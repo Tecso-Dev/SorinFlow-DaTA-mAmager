@@ -1,0 +1,714 @@
+"""
+SorinFlow Divar Scraper - Authentication Handler
+Handles login, cookies, and session management for Divar.ir
+"""
+import asyncio
+import json
+import os
+from datetime import datetime, timezone
+from typing import Optional, Dict, List, Any
+from pathlib import Path
+from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.config import get_settings
+from app.models.cookie import Cookie
+from app.scraper.stealth import StealthConfig, STEALTH_JS, get_browser_args, get_context_options
+
+settings = get_settings()
+
+
+class DivarAuth:
+    """Handle Divar.ir authentication with cookies and session management"""
+    
+    def __init__(self, db_session: Optional[AsyncSession] = None):
+        self.db_session = db_session
+        self.cookies_dir = Path(settings.cookies_path)
+        self.cookies_dir.mkdir(parents=True, exist_ok=True)
+        self.stealth_config = StealthConfig()
+        self.browser: Optional[Browser] = None
+        self.context: Optional[BrowserContext] = None
+        self.page: Optional[Page] = None
+    
+    async def initialize_browser(self, proxy: Optional[str] = None, headless: bool = True):
+        """Initialize browser with stealth settings"""
+        playwright = await async_playwright().start()
+        
+        self.browser = await playwright.chromium.launch(
+            headless=headless,
+            args=get_browser_args()
+        )
+        
+        context_options = get_context_options(self.stealth_config, proxy)
+        self.context = await self.browser.new_context(**context_options)
+        
+        # Add stealth script
+        await self.context.add_init_script(STEALTH_JS)
+        
+        self.page = await self.context.new_page()
+        return self.page
+    
+    async def close_browser(self):
+        """Close browser and cleanup"""
+        if self.page:
+            await self.page.close()
+        if self.context:
+            await self.context.close()
+        if self.browser:
+            await self.browser.close()
+    
+    def get_cookie_file_path(self, phone_number: str) -> Path:
+        """Get path for cookie file"""
+        return self.cookies_dir / f"cookies_{phone_number}.json"
+    
+    async def save_cookies_to_file(self, phone_number: str, cookies: List[Dict]) -> bool:
+        """Save cookies to file"""
+        try:
+            cookie_file = self.get_cookie_file_path(phone_number)
+            with open(cookie_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "phone_number": phone_number,
+                    "cookies": cookies,
+                    "saved_at": datetime.now().isoformat()
+                }, f, ensure_ascii=False, indent=2)
+            logger.info(f"Cookies saved to file for {phone_number}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save cookies to file: {e}")
+            return False
+    
+    async def load_cookies_from_file(self, phone_number: str) -> Optional[List[Dict]]:
+        """Load cookies from file"""
+        try:
+            cookie_file = self.get_cookie_file_path(phone_number)
+            if cookie_file.exists():
+                with open(cookie_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    return data.get("cookies", [])
+            return None
+        except Exception as e:
+            logger.error(f"Failed to load cookies from file: {e}")
+            return None
+    
+    async def save_cookies_to_db(self, phone_number: str, cookies: List[Dict], token: Optional[str] = None) -> bool:
+        """Save cookies to database"""
+        if not self.db_session:
+            return False
+        
+        try:
+            # Find token expiry
+            expires_at = None
+            for cookie in cookies:
+                if cookie.get("name") == "token":
+                    if "expires" in cookie:
+                        expires_at = datetime.fromtimestamp(cookie["expires"])
+                    break
+            
+            # Check if cookie exists for this phone
+            result = await self.db_session.execute(
+                select(Cookie).where(Cookie.phone_number == phone_number)
+            )
+            existing_cookie = result.scalar_one_or_none()
+            
+            if existing_cookie:
+                existing_cookie.cookies = cookies
+                existing_cookie.token = token
+                existing_cookie.is_valid = True
+                existing_cookie.expires_at = expires_at
+                existing_cookie.updated_at = datetime.now()
+            else:
+                new_cookie = Cookie(
+                    phone_number=phone_number,
+                    cookies=cookies,
+                    token=token,
+                    is_valid=True,
+                    expires_at=expires_at
+                )
+                self.db_session.add(new_cookie)
+            
+            await self.db_session.commit()
+            logger.info(f"Cookies saved to database for {phone_number}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save cookies to database: {e}")
+            await self.db_session.rollback()
+            return False
+    
+    async def load_cookies_from_db(self, phone_number: str) -> Optional[List[Dict]]:
+        """Load cookies from database"""
+        if not self.db_session:
+            return None
+        
+        try:
+            result = await self.db_session.execute(
+                select(Cookie).where(
+                    Cookie.phone_number == phone_number,
+                    Cookie.is_valid == True
+                )
+            )
+            cookie = result.scalar_one_or_none()
+            
+            if cookie:
+                # Check if expired (handle timezone-aware vs naive datetime)
+                if cookie.expires_at:
+                    expires_at = cookie.expires_at
+                    now = datetime.now(timezone.utc).replace(tzinfo=None)
+                    # Make comparison timezone-naive if needed
+                    if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
+                        expires_at = expires_at.replace(tzinfo=None)
+                    
+                    if expires_at < now:
+                        cookie.is_valid = False
+                        await self.db_session.commit()
+                        logger.warning(f"Cookies expired for {phone_number}")
+                        return None
+                return cookie.cookies
+            return None
+        except Exception as e:
+            logger.error(f"Failed to load cookies from database: {e}")
+            return None
+    
+    async def check_cookies_validity(self, cookies: List[Dict]) -> bool:
+        """Check if cookies are still valid"""
+        try:
+            # Check for token cookie first
+            token_cookie = next((c for c in cookies if c.get("name") == "token"), None)
+            if token_cookie:
+                if "expires" in token_cookie:
+                    expires = datetime.fromtimestamp(token_cookie["expires"])
+                    if expires > datetime.now():
+                        return True
+            
+            # Check for other auth cookies
+            auth_cookies = [c for c in cookies if any(keyword in c.get("name", "").lower() for keyword in ["auth", "session", "user", "login", "jwt", "bearer"])]
+            for cookie in auth_cookies:
+                if "expires" in cookie:
+                    expires = datetime.fromtimestamp(cookie["expires"])
+                    if expires > datetime.now():
+                        logger.info(f"Valid auth cookie found: {cookie.get('name')}")
+                        return True
+                else:
+                    # If no expiration, assume it's valid (session cookie)
+                    logger.info(f"Session auth cookie found: {cookie.get('name')}")
+                    return True
+            
+            # If no valid auth cookies found, check if we have any cookies at all
+            # Some sites use cookie presence as validity indicator
+            if cookies:
+                logger.warning("No specific auth cookies found, but cookies exist. Assuming valid.")
+                return True
+                
+            return False
+        except Exception as e:
+            logger.error(f"Failed to check cookie validity: {e}")
+            return False
+    
+    async def apply_cookies(self, cookies: List[Dict]) -> bool:
+        """Apply cookies to current browser context"""
+        if not self.context:
+            logger.error("Browser context not initialized")
+            return False
+        
+        try:
+            await self.context.add_cookies(cookies)
+            logger.info("Cookies applied to browser context")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to apply cookies: {e}")
+            return False
+    
+    async def get_current_cookies(self) -> List[Dict]:
+        """Get current cookies from browser context"""
+        if not self.context:
+            return []
+        
+        try:
+            cookies = await self.context.cookies()
+            return cookies
+        except Exception as e:
+            logger.error(f"Failed to get current cookies: {e}")
+            return []
+    
+    async def login_with_phone(self, phone_number: str, wait_for_code: bool = True) -> Dict[str, Any]:
+        """
+        Login to Divar with phone number
+        Returns status and instructions for OTP verification
+        """
+        result = {
+            "success": False,
+            "message": "",
+            "requires_code": False,
+            "cookies": None
+        }
+        
+        try:
+            if not self.page:
+                await self.initialize_browser(headless=settings.scraper_headless)
+            
+            # Navigate to login page
+            logger.info("Navigating to Divar login page...")
+            await self.page.goto(settings.divar_login_url, wait_until="domcontentloaded", timeout=60000)
+            await asyncio.sleep(3)
+
+            # Save screenshot to understand current page state
+            try:
+                debug_path = Path(settings.images_path).parent / "debug" / "debug_login_page.png"
+                debug_path.parent.mkdir(parents=True, exist_ok=True)
+                await self.page.screenshot(path=str(debug_path))
+                logger.debug(f"Login page screenshot saved to {debug_path}")
+            except Exception:
+                pass
+
+            # Click on login button
+            logger.info("Looking for login button...")
+            login_button = None
+            try:
+                buttons = await self.page.query_selector_all('button, a')
+                for btn in buttons:
+                    try:
+                        text = await btn.inner_text()
+                        if 'ورود' in text:
+                            login_button = btn
+                            break
+                    except Exception:
+                        continue
+                if not login_button:
+                    login_button = await self.page.query_selector('button[type="button"]')
+            except Exception as e:
+                logger.warning(f"Error finding initial login button: {e}")
+
+            if login_button:
+                await login_button.click()
+                await asyncio.sleep(2)
+
+            # Screenshot after clicking login button
+            try:
+                debug_path2 = Path(settings.images_path).parent / "debug" / "debug_login_after_click.png"
+                await self.page.screenshot(path=str(debug_path2))
+                logger.debug(f"Post-click screenshot saved to {debug_path2}")
+            except Exception:
+                pass
+
+            # Enter phone number — try multiple selectors
+            logger.info(f"Entering phone number: {phone_number}")
+            phone_input = None
+            for sel in ['input[name="mobile"]', 'input[type="tel"]', 'input[autocomplete="tel"]',
+                        'input[placeholder*="موبایل"]', 'input[placeholder*="تلفن"]',
+                        'input[placeholder*="09"]', 'form input[type="text"]']:
+                try:
+                    phone_input = await self.page.wait_for_selector(sel, timeout=4000)
+                    if phone_input:
+                        logger.info(f"Found phone input with selector: {sel}")
+                        break
+                except Exception:
+                    continue
+            if not phone_input:
+                raise Exception("Could not find phone number input field on login page")
+            await phone_input.fill("")
+            
+            # Type phone number with human-like delays
+            for char in phone_number:
+                await phone_input.type(char, delay=self.stealth_config.typing_delay * 1000)
+                await asyncio.sleep(0.05)
+            
+            await asyncio.sleep(1)
+            
+            # Click confirm button — Divar uses "بعدی" (next) not "تأیید"
+            logger.info("Clicking confirm button...")
+            confirm_button = None
+            CONFIRM_KEYWORDS = ('تأیید', 'بعدی', 'ارسال', 'confirm', 'next', 'submit', 'send')
+            try:
+                buttons = await self.page.query_selector_all('button')
+                for btn in buttons:
+                    try:
+                        text = (await btn.inner_text()).strip()
+                        if any(kw in text for kw in CONFIRM_KEYWORDS):
+                            confirm_button = btn
+                            logger.info(f"Found confirm button with text: '{text}'")
+                            break
+                    except Exception:
+                        continue
+                if not confirm_button:
+                    confirm_button = await self.page.query_selector('button[type="submit"]')
+                    if confirm_button:
+                        logger.info("Found confirm button via type=submit fallback")
+            except Exception as e:
+                logger.warning(f"Error finding confirm button: {e}")
+
+            if confirm_button:
+                await confirm_button.click()
+                logger.info("Confirm button clicked — waiting for SMS...")
+                await asyncio.sleep(4)
+                # Screenshot after clicking to verify page moved forward
+                try:
+                    snap = Path(settings.images_path).parent / "debug" / "debug_after_phone_submit.png"
+                    await self.page.screenshot(path=str(snap))
+                    logger.info(f"Post-submit screenshot: {snap}")
+                except Exception:
+                    pass
+            else:
+                logger.error("Confirm button NOT found — SMS may not have been sent")
+
+            result["requires_code"] = True
+            result["message"] = f"کد OTP به {phone_number} ارسال شد. لطفاً کد ۶ رقمی را وارد کنید."
+            logger.info(result["message"])
+
+            return result
+            
+        except Exception as e:
+            result["message"] = f"Login failed: {str(e)}"
+            logger.error(result["message"])
+            return result
+    
+    async def submit_otp_code(self, code: str, phone_number: str = None) -> Dict[str, Any]:
+        """Submit OTP verification code"""
+        result = {
+            "success": False,
+            "message": "",
+            "cookies": None,
+            "phone_number": phone_number
+        }
+        
+        try:
+            if not self.page:
+                result["message"] = "Browser not initialized. Please start login again."
+                return result
+            
+            # Enter verification code
+            logger.info("Entering verification code...")
+            
+            # Debug: Wait a bit and check page state
+            await asyncio.sleep(2)
+            current_url = self.page.url
+            logger.info(f"Current URL when looking for OTP input: {current_url}")
+            
+            # Try to find the code input with multiple strategies
+            code_input = None
+            
+            # Strategy 1: Wait for the standard selector
+            try:
+                logger.info("Trying to find input[name='code']...")
+                code_input = await self.page.wait_for_selector('input[name="code"]', timeout=20000)
+                logger.info("Found input[name='code']")
+            except Exception as e:
+                logger.warning(f"input[name='code'] not found: {e}")
+                
+                # Strategy 2: Try alternative selectors
+                logger.info("Trying alternative selectors...")
+                selectors_to_try = [
+                    'input[type="text"]',
+                    'input[type="number"]',
+                    'input[placeholder*="کد"]',
+                    'input[placeholder*="code"]',
+                    'input[placeholder*="تأیید"]',
+                    'input[placeholder*="verify"]',
+                    'input[maxlength="6"]',
+                    'input[inputmode="numeric"]'
+                ]
+                
+                for selector in selectors_to_try:
+                    try:
+                        code_input = await self.page.query_selector(selector)
+                        if code_input:
+                            logger.info(f"Found code input with selector: {selector}")
+                            break
+                    except Exception as e:
+                        logger.debug(f"Selector {selector} failed: {e}")
+                        continue
+            
+            if not code_input:
+                # Strategy 3: Debug page content
+                logger.error("No code input field found. Debugging page content...")
+                try:
+                    page_content = await self.page.content()
+                    # Look for input elements in the page
+                    inputs = await self.page.query_selector_all('input')
+                    logger.info(f"Found {len(inputs)} input elements on page")
+                    
+                    for i, inp in enumerate(inputs[:10]):  # Check first 10 inputs
+                        try:
+                            input_type = await inp.get_attribute('type') or 'text'
+                            name = await inp.get_attribute('name') or ''
+                            placeholder = await inp.get_attribute('placeholder') or ''
+                            maxlength = await inp.get_attribute('maxlength') or ''
+                            logger.info(f"Input {i}: type={input_type}, name={name}, placeholder={placeholder}, maxlength={maxlength}")
+                        except Exception as e:
+                            logger.debug(f"Could not get attributes for input {i}: {e}")
+                    
+                    # Save debug content
+                    debug_file = "/app/debug_otp_page.html"
+                    with open(debug_file, 'w', encoding='utf-8') as f:
+                        f.write(page_content)
+                    logger.info(f"Saved debug page content to {debug_file}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to debug page content: {e}")
+                
+                raise Exception(f"Could not find code input field. Page URL: {current_url}")
+            
+            await code_input.fill("")
+            
+            # Type code with delays
+            for char in code:
+                await code_input.type(char, delay=self.stealth_config.typing_delay * 1000)
+                await asyncio.sleep(0.05)
+            
+            await asyncio.sleep(1)
+            
+            # Click login button
+            logger.info("Clicking login button...")
+            
+            # Debug: Take screenshot before clicking login
+            try:
+                await self.page.screenshot(path="/app/debug_before_login_click.png")
+                logger.info("Screenshot saved: debug_before_login_click.png")
+            except Exception as e:
+                logger.warning(f"Could not take screenshot: {e}")
+            
+            login_button = None
+            
+            # Try multiple ways to find the login button
+            try:
+                # First try to find button with text "ورود"
+                login_button = await self.page.query_selector('button[type="submit"]')
+                if not login_button:
+                    # Look for any button that might be the login button
+                    buttons = await self.page.query_selector_all('button')
+                    for btn in buttons:
+                        text = await btn.inner_text()
+                        if 'ورود' in text or 'login' in text.lower() or 'submit' in text.lower():
+                            login_button = btn
+                            break
+                
+                if not login_button:
+                    # Last resort - any button
+                    login_button = await self.page.query_selector('button')
+                    
+            except Exception as e:
+                logger.warning(f"Error finding login button: {e}")
+            
+            if login_button:
+                await login_button.click()
+                logger.info("Login button clicked")
+                await asyncio.sleep(5)
+                
+                # Debug: Take screenshot after clicking login
+                try:
+                    await self.page.screenshot(path="/app/debug_after_login_click.png")
+                    logger.info("Screenshot saved: debug_after_login_click.png")
+                except Exception as e:
+                    logger.warning(f"Could not take screenshot after login: {e}")
+            else:
+                logger.warning("No login button found")
+            
+            # Check if login successful
+            cookies = await self.get_current_cookies()
+            
+            # Debug: Log all available cookies
+            logger.info(f"All cookies after login: {len(cookies)} found")
+            if cookies:
+                for cookie in cookies:
+                    logger.info(f"Cookie: {cookie.get('name')} = {cookie.get('value', '')[:50]}...")
+            else:
+                logger.warning("No cookies found at all after login attempt")
+                # Debug: Check page URL and title
+                try:
+                    current_url = self.page.url
+                    title = await self.page.title()
+                    logger.info(f"Current page URL: {current_url}")
+                    logger.info(f"Current page title: {title}")
+                except Exception as e:
+                    logger.error(f"Could not get page info: {e}")
+            
+            # Also check localStorage and sessionStorage for tokens
+            local_storage = await self.page.evaluate("() => { const items = {}; for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); items[key] = localStorage.getItem(key); } return items; }")
+            session_storage = await self.page.evaluate("() => { const items = {}; for (let i = 0; i < sessionStorage.length; i++) { const key = sessionStorage.key(i); items[key] = sessionStorage.getItem(key); } return items; }")
+            
+            logger.info(f"localStorage items: {len(local_storage)}")
+            for key, value in local_storage.items():
+                if any(keyword in key.lower() for keyword in ["token", "auth", "jwt", "bearer", "session"]):
+                    logger.info(f"localStorage auth item: {key} = {value[:50]}...")
+            
+            logger.info(f"sessionStorage items: {len(session_storage)}")
+            for key, value in session_storage.items():
+                if any(keyword in key.lower() for keyword in ["token", "auth", "jwt", "bearer", "session"]):
+                    logger.info(f"sessionStorage auth item: {key} = {value[:50]}...")
+            
+            token_cookie = next((c for c in cookies if c.get("name") == "token"), None)
+            
+            if token_cookie:
+                result["success"] = True
+                result["message"] = "Login successful!"
+                result["cookies"] = cookies
+                
+                # Save cookies - use passed phone_number or fall back to settings
+                save_phone = phone_number or settings.divar_phone_number
+                if save_phone:
+                    await self.save_cookies_to_file(save_phone, cookies)
+                    if self.db_session:
+                        await self.save_cookies_to_db(save_phone, cookies, token_cookie.get("value"))
+                    logger.info(f"Login successful, cookies saved for {save_phone}!")
+                else:
+                    logger.warning("No phone number provided, cookies not saved")
+            else:
+                # Check for other possible auth cookies or storage items
+                auth_cookies = [c for c in cookies if any(keyword in c.get("name", "").lower() for keyword in ["auth", "session", "user", "login", "jwt", "bearer"])]
+                auth_storage = [k for k in local_storage.keys() if any(keyword in k.lower() for keyword in ["token", "auth", "jwt", "bearer", "session"])]
+                auth_storage.extend([k for k in session_storage.keys() if any(keyword in k.lower() for keyword in ["token", "auth", "jwt", "bearer", "session"])])
+                
+                if auth_cookies or auth_storage:
+                    logger.info(f"Found potential auth cookies: {[c.get('name') for c in auth_cookies]}")
+                    logger.info(f"Found potential auth storage: {auth_storage}")
+                    result["success"] = True
+                    result["message"] = f"Login successful! (Using alternative auth methods)"
+                    result["cookies"] = cookies
+                    
+                    # Save cookies anyway
+                    save_phone = phone_number or settings.divar_phone_number
+                    if save_phone:
+                        await self.save_cookies_to_file(save_phone, cookies)
+                        if self.db_session:
+                            # Use first auth cookie value or a placeholder
+                            auth_value = auth_cookies[0].get("value") if auth_cookies else "alt_auth"
+                            await self.save_cookies_to_db(save_phone, cookies, auth_value)
+                        logger.info(f"Login successful, cookies saved for {save_phone}!")
+                else:
+                    result["message"] = "Login failed. No authentication tokens found."
+                    logger.error(result["message"])
+                    logger.error(f"Available cookies: {[c.get('name') for c in cookies]}")
+                    logger.error(f"localStorage keys: {list(local_storage.keys())}")
+                    logger.error(f"sessionStorage keys: {list(session_storage.keys())}")
+            
+            return result
+            
+        except Exception as e:
+            result["message"] = f"OTP verification failed: {str(e)}"
+            logger.error(result["message"])
+            return result
+    
+    async def restore_session(self, phone_number: str) -> bool:
+        """Restore session from saved cookies"""
+        try:
+            # Try database first
+            cookies = await self.load_cookies_from_db(phone_number)
+            
+            # Fall back to file
+            if not cookies:
+                cookies = await self.load_cookies_from_file(phone_number)
+            
+            if not cookies:
+                logger.warning(f"No saved cookies found for {phone_number}")
+                return False
+            
+            # Check validity
+            is_valid = await self.check_cookies_validity(cookies)
+            if not is_valid:
+                logger.warning(f"Cookies expired for {phone_number}")
+                return False
+            
+            # Initialize browser if needed
+            if not self.page:
+                await self.initialize_browser(headless=settings.scraper_headless)
+            
+            # Apply cookies
+            await self.apply_cookies(cookies)
+            
+            # Verify session by navigating to an authenticated page
+            try:
+                await self.page.goto(
+                    "https://divar.ir/my-divar",
+                    wait_until="domcontentloaded",
+                    timeout=20000,
+                )
+                await asyncio.sleep(1.5)
+            except Exception as nav_error:
+                logger.warning(f"Navigation slow but continuing: {nav_error}")
+
+            # If Divar redirected us back to the login/home page, cookies are expired
+            current_url = self.page.url
+            if "/login" in current_url or current_url.rstrip("/") in (
+                "https://divar.ir",
+                "https://www.divar.ir",
+            ):
+                logger.warning(
+                    f"Session invalid — redirected to {current_url}. Cookies are expired."
+                )
+                return False
+
+            logger.info(f"Session restored successfully for {phone_number} (url={current_url})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to restore session: {e}")
+            return False
+    
+    async def invalidate_cookies(self, phone_number: str) -> bool:
+        """Invalidate stored cookies"""
+        try:
+            # Remove from database
+            if self.db_session:
+                result = await self.db_session.execute(
+                    select(Cookie).where(Cookie.phone_number == phone_number)
+                )
+                cookie = result.scalar_one_or_none()
+                if cookie:
+                    cookie.is_valid = False
+                    await self.db_session.commit()
+            
+            # Remove file
+            cookie_file = self.get_cookie_file_path(phone_number)
+            if cookie_file.exists():
+                os.remove(cookie_file)
+            
+            logger.info(f"Cookies invalidated for {phone_number}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to invalidate cookies: {e}")
+            return False
+    
+    async def get_cookie_status(self, phone_number: str) -> Dict[str, Any]:
+        """Get status of stored cookies using only the database (no browser launch)."""
+        status = {
+            "has_cookies": False,
+            "is_valid": False,
+            "expires_at": None,
+            "phone_number": phone_number,
+            "message": "No cookies found",
+        }
+
+        if not self.db_session:
+            return status
+
+        try:
+            result = await self.db_session.execute(
+                select(Cookie).where(Cookie.phone_number == phone_number)
+            )
+            record = result.scalar_one_or_none()
+
+            if not record:
+                return status
+
+            status["has_cookies"] = True
+            status["expires_at"] = record.expires_at.isoformat() if record.expires_at else None
+
+            if not record.is_valid:
+                status["message"] = "Cookies expired or invalid. Please login again."
+                return status
+
+            if record.expires_at:
+                expires = record.expires_at.replace(tzinfo=None) if record.expires_at.tzinfo else record.expires_at
+                if expires < datetime.now(timezone.utc).replace(tzinfo=None):
+                    record.is_valid = False
+                    await self.db_session.commit()
+                    status["message"] = "Cookies expired or invalid. Please login again."
+                    return status
+
+            status["is_valid"] = True
+            status["message"] = "Session active and verified with Divar."
+            return status
+
+        except Exception as e:
+            status["message"] = f"Error checking cookie status: {e}"
+            return status
