@@ -1,0 +1,2817 @@
+/**
+ * SorinFlow Divar Scraper - Dashboard JavaScript
+ */
+
+const API_BASE = '/api';
+let currentPage = 1;
+let cityChart = null;
+let trendChart = null;
+let loginPhoneNumber = '';
+let cookieStatus = { is_valid: false, has_cookies: false };
+let pendingScrapingAction = null;
+
+// ═══ Auth state ═══════════════════════════════════════════════
+let _authToken = null;
+let _currentUser = null; // { username, role, full_name }
+let _totpSession = null; // temporary session token for TOTP step 2
+
+function getToken() { return localStorage.getItem('sf_token'); }
+function setToken(t) { localStorage.setItem('sf_token', t); _authToken = t; }
+function clearToken() { localStorage.removeItem('sf_token'); _authToken = null; _currentUser = null; _totpSession = null; }
+
+// ═══ Login / Logout ═══════════════════════════════════════════
+async function doLogin() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errEl = document.getElementById('login-error');
+    const btn = document.getElementById('login-btn');
+
+    if (!username || !password) { errEl.textContent = 'نام کاربری و رمز عبور الزامی است'; errEl.classList.remove('d-none'); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال ورود...';
+    errEl.classList.add('d-none');
+
+    try {
+        const form = new URLSearchParams();
+        form.append('username', username);
+        form.append('password', password);
+
+        const resp = await fetch(`${API_BASE}/users/token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: form.toString()
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) { throw new Error(data.detail || 'خطا در ورود'); }
+
+        if (data.requires_totp) {
+            _totpSession = data.totp_session;
+            document.getElementById('login-step-1').classList.add('d-none');
+            document.getElementById('login-step-2').classList.remove('d-none');
+            document.getElementById('login-totp-code').focus();
+            return;
+        }
+
+        _finishLogin(data);
+
+    } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-box-arrow-in-right"></i> ورود به داشبورد';
+    }
+}
+
+async function verifyTotpLogin() {
+    const code = document.getElementById('login-totp-code').value.trim();
+    const errEl = document.getElementById('login-error');
+    const btn = document.getElementById('login-totp-btn');
+
+    if (!code || code.length !== 6) { errEl.textContent = 'کد ۶ رقمی را وارد کنید'; errEl.classList.remove('d-none'); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال تأیید...';
+    errEl.classList.add('d-none');
+
+    try {
+        const resp = await fetch(`${API_BASE}/users/token/verify-totp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ totp_session: _totpSession, code })
+        });
+        const data = await resp.json();
+        if (!resp.ok) { throw new Error(data.detail || 'کد اشتباه است'); }
+        _finishLogin(data);
+    } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-circle"></i> تأیید';
+    }
+}
+
+function backToLogin() {
+    _totpSession = null;
+    document.getElementById('login-step-2').classList.add('d-none');
+    document.getElementById('login-step-1').classList.remove('d-none');
+    document.getElementById('login-totp-code').value = '';
+    document.getElementById('login-error').classList.add('d-none');
+}
+
+function _finishLogin(data) {
+    setToken(data.access_token);
+    _currentUser = { username: data.username, role: data.role, full_name: data.full_name };
+    showMainApp();
+}
+
+function doLogout() {
+    clearToken();
+    showLoginPage();
+}
+
+// Enter key bindings for login
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('login-password')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') doLogin();
+    });
+    document.getElementById('login-totp-code')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') verifyTotpLogin();
+    });
+});
+
+// ═══ 2FA Management ════════════════════════════════════════════
+let _totpQRInstance = null;
+
+async function open2FAModal() {
+    const modal = new bootstrap.Modal(document.getElementById('twoFAModal'));
+    modal.show();
+    document.getElementById('totp-setup-panel').classList.add('d-none');
+    document.getElementById('totp-disable-panel').classList.add('d-none');
+    document.getElementById('totp-status-badge').textContent = 'در حال بررسی...';
+    document.getElementById('totp-status-badge').className = 'badge bg-secondary';
+    document.getElementById('totp-btn-setup').classList.add('d-none');
+    document.getElementById('totp-btn-disable').classList.add('d-none');
+
+    try {
+        const data = await apiCall('/users/me/totp/status');
+        if (data.enabled) {
+            document.getElementById('totp-status-badge').textContent = 'فعال';
+            document.getElementById('totp-status-badge').className = 'badge bg-success';
+            document.getElementById('totp-btn-disable').classList.remove('d-none');
+        } else {
+            document.getElementById('totp-status-badge').textContent = 'غیرفعال';
+            document.getElementById('totp-status-badge').className = 'badge bg-secondary';
+            document.getElementById('totp-btn-setup').classList.remove('d-none');
+        }
+    } catch(e) {
+        document.getElementById('totp-status-badge').textContent = 'خطا';
+    }
+}
+
+async function showTotpSetup() {
+    document.getElementById('totp-setup-panel').classList.remove('d-none');
+    document.getElementById('totp-disable-panel').classList.add('d-none');
+    document.getElementById('totp-btn-setup').classList.add('d-none');
+    document.getElementById('totp-btn-disable').classList.add('d-none');
+    document.getElementById('totp-enable-code').value = '';
+
+    try {
+        const data = await apiCall('/users/me/totp/setup', { method: 'POST' });
+        document.getElementById('totp-secret-display').value = data.secret;
+
+        const qrContainer = document.getElementById('totp-qrcode');
+        qrContainer.innerHTML = '';
+        if (typeof QRCode !== 'undefined') {
+            _totpQRInstance = new QRCode(qrContainer, {
+                text: data.qr_uri,
+                width: 180,
+                height: 180,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M,
+            });
+        } else {
+            qrContainer.innerHTML = `<div class="small text-muted">${data.qr_uri}</div>`;
+        }
+    } catch(e) {
+        showToast('خطا', 'خطا در دریافت اطلاعات 2FA', 'danger');
+    }
+}
+
+function showTotpDisable() {
+    document.getElementById('totp-disable-panel').classList.remove('d-none');
+    document.getElementById('totp-setup-panel').classList.add('d-none');
+    document.getElementById('totp-btn-setup').classList.add('d-none');
+    document.getElementById('totp-btn-disable').classList.add('d-none');
+    document.getElementById('totp-disable-password').value = '';
+}
+
+async function enableTotp() {
+    const code = document.getElementById('totp-enable-code').value.trim();
+    if (!code || code.length !== 6) { showToast('خطا', 'کد ۶ رقمی را وارد کنید', 'warning'); return; }
+
+    try {
+        await apiCall('/users/me/totp/enable', {
+            method: 'POST',
+            body: JSON.stringify({ code })
+        });
+        showToast('موفق', 'احراز هویت دو مرحله‌ای فعال شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('twoFAModal'))?.hide();
+    } catch(e) {
+        showToast('خطا', e.message, 'danger');
+    }
+}
+
+async function disableTotp() {
+    const password = document.getElementById('totp-disable-password').value;
+    if (!password) { showToast('خطا', 'رمز عبور را وارد کنید', 'warning'); return; }
+
+    try {
+        await apiCall('/users/me/totp/disable', {
+            method: 'POST',
+            body: JSON.stringify({ password })
+        });
+        showToast('موفق', 'احراز هویت دو مرحله‌ای غیرفعال شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('twoFAModal'))?.hide();
+    } catch(e) {
+        showToast('خطا', e.message, 'danger');
+    }
+}
+
+function copyTotpSecret() {
+    const val = document.getElementById('totp-secret-display').value;
+    navigator.clipboard.writeText(val).then(() => showToast('کپی شد', 'کلید در کلیپ‌بورد کپی شد', 'success'));
+}
+
+function showLoginPage() {
+    document.getElementById('login-page').style.display = 'flex';
+    document.getElementById('main-app').style.display = 'none';
+    // Reset login form to step 1
+    document.getElementById('login-step-1')?.classList.remove('d-none');
+    document.getElementById('login-step-2')?.classList.add('d-none');
+    document.getElementById('login-error')?.classList.add('d-none');
+    document.getElementById('login-totp-code') && (document.getElementById('login-totp-code').value = '');
+}
+
+function showMainApp() {
+    document.getElementById('login-page').style.display = 'none';
+    document.getElementById('main-app').style.display = 'flex';
+    applyRoleUI();
+    initApp();
+}
+
+function applyRoleUI() {
+    if (!_currentUser) return;
+    const { role, username, full_name } = _currentUser;
+
+    // Sidebar user card
+    const elName = document.getElementById('sidebar-username');
+    const elRole = document.getElementById('sidebar-role');
+    const roleMap = { super_admin: 'Super Admin', admin: 'Admin', user: 'User' };
+    if (elName) elName.textContent = full_name || username;
+    if (elRole) elRole.textContent = roleMap[role] || role;
+
+    // Show Users nav only for super_admin
+    const navUsers = document.getElementById('nav-users');
+    if (navUsers) navUsers.classList.toggle('d-none', role !== 'super_admin');
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+    const token = getToken();
+    if (token) {
+        _authToken = token;
+        // Verify token by fetching /me
+        fetch(`${API_BASE}/users/me`, { headers: { 'Authorization': `Bearer ${token}` } })
+            .then(r => {
+                if (!r.ok) throw new Error('invalid');
+                return r.json();
+            })
+            .then(user => {
+                _currentUser = { username: user.username, role: user.role, full_name: user.full_name };
+                showMainApp();
+            })
+            .catch(() => {
+                clearToken();
+                showLoginPage();
+            });
+    } else {
+        showLoginPage();
+    }
+});
+
+function initApp() {
+    loadDashboard();
+    loadCities();
+    loadCategories();
+    checkCookieStatus();
+
+    document.getElementById('scraper-form').addEventListener('submit', startScraping);
+    document.getElementById('proxy-form').addEventListener('submit', addProxy);
+    document.getElementById('user-create-form')?.addEventListener('submit', createUser);
+
+    setInterval(loadDashboard, 60000);
+    setInterval(checkCookieStatus, 300000);
+}
+
+// Section titles for the topbar
+const SECTION_META = {
+    dashboard:  { title: 'داشبورد',             subtitle: 'خلاصه وضعیت و آمار کلی سیستم' },
+    properties: { title: 'لیست املاک',          subtitle: 'مدیریت و جستجوی ملک‌های اسکرپ‌شده' },
+    scraper:    { title: 'اسکرپر دیوار',         subtitle: 'تنظیم و اجرای تسک‌های اسکرپینگ' },
+    crm:        { title: 'CRM — مدیریت لیدها',  subtitle: 'سیستم CRM و اطلاع‌رسانی' },
+    auth:       { title: 'احراز هویت دیوار',     subtitle: 'مدیریت نشست و کوکی حساب دیوار' },
+    proxies:    { title: 'مدیریت پراکسی‌ها',     subtitle: 'افزودن، تست و مدیریت پراکسی‌ها' },
+    users:      { title: 'مدیریت کاربران',       subtitle: 'حساب‌های کاربری (فقط Super Admin)' },
+};
+
+// Section Navigation
+function showSection(sectionName) {
+    stopOtpPolling();
+    stopJobPolling();
+    document.querySelectorAll('.section-content').forEach(el => {
+        el.style.display = 'none';
+    });
+    const target = document.getElementById(`section-${sectionName}`);
+    if (target) target.style.display = 'block';
+
+    // Update sidebar active state
+    document.querySelectorAll('.nav-item-link').forEach(el => el.classList.remove('active'));
+    const navLink = document.getElementById(`nav-link-${sectionName}`) ||
+                    (sectionName === 'users' ? document.getElementById('nav-users') : null);
+    if (navLink) navLink.classList.add('active');
+
+    // Update topbar
+    const meta = SECTION_META[sectionName] || {};
+    const ttEl = document.getElementById('topbar-title');
+    const tsEl = document.getElementById('topbar-subtitle');
+    if (ttEl) ttEl.textContent = meta.title || sectionName;
+    if (tsEl) tsEl.textContent = meta.subtitle || '';
+
+    // Load section data
+    switch (sectionName) {
+        case 'dashboard':  loadDashboard(); break;
+        case 'properties': loadProperties(); break;
+        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); break;
+        case 'auth':       checkAuthStatus(); loadCookies(); break;
+        case 'proxies':    loadProxies(); break;
+        case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
+        case 'users':      if (_currentUser?.role === 'super_admin') loadUsers(); break;
+    }
+}
+
+// Toast Notification
+function showToast(title, message, type = 'info') {
+    const toast = document.getElementById('toast');
+    const toastTitle = document.getElementById('toast-title');
+    const toastMessage = document.getElementById('toast-message');
+    
+    toastTitle.textContent = title;
+    toastMessage.textContent = message;
+    
+    toast.className = `toast bg-${type} text-white`;
+    
+    const bsToast = new bootstrap.Toast(toast);
+    bsToast.show();
+}
+
+// Format Numbers (Persian)
+function formatNumber(num) {
+    if (!num) return '---';
+    return new Intl.NumberFormat('fa-IR').format(num);
+}
+
+// Format Price
+function formatPrice(price) {
+    if (!price) return '---';
+    if (price >= 1000000000) {
+        return formatNumber(Math.round(price / 1000000000)) + ' میلیارد';
+    } else if (price >= 1000000) {
+        return formatNumber(Math.round(price / 1000000)) + ' میلیون';
+    }
+    return formatNumber(price) + ' تومان';
+}
+
+// API Helper
+async function apiCall(endpoint, options = {}) {
+    try {
+        const token = getToken();
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                ...options.headers
+            },
+            ...options
+        });
+
+        if (response.status === 401) {
+            clearToken();
+            showLoginPage();
+            throw new Error('نشست منقضی شده. لطفاً دوباره وارد شوید.');
+        }
+
+        if (!response.ok) {
+            const error = await response.json();
+            let message = 'Request failed';
+            if (error.detail) {
+                if (typeof error.detail === 'string') {
+                    message = error.detail;
+                } else if (Array.isArray(error.detail)) {
+                    message = error.detail.map(e => e.msg || JSON.stringify(e)).join(' | ');
+                } else {
+                    message = JSON.stringify(error.detail);
+                }
+            }
+            throw new Error(message);
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('API Error:', error);
+        throw error;
+    }
+}
+
+// ==================== Dashboard ====================
+
+async function loadDashboard() {
+    try {
+        const [stats, health] = await Promise.all([
+            apiCall('/stats/dashboard'),
+            apiCall('/stats/health')
+        ]);
+        
+        // Update stats
+        document.getElementById('stat-total-properties').textContent = formatNumber(stats.total_properties);
+        document.getElementById('stat-with-phone').textContent = formatNumber(stats.properties_with_phone);
+        document.getElementById('stat-today').textContent = formatNumber(stats.properties_today);
+        document.getElementById('stat-active-jobs').textContent = formatNumber(stats.active_jobs);
+        
+        // Update health
+        updateHealthStatus('health-db', health.database);
+        updateHealthStatus('health-redis', health.redis);
+        updateHealthStatus('health-scraper', health.scraper);
+        updateHealthStatus('health-cookie', health.cookie_status);
+        
+        // Update charts
+        updateCityChart(stats.city_distribution);
+        updateTrendChart(stats.daily_scraping);
+        
+    } catch (error) {
+        showToast('خطا', 'بارگیری داشبورد ناموفق بود', 'danger');
+    }
+}
+
+function updateHealthStatus(elementId, status) {
+    const element = document.getElementById(elementId);
+    let badgeClass = 'bg-success';
+    let text = status;
+    
+    if (status.includes('unhealthy') || status.includes('expired') || status === 'no session') {
+        badgeClass = 'bg-danger';
+    } else if (status.includes('degraded') || status.includes('unavailable')) {
+        badgeClass = 'bg-warning';
+    }
+    
+    element.className = `badge ${badgeClass}`;
+    element.textContent = text;
+}
+
+function updateCityChart(data) {
+    const ctx = document.getElementById('cityChart').getContext('2d');
+    
+    if (cityChart) {
+        cityChart.destroy();
+    }
+    
+    cityChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: data.map(d => d.city),
+            datasets: [{
+                data: data.map(d => d.count),
+                backgroundColor: [
+                    '#6366f1','#06b6d4','#10b981','#f59e0b','#f97316',
+                    '#ef4444','#8b5cf6','#14b8a6','#ec4899','#64748b'
+                ],
+                borderColor: '#0e1225',
+                borderWidth: 3,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: { color: '#94a3b8', font: { family: 'Vazirmatn' }, boxWidth: 12 }
+                }
+            }
+        }
+    });
+}
+
+function updateTrendChart(data) {
+    const ctx = document.getElementById('trendChart').getContext('2d');
+    
+    if (trendChart) {
+        trendChart.destroy();
+    }
+    
+    trendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(d => d.date),
+            datasets: [{
+                label: 'تعداد اسکرپ',
+                data: data.map(d => d.count),
+                borderColor: '#6366f1',
+                backgroundColor: 'rgba(99,102,241,0.12)',
+                pointBackgroundColor: '#6366f1',
+                pointBorderColor: '#0e1225',
+                pointRadius: 4,
+                fill: true,
+                tension: 0.4,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: {
+                    grid: { color: 'rgba(255,255,255,0.04)' },
+                    ticks: { color: '#64748b', font: { family: 'Vazirmatn' } }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    ticks: { color: '#64748b', font: { family: 'Vazirmatn' } }
+                }
+            }
+        }
+    });
+}
+
+// ==================== Properties ====================
+
+function onFilterTypeChange() {
+    const type = document.getElementById('filter-type').value;
+    const rentFilters = document.getElementById('rent-filters');
+    if (type === 'rent') {
+        rentFilters.classList.remove('d-none');
+    } else {
+        rentFilters.classList.add('d-none');
+    }
+}
+
+async function loadProperties() {
+    const search = document.getElementById('search-properties').value;
+    const city   = document.getElementById('filter-city-hidden')?.value || '';
+    const type = document.getElementById('filter-type').value;
+    const minDeposit = document.getElementById('filter-min-deposit').value;
+    const maxDeposit = document.getElementById('filter-max-deposit').value;
+    const minRent = document.getElementById('filter-min-rent').value;
+    const maxRent = document.getElementById('filter-max-rent').value;
+
+    try {
+        let url = `/properties?page=${currentPage}&size=20`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+        if (city) url += `&city=${encodeURIComponent(city)}`;
+        if (type) url += `&listing_type=${type}`;
+        if (minDeposit) url += `&min_deposit=${minDeposit}`;
+        if (maxDeposit) url += `&max_deposit=${maxDeposit}`;
+        if (minRent) url += `&min_rent_price=${minRent}`;
+        if (maxRent) url += `&max_rent_price=${maxRent}`;
+        
+        const data = await apiCall(url);
+        
+        const tbody = document.getElementById('properties-table');
+        tbody.innerHTML = '';
+        
+        if (data.items.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="text-center text-muted py-4">
+                        <i class="bi bi-inbox" style="font-size: 2rem;"></i>
+                        <p class="mt-2">هیچ ملکی یافت نشد</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        data.items.forEach(property => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><code>${property.tag_number}</code></td>
+                <td title="${property.title}">${property.title.substring(0, 40)}...</td>
+                <td>${property.city_name || '---'}</td>
+                <td>${formatNumber(property.area)} متر</td>
+                <td>${property.rooms != null ? property.rooms : '---'}</td>
+                <td>
+                    ${property.listing_type === 'rent'
+                        ? `<small class="d-block text-muted">رهن: ${formatPrice(property.deposit)}</small><small class="d-block">اجاره: ${formatPrice(property.rent_price)}</small>`
+                        : formatPrice(property.total_price || property.price)
+                    }
+                </td>
+                <td>
+                    ${property.phone_number 
+                        ? `<a href="tel:${property.phone_number}" class="text-success">${property.phone_number}</a>`
+                        : '<span class="text-muted">---</span>'
+                    }
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${property.id})">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    <a href="${property.url}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-box-arrow-up-left"></i>
+                    </a>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteProperty(${property.id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+        
+        // Update pagination
+        updatePagination(data.page, data.pages);
+        
+    } catch (error) {
+        showToast('خطا', 'بارگیری لیست املاک ناموفق بود', 'danger');
+    }
+}
+
+function updatePagination(current, total) {
+    const pagination = document.getElementById('properties-pagination');
+    pagination.innerHTML = '';
+    
+    for (let i = 1; i <= total; i++) {
+        const li = document.createElement('li');
+        li.className = `page-item ${i === current ? 'active' : ''}`;
+        li.innerHTML = `<a class="page-link" href="#" onclick="goToPage(${i})">${formatNumber(i)}</a>`;
+        pagination.appendChild(li);
+    }
+}
+
+function goToPage(page) {
+    currentPage = page;
+    loadProperties();
+}
+
+async function viewProperty(id) {
+    try {
+        const property = await apiCall(`/properties/${id}`);
+        
+        const modal = document.getElementById('property-detail');
+        modal.innerHTML = `
+            <div class="property-detail">
+                ${property.images && property.images.length > 0 ? `
+                    <div class="mb-3">
+                        <div id="propertyCarousel" class="carousel slide" data-bs-ride="carousel">
+                            <div class="carousel-inner">
+                                ${property.images.map((img, idx) => `
+                                    <div class="carousel-item ${idx === 0 ? 'active' : ''}">
+                                        <img src="${img}" class="d-block w-100 rounded" alt="تصویر ${idx + 1}" style="max-height: 400px; object-fit: cover;">
+                                    </div>
+                                `).join('')}
+                            </div>
+                            ${property.images.length > 1 ? `
+                                <button class="carousel-control-prev" type="button" data-bs-target="#propertyCarousel" data-bs-slide="prev">
+                                    <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                                </button>
+                                <button class="carousel-control-next" type="button" data-bs-target="#propertyCarousel" data-bs-slide="next">
+                                    <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                                </button>
+                            ` : ''}
+                        </div>
+                        <p class="text-center text-muted mt-2 small">
+                            <i class="bi bi-images"></i> ${property.images.length} تصویر
+                        </p>
+                    </div>
+                ` : '<div class="alert alert-secondary text-center mb-3"><i class="bi bi-image"></i> بدون تصویر</div>'}
+                
+                <h5 class="mb-3">${property.title}</h5>
+                
+                <!-- Basic Info -->
+                <div class="card mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <i class="bi bi-info-circle"></i> اطلاعات پایه
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="text-muted small">شناسه</label>
+                                <div><strong><code>${property.tag_number}</code></strong></div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">شناسه دیوار</label>
+                                <div><code>${property.divar_id}</code></div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">نوع آگهی</label>
+                                <div>${property.listing_type === 'buy' ? '🏷️ خرید' : '📋 اجاره'}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">نوع ملک</label>
+                                <div>${property.property_type || '---'}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">دسته‌بندی</label>
+                                <div>${property.category_name || '---'}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">دارای تصویر</label>
+                                <div>${property.has_images ? '✅ بله' : '❌ خیر'}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Price Info -->
+                <div class="card mb-3">
+                    <div class="card-header bg-success text-white">
+                        <i class="bi bi-currency-exchange"></i> اطلاعات قیمت
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            ${property.total_price ? `
+                                <div class="col-md-6">
+                                    <label class="text-muted small">قیمت کل</label>
+                                    <div class="h5 text-success mb-0">${formatPrice(property.total_price)}</div>
+                                </div>
+                            ` : ''}
+                            ${property.price_per_meter ? `
+                                <div class="col-md-6">
+                                    <label class="text-muted small">قیمت هر متر</label>
+                                    <div class="h5 text-info mb-0">${formatPrice(property.price_per_meter)}</div>
+                                </div>
+                            ` : ''}
+                            ${property.rent_price ? `
+                                <div class="col-md-6">
+                                    <label class="text-muted small">اجاره ماهانه</label>
+                                    <div class="h5 text-warning mb-0">${formatPrice(property.rent_price)}</div>
+                                </div>
+                            ` : ''}
+                            ${property.deposit ? `
+                                <div class="col-md-6">
+                                    <label class="text-muted small">ودیعه</label>
+                                    <div class="h5 text-primary mb-0">${formatPrice(property.deposit)}</div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Property Details -->
+                <div class="card mb-3">
+                    <div class="card-header bg-info text-white">
+                        <i class="bi bi-house-door"></i> مشخصات ملک
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="text-muted small">متراژ</label>
+                                <div><strong>${property.area ? formatNumber(property.area) + ' متر' : '---'}</strong></div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="text-muted small">متراژ زمین</label>
+                                <div>${property.land_area ? formatNumber(property.land_area) + ' متر' : '---'}</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="text-muted small">زیربنا</label>
+                                <div>${property.built_area ? formatNumber(property.built_area) + ' متر' : '---'}</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="text-muted small">تعداد اتاق</label>
+                                <div><strong>${property.rooms !== null && property.rooms !== undefined ? formatNumber(property.rooms) : '---'}</strong></div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="text-muted small">طبقه</label>
+                                <div>${property.floor !== null && property.floor !== undefined ? formatNumber(property.floor) : '---'}</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="text-muted small">کل طبقات</label>
+                                <div>${property.total_floors ? formatNumber(property.total_floors) : '---'}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">سال ساخت</label>
+                                <div>${property.year_built ? formatNumber(property.year_built) : '---'}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">سن بنا</label>
+                                <div>${property.building_age || '---'}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">جهت ساختمان</label>
+                                <div>${property.building_direction || '---'}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">بر (متر)</label>
+                                <div>${property.frontage ? formatNumber(property.frontage) + ' متر' : '---'}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">وضعیت واحد</label>
+                                <div>${property.unit_status || '---'}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">نوع سند</label>
+                                <div>${property.document_type || '---'}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">نوع کاربری</label>
+                                <div>${property.usage_type || '---'}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Location -->
+                <div class="card mb-3">
+                    <div class="card-header bg-warning text-dark">
+                        <i class="bi bi-geo-alt"></i> موقعیت مکانی
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="text-muted small">شهر</label>
+                                <div><strong>${property.city_name || '---'}</strong></div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="text-muted small">منطقه</label>
+                                <div>${property.district || '---'}</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="text-muted small">محله</label>
+                                <div>${property.neighborhood || '---'}</div>
+                            </div>
+                            ${property.address ? `
+                                <div class="col-12">
+                                    <label class="text-muted small">آدرس</label>
+                                    <div>${property.address}</div>
+                                </div>
+                            ` : ''}
+                            ${property.latitude && property.longitude ? `
+                                <div class="col-12">
+                                    <label class="text-muted small">مختصات جغرافیایی</label>
+                                    <div>
+                                        <a href="https://www.google.com/maps?q=${property.latitude},${property.longitude}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                            <i class="bi bi-map"></i> مشاهده در نقشه
+                                        </a>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Amenities -->
+                <div class="card mb-3">
+                    <div class="card-header bg-secondary text-white">
+                        <i class="bi bi-stars"></i> امکانات
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap gap-2">
+                            ${property.has_elevator ? '<span class="badge bg-success"><i class="bi bi-arrow-up"></i> آسانسور</span>' : '<span class="badge bg-light text-dark"><i class="bi bi-arrow-up"></i> بدون آسانسور</span>'}
+                            ${property.has_parking ? '<span class="badge bg-success"><i class="bi bi-p-square"></i> پارکینگ</span>' : '<span class="badge bg-light text-dark"><i class="bi bi-p-square"></i> بدون پارکینگ</span>'}
+                            ${property.has_storage ? '<span class="badge bg-success"><i class="bi bi-box"></i> انباری</span>' : '<span class="badge bg-light text-dark"><i class="bi bi-box"></i> بدون انباری</span>'}
+                            ${property.has_balcony ? '<span class="badge bg-success"><i class="bi bi-wind"></i> بالکن</span>' : '<span class="badge bg-light text-dark"><i class="bi bi-wind"></i> بدون بالکن</span>'}
+                        </div>
+                        ${property.amenities && property.amenities.length > 0 ? `
+                            <hr>
+                            <label class="text-muted small">سایر امکانات:</label>
+                            <div class="d-flex flex-wrap gap-1 mt-2">
+                                ${property.amenities.map(a => `<span class="badge bg-info">${a}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                        ${property.features && property.features.length > 0 ? `
+                            <hr>
+                            <label class="text-muted small">ویژگی‌ها:</label>
+                            <div class="d-flex flex-wrap gap-1 mt-2">
+                                ${property.features.map(f => `<span class="badge bg-primary">${f}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+
+                <!-- Description -->
+                <div class="card mb-3">
+                    <div class="card-header bg-dark text-white">
+                        <i class="bi bi-card-text"></i> توضیحات
+                    </div>
+                    <div class="card-body">
+                        ${property.description
+                            ? `<pre style="white-space:pre-wrap;font-family:inherit;font-size:0.92rem;margin:0;line-height:1.7">${property.description}</pre>`
+                            : '<span class="text-muted">---</span>'}
+                    </div>
+                </div>
+
+                <!-- Contact -->
+                <div class="card mb-3">
+                    <div class="card-header bg-danger text-white">
+                        <i class="bi bi-telephone"></i> اطلاعات تماس
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="text-muted small">شماره تماس</label>
+                                <div class="h5 mb-0">
+                                    ${property.phone_number 
+                                        ? `<a href="tel:${property.phone_number}" class="text-success">${property.phone_number}</a>` 
+                                        : '<span class="text-muted">---</span>'}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="text-muted small">فروشنده</label>
+                                <div>${property.seller_name || '---'}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Meta -->
+                <div class="card mb-3">
+                    <div class="card-body bg-light">
+                        <div class="row g-2 small text-muted">
+                            <div class="col-md-6">
+                                <i class="bi bi-clock"></i> اسکرپ شده: ${property.scraped_at ? new Date(property.scraped_at).toLocaleString('fa-IR') : '---'}
+                            </div>
+                            <div class="col-md-6">
+                                <i class="bi bi-pencil"></i> آخرین بروزرسانی: ${property.updated_at ? new Date(property.updated_at).toLocaleString('fa-IR') : '---'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Actions -->
+                <div class="d-flex gap-2">
+                    <a href="${property.url}" target="_blank" class="btn btn-primary flex-grow-1">
+                        <i class="bi bi-box-arrow-up-right"></i> مشاهده در دیوار
+                    </a>
+                    <button class="btn btn-outline-danger" onclick="deleteProperty(${property.id}); bootstrap.Modal.getInstance(document.getElementById('propertyModal')).hide();">
+                        <i class="bi bi-trash"></i> حذف
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        const modalElement = new bootstrap.Modal(document.getElementById('propertyModal'));
+        modalElement.show();
+        
+    } catch (error) {
+        showToast('خطا', 'بارگیری جزئیات ملک ناموفق بود', 'danger');
+    }
+}
+
+async function deleteProperty(id) {
+    if (!confirm('آیا از حذف این ملک اطمینان دارید؟')) return;
+    
+    try {
+        await apiCall(`/properties/${id}`, { method: 'DELETE' });
+        showToast('موفق', 'ملک با موفقیت حذف شد', 'success');
+        loadProperties();
+    } catch (error) {
+        showToast('خطا', 'حذف ملک ناموفق بود', 'danger');
+    }
+}
+
+async function exportProperties() {
+    try {
+        const city = document.getElementById('filter-city-hidden')?.value || '';
+        const type = document.getElementById('filter-type').value;
+
+        const data = await apiCall('/properties/export', {
+            method: 'POST',
+            body: JSON.stringify({ city, listing_type: type })
+        });
+        
+        // Download as JSON
+        const blob = new Blob([JSON.stringify(data.data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'properties-export.json';
+        a.click();
+        
+        showToast('موفق', 'فایل دانلود شد', 'success');
+    } catch (error) {
+        showToast('خطا', 'خروجی گرفتن ناموفق بود', 'danger');
+    }
+}
+
+// ==================== Scraper ====================
+
+// ═══ City Picker Component ════════════════════════════════════════════════
+/**
+ * initCityPicker(containerId, cities, opts)
+ * Builds a searchable city picker inside `containerId`.
+ *
+ * opts.valueId   — id of the hidden <input> that stores the selected value
+ * opts.useSlug   — true: store city.slug as value (scraper), false: city.name (filter)
+ * opts.allLabel  — label for the "all" option (default: 'همه شهرها')
+ * opts.allValue  — value for the "all" option (default: '')
+ * opts.placeholder — search box placeholder
+ * opts.onChange  — callback(value, label)
+ */
+function initCityPicker(containerId, cities, opts = {}) {
+    const container  = document.getElementById(containerId);
+    if (!container) return;
+
+    const {
+        valueId     = null,
+        useSlug     = false,
+        allLabel    = 'همه شهرها',
+        allValue    = '',
+        placeholder = 'جستجو در شهرها...',
+        onChange    = null,
+    } = opts;
+
+    // Group cities by province
+    const byProvince = {};
+    cities.forEach(c => {
+        const p = c.province || 'سایر';
+        if (!byProvince[p]) byProvince[p] = [];
+        byProvince[p].push(c);
+    });
+    const provinces = Object.keys(byProvince).sort();
+
+    let selectedValue = allValue;
+    let selectedLabel = allLabel;
+    let focusedIndex  = -1;
+    let flatFiltered  = [];
+
+    // ── Build DOM ──────────────────────────────────
+    container.innerHTML = `
+      <div class="city-picker__trigger" tabindex="0">
+        <i class="bi bi-geo-alt"></i>
+        <span class="city-picker__label">${allLabel}</span>
+        <i class="bi bi-chevron-down caret"></i>
+      </div>
+      <div class="city-picker__panel">
+        <div class="city-picker__search-wrap">
+          <i class="bi bi-search"></i>
+          <input class="city-picker__search" type="text" placeholder="${placeholder}" autocomplete="off">
+        </div>
+        <div class="city-picker__list"></div>
+      </div>`;
+
+    const trigger   = container.querySelector('.city-picker__trigger');
+    const panel     = container.querySelector('.city-picker__panel');
+    const searchEl  = container.querySelector('.city-picker__search');
+    const listEl    = container.querySelector('.city-picker__list');
+    const labelEl   = container.querySelector('.city-picker__label');
+    const hiddenEl  = valueId ? document.getElementById(valueId) : null;
+
+    // ── Render list ────────────────────────────────
+    function hl(text, q) {
+        if (!q) return text;
+        const idx = text.indexOf(q);
+        if (idx === -1) return text;
+        return text.slice(0, idx)
+            + `<span class="city-picker__highlight">${text.slice(idx, idx + q.length)}</span>`
+            + text.slice(idx + q.length);
+    }
+
+    function renderList(query = '') {
+        listEl.innerHTML = '';
+        focusedIndex = -1;
+
+        // Always show "همه" row
+        const allEl = document.createElement('div');
+        allEl.className = 'city-picker__item city-picker__item--all' +
+                          (selectedValue === allValue ? ' selected' : '');
+        allEl.innerHTML = `<i class="bi bi-globe2"></i> ${allLabel}`;
+        allEl.addEventListener('mousedown', () => pick(allValue, allLabel));
+        listEl.appendChild(allEl);
+
+        if (query) {
+            // Flat filtered list
+            flatFiltered = [];
+            provinces.forEach(p => {
+                byProvince[p].forEach(c => {
+                    if (c.name.includes(query)) flatFiltered.push(c);
+                });
+            });
+
+            if (flatFiltered.length === 0) {
+                listEl.innerHTML += `<div class="city-picker__empty">شهری یافت نشد</div>`;
+                return;
+            }
+
+            flatFiltered.forEach((c, i) => {
+                const val = useSlug ? c.slug : c.name;
+                const el  = document.createElement('div');
+                el.className = 'city-picker__item' + (val === selectedValue ? ' selected' : '');
+                el.dataset.idx = i;
+                el.innerHTML   = `<span>${hl(c.name, query)}</span>`;
+                el.addEventListener('mousedown', () => pick(val, c.name));
+                listEl.appendChild(el);
+            });
+        } else {
+            // Grouped by province
+            flatFiltered = [];
+            provinces.forEach(p => {
+                const groupLabel = document.createElement('div');
+                groupLabel.className = 'city-picker__group-label';
+                groupLabel.textContent = p;
+                listEl.appendChild(groupLabel);
+
+                byProvince[p].forEach(c => {
+                    const val = useSlug ? c.slug : c.name;
+                    const idx = flatFiltered.push(c) - 1;
+                    const el  = document.createElement('div');
+                    el.className = 'city-picker__item' + (val === selectedValue ? ' selected' : '');
+                    el.dataset.idx = idx;
+                    el.textContent = c.name;
+                    el.addEventListener('mousedown', () => pick(val, c.name));
+                    listEl.appendChild(el);
+                });
+            });
+        }
+    }
+
+    // ── Open / close ───────────────────────────────
+    function open() {
+        panel.classList.add('open');
+        trigger.classList.add('open');
+        searchEl.value = '';
+        renderList('');
+        // Scroll selected item into view
+        setTimeout(() => {
+            const sel = listEl.querySelector('.selected');
+            if (sel) sel.scrollIntoView({ block: 'nearest' });
+            searchEl.focus();
+        }, 30);
+    }
+
+    function close() {
+        panel.classList.remove('open');
+        trigger.classList.remove('open');
+        focusedIndex = -1;
+    }
+
+    // ── Select a city ──────────────────────────────
+    function pick(val, label) {
+        selectedValue = val;
+        selectedLabel = label;
+        labelEl.textContent = label;
+        if (hiddenEl) hiddenEl.value = val;
+        if (onChange) onChange(val, label);
+        close();
+    }
+
+    // ── Events ─────────────────────────────────────
+    trigger.addEventListener('click', () => panel.classList.contains('open') ? close() : open());
+    trigger.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') open(); });
+
+    searchEl.addEventListener('input', () => renderList(searchEl.value.trim()));
+
+    // Keyboard nav in list
+    searchEl.addEventListener('keydown', e => {
+        const items = [...listEl.querySelectorAll('.city-picker__item')];
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            focusedIndex = Math.min(focusedIndex + 1, items.length - 1);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            focusedIndex = Math.max(focusedIndex - 1, 0);
+        } else if (e.key === 'Enter' && focusedIndex >= 0) {
+            e.preventDefault();
+            items[focusedIndex]?.dispatchEvent(new MouseEvent('mousedown'));
+            return;
+        } else if (e.key === 'Escape') {
+            close(); return;
+        }
+        items.forEach((el, i) => el.classList.toggle('focused', i === focusedIndex));
+        items[focusedIndex]?.scrollIntoView({ block: 'nearest' });
+    });
+
+    // Close when clicking outside
+    document.addEventListener('mousedown', e => {
+        if (!container.contains(e.target)) close();
+    });
+
+    // Expose getter
+    container._getCityValue = () => selectedValue;
+
+    renderList('');
+    return { getValue: () => selectedValue };
+}
+
+async function loadCities() {
+    try {
+        const cities = await apiCall('/scraper/cities');
+
+        initCityPicker('scraper-city-picker', cities, {
+            valueId:     'scraper-city',
+            useSlug:     true,
+            allLabel:    'انتخاب شهر...',
+            allValue:    '',
+            placeholder: 'جستجو در شهرها...',
+        });
+
+        initCityPicker('filter-city-picker', cities, {
+            valueId:     'filter-city-hidden',
+            useSlug:     false,
+            allLabel:    'همه شهرها',
+            allValue:    '',
+            placeholder: 'جستجو...',
+        });
+
+    } catch (error) {
+        console.error('Failed to load cities:', error);
+    }
+}
+
+async function loadCategories() {
+    try {
+        const categories = await apiCall('/scraper/categories');
+
+        const select = document.getElementById('scraper-category');
+        categories.forEach(cat => {
+            select.innerHTML += `<option value="${cat.slug}">${cat.name}</option>`;
+        });
+        onScraperCategoryChange();
+    } catch (error) {
+        console.error('Failed to load categories:', error);
+    }
+}
+
+function onScraperCategoryChange() {
+    const cat = document.getElementById('scraper-category').value;
+    const isRent = cat.startsWith('rent-');
+    const isBuy  = cat.startsWith('buy-');
+    document.getElementById('scraper-buy-filters').classList.toggle('d-none', !isBuy);
+    document.getElementById('scraper-rent-filters').classList.toggle('d-none', !isRent);
+}
+
+function _intOrNull(id) {
+    const v = parseInt(document.getElementById(id)?.value);
+    return isNaN(v) || v <= 0 ? null : v;
+}
+
+async function startScraping(e) {
+    e.preventDefault();
+
+    const city     = document.getElementById('scraper-city').value;
+    const category = document.getElementById('scraper-category').value;
+    const maxPages = parseInt(document.getElementById('scraper-pages').value);
+    const downloadImages = document.getElementById('scraper-images').checked;
+
+    const priceFilters = {
+        min_price:   _intOrNull('scraper-min-price'),
+        max_price:   _intOrNull('scraper-max-price'),
+        min_deposit: _intOrNull('scraper-min-deposit'),
+        max_deposit: _intOrNull('scraper-max-deposit'),
+        min_rent:    _intOrNull('scraper-min-rent'),
+        max_rent:    _intOrNull('scraper-max-rent'),
+    };
+
+    // Check cookie status before scraping
+    if (!cookieStatus.is_valid) {
+        pendingScrapingAction = { type: 'bulk', city, category, maxPages, downloadImages, priceFilters };
+        showCookieWarning();
+        return;
+    }
+
+    await executeBulkScraping(city, category, maxPages, downloadImages, priceFilters);
+}
+
+async function executeBulkScraping(city, category, maxPages, downloadImages, priceFilters = {}) {
+    try {
+        const result = await apiCall('/scraper/start', {
+            method: 'POST',
+            body: JSON.stringify({
+                city,
+                category,
+                max_pages: maxPages,
+                download_images: downloadImages,
+                ...priceFilters,
+            })
+        });
+        
+        showToast('موفق', `اسکرپینگ شروع شد: ${result.job_id}`, 'success');
+        loadJobs();
+        
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function loadJobs() {
+    try {
+        const data = await apiCall('/scraper/jobs?limit=20');
+        // Seed snapshot so first poll doesn't false-trigger a refresh
+        for (const job of data.items) {
+            _jobPollSnapshot[job.job_id] = { new_items: job.new_items, status: job.status };
+        }
+        _renderJobsTable(data.items);
+    } catch (error) {
+        showToast('خطا', 'بارگیری تسک‌ها ناموفق بود', 'danger');
+    }
+}
+
+async function cancelJob(jobId) {
+    if (!confirm('آیا از لغو این تسک اطمینان دارید؟')) return;
+    
+    try {
+        await apiCall(`/scraper/jobs/${jobId}/cancel`, { method: 'POST' });
+        showToast('موفق', 'تسک لغو شد', 'success');
+        loadJobs();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function scrapeSingle() {
+    const url = document.getElementById('single-url').value;
+    
+    if (!url || !url.includes('divar.ir/v/')) {
+        showToast('خطا', 'لطفاً یک آدرس معتبر دیوار وارد کنید', 'warning');
+        return;
+    }
+    
+    // Check cookie status before scraping
+    if (!cookieStatus.is_valid) {
+        pendingScrapingAction = { type: 'single', url };
+        showCookieWarning();
+        return;
+    }
+    
+    await executeSingleScraping(url);
+}
+
+async function executeSingleScraping(url) {
+    try {
+        const result = await apiCall('/scraper/scrape-single', {
+            method: 'POST',
+            body: JSON.stringify({ url })
+        });
+        
+        if (result.success) {
+            showToast('موفق', 'ملک با موفقیت اسکرپ شد', 'success');
+        } else {
+            showToast('خطا', result.message, 'danger');
+        }
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+// Cookie Warning Modal Functions
+function showCookieWarning() {
+    const message = document.getElementById('cookie-warning-message');
+    if (cookieStatus.has_cookies) {
+        message.textContent = 'نشست شما منقضی شده است. لطفاً دوباره وارد شوید.';
+    } else {
+        message.textContent = 'شما هنوز وارد حساب دیوار نشده‌اید.';
+    }
+    
+    const modal = new bootstrap.Modal(document.getElementById('cookieWarningModal'));
+    modal.show();
+    
+    // Setup continue button handler
+    document.getElementById('continue-scraping-btn').onclick = function() {
+        modal.hide();
+        continueScraping();
+    };
+}
+
+function continueScraping() {
+    if (!pendingScrapingAction) return;
+    
+    if (pendingScrapingAction.type === 'bulk') {
+        const { city, category, maxPages, downloadImages } = pendingScrapingAction;
+        executeBulkScraping(city, category, maxPages, downloadImages);
+    } else if (pendingScrapingAction.type === 'single') {
+        executeSingleScraping(pendingScrapingAction.url);
+    }
+    
+    pendingScrapingAction = null;
+}
+
+function goToAuthSection() {
+    const modal = bootstrap.Modal.getInstance(document.getElementById('cookieWarningModal'));
+    if (modal) modal.hide();
+    showSection('auth');
+}
+
+// ==================== Authentication ====================
+
+async function checkCookieStatus() {
+    try {
+        const status = await apiCall('/auth/status');
+        cookieStatus = status;
+
+        const textEl = document.getElementById('cookie-status');
+        const dotEl  = document.getElementById('cookie-dot');
+
+        if (status.is_valid) {
+            if (textEl) textEl.textContent = 'کوکی فعال';
+            if (dotEl)  { dotEl.className = 'dot dot-success'; }
+        } else if (status.has_cookies) {
+            if (textEl) textEl.textContent = 'کوکی منقضی';
+            if (dotEl)  { dotEl.className = 'dot dot-warning'; }
+        } else {
+            if (textEl) textEl.textContent = 'نیاز به ورود';
+            if (dotEl)  { dotEl.className = 'dot dot-danger'; }
+        }
+    } catch (error) {
+        console.error('Failed to check cookie status:', error);
+    }
+}
+
+async function checkAuthStatus() {
+    try {
+        const status = await apiCall('/auth/status');
+        
+        const statusDiv = document.getElementById('auth-status');
+        
+        if (status.is_valid) {
+            statusDiv.className = 'alert alert-success';
+            statusDiv.innerHTML = `
+                <i class="bi bi-check-circle"></i>
+                <strong>وضعیت: متصل</strong><br>
+                شماره: ${status.phone_number}<br>
+                انقضا: ${status.expires_at || 'نامشخص'}
+            `;
+        } else if (status.has_cookies) {
+            statusDiv.className = 'alert alert-warning';
+            statusDiv.innerHTML = `
+                <i class="bi bi-exclamation-triangle"></i>
+                <strong>وضعیت: منقضی شده</strong><br>
+                ${status.message}
+            `;
+        } else {
+            statusDiv.className = 'alert alert-info';
+            statusDiv.innerHTML = `
+                <i class="bi bi-info-circle"></i>
+                ${status.message}
+            `;
+        }
+    } catch (error) {
+        console.error('Failed to check auth status:', error);
+    }
+}
+
+async function checkDivarSessionBanner() {
+    const badge = document.getElementById('divar-session-badge');
+    if (!badge) return;
+    try {
+        const status = await apiCall('/auth/status');
+        if (status.is_valid) {
+            badge.className = 'badge bg-success ms-2';
+            badge.textContent = '● فعال';
+            badge.title = `نشست دیوار فعال — ${status.phone_number}`;
+        } else {
+            badge.className = 'badge bg-warning text-dark ms-2';
+            badge.textContent = '● غیرفعال';
+            badge.title = 'نشست دیوار غیرفعال — شماره تماس اسکرپ نمی‌شود';
+        }
+    } catch(e) {
+        badge.className = 'badge bg-secondary ms-2';
+        badge.textContent = '●';
+        badge.title = 'وضعیت نامشخص';
+    }
+}
+
+// ─── Divar OTP polling ────────────────────────────────────────────────────────
+let _otpPollTimer = null;
+
+function startOtpPolling() {
+    if (_otpPollTimer) return;
+    _otpPollTimer = setInterval(pollDivarOtp, 4000);
+}
+
+function stopOtpPolling() {
+    if (_otpPollTimer) { clearInterval(_otpPollTimer); _otpPollTimer = null; }
+}
+
+// ─── Job auto-refresh polling ─────────────────────────────────────────────────
+let _jobPollTimer = null;
+let _jobPollSnapshot = {}; // { job_id: { new_items, status } }
+
+function startJobPolling() {
+    if (_jobPollTimer) return;
+    _jobPollTimer = setInterval(_pollJobs, 5000);
+}
+
+function stopJobPolling() {
+    if (_jobPollTimer) { clearInterval(_jobPollTimer); _jobPollTimer = null; }
+    _jobPollSnapshot = {};
+}
+
+async function _pollJobs() {
+    try {
+        const data = await apiCall('/scraper/jobs?limit=20');
+        let shouldRefreshProps = false;
+
+        for (const job of data.items) {
+            const prev = _jobPollSnapshot[job.job_id];
+            if (prev) {
+                // New items added since last poll → refresh list
+                if (job.new_items > prev.new_items) shouldRefreshProps = true;
+                // Job just finished → final refresh
+                if (prev.status === 'running' && job.status !== 'running') shouldRefreshProps = true;
+            }
+            _jobPollSnapshot[job.job_id] = { new_items: job.new_items, status: job.status };
+        }
+
+        // Re-render the jobs table
+        _renderJobsTable(data.items);
+
+        if (shouldRefreshProps) loadProperties();
+    } catch (_) {}
+}
+
+function _renderJobsTable(items) {
+    const tbody = document.getElementById('jobs-table');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">هیچ تسکی وجود ندارد</td></tr>`;
+        return;
+    }
+    items.forEach(job => {
+        const row = document.createElement('tr');
+        const statusClass = `status-${job.status}`;
+        row.innerHTML = `
+            <td><code>${job.job_id.substring(0, 8)}...</code></td>
+            <td><span class="badge ${statusClass}">${job.status}</span></td>
+            <td>
+                <div style="min-width:90px">
+                    <div class="progress" style="height:5px;background:var(--border,#333);border-radius:3px;">
+                        <div class="progress-bar" role="progressbar"
+                             style="width:${job.progress}%;border-radius:3px;"></div>
+                    </div>
+                    <div style="font-size:.72rem;color:var(--text-muted,#aaa);text-align:center;margin-top:2px;">${Math.round(job.progress)}%</div>
+                </div>
+            </td>
+            <td>${job.new_items} / ${job.updated_items}</td>
+            <td>${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
+            <td>
+                ${job.status === 'running' ? `
+                    <button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.job_id}')">
+                        <i class="bi bi-stop-fill"></i>
+                    </button>
+                ` : ''}
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+async function pollDivarOtp() {
+    try {
+        const data = await apiCall('/scraper/otp-pending');
+        if (data.pending && data.pending.length > 0) {
+            const item = data.pending[0];
+            const modal = document.getElementById('divarOtpModal');
+            if (modal && !modal.classList.contains('show')) {
+                document.getElementById('divar-otp-key').value = item.key;
+                document.getElementById('divar-otp-input').value = '';
+                new bootstrap.Modal(modal).show();
+                setTimeout(() => document.getElementById('divar-otp-input').focus(), 400);
+            }
+        }
+    } catch(e) { /* silent */ }
+}
+
+async function submitDivarOtp() {
+    const key  = document.getElementById('divar-otp-key').value;
+    const code = document.getElementById('divar-otp-input').value.trim();
+    if (!code || code.length < 4) { showToast('خطا', 'کد را وارد کنید', 'warning'); return; }
+    try {
+        await apiCall(`/scraper/otp/${key}`, { method: 'POST', body: JSON.stringify({ code }) });
+        bootstrap.Modal.getInstance(document.getElementById('divarOtpModal'))?.hide();
+        showToast('تأیید', 'کد ارسال شد', 'success');
+    } catch(e) {
+        showToast('خطا', 'ارسال کد ناموفق بود', 'danger');
+    }
+}
+
+async function initiateLogin() {
+    const phone = document.getElementById('auth-phone').value;
+    
+    if (!phone || !/^09\d{9}$/.test(phone)) {
+        showToast('خطا', 'لطفاً شماره موبایل معتبر وارد کنید', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await apiCall('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ phone_number: phone })
+        });
+        
+        if (result.requires_code) {
+            loginPhoneNumber = phone;
+            document.getElementById('auth-login-form').style.display = 'none';
+            document.getElementById('auth-verify-form').style.display = 'block';
+            showToast('موفق', 'کد تأیید ارسال شد', 'success');
+        } else {
+            showToast('خطا', result.message, 'danger');
+        }
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function verifyCode() {
+    const code = document.getElementById('auth-code').value;
+    
+    if (!code || code.length !== 6) {
+        showToast('خطا', 'لطفاً کد ۶ رقمی را وارد کنید', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await apiCall(`/auth/verify?phone_number=${loginPhoneNumber}`, {
+            method: 'POST',
+            body: JSON.stringify({ code })
+        });
+        
+        if (result.success) {
+            showToast('موفق', 'ورود موفقیت‌آمیز بود', 'success');
+            document.getElementById('auth-login-form').style.display = 'block';
+            document.getElementById('auth-verify-form').style.display = 'none';
+            checkAuthStatus();
+            checkCookieStatus();
+        } else {
+            showToast('خطا', result.message, 'danger');
+        }
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function refreshSession() {
+    try {
+        const result = await apiCall('/auth/refresh', { method: 'POST' });
+        
+        if (result.success) {
+            showToast('موفق', result.message, 'success');
+        } else {
+            showToast('هشدار', result.message, 'warning');
+        }
+        
+        checkAuthStatus();
+        checkCookieStatus();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function logout() {
+    if (!confirm('آیا از خروج اطمینان دارید؟')) return;
+    
+    try {
+        await apiCall('/auth/logout', { method: 'POST' });
+        showToast('موفق', 'خروج موفقیت‌آمیز بود', 'success');
+        checkAuthStatus();
+        checkCookieStatus();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function importCookies() {
+    const phone = document.getElementById('import-phone').value.trim();
+    const raw   = document.getElementById('import-cookies-json').value.trim();
+
+    if (!phone || !/^09\d{9}$/.test(phone)) {
+        showToast('خطا', 'شماره موبایل معتبر وارد کنید', 'warning');
+        return;
+    }
+    if (!raw) {
+        showToast('خطا', 'JSON کوکی‌ها را وارد کنید', 'warning');
+        return;
+    }
+
+    let cookies;
+    try {
+        cookies = JSON.parse(raw);
+        if (!Array.isArray(cookies)) throw new Error('باید آرایه باشد');
+    } catch (e) {
+        showToast('خطا', 'فرمت JSON نادرست است: ' + e.message, 'danger');
+        return;
+    }
+
+    try {
+        await apiCall('/auth/cookies/import', {
+            method: 'POST',
+            body: JSON.stringify({ phone_number: phone, cookies })
+        });
+        showToast('موفق', 'کوکی‌ها با موفقیت وارد شدند', 'success');
+        document.getElementById('import-cookies-json').value = '';
+        checkCookieStatus();
+        loadCookies();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function loadCookies() {
+    try {
+        const data = await apiCall('/auth/cookies');
+        
+        const container = document.getElementById('cookies-list');
+        
+        if (data.cookies.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">هیچ نشستی ذخیره نشده</p>';
+            return;
+        }
+        
+        container.innerHTML = data.cookies.map(cookie => `
+            <div class="d-flex justify-content-between align-items-center p-2 border-bottom">
+                <div>
+                    <strong>${cookie.phone_number}</strong>
+                    <br>
+                    <small class="text-muted">${cookie.is_valid ? 'معتبر' : 'منقضی'}</small>
+                </div>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${cookie.id})">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Failed to load cookies:', error);
+    }
+}
+
+async function deleteCookie(id) {
+    if (!confirm('آیا از حذف این نشست اطمینان دارید؟')) return;
+    
+    try {
+        await apiCall(`/auth/cookies/${id}`, { method: 'DELETE' });
+        showToast('موفق', 'نشست حذف شد', 'success');
+        loadCookies();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+// ==================== Proxies ====================
+
+async function loadProxies() {
+    try {
+        const data = await apiCall('/proxies');
+        
+        const tbody = document.getElementById('proxies-table');
+        tbody.innerHTML = '';
+        
+        if (data.items.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center text-muted py-4">
+                        هیچ پراکسی‌ای وجود ندارد
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        data.items.forEach(proxy => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${proxy.address}</td>
+                <td>${proxy.port}</td>
+                <td>
+                    <span class="badge ${proxy.is_working ? 'bg-success' : 'bg-danger'}">
+                        ${proxy.is_working ? 'فعال' : 'غیرفعال'}
+                    </span>
+                </td>
+                <td>${proxy.success_count} / ${proxy.fail_count}</td>
+                <td>${proxy.avg_response_time ? proxy.avg_response_time.toFixed(2) + 's' : '---'}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="testProxy(${proxy.id})">
+                        <i class="bi bi-speedometer2"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="toggleProxy(${proxy.id})">
+                        <i class="bi bi-toggle-on"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteProxy(${proxy.id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+        
+    } catch (error) {
+        showToast('خطا', 'بارگیری پراکسی‌ها ناموفق بود', 'danger');
+    }
+}
+
+async function addProxy(e) {
+    e.preventDefault();
+    
+    const address = document.getElementById('proxy-address').value;
+    const port = parseInt(document.getElementById('proxy-port').value);
+    const protocol = document.getElementById('proxy-protocol').value;
+    const username = document.getElementById('proxy-username').value;
+    const password = document.getElementById('proxy-password').value;
+    
+    try {
+        await apiCall('/proxies', {
+            method: 'POST',
+            body: JSON.stringify({ address, port, protocol, username, password })
+        });
+        
+        showToast('موفق', 'پراکسی اضافه شد', 'success');
+        e.target.reset();
+        loadProxies();
+        
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function testProxy(id) {
+    try {
+        showToast('در حال تست', 'لطفاً صبر کنید...', 'info');
+        const result = await apiCall(`/proxies/${id}/test`, { method: 'POST' });
+        
+        if (result.success) {
+            showToast('موفق', `زمان پاسخ: ${result.response_time.toFixed(2)}s`, 'success');
+        } else {
+            showToast('ناموفق', result.error || 'پراکسی کار نمی‌کند', 'danger');
+        }
+        
+        loadProxies();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function toggleProxy(id) {
+    try {
+        const result = await apiCall(`/proxies/${id}/toggle`, { method: 'POST' });
+        showToast('موفق', result.message, 'success');
+        loadProxies();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function deleteProxy(id) {
+    if (!confirm('آیا از حذف این پراکسی اطمینان دارید؟')) return;
+    
+    try {
+        await apiCall(`/proxies/${id}`, { method: 'DELETE' });
+        showToast('موفق', 'پراکسی حذف شد', 'success');
+        loadProxies();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function testAllProxies() {
+    try {
+        showToast('در حال تست', 'تست همه پراکسی‌ها شروع شد...', 'info');
+        const result = await apiCall('/proxies/test-all', { method: 'POST' });
+        showToast('موفق', `${result.working} از ${result.total} پراکسی فعال`, 'success');
+        loadProxies();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+// ==================== CRM ====================
+
+const CRM_STATUS_LABELS = {
+    new: { label: 'جدید', cls: 'bg-warning text-dark' },
+    contacted: { label: 'تماس گرفته', cls: 'bg-info text-white' },
+    qualified: { label: 'واجد شرایط', cls: 'bg-primary text-white' },
+    closed: { label: 'بسته شده', cls: 'bg-success text-white' },
+    rejected: { label: 'رد شده', cls: 'bg-danger text-white' },
+};
+
+const TASK_PRIORITY_LABELS = {
+    low: { label: 'کم', cls: 'bg-secondary' },
+    medium: { label: 'متوسط', cls: 'bg-info text-white' },
+    high: { label: 'زیاد', cls: 'bg-warning text-dark' },
+    urgent: { label: 'فوری', cls: 'bg-danger text-white' },
+};
+const TASK_STATUS_LABELS = {
+    todo: { label: 'انجام نشده', cls: 'bg-secondary' },
+    in_progress: { label: 'در حال انجام', cls: 'bg-primary text-white' },
+    done: { label: 'انجام شده', cls: 'bg-success text-white' },
+};
+const DEAL_STATUS_LABELS = {
+    new: { label: 'جدید', cls: 'bg-warning text-dark' },
+    negotiating: { label: 'مذاکره', cls: 'bg-info text-white' },
+    contract: { label: 'قرارداد', cls: 'bg-primary text-white' },
+    closed: { label: 'بسته', cls: 'bg-success text-white' },
+    cancelled: { label: 'لغو', cls: 'bg-danger text-white' },
+};
+const CONTACT_TYPE_LABELS = {
+    buyer: { label: 'خریدار', cls: 'bg-primary text-white' },
+    seller: { label: 'فروشنده', cls: 'bg-warning text-dark' },
+    consultant: { label: 'مشاور', cls: 'bg-info text-white' },
+    other: { label: 'سایر', cls: 'bg-secondary' },
+};
+
+async function loadCrmStats() {
+    try {
+        const data = await apiCall('/crm/stats');
+        _renderCrmReportStats(data);
+    } catch (error) {
+        console.error('Failed to load CRM stats:', error);
+    }
+}
+
+function _renderCrmReportStats(data) {
+    const el = document.getElementById('crm-report-stats');
+    if (!el) return;
+    const cards = [
+        { icon: 'bi-people', val: data.contacts?.total ?? 0, label: 'مخاطبین', color: 's-purple' },
+        { icon: 'bi-check2-square', val: data.tasks?.todo ?? 0, label: 'وظایف انجام نشده', color: 's-orange' },
+        { icon: 'bi-handshake', val: data.deals?.total ?? 0, label: 'معاملات', color: 's-green' },
+        { icon: 'bi-alarm', val: data.reminders_due_today ?? 0, label: 'یادآور امروز', color: 's-red' },
+        { icon: 'bi-chat-dots', val: data.total_sms ?? 0, label: 'پیامک ارسالی', color: 's-blue' },
+        { icon: 'bi-person-check', val: data.leads?.total ?? 0, label: 'کل لیدها', color: 's-teal' },
+    ];
+    el.innerHTML = cards.map(c => `
+        <div class="col-md-2 col-sm-4 col-6">
+          <div class="stat-card ${c.color}">
+            <div class="stat-icon"><i class="bi ${c.icon}"></i></div>
+            <div class="stat-value">${formatNumber(c.val)}</div>
+            <div class="stat-label">${c.label}</div>
+            <i class="bi ${c.icon} stat-bg-icon"></i>
+          </div>
+        </div>`).join('');
+    _renderCrmCharts(data);
+}
+
+function _renderCrmCharts(data) {
+    const dealsCtx = document.getElementById('crm-deals-chart');
+    const contactsCtx = document.getElementById('crm-contacts-chart');
+    if (!dealsCtx || !contactsCtx) return;
+
+    const dealStatusLabels = Object.keys(DEAL_STATUS_LABELS);
+    const dealValues = dealStatusLabels.map(k => data.deals?.by_status?.[k] ?? 0);
+    const dealLabels = dealStatusLabels.map(k => DEAL_STATUS_LABELS[k].label);
+
+    const contactTypeLabels = Object.keys(CONTACT_TYPE_LABELS);
+    const contactValues = contactTypeLabels.map(k => data.contacts?.by_type?.[k] ?? 0);
+    const contactLabels = contactTypeLabels.map(k => CONTACT_TYPE_LABELS[k].label);
+
+    if (window._crmDealsChart) window._crmDealsChart.destroy();
+    if (window._crmContactsChart) window._crmContactsChart.destroy();
+
+    window._crmDealsChart = new Chart(dealsCtx, {
+        type: 'doughnut',
+        data: { labels: dealLabels, datasets: [{ data: dealValues, backgroundColor: ['#f59e0b','#3b82f6','#8b5cf6','#10b981','#ef4444'] }] },
+        options: { plugins: { legend: { labels: { color: '#ccc' } } } }
+    });
+    window._crmContactsChart = new Chart(contactsCtx, {
+        type: 'bar',
+        data: { labels: contactLabels, datasets: [{ data: contactValues, backgroundColor: '#6366f1' }] },
+        options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#ccc' } }, y: { ticks: { color: '#ccc' } } } }
+    });
+}
+
+async function loadLeads() {
+    const status = document.getElementById('crm-filter-status').value;
+    const notified = document.getElementById('crm-filter-notified').value;
+
+    let url = '/crm/leads?limit=50';
+    if (status) url += `&status=${status}`;
+    if (notified !== '') url += `&notified=${notified}`;
+
+    try {
+        const data = await apiCall(url);
+        const tbody = document.getElementById('crm-leads-table');
+        tbody.innerHTML = '';
+
+        if (data.items.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="9" class="text-center text-muted py-4">
+                        <i class="bi bi-inbox" style="font-size:2rem;"></i>
+                        <p class="mt-2">هیچ لیدی یافت نشد</p>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        data.items.forEach(lead => {
+            const st = CRM_STATUS_LABELS[lead.status] || { label: lead.status, cls: 'bg-secondary' };
+            const notifiedBadge = lead.notified
+                ? `<span class="badge bg-success"><i class="bi bi-check-circle"></i> بله</span>`
+                : `<span class="badge bg-secondary">خیر</span>`;
+            const createdAt = lead.created_at
+                ? new Date(lead.created_at).toLocaleDateString('fa-IR')
+                : '---';
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${lead.id}</td>
+                <td title="${lead.property_title || ''}">${(lead.property_title || '---').substring(0, 35)}...</td>
+                <td>${lead.city_name || '---'}</td>
+                <td>${formatPrice(lead.price)}</td>
+                <td>
+                    ${lead.phone_number
+                        ? `<a href="tel:${lead.phone_number}" class="text-success fw-bold">${lead.phone_number}</a>`
+                        : '<span class="text-muted">---</span>'}
+                </td>
+                <td><span class="badge ${st.cls}">${st.label}</span></td>
+                <td>${notifiedBadge}</td>
+                <td>${createdAt}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewLead(${lead.id})" title="ویرایش">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    ${!lead.notified ? `
+                    <button class="btn btn-sm btn-outline-success" onclick="notifyLead(${lead.id})" title="ارسال اطلاع">
+                        <i class="bi bi-bell"></i>
+                    </button>` : ''}
+                    <a href="${lead.property_url}" target="_blank" class="btn btn-sm btn-outline-secondary" title="باز کردن آگهی">
+                        <i class="bi bi-box-arrow-up-left"></i>
+                    </a>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        showToast('خطا', 'بارگیری لیدها ناموفق بود', 'danger');
+    }
+}
+
+async function viewLead(id) {
+    try {
+        const lead = await apiCall(`/crm/leads/${id}`);
+        const st = CRM_STATUS_LABELS[lead.status] || { label: lead.status, cls: 'bg-secondary' };
+
+        document.getElementById('lead-detail-body').innerHTML = `
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="text-muted small">عنوان ملک</label>
+                    <div class="fw-bold">${lead.property_title || '---'}</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="text-muted small">لینک</label>
+                    <div>
+                        <a href="${lead.property_url}" target="_blank" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-box-arrow-up-right"></i> مشاهده آگهی
+                        </a>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <label class="text-muted small">شماره تماس</label>
+                    <div class="h5 text-success mb-0">
+                        ${lead.phone_number
+                            ? `<a href="tel:${lead.phone_number}">${lead.phone_number}</a>`
+                            : '---'}
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <label class="text-muted small">فروشنده</label>
+                    <div>${lead.seller_name || '---'}</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="text-muted small">شهر</label>
+                    <div>${lead.city_name || '---'}</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="text-muted small">قیمت</label>
+                    <div>${formatPrice(lead.price)}</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="text-muted small">متراژ</label>
+                    <div>${lead.area ? formatNumber(lead.area) + ' متر' : '---'}</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="text-muted small">نوع</label>
+                    <div>${lead.listing_type === 'buy' ? 'خرید' : lead.listing_type === 'rent' ? 'اجاره' : '---'}</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="text-muted small">اطلاع‌رسانی</label>
+                    <div>
+                        ${lead.notified
+                            ? `<span class="badge bg-success">بله (${lead.notification_channel})</span>`
+                            : '<span class="badge bg-secondary">خیر</span>'}
+                    </div>
+                </div>
+                <hr>
+                <div class="col-md-6">
+                    <label class="form-label">وضعیت CRM</label>
+                    <select id="lead-edit-status" class="form-select">
+                        ${Object.entries(CRM_STATUS_LABELS).map(([val, info]) =>
+                            `<option value="${val}" ${lead.status === val ? 'selected' : ''}>${info.label}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">مسئول پیگیری</label>
+                    <input type="text" id="lead-edit-assigned" class="form-control"
+                           value="${lead.assigned_to || ''}" placeholder="نام مسئول...">
+                </div>
+                <div class="col-12">
+                    <label class="form-label">یادداشت</label>
+                    <textarea id="lead-edit-notes" class="form-control" rows="3"
+                              placeholder="یادداشت...">${lead.notes || ''}</textarea>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('lead-save-btn').onclick = () => saveLead(id);
+
+        new bootstrap.Modal(document.getElementById('leadModal')).show();
+    } catch (error) {
+        showToast('خطا', 'بارگیری لید ناموفق بود', 'danger');
+    }
+}
+
+async function saveLead(id) {
+    const status = document.getElementById('lead-edit-status').value;
+    const notes = document.getElementById('lead-edit-notes').value;
+    const assigned_to = document.getElementById('lead-edit-assigned').value;
+
+    try {
+        await apiCall(`/crm/leads/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status, notes, assigned_to })
+        });
+        showToast('موفق', 'لید بروزرسانی شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('leadModal')).hide();
+        loadLeads();
+        loadCrmStats();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function notifyLead(id) {
+    try {
+        showToast('در حال ارسال', 'اطلاع‌رسانی در حال انجام...', 'info');
+        const result = await apiCall(`/crm/leads/${id}/notify`, { method: 'POST' });
+        if (result.success) {
+            showToast('موفق', `اطلاع‌رسانی از طریق ${result.channel} انجام شد`, 'success');
+        } else {
+            showToast('هشدار', 'کانال اطلاع‌رسانی تنظیم نشده', 'warning');
+        }
+        loadLeads();
+        loadCrmStats();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+// ==================== Users (super_admin) ====================
+
+const ROLE_LABELS = {
+    super_admin: { label: '👑 Super Admin', cls: 'bg-danger' },
+    admin:       { label: '🛠 Admin',        cls: 'bg-primary' },
+    user:        { label: '👤 User',          cls: 'bg-secondary' },
+};
+
+async function loadUsers() {
+    try {
+        const data = await apiCall('/users');
+        const tbody = document.getElementById('users-table');
+        tbody.innerHTML = '';
+
+        data.items.forEach(u => {
+            const rl = ROLE_LABELS[u.role] || { label: u.role, cls: 'bg-dark' };
+            const lastLogin = u.last_login
+                ? new Date(u.last_login).toLocaleDateString('fa-IR')
+                : '---';
+            const isSelf = u.username === _currentUser?.username;
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${u.id}</td>
+                <td><strong>${u.username}</strong> ${isSelf ? '<span class="badge bg-info">شما</span>' : ''}</td>
+                <td>${u.full_name || '---'}</td>
+                <td><span class="badge ${rl.cls}">${rl.label}</span></td>
+                <td>
+                    <span class="badge ${u.is_active ? 'bg-success' : 'bg-secondary'}">
+                        ${u.is_active ? 'فعال' : 'غیرفعال'}
+                    </span>
+                </td>
+                <td>${lastLogin}</td>
+                <td>
+                    ${!isSelf ? `
+                    <button class="btn btn-sm btn-outline-warning" onclick="toggleUserActive(${u.id}, ${u.is_active})" title="${u.is_active ? 'غیرفعال' : 'فعال'} کردن">
+                        <i class="bi bi-toggle-${u.is_active ? 'on' : 'off'}"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-info" onclick="promptResetPassword(${u.id})" title="تغییر رمز">
+                        <i class="bi bi-key"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${u.id})" title="حذف">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                    ` : ''}
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        showToast('خطا', 'بارگیری کاربران ناموفق بود', 'danger');
+    }
+}
+
+async function createUser(e) {
+    e.preventDefault();
+    const username  = document.getElementById('new-username').value.trim();
+    const full_name = document.getElementById('new-fullname').value.trim();
+    const email     = document.getElementById('new-email').value.trim();
+    const password  = document.getElementById('new-password').value;
+    const role      = document.getElementById('new-role').value;
+
+    try {
+        await apiCall('/users', {
+            method: 'POST',
+            body: JSON.stringify({ username, full_name, email, password, role })
+        });
+        showToast('موفق', 'کاربر ساخته شد', 'success');
+        e.target.reset();
+        loadUsers();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function toggleUserActive(id, currentlyActive) {
+    try {
+        await apiCall(`/users/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ is_active: !currentlyActive })
+        });
+        showToast('موفق', `کاربر ${currentlyActive ? 'غیرفعال' : 'فعال'} شد`, 'success');
+        loadUsers();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function promptResetPassword(id) {
+    const newPass = prompt('رمز عبور جدید را وارد کنید (حداقل ۶ کاراکتر):');
+    if (!newPass || newPass.length < 6) {
+        showToast('خطا', 'رمز عبور باید حداقل ۶ کاراکتر باشد', 'warning');
+        return;
+    }
+    try {
+        await apiCall(`/users/${id}/password`, {
+            method: 'POST',
+            body: JSON.stringify({ new_password: newPass })
+        });
+        showToast('موفق', 'رمز عبور تغییر کرد', 'success');
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function deleteUser(id) {
+    if (!confirm('آیا از حذف این کاربر اطمینان دارید؟')) return;
+    try {
+        await apiCall(`/users/${id}`, { method: 'DELETE' });
+        showToast('موفق', 'کاربر حذف شد', 'success');
+        loadUsers();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function importProxies() {
+    const proxyList = document.getElementById('proxy-import').value;
+
+    if (!proxyList.trim()) {
+        showToast('خطا', 'لطفاً لیست پراکسی‌ها را وارد کنید', 'warning');
+        return;
+    }
+
+    try {
+        const result = await apiCall('/proxies/import', {
+            method: 'POST',
+            body: JSON.stringify({ proxy_list: proxyList })
+        });
+
+        showToast('موفق', result.message, 'success');
+        document.getElementById('proxy-import').value = '';
+        loadProxies();
+
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CRM — TASKS
+// ═══════════════════════════════════════════════════════════════
+
+async function loadTasks() {
+    const status = document.getElementById('task-filter-status')?.value || '';
+    const priority = document.getElementById('task-filter-priority')?.value || '';
+    let url = '/crm/tasks?limit=100';
+    if (status) url += `&status=${status}`;
+    if (priority) url += `&priority=${priority}`;
+    try {
+        const data = await apiCall(url);
+        const tbody = document.getElementById('tasks-table');
+        if (!tbody) return;
+        if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">وظیفه‌ای یافت نشد</td></tr>'; return; }
+        tbody.innerHTML = data.items.map(t => {
+            const p = TASK_PRIORITY_LABELS[t.priority] || { label: t.priority, cls: 'bg-secondary' };
+            const s = TASK_STATUS_LABELS[t.status] || { label: t.status, cls: 'bg-secondary' };
+            const due = t.due_date ? new Date(t.due_date).toLocaleDateString('fa-IR') : '—';
+            return `<tr>
+                <td>${t.title}</td>
+                <td><span class="badge ${p.cls}">${p.label}</span></td>
+                <td><span class="badge ${s.cls}">${s.label}</span></td>
+                <td>${due}</td>
+                <td>${t.assigned_to || '—'}</td>
+                <td>
+                    <button class="btn btn-xs btn-outline-primary" onclick="openTaskModal(${t.id})"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-xs btn-outline-danger" onclick="deleteTask(${t.id})"><i class="bi bi-trash"></i></button>
+                    ${t.status !== 'done' ? `<button class="btn btn-xs btn-outline-success" onclick="markTaskDone(${t.id})"><i class="bi bi-check2"></i></button>` : ''}
+                </td>
+            </tr>`;
+        }).join('');
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function openTaskModal(id = null) {
+    document.getElementById('task-edit-id').value = id || '';
+    document.getElementById('taskModalTitle').textContent = id ? 'ویرایش وظیفه' : 'وظیفه جدید';
+    document.getElementById('task-title').value = '';
+    document.getElementById('task-description').value = '';
+    document.getElementById('task-priority').value = 'medium';
+    document.getElementById('task-status').value = 'todo';
+    document.getElementById('task-due-date').value = '';
+    document.getElementById('task-assigned').value = '';
+    if (id) {
+        try {
+            const t = await apiCall(`/crm/tasks/${id}`);
+            document.getElementById('task-title').value = t.title || '';
+            document.getElementById('task-description').value = t.description || '';
+            document.getElementById('task-priority').value = t.priority || 'medium';
+            document.getElementById('task-status').value = t.status || 'todo';
+            document.getElementById('task-due-date').value = t.due_date ? t.due_date.slice(0,16) : '';
+            document.getElementById('task-assigned').value = t.assigned_to || '';
+        } catch(e) { showToast('خطا', e.message, 'danger'); return; }
+    }
+    new bootstrap.Modal(document.getElementById('taskModal')).show();
+}
+
+async function saveTask() {
+    const id = document.getElementById('task-edit-id').value;
+    const payload = {
+        title: document.getElementById('task-title').value.trim(),
+        description: document.getElementById('task-description').value.trim() || null,
+        priority: document.getElementById('task-priority').value,
+        status: document.getElementById('task-status').value,
+        due_date: document.getElementById('task-due-date').value || null,
+        assigned_to: document.getElementById('task-assigned').value.trim() || null,
+    };
+    if (!payload.title) { showToast('خطا', 'عنوان الزامی است', 'warning'); return; }
+    try {
+        if (id) {
+            await apiCall(`/crm/tasks/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+        } else {
+            await apiCall('/crm/tasks', { method: 'POST', body: JSON.stringify(payload) });
+        }
+        showToast('موفق', 'وظیفه ذخیره شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('taskModal')).hide();
+        loadTasks();
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function deleteTask(id) {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiCall(`/crm/tasks/${id}`, { method: 'DELETE' }); showToast('موفق', 'حذف شد', 'success'); loadTasks(); }
+    catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function markTaskDone(id) {
+    try { await apiCall(`/crm/tasks/${id}`, { method: 'PUT', body: JSON.stringify({ status: 'done' }) }); loadTasks(); }
+    catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CRM — CONTACTS
+// ═══════════════════════════════════════════════════════════════
+
+async function loadContacts() {
+    const search = document.getElementById('contact-search')?.value.trim() || '';
+    const type = document.getElementById('contact-filter-type')?.value || '';
+    const category = document.getElementById('contact-filter-category')?.value || '';
+    let url = '/crm/contacts?limit=200';
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (type) url += `&contact_type=${type}`;
+    if (category) url += `&category=${category}`;
+    try {
+        const data = await apiCall(url);
+        const tbody = document.getElementById('contacts-table');
+        if (!tbody) return;
+        if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">مخاطبی یافت نشد</td></tr>'; return; }
+        tbody.innerHTML = data.items.map(c => {
+            const typeInfo = CONTACT_TYPE_LABELS[c.contact_type] || { label: c.contact_type, cls: 'bg-secondary' };
+            const catCls = c.category === 'VIP' ? 'bg-warning text-dark' : c.category === 'cold' ? 'bg-secondary' : 'bg-info text-white';
+            const tags = (c.tags || []).map(t => `<span class="badge bg-dark me-1">${t}</span>`).join('');
+            return `<tr>
+                <td>${c.name}</td>
+                <td>${c.phone || '—'}</td>
+                <td><span class="badge ${typeInfo.cls}">${typeInfo.label}</span></td>
+                <td><span class="badge ${catCls}">${c.category || 'عادی'}</span></td>
+                <td>${c.city || '—'}</td>
+                <td>${tags || '—'}</td>
+                <td>
+                    <button class="btn btn-xs btn-outline-primary" onclick="openContactModal(${c.id})"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-xs btn-outline-danger" onclick="deleteContact(${c.id})"><i class="bi bi-trash"></i></button>
+                    <button class="btn btn-xs btn-outline-info" onclick="quickSmsToContact('${c.phone || ''}')"><i class="bi bi-chat-dots"></i></button>
+                </td>
+            </tr>`;
+        }).join('');
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function openContactModal(id = null) {
+    document.getElementById('contact-edit-id').value = id || '';
+    document.getElementById('contactModalTitle').textContent = id ? 'ویرایش مخاطب' : 'مخاطب جدید';
+    ['name','phone','phone2','email','city','address','tags','notes'].forEach(f => document.getElementById(`contact-${f}`).value = '');
+    document.getElementById('contact-type').value = 'buyer';
+    document.getElementById('contact-category').value = 'normal';
+    if (id) {
+        try {
+            const c = await apiCall(`/crm/contacts/${id}`);
+            document.getElementById('contact-name').value = c.name || '';
+            document.getElementById('contact-phone').value = c.phone || '';
+            document.getElementById('contact-phone2').value = c.phone2 || '';
+            document.getElementById('contact-email').value = c.email || '';
+            document.getElementById('contact-type').value = c.contact_type || 'buyer';
+            document.getElementById('contact-category').value = c.category || 'normal';
+            document.getElementById('contact-city').value = c.city || '';
+            document.getElementById('contact-address').value = c.address || '';
+            document.getElementById('contact-tags').value = (c.tags || []).join(', ');
+            document.getElementById('contact-notes').value = c.notes || '';
+        } catch(e) { showToast('خطا', e.message, 'danger'); return; }
+    }
+    new bootstrap.Modal(document.getElementById('contactModal')).show();
+}
+
+async function saveContact() {
+    const id = document.getElementById('contact-edit-id').value;
+    const tagsRaw = document.getElementById('contact-tags').value;
+    const payload = {
+        name: document.getElementById('contact-name').value.trim(),
+        phone: document.getElementById('contact-phone').value.trim() || null,
+        phone2: document.getElementById('contact-phone2').value.trim() || null,
+        email: document.getElementById('contact-email').value.trim() || null,
+        contact_type: document.getElementById('contact-type').value,
+        category: document.getElementById('contact-category').value,
+        city: document.getElementById('contact-city').value.trim() || null,
+        address: document.getElementById('contact-address').value.trim() || null,
+        tags: tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [],
+        notes: document.getElementById('contact-notes').value.trim() || null,
+    };
+    if (!payload.name) { showToast('خطا', 'نام الزامی است', 'warning'); return; }
+    try {
+        if (id) {
+            await apiCall(`/crm/contacts/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+        } else {
+            await apiCall('/crm/contacts', { method: 'POST', body: JSON.stringify(payload) });
+        }
+        showToast('موفق', 'مخاطب ذخیره شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('contactModal')).hide();
+        loadContacts();
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function deleteContact(id) {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiCall(`/crm/contacts/${id}`, { method: 'DELETE' }); showToast('موفق', 'حذف شد', 'success'); loadContacts(); }
+    catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+function quickSmsToContact(phone) {
+    if (!phone) return;
+    document.getElementById('sms-to').value = phone;
+    const smsTab = document.querySelector('[data-bs-target="#crm-tab-sms"]');
+    if (smsTab) bootstrap.Tab.getOrCreateInstance(smsTab).show();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CRM — DEALS
+// ═══════════════════════════════════════════════════════════════
+
+async function loadDeals() {
+    const status = document.getElementById('deal-filter-status')?.value || '';
+    let url = '/crm/deals?limit=100';
+    if (status) url += `&status=${status}`;
+    try {
+        const data = await apiCall(url);
+        const tbody = document.getElementById('deals-table');
+        if (!tbody) return;
+        if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">معامله‌ای یافت نشد</td></tr>'; return; }
+        tbody.innerHTML = data.items.map(d => {
+            const s = DEAL_STATUS_LABELS[d.status] || { label: d.status, cls: 'bg-secondary' };
+            const dealTypeLabel = { buy: 'خرید', rent: 'اجاره', lease: 'رهن' }[d.deal_type] || d.deal_type;
+            const amount = d.amount ? formatNumber(d.amount) + ' ت' : '—';
+            const date = d.contract_date ? new Date(d.contract_date).toLocaleDateString('fa-IR') : '—';
+            return `<tr>
+                <td>${d.title}</td>
+                <td>${dealTypeLabel}</td>
+                <td><span class="badge ${s.cls}">${s.label}</span></td>
+                <td>${amount}</td>
+                <td>${d.buyer_contact_id || '—'}</td>
+                <td>${d.seller_contact_id || '—'}</td>
+                <td>${date}</td>
+                <td>
+                    <button class="btn btn-xs btn-outline-primary" onclick="openDealModal(${d.id})"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-xs btn-outline-danger" onclick="deleteDeal(${d.id})"><i class="bi bi-trash"></i></button>
+                </td>
+            </tr>`;
+        }).join('');
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function openDealModal(id = null) {
+    document.getElementById('deal-edit-id').value = id || '';
+    document.getElementById('dealModalTitle').textContent = id ? 'ویرایش معامله' : 'معامله جدید';
+    ['title','amount','commission','buyer-id','seller-id','notes'].forEach(f => document.getElementById(`deal-${f}`).value = '');
+    document.getElementById('deal-type').value = 'buy';
+    document.getElementById('deal-status').value = 'new';
+    document.getElementById('deal-commission-paid').value = 'false';
+    document.getElementById('deal-contract-date').value = '';
+    if (id) {
+        try {
+            const d = await apiCall(`/crm/deals/${id}`);
+            document.getElementById('deal-title').value = d.title || '';
+            document.getElementById('deal-type').value = d.deal_type || 'buy';
+            document.getElementById('deal-status').value = d.status || 'new';
+            document.getElementById('deal-amount').value = d.amount || '';
+            document.getElementById('deal-commission').value = d.commission || '';
+            document.getElementById('deal-commission-paid').value = d.commission_paid ? 'true' : 'false';
+            document.getElementById('deal-contract-date').value = d.contract_date ? d.contract_date.slice(0,10) : '';
+            document.getElementById('deal-buyer-id').value = d.buyer_contact_id || '';
+            document.getElementById('deal-seller-id').value = d.seller_contact_id || '';
+            document.getElementById('deal-notes').value = d.notes || '';
+        } catch(e) { showToast('خطا', e.message, 'danger'); return; }
+    }
+    new bootstrap.Modal(document.getElementById('dealModal')).show();
+}
+
+async function saveDeal() {
+    const id = document.getElementById('deal-edit-id').value;
+    const payload = {
+        title: document.getElementById('deal-title').value.trim(),
+        deal_type: document.getElementById('deal-type').value,
+        status: document.getElementById('deal-status').value,
+        amount: parseFloat(document.getElementById('deal-amount').value) || null,
+        commission: parseFloat(document.getElementById('deal-commission').value) || null,
+        commission_paid: document.getElementById('deal-commission-paid').value === 'true',
+        contract_date: document.getElementById('deal-contract-date').value || null,
+        buyer_contact_id: parseInt(document.getElementById('deal-buyer-id').value) || null,
+        seller_contact_id: parseInt(document.getElementById('deal-seller-id').value) || null,
+        notes: document.getElementById('deal-notes').value.trim() || null,
+    };
+    if (!payload.title) { showToast('خطا', 'عنوان الزامی است', 'warning'); return; }
+    try {
+        if (id) {
+            await apiCall(`/crm/deals/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+        } else {
+            await apiCall('/crm/deals', { method: 'POST', body: JSON.stringify(payload) });
+        }
+        showToast('موفق', 'معامله ذخیره شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('dealModal')).hide();
+        loadDeals();
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function deleteDeal(id) {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiCall(`/crm/deals/${id}`, { method: 'DELETE' }); showToast('موفق', 'حذف شد', 'success'); loadDeals(); }
+    catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CRM — NOTES
+// ═══════════════════════════════════════════════════════════════
+
+async function loadNotes() {
+    try {
+        const data = await apiCall('/crm/notes?limit=100');
+        const el = document.getElementById('notes-list');
+        if (!el) return;
+        if (!data.items?.length) { el.innerHTML = '<p class="text-muted text-center py-3">یادداشتی یافت نشد</p>'; return; }
+        el.innerHTML = data.items.map(n => {
+            const date = n.created_at ? new Date(n.created_at).toLocaleString('fa-IR') : '';
+            return `<div class="note-card mb-2 p-3 rounded" style="background:var(--bg-secondary);border-right:3px solid var(--accent);">
+                <div class="d-flex justify-content-between align-items-start">
+                    <p class="mb-1" style="white-space:pre-wrap;">${n.content}</p>
+                    <button class="btn btn-xs btn-outline-danger ms-2" onclick="deleteNote(${n.id})"><i class="bi bi-trash"></i></button>
+                </div>
+                <small class="text-muted">${date}${n.created_by ? ' — ' + n.created_by : ''}</small>
+            </div>`;
+        }).join('');
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+function openNoteModal() {
+    document.getElementById('note-content').value = '';
+    document.getElementById('note-contact-id').value = '';
+    document.getElementById('note-deal-id').value = '';
+    document.getElementById('note-property-id').value = '';
+    new bootstrap.Modal(document.getElementById('noteModal')).show();
+}
+
+async function saveNote() {
+    const content = document.getElementById('note-content').value.trim();
+    if (!content) { showToast('خطا', 'متن یادداشت الزامی است', 'warning'); return; }
+    const payload = {
+        content,
+        contact_id: parseInt(document.getElementById('note-contact-id').value) || null,
+        deal_id: parseInt(document.getElementById('note-deal-id').value) || null,
+        property_id: parseInt(document.getElementById('note-property-id').value) || null,
+    };
+    try {
+        await apiCall('/crm/notes', { method: 'POST', body: JSON.stringify(payload) });
+        showToast('موفق', 'یادداشت ذخیره شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('noteModal')).hide();
+        loadNotes();
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function deleteNote(id) {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiCall(`/crm/notes/${id}`, { method: 'DELETE' }); showToast('موفق', 'حذف شد', 'success'); loadNotes(); }
+    catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CRM — REMINDERS
+// ═══════════════════════════════════════════════════════════════
+
+async function loadReminders() {
+    const isSent = document.getElementById('reminder-filter-sent')?.value;
+    let url = '/crm/reminders?limit=100';
+    if (isSent !== '') url += `&is_sent=${isSent}`;
+    try {
+        const data = await apiCall(url);
+        const tbody = document.getElementById('reminders-table');
+        if (!tbody) return;
+        if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">یادآوری یافت نشد</td></tr>'; return; }
+        tbody.innerHTML = data.items.map(r => {
+            const dt = r.remind_at ? new Date(r.remind_at).toLocaleString('fa-IR') : '—';
+            const channelLabel = r.channel === 'sms' ? '<span class="badge bg-primary">پیامک</span>' : '<span class="badge bg-secondary">در برنامه</span>';
+            const repeatLabel = { none: 'بدون تکرار', daily: 'روزانه', weekly: 'هفتگی', monthly: 'ماهانه' }[r.repeat] || r.repeat;
+            const statusBadge = r.is_sent ? '<span class="badge bg-success">ارسال شده</span>' : '<span class="badge bg-warning text-dark">فعال</span>';
+            return `<tr>
+                <td>${r.title}</td>
+                <td>${dt}</td>
+                <td>${channelLabel}</td>
+                <td>${repeatLabel}</td>
+                <td>${statusBadge}</td>
+                <td>
+                    <button class="btn btn-xs btn-outline-danger" onclick="deleteReminder(${r.id})"><i class="bi bi-trash"></i></button>
+                </td>
+            </tr>`;
+        }).join('');
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+function openReminderModal() {
+    document.getElementById('reminder-title').value = '';
+    document.getElementById('reminder-at').value = '';
+    document.getElementById('reminder-repeat').value = 'none';
+    document.getElementById('reminder-channel').value = 'in_app';
+    document.getElementById('reminder-sms-to').value = '';
+    document.getElementById('reminder-contact-id').value = '';
+    document.getElementById('reminder-sms-to-group').style.display = 'none';
+    new bootstrap.Modal(document.getElementById('reminderModal')).show();
+}
+
+function toggleSmsTo() {
+    const ch = document.getElementById('reminder-channel').value;
+    document.getElementById('reminder-sms-to-group').style.display = ch === 'sms' ? '' : 'none';
+}
+
+async function saveReminder() {
+    const title = document.getElementById('reminder-title').value.trim();
+    const remindAt = document.getElementById('reminder-at').value;
+    if (!title || !remindAt) { showToast('خطا', 'عنوان و زمان الزامی است', 'warning'); return; }
+    const payload = {
+        title,
+        remind_at: new Date(remindAt).toISOString(),
+        repeat: document.getElementById('reminder-repeat').value,
+        channel: document.getElementById('reminder-channel').value,
+        sms_to: document.getElementById('reminder-sms-to').value.trim() || null,
+        contact_id: parseInt(document.getElementById('reminder-contact-id').value) || null,
+    };
+    try {
+        await apiCall('/crm/reminders', { method: 'POST', body: JSON.stringify(payload) });
+        showToast('موفق', 'یادآور ذخیره شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('reminderModal')).hide();
+        loadReminders();
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function deleteReminder(id) {
+    if (!confirm('حذف شود؟')) return;
+    try { await apiCall(`/crm/reminders/${id}`, { method: 'DELETE' }); showToast('موفق', 'حذف شد', 'success'); loadReminders(); }
+    catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CRM — SMS
+// ═══════════════════════════════════════════════════════════════
+
+document.addEventListener('DOMContentLoaded', () => {
+    const msgEl = document.getElementById('sms-message');
+    const countEl = document.getElementById('sms-char-count');
+    if (msgEl && countEl) {
+        msgEl.addEventListener('input', () => {
+            countEl.textContent = `${msgEl.value.length} کاراکتر`;
+        });
+    }
+});
+
+async function sendSms() {
+    const to = document.getElementById('sms-to').value.trim();
+    const message = document.getElementById('sms-message').value.trim();
+    const provider = document.getElementById('sms-provider').value;
+    if (!to || !message) { showToast('خطا', 'شماره و متن الزامی است', 'warning'); return; }
+    try {
+        const result = await apiCall('/crm/sms/send', {
+            method: 'POST',
+            body: JSON.stringify({ to_number: to, message, provider })
+        });
+        if (result.success) {
+            showToast('موفق', 'پیامک ارسال شد', 'success');
+            document.getElementById('sms-message').value = '';
+            loadSmsLogs();
+        } else {
+            showToast('خطا', result.response || result.error || 'خطا در ارسال', 'danger');
+        }
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function loadSmsLogs() {
+    try {
+        const data = await apiCall('/crm/sms/logs?limit=50');
+        const tbody = document.getElementById('sms-logs-table');
+        if (!tbody) return;
+        if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">تاریخچه‌ای وجود ندارد</td></tr>'; return; }
+        tbody.innerHTML = data.items.map(s => {
+            const providerLabel = s.provider === 'kavenegar' ? 'کاوه‌نگار' : 'ملی پیامک';
+            const statusCls = s.status === 'sent' ? 'bg-success' : 'bg-danger';
+            const statusLabel = s.status === 'sent' ? 'ارسال شد' : 'خطا';
+            const dt = s.sent_at ? new Date(s.sent_at).toLocaleString('fa-IR') : '—';
+            const msg = s.message?.length > 50 ? s.message.slice(0, 50) + '…' : (s.message || '—');
+            return `<tr>
+                <td>${s.to_number}</td>
+                <td>${providerLabel}</td>
+                <td title="${s.message || ''}">${msg}</td>
+                <td><span class="badge ${statusCls}">${statusLabel}</span></td>
+                <td>${dt}</td>
+            </tr>`;
+        }).join('');
+    } catch(e) { console.error('SMS logs error:', e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CRM — Export (Excel for all / JSON for super_admin only)
+// ═══════════════════════════════════════════════════════════════
+
+async function _downloadExport(url, filename) {
+    const token = getToken();
+    try {
+        const resp = await fetch(url, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (resp.status === 403) { showToast('خطا', 'دسترسی ندارید', 'danger'); return; }
+        if (!resp.ok) { showToast('خطا', 'خروجی با خطا مواجه شد', 'danger'); return; }
+        const blob = await resp.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    } catch(e) { showToast('خطا', e.message, 'danger'); }
+}
+
+function exportExcel(type) {
+    _downloadExport(`${API_BASE}/crm/${type}/export/excel`, `${type}.xlsx`);
+}
+
+function exportJson(type) {
+    _downloadExport(`${API_BASE}/crm/${type}/export/json`, `${type}.json`);
+}
+
+function _applyCrmRoleVisibility() {
+    const isSuperAdmin = _currentUser?.role === 'super_admin';
+    document.querySelectorAll('.crm-superadmin-only').forEach(el => {
+        el.style.display = isSuperAdmin ? '' : 'none';
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CRM — Tab activation hooks
+// ═══════════════════════════════════════════════════════════════
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('#crm-main-tabs .nav-link').forEach(tab => {
+        tab.addEventListener('shown.bs.tab', e => {
+            const target = e.target.getAttribute('data-bs-target');
+            if (target === '#crm-tab-tasks')     loadTasks();
+            if (target === '#crm-tab-contacts')  loadContacts();
+            if (target === '#crm-tab-deals')     loadDeals();
+            if (target === '#crm-tab-notes')     loadNotes();
+            if (target === '#crm-tab-reminders') loadReminders();
+            if (target === '#crm-tab-sms')       loadSmsLogs();
+            if (target === '#crm-tab-leads')     loadLeads();
+            if (target === '#crm-tab-report')    loadCrmStats();
+        });
+    });
+});

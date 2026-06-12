@@ -1,0 +1,108 @@
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: sorinflow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sorinflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sorinflow_secret_2024}
+      POSTGRES_DB: ${POSTGRES_DB:-divar_scraper}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sorinflow} -d ${POSTGRES_DB:-divar_scraper}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sorinflow_network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: sorinflow_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secret_2024}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secret_2024}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sorinflow_network
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sorinflow_backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-sorinflow}:${POSTGRES_PASSWORD:-sorinflow_secret_2024}@db:5432/${POSTGRES_DB:-divar_scraper}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secret_2024}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-your-super-secret-key-change-in-production}
+      - API_KEY=${API_KEY:-}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - PROXY_ENABLED=${PROXY_ENABLED:-false}
+      - PROXY_LIST=${PROXY_LIST:-}
+      - SERVER_IP=171.22.182.91
+      - DOMAIN=scc.sorinflow.com
+    volumes:
+      - ./app:/app/app
+      - ./frontend:/app/frontend
+      - ./data:/app/data
+      - ./logs:/app/logs
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: >
+      bash -c "pip install --quiet pyotp qrcode openpyxl python-dateutil &&
+               uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"
+    dns:
+      - 178.22.122.100
+      - 185.51.200.2
+    networks:
+      - sorinflow_network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: sorinflow_nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./frontend:/usr/share/nginx/html:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    networks:
+      - sorinflow_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  sorinflow_network:
+    driver: bridge

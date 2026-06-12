@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SorinFlow — داشبورد مدیریت</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════
+     LOGIN PAGE
+     ════════════════════════════════════════════════ -->
+<div id="login-page">
+    <div class="login-bg"></div>
+    <div class="login-orb login-orb-1"></div>
+    <div class="login-orb login-orb-2"></div>
+    <div class="login-orb login-orb-3"></div>
+
+    <div class="login-card">
+        <div class="login-logo">
+            <div class="logo-icon"><i class="bi bi-building"></i></div>
+            <h4>SorinFlow</h4>
+            <p>پنل مدیریت اسکرپر دیوار</p>
+        </div>
+
+        <div id="login-error" class="d-none"></div>
+
+        <!-- Step 1: username + password -->
+        <div id="login-step-1">
+            <div class="login-input-wrap">
+                <span class="input-icon"><i class="bi bi-person"></i></span>
+                <input type="text" id="login-username" placeholder="نام کاربری" autocomplete="username">
+            </div>
+            <div class="login-input-wrap">
+                <span class="input-icon"><i class="bi bi-lock"></i></span>
+                <input type="password" id="login-password" placeholder="رمز عبور" autocomplete="current-password">
+            </div>
+            <button id="login-btn" class="btn-login" onclick="doLogin()">
+                <i class="bi bi-box-arrow-in-right"></i> ورود به داشبورد
+            </button>
+        </div>
+
+        <!-- Step 2: TOTP code (shown only when requires_totp=true) -->
+        <div id="login-step-2" class="d-none">
+            <div style="text-align:center;margin-bottom:1.2rem;color:var(--text-muted,#aaa);font-size:.9rem;">
+                <i class="bi bi-shield-lock" style="font-size:2rem;color:#7c6ef5;display:block;margin-bottom:.5rem;"></i>
+                کد ۶ رقمی Google Authenticator را وارد کنید
+            </div>
+            <div class="login-input-wrap">
+                <span class="input-icon"><i class="bi bi-shield-check"></i></span>
+                <input type="text" id="login-totp-code" placeholder="کد احراز هویت"
+                       maxlength="6" autocomplete="one-time-code" inputmode="numeric">
+            </div>
+            <button id="login-totp-btn" class="btn-login" onclick="verifyTotpLogin()">
+                <i class="bi bi-check-circle"></i> تأیید
+            </button>
+            <button class="btn-login" style="background:transparent;border:1px solid #444;margin-top:.5rem;font-size:.85rem;" onclick="backToLogin()">
+                <i class="bi bi-arrow-right"></i> بازگشت
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     MAIN APP
+     ════════════════════════════════════════════════ -->
+<div id="main-app" style="display:none;">
+
+    <!-- ── Sidebar ─────────────────────────────── -->
+    <aside id="sidebar">
+        <div class="sidebar-glow"></div>
+
+        <div class="sidebar-brand">
+            <div class="brand-icon"><i class="bi bi-building"></i></div>
+            <div class="brand-text">
+                <h6>SorinFlow</h6>
+                <span>Divar Scraper Pro</span>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <div class="sidebar-section-label">منو اصلی</div>
+
+            <a class="nav-item-link active" onclick="showSection('dashboard')" id="nav-link-dashboard">
+                <span class="nav-icon"><i class="bi bi-speedometer2"></i></span>
+                داشبورد
+            </a>
+            <a class="nav-item-link" onclick="showSection('properties')" id="nav-link-properties">
+                <span class="nav-icon"><i class="bi bi-house-door"></i></span>
+                لیست املاک
+            </a>
+            <a class="nav-item-link" onclick="showSection('scraper')" id="nav-link-scraper">
+                <span class="nav-icon"><i class="bi bi-robot"></i></span>
+                اسکرپر
+            </a>
+            <a class="nav-item-link" onclick="showSection('crm')" id="nav-link-crm">
+                <span class="nav-icon"><i class="bi bi-people"></i></span>
+                CRM — لیدها
+            </a>
+
+            <div class="sidebar-section-label">تنظیمات</div>
+
+            <a class="nav-item-link" onclick="showSection('auth')" id="nav-link-auth">
+                <span class="nav-icon"><i class="bi bi-key"></i></span>
+                احراز هویت دیوار
+            </a>
+            <a class="nav-item-link" onclick="showSection('proxies')" id="nav-link-proxies">
+                <span class="nav-icon"><i class="bi bi-shield-check"></i></span>
+                پراکسی‌ها
+            </a>
+            <a class="nav-item-link d-none" onclick="showSection('users')" id="nav-users">
+                <span class="nav-icon"><i class="bi bi-person-gear"></i></span>
+                کاربران
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-card">
+                <div class="user-avatar"><i class="bi bi-person-fill"></i></div>
+                <div class="user-info">
+                    <div class="u-name" id="sidebar-username">در حال بارگیری...</div>
+                    <div class="u-role" id="sidebar-role">---</div>
+                </div>
+            </div>
+            <div class="sidebar-actions">
+                <button class="btn-2fa" onclick="open2FAModal()">
+                    <i class="bi bi-shield-lock"></i> احراز هویت
+                </button>
+                <button class="btn-logout" onclick="doLogout()">
+                    <i class="bi bi-box-arrow-right"></i> خروج
+                </button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ── Main Content ─────────────────────────── -->
+    <main id="main-content">
+
+        <!-- Topbar -->
+        <header class="topbar">
+            <div>
+                <div class="topbar-title" id="topbar-title">داشبورد</div>
+                <div class="topbar-subtitle" id="topbar-subtitle">خلاصه وضعیت سیستم</div>
+            </div>
+            <div class="topbar-spacer"></div>
+
+            <div class="topbar-badge">
+                <span class="dot dot-muted" id="cookie-dot"></span>
+                <span id="cookie-status">وضعیت کوکی</span>
+            </div>
+
+            <span id="current-user-badge" style="display:none;" class="badge bg-secondary"></span>
+
+            <a href="/api/docs" target="_blank" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-code-slash"></i> API
+            </a>
+        </header>
+
+        <!-- Content -->
+        <div class="content-wrapper">
+
+            <!-- ═══ DASHBOARD ════════════════════ -->
+            <div id="section-dashboard" class="section-content">
+
+                <div class="row g-3 mb-4">
+                    <div class="col-md-3">
+                        <div class="stat-card s-purple">
+                            <div class="stat-icon"><i class="bi bi-house-door"></i></div>
+                            <div class="stat-value" id="stat-total-properties">0</div>
+                            <div class="stat-label">کل املاک ثبت‌شده</div>
+                            <i class="bi bi-house-door stat-bg-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card s-cyan">
+                            <div class="stat-icon"><i class="bi bi-telephone"></i></div>
+                            <div class="stat-value" id="stat-with-phone">0</div>
+                            <div class="stat-label">با شماره تماس</div>
+                            <i class="bi bi-telephone stat-bg-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card s-green">
+                            <div class="stat-icon"><i class="bi bi-calendar-day"></i></div>
+                            <div class="stat-value" id="stat-today">0</div>
+                            <div class="stat-label">اضافه‌شده امروز</div>
+                            <i class="bi bi-calendar-day stat-bg-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card s-orange">
+                            <div class="stat-icon"><i class="bi bi-gear-wide-connected"></i></div>
+                            <div class="stat-value" id="stat-active-jobs">0</div>
+                            <div class="stat-label">تسک‌های فعال</div>
+                            <i class="bi bi-gear-wide-connected stat-bg-icon"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-geo-alt"></i> توزیع شهرها
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-wrap"><canvas id="cityChart"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-graph-up"></i> روند اسکرپینگ
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-heart-pulse"></i> وضعیت سیستم
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3" id="system-health">
+                            <div class="col-md-3">
+                                <div class="health-item">
+                                    <i class="bi bi-database"></i>
+                                    <span>دیتابیس</span>
+                                    <span id="health-db" class="badge bg-secondary ms-auto">---</span>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="health-item">
+                                    <i class="bi bi-memory"></i>
+                                    <span>Redis</span>
+                                    <span id="health-redis" class="badge bg-secondary ms-auto">---</span>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="health-item">
+                                    <i class="bi bi-robot"></i>
+                                    <span>اسکرپر</span>
+                                    <span id="health-scraper" class="badge bg-secondary ms-auto">---</span>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="health-item">
+                                    <i class="bi bi-cookie"></i>
+                                    <span>کوکی دیوار</span>
+                                    <span id="health-cookie" class="badge bg-secondary ms-auto">---</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ PROPERTIES ══════════════════ -->
+            <div id="section-properties" class="section-content" style="display:none;">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <span><i class="bi bi-house"></i> جستجو و فیلتر</span>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <input type="text" id="search-properties" class="form-control form-control-sm"
+                                   placeholder="جستجو..." style="width:180px;">
+                            <div id="filter-city-picker" class="city-picker city-picker--sm" style="width:160px;"></div>
+                            <input type="hidden" id="filter-city-hidden">
+                            <select id="filter-type" class="form-select form-select-sm" style="width:130px;" onchange="onFilterTypeChange()">
+                                <option value="">همه انواع</option>
+                                <option value="buy">خرید</option>
+                                <option value="rent">اجاره</option>
+                            </select>
+                            <button class="btn btn-primary btn-sm" onclick="loadProperties()">
+                                <i class="bi bi-search"></i> جستجو
+                            </button>
+                            <button class="btn btn-outline-success btn-sm" onclick="exportProperties()">
+                                <i class="bi bi-download"></i> خروجی
+                            </button>
+                        </div>
+                        <div id="rent-filters" class="d-none d-flex gap-2 flex-wrap mt-2">
+                            <input type="number" id="filter-min-deposit" class="form-control form-control-sm" placeholder="حداقل ودیعه (تومان)" style="width:170px;">
+                            <input type="number" id="filter-max-deposit" class="form-control form-control-sm" placeholder="حداکثر ودیعه (تومان)" style="width:170px;">
+                            <input type="number" id="filter-min-rent" class="form-control form-control-sm" placeholder="حداقل اجاره ماهانه" style="width:170px;">
+                            <input type="number" id="filter-max-rent" class="form-control form-control-sm" placeholder="حداکثر اجاره ماهانه" style="width:170px;">
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>عنوان</th>
+                                    <th>شهر</th>
+                                    <th>متراژ</th>
+                                    <th>اتاق</th>
+                                    <th>قیمت</th>
+                                    <th>شماره تماس</th>
+                                    <th>عملیات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="properties-table"></tbody>
+                        </table>
+                    </div>
+                    <div class="card-body pt-2">
+                        <nav>
+                            <ul class="pagination justify-content-center mb-0" id="properties-pagination"></ul>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ SCRAPER ══════════════════════ -->
+            <div id="section-scraper" class="section-content" style="display:none;">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-plus-circle"></i> اسکرپینگ جدید
+                            </div>
+                            <div class="card-body">
+                                <form id="scraper-form">
+                                    <div class="mb-3">
+                                        <label class="form-label">شهر</label>
+                                        <div id="scraper-city-picker" class="city-picker"></div>
+                                        <input type="hidden" id="scraper-city" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">دسته‌بندی</label>
+                                        <select id="scraper-category" class="form-select" required onchange="onScraperCategoryChange()"></select>
+                                    </div>
+
+                                    <!-- فیلتر قیمت خرید -->
+                                    <div id="scraper-buy-filters" class="d-none">
+                                        <div class="mb-2">
+                                            <label class="form-label small text-muted">فیلتر قیمت (تومان) — اختیاری</label>
+                                            <div class="d-flex gap-2">
+                                                <input type="number" id="scraper-min-price" class="form-control form-control-sm"
+                                                       placeholder="حداقل قیمت">
+                                                <input type="number" id="scraper-max-price" class="form-control form-control-sm"
+                                                       placeholder="حداکثر قیمت">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- فیلتر قیمت اجاره -->
+                                    <div id="scraper-rent-filters" class="d-none">
+                                        <div class="mb-2">
+                                            <label class="form-label small text-muted">فیلتر ودیعه (تومان) — اختیاری</label>
+                                            <div class="d-flex gap-2">
+                                                <input type="number" id="scraper-min-deposit" class="form-control form-control-sm"
+                                                       placeholder="حداقل ودیعه">
+                                                <input type="number" id="scraper-max-deposit" class="form-control form-control-sm"
+                                                       placeholder="حداکثر ودیعه">
+                                            </div>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label small text-muted">فیلتر اجاره ماهانه (تومان) — اختیاری</label>
+                                            <div class="d-flex gap-2">
+                                                <input type="number" id="scraper-min-rent" class="form-control form-control-sm"
+                                                       placeholder="حداقل اجاره">
+                                                <input type="number" id="scraper-max-rent" class="form-control form-control-sm"
+                                                       placeholder="حداکثر اجاره">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label">حداکثر صفحات</label>
+                                        <input type="number" id="scraper-pages" class="form-control" value="10" min="1" max="100">
+                                    </div>
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" id="scraper-images" class="form-check-input" checked>
+                                        <label class="form-check-label" for="scraper-images">دانلود تصاویر</label>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary btn-w100">
+                                        <i class="bi bi-play-fill"></i> شروع اسکرپینگ
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-link-45deg"></i> اسکرپ تکی
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <input type="url" id="single-url" class="form-control"
+                                           placeholder="آدرس ملک در دیوار...">
+                                </div>
+                                <button class="btn btn-outline-primary btn-w100" onclick="scrapeSingle()">
+                                    <i class="bi bi-download"></i> اسکرپ این ملک
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-8">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span>
+                                    <i class="bi bi-list-task"></i> تسک‌های اسکرپینگ
+                                    <span id="divar-session-badge" class="badge bg-secondary ms-2" style="cursor:default;font-size:.7rem" title="در حال بررسی...">●</span>
+                                </span>
+                                <button class="btn btn-outline-secondary btn-sm" onclick="loadJobs()">
+                                    <i class="bi bi-arrow-clockwise"></i> بروزرسانی
+                                </button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>وضعیت</th>
+                                            <th>پیشرفت</th>
+                                            <th>جدید / بروز</th>
+                                            <th>شروع</th>
+                                            <th>عملیات</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="jobs-table"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ AUTH ═════════════════════════ -->
+            <div id="section-auth" class="section-content" style="display:none;">
+                <div class="row justify-content-center">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-key"></i> ورود به حساب دیوار
+                            </div>
+                            <div class="card-body">
+                                <div id="auth-status" class="alert alert-info">در حال بررسی وضعیت...</div>
+
+                                <div id="auth-login-form">
+                                    <div class="mb-3">
+                                        <label class="form-label">شماره موبایل</label>
+                                        <input type="tel" id="auth-phone" class="form-control"
+                                               placeholder="09xxxxxxxxx" pattern="09[0-9]{9}">
+                                    </div>
+                                    <button class="btn btn-primary btn-w100" onclick="initiateLogin()">
+                                        <i class="bi bi-send"></i> ارسال کد تأیید
+                                    </button>
+                                </div>
+
+                                <div id="auth-verify-form" style="display:none;">
+                                    <div class="mb-3">
+                                        <label class="form-label">کد تأیید ۶ رقمی</label>
+                                        <input type="text" id="auth-code" class="form-control"
+                                               maxlength="6" placeholder="------">
+                                    </div>
+                                    <button class="btn btn-success btn-w100" onclick="verifyCode()">
+                                        <i class="bi bi-check-circle"></i> تأیید و ورود
+                                    </button>
+                                </div>
+
+                                <hr style="border-color:var(--border); margin:1.2rem 0;">
+
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-outline-primary flex-grow-1" onclick="refreshSession()">
+                                        <i class="bi bi-arrow-clockwise"></i> بازنشانی نشست
+                                    </button>
+                                    <button class="btn btn-outline-danger flex-grow-1" onclick="logout()">
+                                        <i class="bi bi-box-arrow-right"></i> خروج
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-clock-history"></i> نشست‌های ذخیره‌شده
+                            </div>
+                            <div class="card-body" id="cookies-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ PROXIES ══════════════════════ -->
+            <div id="section-proxies" class="section-content" style="display:none;">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-plus-circle"></i> افزودن پراکسی
+                            </div>
+                            <div class="card-body">
+                                <form id="proxy-form">
+                                    <div class="mb-3">
+                                        <label class="form-label">آدرس IP</label>
+                                        <input type="text" id="proxy-address" class="form-control" required placeholder="192.168.1.1">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">پورت</label>
+                                        <input type="number" id="proxy-port" class="form-control" required placeholder="8080">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">پروتکل</label>
+                                        <select id="proxy-protocol" class="form-select">
+                                            <option value="http">HTTP</option>
+                                            <option value="https">HTTPS</option>
+                                            <option value="socks5">SOCKS5</option>
+                                        </select>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <div class="col-6">
+                                            <label class="form-label">نام کاربری</label>
+                                            <input type="text" id="proxy-username" class="form-control" placeholder="اختیاری">
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label">رمز عبور</label>
+                                            <input type="password" id="proxy-password" class="form-control" placeholder="اختیاری">
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary btn-w100">
+                                        <i class="bi bi-plus"></i> افزودن پراکسی
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-upload"></i> وارد کردن دسته‌ای
+                            </div>
+                            <div class="card-body">
+                                <textarea id="proxy-import" class="form-control" rows="4"
+                                          placeholder="هر پراکسی در یک خط&#10;ip:port&#10;ip:port:user:pass"></textarea>
+                                <button class="btn btn-outline-primary btn-w100 mt-2" onclick="importProxies()">
+                                    <i class="bi bi-upload"></i> وارد کردن
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-8">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-shield-check"></i> لیست پراکسی‌ها</span>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-outline-success btn-sm" onclick="testAllProxies()">
+                                        <i class="bi bi-check-all"></i> تست همه
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadProxies()">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>آدرس</th>
+                                            <th>پورت</th>
+                                            <th>وضعیت</th>
+                                            <th>موفق / ناموفق</th>
+                                            <th>زمان پاسخ</th>
+                                            <th>عملیات</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="proxies-table"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ CRM ══════════════════════════ -->
+            <div id="section-crm" class="section-content" style="display:none;">
+
+                <!-- CRM Tab Nav -->
+                <ul class="nav nav-tabs mb-3 flex-wrap" id="crm-main-tabs" role="tablist">
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#crm-tab-tasks" type="button"><i class="bi bi-check2-square"></i> وظایف</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-contacts" type="button"><i class="bi bi-person-lines-fill"></i> دفترچه تلفن</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-deals" type="button"><i class="bi bi-handshake"></i> معاملات</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-notes" type="button"><i class="bi bi-journal-text"></i> یادداشت‌ها</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-reminders" type="button"><i class="bi bi-alarm"></i> یادآورها</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-sms" type="button"><i class="bi bi-chat-dots"></i> پیامک</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-leads" type="button"><i class="bi bi-people"></i> لیدها</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-report" type="button"><i class="bi bi-bar-chart"></i> گزارش</button></li>
+                </ul>
+
+                <div class="tab-content" id="crm-tabs-content">
+
+                    <!-- ── TASKS ── -->
+                    <div class="tab-pane fade show active" id="crm-tab-tasks" role="tabpanel">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <span><i class="bi bi-check2-square"></i> وظایف</span>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <select id="task-filter-status" class="form-select form-select-sm" style="width:130px;">
+                                        <option value="">همه وضعیت‌ها</option>
+                                        <option value="todo">انجام نشده</option>
+                                        <option value="in_progress">در حال انجام</option>
+                                        <option value="done">انجام شده</option>
+                                    </select>
+                                    <select id="task-filter-priority" class="form-select form-select-sm" style="width:120px;">
+                                        <option value="">همه اولویت‌ها</option>
+                                        <option value="urgent">فوری</option>
+                                        <option value="high">زیاد</option>
+                                        <option value="medium">متوسط</option>
+                                        <option value="low">کم</option>
+                                    </select>
+                                    <button class="btn btn-sm btn-primary" onclick="loadTasks()"><i class="bi bi-search"></i></button>
+                                    <button class="btn btn-sm btn-success" onclick="openTaskModal()"><i class="bi bi-plus-lg"></i> وظیفه جدید</button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead><tr><th>عنوان</th><th>اولویت</th><th>وضعیت</th><th>سررسید</th><th>مسئول</th><th>عملیات</th></tr></thead>
+                                    <tbody id="tasks-table"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── CONTACTS ── -->
+                    <div class="tab-pane fade" id="crm-tab-contacts" role="tabpanel">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <span><i class="bi bi-person-lines-fill"></i> دفترچه تلفن</span>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <input type="text" id="contact-search" class="form-control form-control-sm" placeholder="جستجو نام / تلفن..." style="width:180px;" oninput="loadContacts()">
+                                    <select id="contact-filter-type" class="form-select form-select-sm" style="width:130px;" onchange="loadContacts()">
+                                        <option value="">همه انواع</option>
+                                        <option value="buyer">خریدار</option>
+                                        <option value="seller">فروشنده</option>
+                                        <option value="consultant">مشاور</option>
+                                        <option value="other">سایر</option>
+                                    </select>
+                                    <select id="contact-filter-category" class="form-select form-select-sm" style="width:110px;" onchange="loadContacts()">
+                                        <option value="">همه</option>
+                                        <option value="VIP">VIP</option>
+                                        <option value="normal">عادی</option>
+                                        <option value="cold">سرد</option>
+                                    </select>
+                                    <button class="btn btn-sm btn-success" onclick="openContactModal()"><i class="bi bi-plus-lg"></i> مخاطب جدید</button>
+                                    <button class="btn btn-sm btn-outline-success" onclick="exportExcel('contacts')"><i class="bi bi-file-earmark-excel"></i> خروجی اکسل</button>
+                                    <button class="btn btn-sm btn-outline-info crm-superadmin-only" onclick="exportJson('contacts')" style="display:none;"><i class="bi bi-filetype-json"></i> خروجی JSON</button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead><tr><th>نام</th><th>تلفن</th><th>نوع</th><th>دسته‌بندی</th><th>شهر</th><th>تگ‌ها</th><th>عملیات</th></tr></thead>
+                                    <tbody id="contacts-table"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── DEALS ── -->
+                    <div class="tab-pane fade" id="crm-tab-deals" role="tabpanel">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <span><i class="bi bi-handshake"></i> معاملات</span>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <select id="deal-filter-status" class="form-select form-select-sm" style="width:140px;" onchange="loadDeals()">
+                                        <option value="">همه وضعیت‌ها</option>
+                                        <option value="new">جدید</option>
+                                        <option value="negotiating">در حال مذاکره</option>
+                                        <option value="contract">قرارداد</option>
+                                        <option value="closed">بسته شده</option>
+                                        <option value="cancelled">لغو شده</option>
+                                    </select>
+                                    <button class="btn btn-sm btn-success" onclick="openDealModal()"><i class="bi bi-plus-lg"></i> معامله جدید</button>
+                                    <button class="btn btn-sm btn-outline-success" onclick="exportExcel('deals')"><i class="bi bi-file-earmark-excel"></i> خروجی اکسل</button>
+                                    <button class="btn btn-sm btn-outline-info crm-superadmin-only" onclick="exportJson('deals')" style="display:none;"><i class="bi bi-filetype-json"></i> خروجی JSON</button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead><tr><th>عنوان</th><th>نوع</th><th>وضعیت</th><th>مبلغ</th><th>خریدار</th><th>فروشنده</th><th>تاریخ</th><th>عملیات</th></tr></thead>
+                                    <tbody id="deals-table"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── NOTES ── -->
+                    <div class="tab-pane fade" id="crm-tab-notes" role="tabpanel">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <span><i class="bi bi-journal-text"></i> یادداشت‌ها</span>
+                                <button class="btn btn-sm btn-success" onclick="openNoteModal()"><i class="bi bi-plus-lg"></i> یادداشت جدید</button>
+                            </div>
+                            <div class="card-body p-2" id="notes-list" style="max-height:600px;overflow-y:auto;"></div>
+                        </div>
+                    </div>
+
+                    <!-- ── REMINDERS ── -->
+                    <div class="tab-pane fade" id="crm-tab-reminders" role="tabpanel">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <span><i class="bi bi-alarm"></i> یادآورها</span>
+                                <div class="d-flex gap-2">
+                                    <select id="reminder-filter-sent" class="form-select form-select-sm" style="width:130px;" onchange="loadReminders()">
+                                        <option value="">همه</option>
+                                        <option value="false">فعال</option>
+                                        <option value="true">ارسال شده</option>
+                                    </select>
+                                    <button class="btn btn-sm btn-success" onclick="openReminderModal()"><i class="bi bi-plus-lg"></i> یادآور جدید</button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead><tr><th>عنوان</th><th>زمان</th><th>کانال</th><th>تکرار</th><th>وضعیت</th><th>عملیات</th></tr></thead>
+                                    <tbody id="reminders-table"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── SMS ── -->
+                    <div class="tab-pane fade" id="crm-tab-sms" role="tabpanel">
+                        <div class="row g-3">
+                            <div class="col-md-5">
+                                <div class="card">
+                                    <div class="card-header"><i class="bi bi-send"></i> ارسال پیامک</div>
+                                    <div class="card-body">
+                                        <div class="mb-2">
+                                            <label class="form-label">شماره گیرنده</label>
+                                            <input type="text" id="sms-to" class="form-control form-control-sm" placeholder="09xxxxxxxxx">
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label">سرویس ارسال</label>
+                                            <select id="sms-provider" class="form-select form-select-sm">
+                                                <option value="kavenegar">کاوه نگار</option>
+                                                <option value="melipayamak">ملی پیامک</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">متن پیامک</label>
+                                            <textarea id="sms-message" class="form-control form-control-sm" rows="4" placeholder="متن پیامک را اینجا بنویسید..."></textarea>
+                                            <div class="form-text" id="sms-char-count">۰ کاراکتر</div>
+                                        </div>
+                                        <button class="btn btn-primary w-100" onclick="sendSms()">
+                                            <i class="bi bi-send-fill"></i> ارسال پیامک
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-7">
+                                <div class="card">
+                                    <div class="card-header d-flex justify-content-between">
+                                        <span><i class="bi bi-clock-history"></i> تاریخچه پیامک</span>
+                                        <button class="btn btn-outline-secondary btn-sm" onclick="loadSmsLogs()"><i class="bi bi-arrow-clockwise"></i></button>
+                                    </div>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm">
+                                            <thead><tr><th>گیرنده</th><th>سرویس</th><th>متن</th><th>وضعیت</th><th>زمان</th></tr></thead>
+                                            <tbody id="sms-logs-table"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── LEADS ── -->
+                    <div class="tab-pane fade" id="crm-tab-leads" role="tabpanel">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <span><i class="bi bi-people"></i> لیدهای اسکرپ شده</span>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <select id="crm-filter-status" class="form-select form-select-sm" style="width:140px;">
+                                        <option value="">همه وضعیت‌ها</option>
+                                        <option value="new">جدید</option>
+                                        <option value="contacted">تماس گرفته</option>
+                                        <option value="qualified">واجد شرایط</option>
+                                        <option value="closed">بسته شده</option>
+                                        <option value="rejected">رد شده</option>
+                                    </select>
+                                    <select id="crm-filter-notified" class="form-select form-select-sm" style="width:140px;">
+                                        <option value="">همه</option>
+                                        <option value="false">بدون اطلاع</option>
+                                        <option value="true">اطلاع داده شده</option>
+                                    </select>
+                                    <button class="btn btn-primary btn-sm" onclick="loadLeads()"><i class="bi bi-search"></i> فیلتر</button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadLeads()"><i class="bi bi-arrow-clockwise"></i></button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead><tr><th>#</th><th>عنوان ملک</th><th>شهر</th><th>قیمت</th><th>شماره تماس</th><th>وضعیت CRM</th><th>اطلاع‌رسانی</th><th>تاریخ</th><th>عملیات</th></tr></thead>
+                                    <tbody id="crm-leads-table"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── REPORT ── -->
+                    <div class="tab-pane fade" id="crm-tab-report" role="tabpanel">
+                        <div class="row g-3 mb-3" id="crm-report-stats"></div>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header"><i class="bi bi-pie-chart"></i> وضعیت معاملات</div>
+                                    <div class="card-body"><canvas id="crm-deals-chart" height="200"></canvas></div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header"><i class="bi bi-bar-chart"></i> نوع مخاطبین</div>
+                                    <div class="card-body"><canvas id="crm-contacts-chart" height="200"></canvas></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div><!-- /tab-content -->
+            </div><!-- /section-crm -->
+
+            <!-- ── MODAL: Contact ── -->
+            <div class="modal fade" id="contactModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header"><h5 class="modal-title" id="contactModalTitle">مخاطب جدید</h5><button type="button" class="btn-close" data-bs-dismiss="modal">✕</button></div>
+                        <div class="modal-body">
+                            <input type="hidden" id="contact-edit-id">
+                            <div class="row g-2">
+                                <div class="col-md-6"><label class="form-label">نام <span class="text-danger">*</span></label><input type="text" id="contact-name" class="form-control form-control-sm"></div>
+                                <div class="col-md-6"><label class="form-label">تلفن اول</label><input type="text" id="contact-phone" class="form-control form-control-sm" placeholder="09xxxxxxxxx"></div>
+                                <div class="col-md-6"><label class="form-label">تلفن دوم</label><input type="text" id="contact-phone2" class="form-control form-control-sm"></div>
+                                <div class="col-md-6"><label class="form-label">ایمیل</label><input type="email" id="contact-email" class="form-control form-control-sm"></div>
+                                <div class="col-md-4"><label class="form-label">نوع</label>
+                                    <select id="contact-type" class="form-select form-select-sm">
+                                        <option value="buyer">خریدار</option><option value="seller">فروشنده</option><option value="consultant">مشاور</option><option value="other">سایر</option>
+                                    </select></div>
+                                <div class="col-md-4"><label class="form-label">دسته‌بندی</label>
+                                    <select id="contact-category" class="form-select form-select-sm">
+                                        <option value="normal">عادی</option><option value="VIP">VIP</option><option value="cold">سرد</option>
+                                    </select></div>
+                                <div class="col-md-4"><label class="form-label">شهر</label><input type="text" id="contact-city" class="form-control form-control-sm"></div>
+                                <div class="col-12"><label class="form-label">آدرس</label><input type="text" id="contact-address" class="form-control form-control-sm"></div>
+                                <div class="col-md-6"><label class="form-label">تگ‌ها (با کاما جدا کن)</label><input type="text" id="contact-tags" class="form-control form-control-sm" placeholder="VIP, تبریز, سرمایه‌گذار"></div>
+                                <div class="col-md-6"><label class="form-label">یادداشت</label><input type="text" id="contact-notes" class="form-control form-control-sm"></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">لغو</button><button class="btn btn-primary btn-sm" onclick="saveContact()">ذخیره</button></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── MODAL: Task ── -->
+            <div class="modal fade" id="taskModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header"><h5 class="modal-title" id="taskModalTitle">وظیفه جدید</h5><button type="button" class="btn-close" data-bs-dismiss="modal">✕</button></div>
+                        <div class="modal-body">
+                            <input type="hidden" id="task-edit-id">
+                            <div class="mb-2"><label class="form-label">عنوان <span class="text-danger">*</span></label><input type="text" id="task-title" class="form-control form-control-sm"></div>
+                            <div class="mb-2"><label class="form-label">توضیحات</label><textarea id="task-description" class="form-control form-control-sm" rows="2"></textarea></div>
+                            <div class="row g-2">
+                                <div class="col-6"><label class="form-label">اولویت</label>
+                                    <select id="task-priority" class="form-select form-select-sm">
+                                        <option value="low">کم</option><option value="medium" selected>متوسط</option><option value="high">زیاد</option><option value="urgent">فوری</option>
+                                    </select></div>
+                                <div class="col-6"><label class="form-label">وضعیت</label>
+                                    <select id="task-status" class="form-select form-select-sm">
+                                        <option value="todo" selected>انجام نشده</option><option value="in_progress">در حال انجام</option><option value="done">انجام شده</option>
+                                    </select></div>
+                                <div class="col-6"><label class="form-label">سررسید</label><input type="datetime-local" id="task-due-date" class="form-control form-control-sm"></div>
+                                <div class="col-6"><label class="form-label">مسئول</label><input type="text" id="task-assigned" class="form-control form-control-sm"></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">لغو</button><button class="btn btn-primary btn-sm" onclick="saveTask()">ذخیره</button></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── MODAL: Deal ── -->
+            <div class="modal fade" id="dealModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header"><h5 class="modal-title" id="dealModalTitle">معامله جدید</h5><button type="button" class="btn-close" data-bs-dismiss="modal">✕</button></div>
+                        <div class="modal-body">
+                            <input type="hidden" id="deal-edit-id">
+                            <div class="row g-2">
+                                <div class="col-12"><label class="form-label">عنوان <span class="text-danger">*</span></label><input type="text" id="deal-title" class="form-control form-control-sm"></div>
+                                <div class="col-md-4"><label class="form-label">نوع معامله</label>
+                                    <select id="deal-type" class="form-select form-select-sm">
+                                        <option value="buy">خرید</option><option value="rent">اجاره</option><option value="lease">رهن</option>
+                                    </select></div>
+                                <div class="col-md-4"><label class="form-label">وضعیت</label>
+                                    <select id="deal-status" class="form-select form-select-sm">
+                                        <option value="new">جدید</option><option value="negotiating">در حال مذاکره</option><option value="contract">قرارداد</option><option value="closed">بسته شده</option><option value="cancelled">لغو شده</option>
+                                    </select></div>
+                                <div class="col-md-4"><label class="form-label">مبلغ (تومان)</label><input type="number" id="deal-amount" class="form-control form-control-sm"></div>
+                                <div class="col-md-4"><label class="form-label">کمیسیون (تومان)</label><input type="number" id="deal-commission" class="form-control form-control-sm"></div>
+                                <div class="col-md-4"><label class="form-label">کمیسیون پرداخت شده</label>
+                                    <select id="deal-commission-paid" class="form-select form-select-sm">
+                                        <option value="false">خیر</option><option value="true">بله</option>
+                                    </select></div>
+                                <div class="col-md-4"><label class="form-label">تاریخ قرارداد</label><input type="date" id="deal-contract-date" class="form-control form-control-sm"></div>
+                                <div class="col-md-6"><label class="form-label">خریدار (شناسه مخاطب)</label><input type="number" id="deal-buyer-id" class="form-control form-control-sm" placeholder="ID مخاطب..."></div>
+                                <div class="col-md-6"><label class="form-label">فروشنده (شناسه مخاطب)</label><input type="number" id="deal-seller-id" class="form-control form-control-sm" placeholder="ID مخاطب..."></div>
+                                <div class="col-12"><label class="form-label">یادداشت</label><textarea id="deal-notes" class="form-control form-control-sm" rows="2"></textarea></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">لغو</button><button class="btn btn-primary btn-sm" onclick="saveDeal()">ذخیره</button></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── MODAL: Note ── -->
+            <div class="modal fade" id="noteModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header"><h5 class="modal-title">یادداشت جدید</h5><button type="button" class="btn-close" data-bs-dismiss="modal">✕</button></div>
+                        <div class="modal-body">
+                            <div class="mb-2"><label class="form-label">متن یادداشت <span class="text-danger">*</span></label><textarea id="note-content" class="form-control" rows="4"></textarea></div>
+                            <div class="row g-2">
+                                <div class="col-4"><label class="form-label">مخاطب (ID)</label><input type="number" id="note-contact-id" class="form-control form-control-sm"></div>
+                                <div class="col-4"><label class="form-label">معامله (ID)</label><input type="number" id="note-deal-id" class="form-control form-control-sm"></div>
+                                <div class="col-4"><label class="form-label">ملک (ID)</label><input type="number" id="note-property-id" class="form-control form-control-sm"></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">لغو</button><button class="btn btn-primary btn-sm" onclick="saveNote()">ذخیره</button></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── MODAL: Reminder ── -->
+            <div class="modal fade" id="reminderModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header"><h5 class="modal-title">یادآور جدید</h5><button type="button" class="btn-close" data-bs-dismiss="modal">✕</button></div>
+                        <div class="modal-body">
+                            <div class="mb-2"><label class="form-label">عنوان <span class="text-danger">*</span></label><input type="text" id="reminder-title" class="form-control form-control-sm"></div>
+                            <div class="row g-2">
+                                <div class="col-6"><label class="form-label">زمان یادآوری <span class="text-danger">*</span></label><input type="datetime-local" id="reminder-at" class="form-control form-control-sm"></div>
+                                <div class="col-6"><label class="form-label">تکرار</label>
+                                    <select id="reminder-repeat" class="form-select form-select-sm">
+                                        <option value="none">بدون تکرار</option><option value="daily">روزانه</option><option value="weekly">هفتگی</option><option value="monthly">ماهانه</option>
+                                    </select></div>
+                                <div class="col-6"><label class="form-label">کانال</label>
+                                    <select id="reminder-channel" class="form-select form-select-sm" onchange="toggleSmsTo()">
+                                        <option value="in_app">در برنامه</option><option value="sms">پیامک</option>
+                                    </select></div>
+                                <div class="col-6" id="reminder-sms-to-group" style="display:none;">
+                                    <label class="form-label">شماره ارسال</label><input type="text" id="reminder-sms-to" class="form-control form-control-sm" placeholder="09xxxxxxxxx">
+                                </div>
+                                <div class="col-6"><label class="form-label">مخاطب (ID)</label><input type="number" id="reminder-contact-id" class="form-control form-control-sm"></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">لغو</button><button class="btn btn-primary btn-sm" onclick="saveReminder()">ذخیره</button></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ USERS ═════════════════════════ -->
+            <div id="section-users" class="section-content" style="display:none;">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-person-plus"></i> کاربر جدید
+                            </div>
+                            <div class="card-body">
+                                <form id="user-create-form">
+                                    <div class="mb-2">
+                                        <label class="form-label">نام کاربری</label>
+                                        <input type="text" id="new-username" class="form-control form-control-sm" required>
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label">نام کامل</label>
+                                        <input type="text" id="new-fullname" class="form-control form-control-sm">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label">ایمیل</label>
+                                        <input type="email" id="new-email" class="form-control form-control-sm">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label">رمز عبور</label>
+                                        <input type="password" id="new-password" class="form-control form-control-sm" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">نقش</label>
+                                        <select id="new-role" class="form-select form-select-sm">
+                                            <option value="user">User — فقط خواندن</option>
+                                            <option value="admin">Admin — مدیریت کامل</option>
+                                            <option value="super_admin">Super Admin</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary btn-w100 btn-sm">
+                                        <i class="bi bi-plus-circle"></i> ساخت کاربر
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-people"></i> لیست کاربران</span>
+                                <button class="btn btn-outline-secondary btn-sm" onclick="loadUsers()">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>نام کاربری</th>
+                                            <th>نام کامل</th>
+                                            <th>نقش</th>
+                                            <th>وضعیت</th>
+                                            <th>آخرین ورود</th>
+                                            <th>عملیات</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="users-table"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /.content-wrapper -->
+    </main>
+</div><!-- /#main-app -->
+
+<!-- ════════════════════════════════════════════════
+     MODALS
+     ════════════════════════════════════════════════ -->
+
+<!-- Property Detail Modal -->
+<div class="modal fade" id="propertyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-house-door"></i> جزئیات ملک</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal">✕</button>
+            </div>
+            <div class="modal-body" id="property-detail"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Lead Detail Modal -->
+<div class="modal fade" id="leadModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-person-lines-fill"></i> جزئیات لید</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal">✕</button>
+            </div>
+            <div class="modal-body" id="lead-detail-body"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">بستن</button>
+                <button type="button" class="btn btn-primary" id="lead-save-btn">
+                    <i class="bi bi-save"></i> ذخیره تغییرات
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Cookie Warning Modal -->
+<div class="modal fade" id="cookieWarningModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle text-warning"></i> هشدار: بدون ورود به دیوار
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning mb-3">
+                    <i class="bi bi-info-circle"></i>
+                    <span id="cookie-warning-message">شما هنوز وارد حساب دیوار نشده‌اید.</span>
+                </div>
+                <p class="mb-2 fw-semibold">بدون ورود به حساب:</p>
+                <ul class="small text-muted">
+                    <li>شماره تماس مالکان نمایش داده نمی‌شود</li>
+                    <li>برخی اطلاعات ممکن است در دسترس نباشد</li>
+                    <li>ممکن است با محدودیت‌های دیوار مواجه شوید</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" onclick="goToAuthSection()">
+                    <i class="bi bi-key"></i> ورود به حساب
+                </button>
+                <button type="button" class="btn btn-outline-warning" id="continue-scraping-btn">
+                    <i class="bi bi-play-fill"></i> ادامه بدون ورود
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="toast" class="toast" role="alert">
+        <div class="toast-header">
+            <strong class="me-auto" id="toast-title">اعلان</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast">✕</button>
+        </div>
+        <div class="toast-body" id="toast-message"></div>
+    </div>
+</div>
+
+<!-- 2FA Management Modal -->
+<!-- ═══ Divar SMS-OTP Modal ══════════════════════════════════════════════════ -->
+<div class="modal fade" id="divarOtpModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content" style="background:var(--surface);border:1px solid var(--border);color:var(--text);">
+            <div class="modal-header" style="border-color:var(--border);background:var(--surface2);">
+                <h5 class="modal-title" style="color:var(--text);font-size:.9rem;">
+                    <i class="bi bi-phone"></i> کد تأیید دیوار
+                </h5>
+            </div>
+            <div class="modal-body" style="font-size:.85rem;">
+                <p class="text-muted mb-2">دیوار یک کد ۶ رقمی به شماره‌تان ارسال کرد. لطفاً وارد کنید:</p>
+                <input id="divar-otp-input" type="text" class="form-control text-center"
+                       maxlength="6" placeholder="------" style="font-size:1.3rem;letter-spacing:.4rem;">
+                <input type="hidden" id="divar-otp-key">
+            </div>
+            <div class="modal-footer" style="border-color:var(--border);">
+                <button class="btn btn-primary flex-grow-1" onclick="submitDivarOtp()">
+                    <i class="bi bi-check-circle"></i> تأیید
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="twoFAModal" tabindex="-1">
+    <div class="modal-dialog modal-md">
+        <div class="modal-content" style="background:var(--surface);border:1px solid var(--border);color:var(--text);">
+            <div class="modal-header" style="border-color:var(--border);background:var(--surface2);">
+                <h5 class="modal-title" style="color:var(--text);font-size:.95rem;">
+                    <i class="bi bi-shield-lock" style="color:#818cf8;"></i> احراز هویت دو مرحله‌ای
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="twofa-modal-body" style="padding:1.25rem;">
+
+                <!-- Status bar -->
+                <div class="d-flex align-items-center gap-2 mb-3 p-2"
+                     style="background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
+                    <i class="bi bi-shield" style="color:var(--text-dim);"></i>
+                    <span style="color:var(--text-dim);font-size:.85rem;">وضعیت فعلی:</span>
+                    <span id="totp-status-badge" class="badge bg-secondary ms-auto">در حال بررسی...</span>
+                </div>
+
+                <!-- QR / Setup panel -->
+                <div id="totp-setup-panel" class="d-none">
+                    <div class="mb-3 p-2" style="background:rgba(6,182,212,.08);border:1px solid rgba(6,182,212,.2);border-radius:8px;font-size:.82rem;color:var(--text-dim);">
+                        <i class="bi bi-info-circle" style="color:var(--accent2);"></i>
+                        این QR را با <strong style="color:var(--text);">Google Authenticator</strong> اسکن کنید، سپس کد ۶ رقمی را وارد کنید.
+                    </div>
+                    <div class="text-center mb-3">
+                        <div id="totp-qrcode" style="display:inline-block;background:#fff;padding:10px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.4);"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label style="font-size:.78rem;color:var(--text-muted);display:block;margin-bottom:.3rem;">یا کلید را دستی وارد کنید:</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" id="totp-secret-display"
+                                   style="background:var(--surface3);border:1px solid var(--border);color:var(--text);border-radius:6px 0 0 6px;padding:.4rem .6rem;font-size:.78rem;font-family:monospace;direction:ltr;width:1%;flex:1;"
+                                   readonly>
+                            <button onclick="copyTotpSecret()"
+                                    style="background:var(--surface3);border:1px solid var(--border);border-right:none;color:var(--text-dim);padding:.4rem .65rem;border-radius:0 6px 6px 0;cursor:pointer;">
+                                <i class="bi bi-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label style="font-size:.85rem;color:var(--text-dim);display:block;margin-bottom:.4rem;">کد تأیید را وارد کنید:</label>
+                        <input type="text" id="totp-enable-code"
+                               style="width:100%;background:var(--surface3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:.65rem;text-align:center;font-family:monospace;font-size:1.5rem;letter-spacing:.4rem;outline:none;"
+                               maxlength="6" inputmode="numeric" placeholder="------">
+                    </div>
+                    <button onclick="enableTotp()"
+                            style="width:100%;padding:.65rem;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:8px;color:#fff;font-weight:600;cursor:pointer;font-size:.9rem;">
+                        <i class="bi bi-shield-check"></i> فعال کردن احراز هویت
+                    </button>
+                </div>
+
+                <!-- Disable panel -->
+                <div id="totp-disable-panel" class="d-none">
+                    <div class="mb-3 p-2" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;font-size:.82rem;color:var(--text-dim);">
+                        <i class="bi bi-exclamation-triangle" style="color:var(--warning);"></i>
+                        برای غیرفعال کردن، رمز عبور خود را وارد کنید.
+                    </div>
+                    <div class="mb-3">
+                        <label style="font-size:.85rem;color:var(--text-dim);display:block;margin-bottom:.4rem;">رمز عبور</label>
+                        <input type="password" id="totp-disable-password"
+                               style="width:100%;background:var(--surface3);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:.55rem .75rem;outline:none;"
+                               placeholder="رمز عبور فعلی">
+                    </div>
+                    <button onclick="disableTotp()"
+                            style="width:100%;padding:.65rem;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#f87171;font-weight:600;cursor:pointer;font-size:.9rem;">
+                        <i class="bi bi-shield-x"></i> غیرفعال کردن احراز هویت
+                    </button>
+                </div>
+
+                <!-- Action buttons -->
+                <div id="totp-action-btns" class="d-flex gap-2 mt-3">
+                    <button id="totp-btn-setup" class="d-none flex-grow-1" onclick="showTotpSetup()"
+                            style="padding:.6rem;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:8px;color:#818cf8;font-weight:600;cursor:pointer;">
+                        <i class="bi bi-qr-code"></i> راه‌اندازی
+                    </button>
+                    <button id="totp-btn-disable" class="d-none flex-grow-1" onclick="showTotpDisable()"
+                            style="padding:.6rem;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:8px;color:#f87171;font-weight:600;cursor:pointer;">
+                        <i class="bi bi-shield-x"></i> غیرفعال کردن
+                    </button>
+                </div>
+
+            </div>
+            <div class="modal-footer" style="border-color:var(--border);background:var(--surface2);">
+                <button type="button" data-bs-dismiss="modal"
+                        style="padding:.45rem 1rem;background:var(--surface3);border:1px solid var(--border);border-radius:7px;color:var(--text-dim);cursor:pointer;font-size:.85rem;">
+                    بستن
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+"""
+SorinFlow CRM package
+"""
