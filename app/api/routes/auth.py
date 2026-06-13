@@ -135,18 +135,41 @@ async def get_cookie_status(
     """Get current cookie/session status"""
     
     phone = phone_number or settings.divar_phone_number
-    
-    if not phone:
+
+    auth = DivarAuth(db)
+
+    # If a specific phone was requested, return its status directly
+    if phone:
+        status = await auth.get_cookie_status(phone)
+        # If that number has no valid session, fall back to any active session in DB
+        if not status.get("is_valid"):
+            result = await db.execute(
+                select(Cookie)
+                .where(Cookie.is_valid == True)
+                .order_by(Cookie.updated_at.desc())
+                .limit(1)
+            )
+            fallback = result.scalar_one_or_none()
+            if fallback:
+                status = await auth.get_cookie_status(fallback.phone_number)
+        return CookieStatusResponse(**status)
+
+    # No phone configured at all — find any valid session
+    result = await db.execute(
+        select(Cookie)
+        .where(Cookie.is_valid == True)
+        .order_by(Cookie.updated_at.desc())
+        .limit(1)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
         return CookieStatusResponse(
             has_cookies=False,
             is_valid=False,
             phone_number="",
             message="No phone number configured"
         )
-    
-    auth = DivarAuth(db)
-    status = await auth.get_cookie_status(phone)
-    
+    status = await auth.get_cookie_status(record.phone_number)
     return CookieStatusResponse(**status)
 
 

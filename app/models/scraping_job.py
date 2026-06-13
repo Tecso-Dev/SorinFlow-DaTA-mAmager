@@ -30,9 +30,12 @@ class ScrapingJob(Base):
     updated_items = Column(Integer, default=0)
     failed_items = Column(Integer, default=0)
     
+    # Divar session used for this job
+    divar_phone = Column(String(20), nullable=True)
+
     # Error handling
     error_message = Column(Text)
-    
+
     # Timestamps
     started_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))

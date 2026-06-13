@@ -341,19 +341,19 @@ class DivarAuth:
                 await confirm_button.click()
                 logger.info("Confirm button clicked — waiting for SMS...")
                 await asyncio.sleep(4)
-                # Screenshot after clicking to verify page moved forward
                 try:
                     snap = Path(settings.images_path).parent / "debug" / "debug_after_phone_submit.png"
                     await self.page.screenshot(path=str(snap))
                     logger.info(f"Post-submit screenshot: {snap}")
                 except Exception:
                     pass
+                result["requires_code"] = True
+                result["message"] = f"کد OTP به {phone_number} ارسال شد. لطفاً کد ۶ رقمی را وارد کنید."
+                logger.info(result["message"])
             else:
-                logger.error("Confirm button NOT found — SMS may not have been sent")
-
-            result["requires_code"] = True
-            result["message"] = f"کد OTP به {phone_number} ارسال شد. لطفاً کد ۶ رقمی را وارد کنید."
-            logger.info(result["message"])
+                result["success"] = False
+                result["message"] = "خطا: دکمه تأیید در صفحه دیوار پیدا نشد. لطفاً دوباره امتحان کنید."
+                logger.error(result["message"])
 
             return result
             
