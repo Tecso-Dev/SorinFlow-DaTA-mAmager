@@ -75,8 +75,9 @@ async def init_db():
     async with engine.begin() as conn:
         from app.models import property, cookie, scraping_job, lead, user, crm_models
         await conn.run_sync(Base.metadata.create_all)
-        # Add 2FA columns to users table if they don't exist yet
         await _migrate_users_totp(conn)
+        await _migrate_scraping_jobs_divar_phone(conn)
+        await _migrate_properties_owner_phone(conn)
 
     await _seed_super_admin()
 
@@ -96,7 +97,42 @@ async def _migrate_users_totp(conn):
                 "ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE"
             ))
     except Exception:
-        pass  # non-PostgreSQL or column already exists
+        pass
+
+
+async def _migrate_scraping_jobs_divar_phone(conn):
+    """Idempotently add divar_phone column to scraping_jobs table."""
+    try:
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='scraping_jobs' AND column_name='divar_phone'"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE scraping_jobs ADD COLUMN IF NOT EXISTS divar_phone VARCHAR(20)"
+            ))
+    except Exception:
+        pass
+
+
+async def _migrate_properties_owner_phone(conn):
+    """Idempotently add owner_phone column to properties table."""
+    try:
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='properties' AND column_name='owner_phone'"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS owner_phone VARCHAR(20)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_properties_owner_phone ON properties (owner_phone)"
+            ))
+    except Exception:
+        pass
 
 
 async def _seed_super_admin():

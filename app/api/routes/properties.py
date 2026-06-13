@@ -40,6 +40,7 @@ async def get_properties(
     max_rooms: Optional[int] = None,
     has_phone: Optional[bool] = None,
     search: Optional[str] = None,
+    owner_phone: Optional[str] = None,
     sort_by: str = "scraped_at",
     sort_order: str = "desc",
     db: AsyncSession = Depends(get_db)
@@ -48,7 +49,11 @@ async def get_properties(
     
     # Build query
     query = select(Property).where(Property.is_active == True)
-    
+
+    # Isolate data per Divar account
+    if owner_phone:
+        query = query.where(Property.owner_phone == owner_phone)
+
     # Apply filters
     if city:
         query = query.where(Property.city_name.ilike(f"%{city}%"))

@@ -56,37 +56,40 @@ class DivarScraper:
         
         self.images_dir = Path(settings.images_path)
         self.images_dir.mkdir(parents=True, exist_ok=True)
-        
+
+        self.active_phone: Optional[str] = None  # Divar account used for this session
+
         self.current_job: Optional[ScrapingJob] = None
         self.request_count = 0
         self.session_start = datetime.now()
     
-    async def initialize(self, restore_session: bool = True) -> bool:
+    async def initialize(self, restore_session: bool = True, phone_number: str = None) -> bool:
         """Initialize scraper with browser and optional session restoration"""
         try:
             self.playwright = await async_playwright().start()
-            
+
             # Get proxy if enabled
             proxy = None
             if self.proxy_enabled:
                 proxy = await self._get_working_proxy()
-            
+
             self.browser = await self.playwright.chromium.launch(
                 headless=self.headless,
                 args=get_browser_args()
             )
-            
+
             context_options = get_context_options(self.stealth_config, proxy)
             self.context = await self.browser.new_context(**context_options)
-            
+
             # Add stealth script
             await self.context.add_init_script(STEALTH_JS)
-            
+
             self.page = await self.context.new_page()
-            
+
             # Restore authentication session
             if restore_session:
-                phone_number = settings.divar_phone_number
+                # Explicit phone takes priority, then env var, then auto-select from DB
+                phone_number = phone_number or settings.divar_phone_number
                 # If DIVAR_PHONE_NUMBER not configured, find any valid cookie in DB
                 if not phone_number and self.db_session:
                     try:
@@ -112,12 +115,42 @@ class DivarScraper:
 
                     restored = await self.auth.restore_session(phone_number)
                     if not restored:
-                        logger.warning("Session not restored. Phone numbers will not be extracted.")
-                        return False
-                    logger.info("Session restored successfully")
+                        logger.warning(f"Session not restored for {phone_number}. Trying other saved sessions...")
+                        # Fall back to any other valid session in DB
+                        phone_number = None
+                        if self.db_session:
+                            try:
+                                from app.models.cookie import Cookie as CookieModel
+                                from sqlalchemy import select as _select
+                                _res = await self.db_session.execute(
+                                    _select(CookieModel)
+                                    .where(CookieModel.is_valid == True)
+                                    .order_by(CookieModel.updated_at.desc())
+                                    .limit(1)
+                                )
+                                _rec = _res.scalar_one_or_none()
+                                if _rec:
+                                    phone_number = _rec.phone_number
+                                    logger.info(f"Falling back to session for {phone_number}")
+                            except Exception as _e:
+                                logger.warning(f"Could not find fallback session: {_e}")
+
+                        if phone_number:
+                            restored = await self.auth.restore_session(phone_number)
+                            if not restored:
+                                logger.warning("Fallback session also failed. Phone numbers will not be extracted.")
+                                return False
+                            self.active_phone = phone_number
+                            logger.info(f"Session restored successfully using fallback: {phone_number}")
+                        else:
+                            logger.warning("No valid session found. Phone numbers will not be extracted.")
+                            return False
+                    else:
+                        self.active_phone = phone_number
+                        logger.info("Session restored successfully")
                 else:
                     logger.warning("No Divar session configured — phone numbers will not be extracted.")
-            
+
             return True
             
         except Exception as e:
@@ -1202,10 +1235,12 @@ class DivarScraper:
             existing = result.scalar_one_or_none()
             
             if existing:
-                # Update existing
+                # Update existing — only update owner_phone if it's not set yet
                 for key, value in property_data.items():
                     if hasattr(existing, key) and value is not None:
                         setattr(existing, key, value)
+                if self.active_phone and not existing.owner_phone:
+                    existing.owner_phone = self.active_phone
                 # Sync has_images flag
                 if existing.images:
                     existing.has_images = True
@@ -1217,6 +1252,8 @@ class DivarScraper:
                 # Create new
                 property_data['tag_number'] = self._generate_tag_number()
                 property_data['scraped_at'] = datetime.now()
+                if self.active_phone:
+                    property_data['owner_phone'] = self.active_phone
 
                 # Remove non-model fields
                 property_data.pop('descriptions', None)

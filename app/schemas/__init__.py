@@ -56,6 +56,7 @@ class PropertyResponse(PropertyBase):
     url: str
     phone_number: Optional[str] = None
     seller_name: Optional[str] = None
+    owner_phone: Optional[str] = None
     images: List[str] = []
     has_images: bool = False
     thumbnail_url: Optional[str] = None
@@ -102,6 +103,7 @@ class ScrapingJobCreate(BaseModel):
     category: str
     max_pages: int = 10
     download_images: bool = True
+    divar_phone: Optional[str] = None
     min_price: Optional[int] = None
     max_price: Optional[int] = None
     min_deposit: Optional[int] = None
@@ -116,6 +118,7 @@ class ScrapingJobResponse(BaseModel):
     job_id: str
     city_id: Optional[int] = None
     category_id: Optional[int] = None
+    divar_phone: Optional[str] = None
     status: str
     total_pages: int = 0
     scraped_pages: int = 0

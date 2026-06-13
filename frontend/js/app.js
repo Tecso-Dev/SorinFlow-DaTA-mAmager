@@ -289,6 +289,7 @@ function initApp() {
     loadCities();
     loadCategories();
     checkCookieStatus();
+    initOtpBoxes();
 
     document.getElementById('scraper-form').addEventListener('submit', startScraping);
     document.getElementById('proxy-form').addEventListener('submit', addProxy);
@@ -336,7 +337,7 @@ function showSection(sectionName) {
     switch (sectionName) {
         case 'dashboard':  loadDashboard(); break;
         case 'properties': loadProperties(); break;
-        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); break;
+        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); populateDivarPhoneDropdown(); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
@@ -568,6 +569,10 @@ async function loadProperties() {
         if (maxDeposit) url += `&max_deposit=${maxDeposit}`;
         if (minRent) url += `&min_rent_price=${minRent}`;
         if (maxRent) url += `&max_rent_price=${maxRent}`;
+
+        // Isolate data per active Divar session
+        const activeSession = await _getActiveSession();
+        if (activeSession) url += `&owner_phone=${encodeURIComponent(activeSession.phone_number)}`;
         
         const data = await apiCall(url);
         
@@ -1237,6 +1242,31 @@ function _intOrNull(id) {
     return isNaN(v) || v <= 0 ? null : v;
 }
 
+async function populateDivarPhoneDropdown() {
+    const sel = document.getElementById('scraper-divar-phone');
+    if (!sel) return;
+    try {
+        const data = await apiCall('/auth/cookies');
+        const valid = (data.cookies || []).filter(c => c.is_valid);
+        // Keep the first "auto" option, then replace the rest
+        sel.innerHTML = '<option value="">-- انتخاب خودکار --</option>';
+        valid.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.phone_number;
+            opt.textContent = c.phone_number;
+            sel.appendChild(opt);
+        });
+        if (valid.length === 0) {
+            const opt = document.createElement('option');
+            opt.disabled = true;
+            opt.textContent = 'هیچ نشستی ثبت نشده';
+            sel.appendChild(opt);
+        }
+    } catch (e) {
+        console.warn('Could not load Divar sessions:', e);
+    }
+}
+
 async function startScraping(e) {
     e.preventDefault();
 
@@ -1244,6 +1274,7 @@ async function startScraping(e) {
     const category = document.getElementById('scraper-category').value;
     const maxPages = parseInt(document.getElementById('scraper-pages').value);
     const downloadImages = document.getElementById('scraper-images').checked;
+    const divarPhone = document.getElementById('scraper-divar-phone')?.value || null;
 
     const priceFilters = {
         min_price:   _intOrNull('scraper-min-price'),
@@ -1256,30 +1287,34 @@ async function startScraping(e) {
 
     // Check cookie status before scraping
     if (!cookieStatus.is_valid) {
-        pendingScrapingAction = { type: 'bulk', city, category, maxPages, downloadImages, priceFilters };
+        pendingScrapingAction = { type: 'bulk', city, category, maxPages, downloadImages, priceFilters, divarPhone };
         showCookieWarning();
         return;
     }
 
-    await executeBulkScraping(city, category, maxPages, downloadImages, priceFilters);
+    await executeBulkScraping(city, category, maxPages, downloadImages, priceFilters, divarPhone);
 }
 
-async function executeBulkScraping(city, category, maxPages, downloadImages, priceFilters = {}) {
+async function executeBulkScraping(city, category, maxPages, downloadImages, priceFilters = {}, divarPhone = null) {
     try {
+        const body = {
+            city,
+            category,
+            max_pages: maxPages,
+            download_images: downloadImages,
+            ...priceFilters,
+        };
+        if (divarPhone) body.divar_phone = divarPhone;
+
         const result = await apiCall('/scraper/start', {
             method: 'POST',
-            body: JSON.stringify({
-                city,
-                category,
-                max_pages: maxPages,
-                download_images: downloadImages,
-                ...priceFilters,
-            })
+            body: JSON.stringify(body)
         });
-        
-        showToast('موفق', `اسکرپینگ شروع شد: ${result.job_id}`, 'success');
+
+        const phoneLabel = result.divar_phone ? ` (${result.divar_phone})` : '';
+        showToast('موفق', `اسکرپینگ شروع شد: ${result.job_id}${phoneLabel}`, 'success');
         loadJobs();
-        
+
     } catch (error) {
         showToast('خطا', error.message, 'danger');
     }
@@ -1368,8 +1403,8 @@ function continueScraping() {
     if (!pendingScrapingAction) return;
     
     if (pendingScrapingAction.type === 'bulk') {
-        const { city, category, maxPages, downloadImages } = pendingScrapingAction;
-        executeBulkScraping(city, category, maxPages, downloadImages);
+        const { city, category, maxPages, downloadImages, priceFilters, divarPhone } = pendingScrapingAction;
+        executeBulkScraping(city, category, maxPages, downloadImages, priceFilters, divarPhone);
     } else if (pendingScrapingAction.type === 'single') {
         executeSingleScraping(pendingScrapingAction.url);
     }
@@ -1385,23 +1420,45 @@ function goToAuthSection() {
 
 // ==================== Authentication ====================
 
+async function _getActiveSession() {
+    // Returns the most recently updated valid session, or null
+    try {
+        const data = await apiCall('/auth/cookies');
+        const valid = (data.cookies || []).filter(c => c.is_valid);
+        if (!valid.length) return null;
+        // sort by id descending (most recently added) as a proxy for recency
+        valid.sort((a, b) => b.id - a.id);
+        return valid[0];
+    } catch (e) {
+        return null;
+    }
+}
+
 async function checkCookieStatus() {
     try {
-        const status = await apiCall('/auth/status');
-        cookieStatus = status;
-
+        const session = await _getActiveSession();
         const textEl = document.getElementById('cookie-status');
         const dotEl  = document.getElementById('cookie-dot');
 
-        if (status.is_valid) {
-            if (textEl) textEl.textContent = 'کوکی فعال';
-            if (dotEl)  { dotEl.className = 'dot dot-success'; }
-        } else if (status.has_cookies) {
-            if (textEl) textEl.textContent = 'کوکی منقضی';
-            if (dotEl)  { dotEl.className = 'dot dot-warning'; }
+        if (session) {
+            cookieStatus = { is_valid: true, has_cookies: true, phone_number: session.phone_number };
+            if (textEl) textEl.textContent = `کوکی فعال (${session.phone_number})`;
+            if (dotEl)  dotEl.className = 'dot dot-success';
         } else {
-            if (textEl) textEl.textContent = 'نیاز به ورود';
-            if (dotEl)  { dotEl.className = 'dot dot-danger'; }
+            // check if there are any (expired) cookies
+            let hasCookies = false;
+            try {
+                const data = await apiCall('/auth/cookies');
+                hasCookies = (data.cookies || []).length > 0;
+            } catch (e) {}
+            cookieStatus = { is_valid: false, has_cookies: hasCookies };
+            if (hasCookies) {
+                if (textEl) textEl.textContent = 'کوکی منقضی';
+                if (dotEl)  dotEl.className = 'dot dot-warning';
+            } else {
+                if (textEl) textEl.textContent = 'نیاز به ورود';
+                if (dotEl)  dotEl.className = 'dot dot-danger';
+            }
         }
     } catch (error) {
         console.error('Failed to check cookie status:', error);
@@ -1409,32 +1466,36 @@ async function checkCookieStatus() {
 }
 
 async function checkAuthStatus() {
+    const statusDiv = document.getElementById('auth-status');
+    if (!statusDiv) return;
     try {
-        const status = await apiCall('/auth/status');
-        
-        const statusDiv = document.getElementById('auth-status');
-        
-        if (status.is_valid) {
+        const session = await _getActiveSession();
+
+        if (session) {
             statusDiv.className = 'alert alert-success';
             statusDiv.innerHTML = `
                 <i class="bi bi-check-circle"></i>
                 <strong>وضعیت: متصل</strong><br>
-                شماره: ${status.phone_number}<br>
-                انقضا: ${status.expires_at || 'نامشخص'}
-            `;
-        } else if (status.has_cookies) {
-            statusDiv.className = 'alert alert-warning';
-            statusDiv.innerHTML = `
-                <i class="bi bi-exclamation-triangle"></i>
-                <strong>وضعیت: منقضی شده</strong><br>
-                ${status.message}
+                شماره فعال: <strong>${session.phone_number}</strong>
             `;
         } else {
-            statusDiv.className = 'alert alert-info';
-            statusDiv.innerHTML = `
-                <i class="bi bi-info-circle"></i>
-                ${status.message}
-            `;
+            // check if any (expired) cookies exist
+            let hasCookies = false;
+            try {
+                const data = await apiCall('/auth/cookies');
+                hasCookies = (data.cookies || []).length > 0;
+            } catch (e) {}
+
+            if (hasCookies) {
+                statusDiv.className = 'alert alert-warning';
+                statusDiv.innerHTML = `<i class="bi bi-exclamation-triangle"></i>
+                    <strong>وضعیت: منقضی شده</strong><br>
+                    لطفاً دوباره وارد شوید.`;
+            } else {
+                statusDiv.className = 'alert alert-info';
+                statusDiv.innerHTML = `<i class="bi bi-info-circle"></i>
+                    هیچ نشست فعالی یافت نشد. شماره موبایل خود را وارد کنید.`;
+            }
         }
     } catch (error) {
         console.error('Failed to check auth status:', error);
@@ -1445,11 +1506,11 @@ async function checkDivarSessionBanner() {
     const badge = document.getElementById('divar-session-badge');
     if (!badge) return;
     try {
-        const status = await apiCall('/auth/status');
-        if (status.is_valid) {
+        const session = await _getActiveSession();
+        if (session) {
             badge.className = 'badge bg-success ms-2';
             badge.textContent = '● فعال';
-            badge.title = `نشست دیوار فعال — ${status.phone_number}`;
+            badge.title = `نشست دیوار فعال — ${session.phone_number}`;
         } else {
             badge.className = 'badge bg-warning text-dark ms-2';
             badge.textContent = '● غیرفعال';
@@ -1579,38 +1640,128 @@ async function submitDivarOtp() {
 
 async function initiateLogin() {
     const phone = document.getElementById('auth-phone').value;
-    
+
     if (!phone || !/^09\d{9}$/.test(phone)) {
         showToast('خطا', 'لطفاً شماره موبایل معتبر وارد کنید', 'warning');
         return;
     }
-    
+
+    const btn = document.querySelector('#auth-login-form button');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> در حال ارسال کد...';
+
     try {
         const result = await apiCall('/auth/login', {
             method: 'POST',
             body: JSON.stringify({ phone_number: phone })
         });
-        
+
         if (result.requires_code) {
             loginPhoneNumber = phone;
             document.getElementById('auth-login-form').style.display = 'none';
-            document.getElementById('auth-verify-form').style.display = 'block';
-            showToast('موفق', 'کد تأیید ارسال شد', 'success');
+            const verifyForm = document.getElementById('auth-verify-form');
+            verifyForm.style.display = 'block';
+
+            // Show waiting message above the code input
+            const waitMsg = verifyForm.querySelector('.otp-wait-msg') || (() => {
+                const el = document.createElement('div');
+                el.className = 'alert alert-warning otp-wait-msg mb-3';
+                verifyForm.insertBefore(el, verifyForm.firstChild);
+                return el;
+            })();
+            waitMsg.innerHTML = `<i class="bi bi-phone"></i> کد تأیید به <strong>${phone}</strong> ارسال شد.<br>
+                <small class="text-muted">ممکن است تا ۳۰ ثانیه طول بکشد. منتظر SMS باشید.</small>`;
+
+            _clearOtpBoxes();
+            document.querySelector('.otp-box')?.focus();
         } else {
-            showToast('خطا', result.message, 'danger');
+            showToast('خطا', result.message || 'خطا در ارسال کد', 'danger');
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
         }
     } catch (error) {
         showToast('خطا', error.message, 'danger');
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
     }
 }
 
+function _getOtpCode() {
+    return [...document.querySelectorAll('.otp-box')].map(b => b.value).join('');
+}
+
+function _clearOtpBoxes() {
+    document.querySelectorAll('.otp-box').forEach(b => {
+        b.value = '';
+        b.classList.remove('filled');
+    });
+}
+
+function initOtpBoxes() {
+    const boxes = [...document.querySelectorAll('.otp-box')];
+    let _verifying = false;
+
+    boxes.forEach((box, idx) => {
+        box.addEventListener('keydown', e => {
+            if (e.key === 'Backspace') {
+                if (box.value) {
+                    box.value = '';
+                    box.classList.remove('filled');
+                } else if (idx > 0) {
+                    boxes[idx - 1].focus();
+                    boxes[idx - 1].value = '';
+                    boxes[idx - 1].classList.remove('filled');
+                }
+                e.preventDefault();
+            } else if (e.key === 'ArrowLeft' && idx < boxes.length - 1) {
+                boxes[idx + 1].focus(); e.preventDefault();
+            } else if (e.key === 'ArrowRight' && idx > 0) {
+                boxes[idx - 1].focus(); e.preventDefault();
+            }
+        });
+
+        box.addEventListener('input', () => {
+            const val = box.value.replace(/\D/g, '');
+            box.value = val ? val[0] : '';
+            box.classList.toggle('filled', !!box.value);
+            if (box.value && idx < boxes.length - 1) boxes[idx + 1].focus();
+            // auto-submit when all filled
+            if (boxes.every(b => b.value) && !_verifying) {
+                _verifying = true;
+                verifyCode().finally(() => { _verifying = false; });
+            }
+        });
+
+        box.addEventListener('paste', e => {
+            e.preventDefault();
+            const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
+            boxes.forEach((b, i) => {
+                b.value = text[i] || '';
+                b.classList.toggle('filled', !!b.value);
+            });
+            const nextEmpty = boxes.findIndex(b => !b.value);
+            (nextEmpty === -1 ? boxes[5] : boxes[nextEmpty]).focus();
+            if (text.length >= 6 && !_verifying) {
+                _verifying = true;
+                verifyCode().finally(() => { _verifying = false; });
+            }
+        });
+
+        box.addEventListener('click', () => box.select());
+    });
+}
+
 async function verifyCode() {
-    const code = document.getElementById('auth-code').value;
-    
-    if (!code || code.length !== 6) {
+    const code = _getOtpCode();
+
+    if (code.length !== 6) {
         showToast('خطا', 'لطفاً کد ۶ رقمی را وارد کنید', 'warning');
         return;
     }
+
+    const btn = document.getElementById('otp-verify-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> در حال تأیید...'; }
     
     try {
         const result = await apiCall(`/auth/verify?phone_number=${loginPhoneNumber}`, {
@@ -1619,16 +1770,28 @@ async function verifyCode() {
         });
         
         if (result.success) {
-            showToast('موفق', 'ورود موفقیت‌آمیز بود', 'success');
+            showToast('موفق', `ورود موفقیت‌آمیز بود (${loginPhoneNumber})`, 'success');
+            // Reset login form for next use
+            document.getElementById('auth-phone').value = '';
+            _clearOtpBoxes();
+            const btn = document.querySelector('#auth-login-form button');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> ارسال کد تأیید'; }
             document.getElementById('auth-login-form').style.display = 'block';
             document.getElementById('auth-verify-form').style.display = 'none';
+            loadCookies();
             checkAuthStatus();
             checkCookieStatus();
         } else {
             showToast('خطا', result.message, 'danger');
+            _clearOtpBoxes();
+            document.querySelector('.otp-box')?.focus();
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-circle"></i> تأیید و ورود'; }
         }
     } catch (error) {
         showToast('خطا', error.message, 'danger');
+        _clearOtpBoxes();
+        document.querySelector('.otp-box')?.focus();
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-circle"></i> تأیید و ورود'; }
     }
 }
 

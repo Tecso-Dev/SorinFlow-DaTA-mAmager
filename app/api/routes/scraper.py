@@ -33,6 +33,7 @@ async def run_scraping_job(
     max_pages: int,
     download_images: bool,
     db_url: str,
+    divar_phone: str = None,
     min_price: int = None,
     max_price: int = None,
     min_deposit: int = None,
@@ -84,8 +85,8 @@ async def run_scraping_job(
                 headless=settings.scraper_headless
             )
             
-            logger.info(f"[{job_id}] Initializing Playwright browser")
-            initialized = await scraper.initialize()
+            logger.info(f"[{job_id}] Initializing Playwright browser (divar_phone={divar_phone or 'auto'})")
+            initialized = await scraper.initialize(phone_number=divar_phone)
             
             if not initialized:
                 logger.warning(f"[{job_id}] Browser initialization incomplete, continuing anyway...")
@@ -198,18 +199,19 @@ async def start_scraping_job(
     # Create job record
     job = ScrapingJob(
         status="pending",
+        divar_phone=job_config.divar_phone or None,
         created_at=datetime.now()
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
-    
+
     job_id = str(job.job_id)
-    logger.info(f"Created scraping job: {job_id}")
-    
+    logger.info(f"Created scraping job: {job_id} (divar_phone={job_config.divar_phone or 'auto'})")
+
     # Store a placeholder to track active jobs
     active_tasks[job_id] = {"status": "starting", "city": job_config.city, "category": job_config.category}
-    
+
     # Use background_tasks to run the job
     background_tasks.add_task(
         run_scraping_job,
@@ -219,6 +221,7 @@ async def start_scraping_job(
         job_config.max_pages,
         job_config.download_images,
         settings.database_url,
+        job_config.divar_phone or None,
         job_config.min_price,
         job_config.max_price,
         job_config.min_deposit,
@@ -232,6 +235,7 @@ async def start_scraping_job(
     return ScrapingJobResponse(
         id=job.id,
         job_id=job_id,
+        divar_phone=job.divar_phone,
         status="pending",
         created_at=job.created_at
     )
