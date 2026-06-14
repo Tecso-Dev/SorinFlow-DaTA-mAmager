@@ -77356,3 +77356,108 @@ _
 2026-06-13 14:22:40 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.102s
 2026-06-13 14:22:40 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.118s
 2026-06-13 14:22:58 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 07:55:42 | INFO     | app.main:lifespan:40 - Starting SorinFlow Divar Scraper...
+2026-06-14 07:55:42 | WARNING  | app.main:lifespan:47 - DATABASE_URL is using default credentials — change in .env for production
+2026-06-14 07:55:42 | INFO     | app.main:lifespan:51 - Database initialized
+2026-06-14 07:56:01 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 07:56:13 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.120s
+2026-06-14 07:56:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.356s
+2026-06-14 07:56:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.356s
+2026-06-14 07:56:13 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.391s
+2026-06-14 07:56:14 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.427s
+2026-06-14 07:56:14 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.537s
+2026-06-14 07:56:15 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.052s
+2026-06-14 07:56:15 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.107s
+2026-06-14 07:56:16 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.167s
+2026-06-14 07:56:16 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.179s
+2026-06-14 07:56:17 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.114s
+2026-06-14 07:56:20 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.079s
+2026-06-14 07:56:20 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.102s
+2026-06-14 07:56:25 | INFO     | app.scraper.auth:invalidate_cookies:665 - Cookies invalidated for 09053833026
+2026-06-14 07:56:25 | DEBUG    | app.main:log_requests:142 - POST /api/auth/logout - 200 - 0.070s
+2026-06-14 07:56:25 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.063s
+2026-06-14 07:56:25 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.067s
+2026-06-14 07:56:25 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.071s
+2026-06-14 07:56:25 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.074s
+2026-06-14 07:56:27 | DEBUG    | app.main:log_requests:142 - DELETE /api/auth/cookies/8 - 200 - 0.055s
+2026-06-14 07:56:27 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.061s
+2026-06-14 07:56:31 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 07:57:01 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 07:57:13 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.102s
+2026-06-14 07:57:13 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.123s
+2026-06-14 07:57:31 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 07:58:02 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 07:58:13 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.102s
+2026-06-14 07:58:13 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.143s
+2026-06-14 07:58:32 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 07:58:53 | INFO     | app.scraper.auth:login_with_phone:251 - Navigating to Divar login page...
+2026-06-14 07:58:57 | DEBUG    | app.scraper.auth:login_with_phone:260 - Login page screenshot saved to /app/data/debug/debug_login_page.png
+2026-06-14 07:58:57 | INFO     | app.scraper.auth:login_with_phone:265 - Looking for login button...
+2026-06-14 07:59:00 | DEBUG    | app.scraper.auth:login_with_phone:290 - Post-click screenshot saved to /app/data/debug/debug_login_after_click.png
+2026-06-14 07:59:00 | INFO     | app.scraper.auth:login_with_phone:295 - Entering phone number: 09364751021
+2026-06-14 07:59:02 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.003s
+2026-06-14 07:59:04 | INFO     | app.scraper.auth:login_with_phone:303 - Found phone input with selector: input[type="tel"]
+2026-06-14 07:59:07 | INFO     | app.scraper.auth:login_with_phone:319 - Clicking confirm button...
+2026-06-14 07:59:07 | INFO     | app.scraper.auth:login_with_phone:329 - Found confirm button with text: 'بعدی'
+2026-06-14 07:59:08 | INFO     | app.scraper.auth:login_with_phone:342 - Confirm button clicked — waiting for SMS...
+2026-06-14 07:59:12 | INFO     | app.scraper.auth:login_with_phone:347 - Post-submit screenshot: /app/data/debug/debug_after_phone_submit.png
+2026-06-14 07:59:12 | INFO     | app.scraper.auth:login_with_phone:352 - کد OTP به 09364751021 ارسال شد. لطفاً کد ۶ رقمی را وارد کنید.
+2026-06-14 07:59:12 | DEBUG    | app.main:log_requests:142 - POST /api/auth/login - 200 - 20.689s
+2026-06-14 07:59:13 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.095s
+2026-06-14 07:59:13 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.107s
+2026-06-14 07:59:32 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 07:59:45 | INFO     | app.scraper.auth:submit_otp_code:380 - Entering verification code...
+2026-06-14 07:59:47 | INFO     | app.scraper.auth:submit_otp_code:385 - Current URL when looking for OTP input: https://divar.ir/my-divar/my-posts
+2026-06-14 07:59:47 | INFO     | app.scraper.auth:submit_otp_code:392 - Trying to find input[name='code']...
+2026-06-14 07:59:47 | INFO     | app.scraper.auth:submit_otp_code:394 - Found input[name='code']
+2026-06-14 07:59:49 | INFO     | app.scraper.auth:submit_otp_code:461 - Clicking login button...
+2026-06-14 07:59:50 | INFO     | app.scraper.auth:submit_otp_code:466 - Screenshot saved: debug_before_login_click.png
+2026-06-14 07:59:51 | INFO     | app.scraper.auth:submit_otp_code:494 - Login button clicked
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:500 - Screenshot saved: debug_after_login_click.png
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:510 - All cookies after login: 9 found
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sRefreshToken = Z%2B3%2B3fBMxlo4lJqCuN1HMK6Znjnwma%2FDcnasjZyiNhBX...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: did = 94bfb25d-7b22-4efd-b2a3-b2e51a169d5d...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: cdid = 7c4fc48e-386f-4404-8c24-378d018fa529...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: ff = %7B%22f%22%3A%7B%22foreigner_payment_enabled%22%3A...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: referrer = ...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: theme = light...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sAccessToken = eyJraWQiOiJkLTE3ODA4MzAyNzk4MDIiLCJ0eXAiOiJKV1QiLC...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sFrontToken = eyJ1aWQiOiI3YTFjYjVhOC0zZmZlLTQ3MjMtYmU0MC05ZDczZW...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: csid = f7bf510266f0e0c174...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:529 - localStorage items: 9
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:532 - localStorage auth item: auth-state-sync = 1781423988766...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:532 - localStorage auth item: auth-clock-drift = NORMAL...
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:534 - sessionStorage items: 0
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:562 - Found potential auth cookies: []
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:563 - Found potential auth storage: ['auth-state-sync', 'auth-clock-drift']
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:save_cookies_to_file:76 - Cookies saved to file for 09364751021
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:save_cookies_to_db:132 - Cookies saved to database for 09364751021
+2026-06-14 07:59:56 | INFO     | app.scraper.auth:submit_otp_code:576 - Login successful, cookies saved for 09364751021!
+2026-06-14 07:59:56 | DEBUG    | app.main:log_requests:142 - POST /api/auth/verify - 200 - 11.329s
+2026-06-14 07:59:56 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.096s
+2026-06-14 07:59:57 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.160s
+2026-06-14 07:59:57 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.117s
+2026-06-14 08:00:00 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.120s
+2026-06-14 08:00:00 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.150s
+2026-06-14 08:00:01 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.074s
+2026-06-14 08:00:01 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.066s
+2026-06-14 08:00:02 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:00:02 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.089s
+2026-06-14 08:00:02 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.097s
+2026-06-14 08:00:04 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.088s
+2026-06-14 08:00:05 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.248s
+2026-06-14 08:00:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.242s
+2026-06-14 08:00:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.247s
+2026-06-14 08:00:05 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.263s
+2026-06-14 08:00:05 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.152s
+2026-06-14 08:00:12 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.096s
+2026-06-14 08:00:12 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.185s
+2026-06-14 08:00:12 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.188s
+2026-06-14 08:00:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.198s
+2026-06-14 08:00:12 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.194s
+2026-06-14 08:00:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.210s
+2026-06-14 08:00:13 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.084s
+2026-06-14 08:00:14 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.078s
+2026-06-14 08:00:21 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.204s
+2026-06-14 08:00:21 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.228s
+2026-06-14 08:00:32 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
