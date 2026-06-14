@@ -76,6 +76,7 @@ async def init_db():
         from app.models import property, cookie, scraping_job, lead, user, crm_models
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_users_totp(conn)
+        await _migrate_users_divar_phone(conn)
         await _migrate_scraping_jobs_divar_phone(conn)
         await _migrate_properties_owner_phone(conn)
 
@@ -95,6 +96,22 @@ async def _migrate_users_totp(conn):
                 "ALTER TABLE users "
                 "ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64), "
                 "ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+    except Exception:
+        pass
+
+
+async def _migrate_users_divar_phone(conn):
+    """Idempotently add divar_phone column to users table."""
+    try:
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='users' AND column_name='divar_phone'"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS divar_phone VARCHAR(20)"
             ))
     except Exception:
         pass

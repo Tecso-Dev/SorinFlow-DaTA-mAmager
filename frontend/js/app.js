@@ -337,7 +337,7 @@ function showSection(sectionName) {
     switch (sectionName) {
         case 'dashboard':  loadDashboard(); break;
         case 'properties': loadProperties(); break;
-        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); populateDivarPhoneDropdown(); break;
+        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
@@ -422,6 +422,7 @@ async function apiCall(endpoint, options = {}) {
 
 async function loadDashboard() {
     try {
+        // Isolation is enforced server-side — no need to pass owner_phone manually
         const [stats, health] = await Promise.all([
             apiCall('/stats/dashboard'),
             apiCall('/stats/health')
@@ -570,9 +571,7 @@ async function loadProperties() {
         if (minRent) url += `&min_rent_price=${minRent}`;
         if (maxRent) url += `&max_rent_price=${maxRent}`;
 
-        // Isolate data per active Divar session
-        const activeSession = await _getActiveSession();
-        if (activeSession) url += `&owner_phone=${encodeURIComponent(activeSession.phone_number)}`;
+        // Isolation is enforced server-side via current_user.divar_phone
         
         const data = await apiCall(url);
         
@@ -1242,30 +1241,6 @@ function _intOrNull(id) {
     return isNaN(v) || v <= 0 ? null : v;
 }
 
-async function populateDivarPhoneDropdown() {
-    const sel = document.getElementById('scraper-divar-phone');
-    if (!sel) return;
-    try {
-        const data = await apiCall('/auth/cookies');
-        const valid = (data.cookies || []).filter(c => c.is_valid);
-        // Keep the first "auto" option, then replace the rest
-        sel.innerHTML = '<option value="">-- انتخاب خودکار --</option>';
-        valid.forEach(c => {
-            const opt = document.createElement('option');
-            opt.value = c.phone_number;
-            opt.textContent = c.phone_number;
-            sel.appendChild(opt);
-        });
-        if (valid.length === 0) {
-            const opt = document.createElement('option');
-            opt.disabled = true;
-            opt.textContent = 'هیچ نشستی ثبت نشده';
-            sel.appendChild(opt);
-        }
-    } catch (e) {
-        console.warn('Could not load Divar sessions:', e);
-    }
-}
 
 async function startScraping(e) {
     e.preventDefault();
@@ -1274,7 +1249,6 @@ async function startScraping(e) {
     const category = document.getElementById('scraper-category').value;
     const maxPages = parseInt(document.getElementById('scraper-pages').value);
     const downloadImages = document.getElementById('scraper-images').checked;
-    const divarPhone = document.getElementById('scraper-divar-phone')?.value || null;
 
     const priceFilters = {
         min_price:   _intOrNull('scraper-min-price'),
@@ -1287,16 +1261,18 @@ async function startScraping(e) {
 
     // Check cookie status before scraping
     if (!cookieStatus.is_valid) {
-        pendingScrapingAction = { type: 'bulk', city, category, maxPages, downloadImages, priceFilters, divarPhone };
+        pendingScrapingAction = { type: 'bulk', city, category, maxPages, downloadImages, priceFilters };
         showCookieWarning();
         return;
     }
 
-    await executeBulkScraping(city, category, maxPages, downloadImages, priceFilters, divarPhone);
+    await executeBulkScraping(city, category, maxPages, downloadImages, priceFilters);
 }
 
-async function executeBulkScraping(city, category, maxPages, downloadImages, priceFilters = {}, divarPhone = null) {
+async function executeBulkScraping(city, category, maxPages, downloadImages, priceFilters = {}) {
     try {
+        // Auto-use the active Divar session — no manual phone selection needed
+        const session = await _getActiveSession();
         const body = {
             city,
             category,
@@ -1304,7 +1280,7 @@ async function executeBulkScraping(city, category, maxPages, downloadImages, pri
             download_images: downloadImages,
             ...priceFilters,
         };
-        if (divarPhone) body.divar_phone = divarPhone;
+        if (session) body.divar_phone = session.phone_number;
 
         const result = await apiCall('/scraper/start', {
             method: 'POST',
@@ -1403,8 +1379,8 @@ function continueScraping() {
     if (!pendingScrapingAction) return;
     
     if (pendingScrapingAction.type === 'bulk') {
-        const { city, category, maxPages, downloadImages, priceFilters, divarPhone } = pendingScrapingAction;
-        executeBulkScraping(city, category, maxPages, downloadImages, priceFilters, divarPhone);
+        const { city, category, maxPages, downloadImages, priceFilters } = pendingScrapingAction;
+        executeBulkScraping(city, category, maxPages, downloadImages, priceFilters);
     } else if (pendingScrapingAction.type === 'single') {
         executeSingleScraping(pendingScrapingAction.url);
     }
@@ -2338,6 +2314,12 @@ async function loadUsers() {
                 <td>${u.full_name || '---'}</td>
                 <td><span class="badge ${rl.cls}">${rl.label}</span></td>
                 <td>
+                    <span class="text-monospace small">${u.divar_phone || '---'}</span>
+                    <button class="btn btn-sm btn-link p-0 ms-1" onclick="promptSetDivarPhone(${u.id}, '${u.divar_phone || ''}')" title="ویرایش شماره دیوار">
+                        <i class="bi bi-pencil-square"></i>
+                    </button>
+                </td>
+                <td>
                     <span class="badge ${u.is_active ? 'bg-success' : 'bg-secondary'}">
                         ${u.is_active ? 'فعال' : 'غیرفعال'}
                     </span>
@@ -2366,16 +2348,17 @@ async function loadUsers() {
 
 async function createUser(e) {
     e.preventDefault();
-    const username  = document.getElementById('new-username').value.trim();
-    const full_name = document.getElementById('new-fullname').value.trim();
-    const email     = document.getElementById('new-email').value.trim();
-    const password  = document.getElementById('new-password').value;
-    const role      = document.getElementById('new-role').value;
+    const username    = document.getElementById('new-username').value.trim();
+    const full_name   = document.getElementById('new-fullname').value.trim();
+    const email       = document.getElementById('new-email').value.trim();
+    const password    = document.getElementById('new-password').value;
+    const role        = document.getElementById('new-role').value;
+    const divar_phone = document.getElementById('new-divar-phone').value.trim() || null;
 
     try {
         await apiCall('/users', {
             method: 'POST',
-            body: JSON.stringify({ username, full_name, email, password, role })
+            body: JSON.stringify({ username, full_name, email, password, role, divar_phone })
         });
         showToast('موفق', 'کاربر ساخته شد', 'success');
         e.target.reset();
@@ -2410,6 +2393,21 @@ async function promptResetPassword(id) {
             body: JSON.stringify({ new_password: newPass })
         });
         showToast('موفق', 'رمز عبور تغییر کرد', 'success');
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function promptSetDivarPhone(id, currentPhone) {
+    const newPhone = prompt(`شماره دیوار مرتبط با این کاربر را وارد کنید:\n(برای پاک کردن، خالی بگذارید)`, currentPhone);
+    if (newPhone === null) return; // cancelled
+    try {
+        await apiCall(`/users/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ divar_phone: newPhone.trim() || null })
+        });
+        showToast('موفق', 'شماره دیوار بروزرسانی شد', 'success');
+        loadUsers();
     } catch (error) {
         showToast('خطا', error.message, 'danger');
     }

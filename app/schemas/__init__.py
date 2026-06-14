@@ -292,6 +292,7 @@ class UserResponse(BaseModel):
     full_name: Optional[str] = None
     role: str
     is_active: bool
+    divar_phone: Optional[str] = None
     last_login: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
@@ -305,6 +306,7 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     password: str = Field(..., min_length=6)
     role: str = Field(default="user")
+    divar_phone: Optional[str] = None
 
     def model_post_init(self, __context: Any) -> None:
         if self.role not in VALID_ROLES:
@@ -316,6 +318,7 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    divar_phone: Optional[str] = None
 
     def model_post_init(self, __context: Any) -> None:
         if self.role and self.role not in VALID_ROLES:

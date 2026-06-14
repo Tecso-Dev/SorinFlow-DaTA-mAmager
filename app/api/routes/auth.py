@@ -10,8 +10,10 @@ from typing import Any, List, Optional
 
 from app.database import get_db
 from app.models.cookie import Cookie
+from app.models.user import User
 from app.scraper.auth import DivarAuth
 from app.config import get_settings
+from app.auth.dependencies import get_current_user_optional
 from app.schemas import (
     LoginRequest,
     OTPVerifyRequest,
@@ -56,7 +58,8 @@ async def initiate_login(
 async def verify_otp(
     request: OTPVerifyRequest,
     phone_number: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_optional),
 ):
     """Verify OTP code and complete login"""
     
@@ -72,6 +75,12 @@ async def verify_otp(
         result = await auth.submit_otp_code(request.code, phone_number)
         
         if result.get("success"):
+            # Auto-link this Divar phone to the current dashboard user
+            if current_user:
+                current_user.divar_phone = phone_number
+                # flush so the cookie-save below sees the updated user
+                await db.flush()
+
             # Ensure cookies are saved to database
             cookies = result.get("cookies", [])
             if cookies:
@@ -253,6 +262,7 @@ class CookieImportRequest(BaseModel):
 async def import_cookies(
     request: CookieImportRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_optional),
 ):
     """Manually import cookies exported from a browser (e.g. via EditThisCookie extension)."""
     if not request.cookies:
@@ -288,6 +298,10 @@ async def import_cookies(
             is_valid=True,
             expires_at=expires_at,
         ))
+
+    # Auto-link this Divar phone to the current dashboard user
+    if current_user:
+        current_user.divar_phone = request.phone_number
 
     await db.commit()
     return {"success": True, "message": f"Cookies imported for {request.phone_number}"}

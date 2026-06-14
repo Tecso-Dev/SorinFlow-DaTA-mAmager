@@ -372,13 +372,6 @@
                                     </div>
 
                                     <div class="mb-3">
-                                        <label class="form-label">شماره دیوار (حساب کاربری)</label>
-                                        <select id="scraper-divar-phone" class="form-select">
-                                            <option value="">-- انتخاب خودکار --</option>
-                                        </select>
-                                        <div class="form-text">نشست‌هایی که لاگین شده‌اند نمایش داده می‌شوند.</div>
-                                    </div>
-                                    <div class="mb-3">
                                         <label class="form-label">حداکثر صفحات</label>
                                         <input type="number" id="scraper-pages" class="form-control" value="10" min="1" max="100">
                                     </div>
@@ -998,13 +991,17 @@
                                         <label class="form-label">رمز عبور</label>
                                         <input type="password" id="new-password" class="form-control form-control-sm" required>
                                     </div>
-                                    <div class="mb-3">
+                                    <div class="mb-2">
                                         <label class="form-label">نقش</label>
                                         <select id="new-role" class="form-select form-select-sm">
                                             <option value="user">User — فقط خواندن</option>
                                             <option value="admin">Admin — مدیریت کامل</option>
                                             <option value="super_admin">Super Admin</option>
                                         </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">شماره دیوار <small class="text-muted">(اختیاری)</small></label>
+                                        <input type="text" id="new-divar-phone" class="form-control form-control-sm" placeholder="09xxxxxxxxx">
                                     </div>
                                     <button type="submit" class="btn btn-primary btn-w100 btn-sm">
                                         <i class="bi bi-plus-circle"></i> ساخت کاربر
@@ -1029,6 +1026,7 @@
                                             <th>نام کاربری</th>
                                             <th>نام کامل</th>
                                             <th>نقش</th>
+                                            <th>شماره دیوار</th>
                                             <th>وضعیت</th>
                                             <th>آخرین ورود</th>
                                             <th>عملیات</th>
