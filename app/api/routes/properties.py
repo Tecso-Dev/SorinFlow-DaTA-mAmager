@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 
 from app.database import get_db
 from app.models.property import Property, City, Category
+from app.models.user import User
+from app.auth.dependencies import get_current_user_optional
 from app.schemas import (
     PropertyResponse,
     PropertyListResponse,
@@ -40,15 +42,22 @@ async def get_properties(
     max_rooms: Optional[int] = None,
     has_phone: Optional[bool] = None,
     search: Optional[str] = None,
+    owner_phone: Optional[str] = None,
     sort_by: str = "scraped_at",
     sort_order: str = "desc",
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """Get paginated list of properties with filters"""
-    
+
     # Build query
     query = select(Property).where(Property.is_active == True)
-    
+
+    # Server-enforced isolation: user's divar_phone takes priority over query param
+    effective_phone = (current_user.divar_phone if current_user else None) or owner_phone or None
+    if effective_phone:
+        query = query.where(Property.owner_phone == effective_phone)
+
     # Apply filters
     if city:
         query = query.where(Property.city_name.ilike(f"%{city}%"))

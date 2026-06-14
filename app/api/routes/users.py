@@ -161,6 +161,20 @@ async def totp_enable(
     return {"success": True, "message": "احراز هویت دو مرحله‌ای فعال شد"}
 
 
+@router.patch("/me/divar-phone", response_model=UserResponse)
+async def update_my_divar_phone(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set or clear the current user's linked Divar phone number."""
+    phone = data.get("divar_phone", "").strip() or None
+    current_user.divar_phone = phone
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
+
 @router.post("/me/totp/disable")
 async def totp_disable(
     data: TotpDisableRequest,
@@ -210,6 +224,7 @@ async def create_user(
         full_name=data.full_name,
         hashed_password=get_password_hash(data.password),
         role=data.role,
+        divar_phone=data.divar_phone or None,
         is_active=True,
     )
     db.add(user)
@@ -238,6 +253,8 @@ async def update_user(
         user.role = data.role
     if data.is_active is not None:
         user.is_active = data.is_active
+    if data.divar_phone is not None:
+        user.divar_phone = data.divar_phone or None
 
     await db.commit()
     await db.refresh(user)

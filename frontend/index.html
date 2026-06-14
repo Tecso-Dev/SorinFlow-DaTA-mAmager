@@ -147,7 +147,7 @@
             </div>
             <div class="topbar-spacer"></div>
 
-            <div class="topbar-badge">
+            <div class="topbar-badge" onclick="showSection('auth')" style="cursor:pointer;" title="رفتن به بخش احراز هویت دیوار">
                 <span class="dot dot-muted" id="cookie-dot"></span>
                 <span id="cookie-status">وضعیت کوکی</span>
             </div>
@@ -455,12 +455,18 @@
                                 </div>
 
                                 <div id="auth-verify-form" style="display:none;">
-                                    <div class="mb-3">
-                                        <label class="form-label">کد تأیید ۶ رقمی</label>
-                                        <input type="text" id="auth-code" class="form-control"
-                                               maxlength="6" placeholder="------">
+                                    <div class="mb-3 text-center">
+                                        <label class="form-label d-block mb-3">کد تأیید ۶ رقمی</label>
+                                        <div class="otp-boxes" dir="ltr" id="otp-boxes">
+                                            <input class="otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="one-time-code">
+                                            <input class="otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+                                            <input class="otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+                                            <input class="otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+                                            <input class="otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+                                            <input class="otp-box" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off">
+                                        </div>
                                     </div>
-                                    <button class="btn btn-success btn-w100" onclick="verifyCode()">
+                                    <button id="otp-verify-btn" class="btn btn-success btn-w100" onclick="verifyCode()">
                                         <i class="bi bi-check-circle"></i> تأیید و ورود
                                     </button>
                                 </div>
@@ -985,13 +991,17 @@
                                         <label class="form-label">رمز عبور</label>
                                         <input type="password" id="new-password" class="form-control form-control-sm" required>
                                     </div>
-                                    <div class="mb-3">
+                                    <div class="mb-2">
                                         <label class="form-label">نقش</label>
                                         <select id="new-role" class="form-select form-select-sm">
                                             <option value="user">User — فقط خواندن</option>
                                             <option value="admin">Admin — مدیریت کامل</option>
                                             <option value="super_admin">Super Admin</option>
                                         </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">شماره دیوار <small class="text-muted">(اختیاری)</small></label>
+                                        <input type="text" id="new-divar-phone" class="form-control form-control-sm" placeholder="09xxxxxxxxx">
                                     </div>
                                     <button type="submit" class="btn btn-primary btn-w100 btn-sm">
                                         <i class="bi bi-plus-circle"></i> ساخت کاربر
@@ -1016,6 +1026,7 @@
                                             <th>نام کاربری</th>
                                             <th>نام کامل</th>
                                             <th>نقش</th>
+                                            <th>شماره دیوار</th>
                                             <th>وضعیت</th>
                                             <th>آخرین ورود</th>
                                             <th>عملیات</th>

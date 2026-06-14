@@ -707,6 +707,48 @@ a:hover { color: var(--accent); }
   outline: none;
 }
 .form-control::placeholder { color: var(--text-muted); }
+
+/* Fix browser autofill overriding dark theme background */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--text) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--surface2) inset !important;
+  caret-color: var(--text);
+}
+/* ── OTP Boxes ──────────────────────────────────── */
+.otp-boxes {
+  display: flex;
+  gap: .5rem;
+  justify-content: center;
+  margin: .25rem auto 1.25rem;
+}
+.otp-box {
+  width: 48px; height: 56px;
+  text-align: center;
+  font-size: 1.6rem; font-weight: 700;
+  border: 2px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface3);
+  color: var(--text);
+  caret-color: var(--accent);
+  outline: none;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+  -webkit-text-fill-color: var(--text);
+}
+.otp-box:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+  background: var(--surface);
+}
+.otp-box.filled {
+  border-color: rgba(99,102,241,.5);
+  color: var(--accent);
+  -webkit-text-fill-color: var(--accent);
+}
+/* ── End OTP Boxes ───────────────────────────── */
+
 .form-control:focus, .form-select:focus {
   border-color: rgba(99,102,241,.6);
   box-shadow: 0 0 0 3px var(--accent-glow);

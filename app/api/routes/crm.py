@@ -128,6 +128,14 @@ async def list_contacts(
     return {"items": [c.to_dict() for c in items], "total": count}
 
 
+def _normalize_tags(tags) -> str | None:
+    if tags is None:
+        return None
+    if isinstance(tags, list):
+        return ", ".join(str(t).strip() for t in tags if t)
+    return str(tags).strip() or None
+
+
 @router.post("/contacts")
 async def create_contact(data: dict, db: AsyncSession = Depends(get_db)):
     contact = Contact(
@@ -140,7 +148,7 @@ async def create_contact(data: dict, db: AsyncSession = Depends(get_db)):
         city=data.get("city"),
         address=data.get("address"),
         notes=data.get("notes"),
-        tags=data.get("tags"),
+        tags=_normalize_tags(data.get("tags")),
     )
     db.add(contact)
     await db.commit()
@@ -217,9 +225,11 @@ async def update_contact(contact_id: int, data: dict, db: AsyncSession = Depends
     contact = result.scalar_one_or_none()
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
-    for field in ("name", "phone", "phone2", "email", "contact_type", "category", "city", "address", "notes", "tags"):
+    for field in ("name", "phone", "phone2", "email", "contact_type", "category", "city", "address", "notes"):
         if field in data:
             setattr(contact, field, data[field])
+    if "tags" in data:
+        contact.tags = _normalize_tags(data["tags"])
     contact.updated_at = datetime.now()
     await db.commit()
     await db.refresh(contact)
@@ -335,7 +345,7 @@ async def create_task(data: dict, db: AsyncSession = Depends(get_db)):
     due = None
     if data.get("due_date"):
         try:
-            due = datetime.fromisoformat(data["due_date"])
+            due = _parse_datetime(data["due_date"])
         except Exception:
             pass
     task = Task(
@@ -374,7 +384,7 @@ async def update_task(task_id: int, data: dict, db: AsyncSession = Depends(get_d
             setattr(task, field, data[field])
     if "due_date" in data and data["due_date"]:
         try:
-            task.due_date = datetime.fromisoformat(data["due_date"])
+            task.due_date = _parse_datetime(data["due_date"])
         except Exception:
             pass
     task.updated_at = datetime.now()
@@ -444,12 +454,12 @@ async def create_deal(data: dict, db: AsyncSession = Depends(get_db)):
     contract_date = close_date = None
     if data.get("contract_date"):
         try:
-            contract_date = datetime.fromisoformat(data["contract_date"])
+            contract_date = _parse_datetime(data["contract_date"])
         except Exception:
             pass
     if data.get("close_date"):
         try:
-            close_date = datetime.fromisoformat(data["close_date"])
+            close_date = _parse_datetime(data["close_date"])
         except Exception:
             pass
     deal = Deal(
@@ -545,7 +555,7 @@ async def update_deal(deal_id: int, data: dict, db: AsyncSession = Depends(get_d
     for date_field in ("contract_date", "close_date"):
         if data.get(date_field):
             try:
-                setattr(deal, date_field, datetime.fromisoformat(data[date_field]))
+                setattr(deal, date_field, _parse_datetime(data[date_field]))
             except Exception:
                 pass
     deal.updated_at = datetime.now()
@@ -600,12 +610,17 @@ async def get_due_reminders(db: AsyncSession = Depends(get_db)):
     return {"items": [r.to_dict() for r in items]}
 
 
+def _parse_datetime(value: str) -> datetime:
+    """Parse ISO datetime string; handles Z suffix (Python < 3.11 compat)."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 @router.post("/reminders")
 async def create_reminder(data: dict, db: AsyncSession = Depends(get_db)):
     remind_at = None
     if data.get("remind_at"):
         try:
-            remind_at = datetime.fromisoformat(data["remind_at"])
+            remind_at = _parse_datetime(data["remind_at"])
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid remind_at format")
     if not remind_at:
