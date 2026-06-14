@@ -77461,3 +77461,1773 @@ _
 2026-06-14 08:00:21 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.204s
 2026-06-14 08:00:21 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.228s
 2026-06-14 08:00:32 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:01:02 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:01:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.072s
+2026-06-14 08:01:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.102s
+2026-06-14 08:01:32 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:02:02 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:02:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.067s
+2026-06-14 08:02:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.078s
+2026-06-14 08:02:32 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:03:02 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:03:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.077s
+2026-06-14 08:03:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.109s
+2026-06-14 08:03:32 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:04:03 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:04:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.079s
+2026-06-14 08:04:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-14 08:04:33 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:05:03 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:05:12 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.094s
+2026-06-14 08:05:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.105s
+2026-06-14 08:05:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.138s
+2026-06-14 08:05:33 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:06:03 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:06:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.096s
+2026-06-14 08:06:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.110s
+2026-06-14 08:06:33 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:07:03 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:07:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.092s
+2026-06-14 08:07:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.124s
+2026-06-14 08:07:33 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:08:03 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:08:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.071s
+2026-06-14 08:08:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.079s
+2026-06-14 08:08:33 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:09:03 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:09:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.091s
+2026-06-14 08:09:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.119s
+2026-06-14 08:09:34 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:10:04 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:10:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.104s
+2026-06-14 08:10:12 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.104s
+2026-06-14 08:10:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.117s
+2026-06-14 08:10:34 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:11:04 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:11:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.081s
+2026-06-14 08:11:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.110s
+2026-06-14 08:11:34 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:12:04 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:12:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.068s
+2026-06-14 08:12:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.080s
+2026-06-14 08:12:34 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:13:04 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:13:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.075s
+2026-06-14 08:13:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.101s
+2026-06-14 08:13:34 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:14:04 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:14:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.076s
+2026-06-14 08:14:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.090s
+2026-06-14 08:14:35 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.003s
+2026-06-14 08:15:05 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:15:12 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.093s
+2026-06-14 08:15:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.099s
+2026-06-14 08:15:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.137s
+2026-06-14 08:15:35 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:16:05 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:16:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.094s
+2026-06-14 08:16:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.104s
+2026-06-14 08:16:35 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:17:05 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:17:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.077s
+2026-06-14 08:17:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.103s
+2026-06-14 08:17:35 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:18:05 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:18:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.069s
+2026-06-14 08:18:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.078s
+2026-06-14 08:18:35 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:19:05 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:19:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.077s
+2026-06-14 08:19:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.116s
+2026-06-14 08:19:35 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:20:06 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:20:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.091s
+2026-06-14 08:20:12 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.095s
+2026-06-14 08:20:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.104s
+2026-06-14 08:20:36 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:21:06 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:21:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.107s
+2026-06-14 08:21:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.145s
+2026-06-14 08:21:36 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:22:06 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:22:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.066s
+2026-06-14 08:22:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.076s
+2026-06-14 08:22:36 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:23:06 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:23:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.072s
+2026-06-14 08:23:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.103s
+2026-06-14 08:23:36 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.003s
+2026-06-14 08:24:06 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:24:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.085s
+2026-06-14 08:24:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.098s
+2026-06-14 08:24:36 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:25:06 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:25:12 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.096s
+2026-06-14 08:25:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.105s
+2026-06-14 08:25:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.139s
+2026-06-14 08:25:36 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:26:07 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:26:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.068s
+2026-06-14 08:26:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.080s
+2026-06-14 08:26:37 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:27:07 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:27:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.068s
+2026-06-14 08:27:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.093s
+2026-06-14 08:27:37 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:28:07 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:28:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.075s
+2026-06-14 08:28:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.087s
+2026-06-14 08:28:37 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:29:07 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:29:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.088s
+2026-06-14 08:29:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.118s
+2026-06-14 08:29:37 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:30:07 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:30:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.092s
+2026-06-14 08:30:12 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.093s
+2026-06-14 08:30:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.105s
+2026-06-14 08:30:37 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:31:08 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:31:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.088s
+2026-06-14 08:31:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.126s
+2026-06-14 08:31:38 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:32:08 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:32:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.160s
+2026-06-14 08:32:12 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.197s
+2026-06-14 08:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.100s
+2026-06-14 08:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.217s
+2026-06-14 08:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.211s
+2026-06-14 08:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.212s
+2026-06-14 08:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.216s
+2026-06-14 08:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.226s
+2026-06-14 08:32:22 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.089s
+2026-06-14 08:32:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.192s
+2026-06-14 08:32:23 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.189s
+2026-06-14 08:32:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.194s
+2026-06-14 08:32:23 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.198s
+2026-06-14 08:32:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.208s
+2026-06-14 08:32:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.088s
+2026-06-14 08:32:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.091s
+2026-06-14 08:32:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.068s
+2026-06-14 08:32:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.151s
+2026-06-14 08:32:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.050s
+2026-06-14 08:32:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:32:38 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:32:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.060s
+2026-06-14 08:32:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:32:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.053s
+2026-06-14 08:32:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.045s
+2026-06-14 08:32:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.079s
+2026-06-14 08:32:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.085s
+2026-06-14 08:32:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.041s
+2026-06-14 08:32:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.059s
+2026-06-14 08:32:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:32:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.045s
+2026-06-14 08:33:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:33:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.054s
+2026-06-14 08:33:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:33:08 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:33:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.076s
+2026-06-14 08:33:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.083s
+2026-06-14 08:33:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.038s
+2026-06-14 08:33:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.046s
+2026-06-14 08:33:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.051s
+2026-06-14 08:33:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:33:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.080s
+2026-06-14 08:33:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.102s
+2026-06-14 08:33:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.130s
+2026-06-14 08:33:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:33:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.067s
+2026-06-14 08:33:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.072s
+2026-06-14 08:33:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.077s
+2026-06-14 08:33:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.062s
+2026-06-14 08:33:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.058s
+2026-06-14 08:33:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:33:38 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:33:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.061s
+2026-06-14 08:33:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.057s
+2026-06-14 08:33:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.050s
+2026-06-14 08:33:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:33:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.093s
+2026-06-14 08:33:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.102s
+2026-06-14 08:33:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:33:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.045s
+2026-06-14 08:33:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:33:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:34:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:34:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.042s
+2026-06-14 08:34:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:34:08 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:34:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.089s
+2026-06-14 08:34:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.099s
+2026-06-14 08:34:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.041s
+2026-06-14 08:34:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.052s
+2026-06-14 08:34:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.038s
+2026-06-14 08:34:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.046s
+2026-06-14 08:34:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.084s
+2026-06-14 08:34:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.087s
+2026-06-14 08:34:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.107s
+2026-06-14 08:34:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.086s
+2026-06-14 08:34:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:34:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.078s
+2026-06-14 08:34:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.081s
+2026-06-14 08:34:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.042s
+2026-06-14 08:34:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.057s
+2026-06-14 08:34:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.038s
+2026-06-14 08:34:38 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:34:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:34:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:34:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.044s
+2026-06-14 08:34:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:34:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.069s
+2026-06-14 08:34:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.076s
+2026-06-14 08:34:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:34:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.059s
+2026-06-14 08:34:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.038s
+2026-06-14 08:34:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.045s
+2026-06-14 08:35:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:35:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:35:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.050s
+2026-06-14 08:35:08 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:35:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.097s
+2026-06-14 08:35:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.111s
+2026-06-14 08:35:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:35:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.056s
+2026-06-14 08:35:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.050s
+2026-06-14 08:35:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.050s
+2026-06-14 08:35:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.079s
+2026-06-14 08:35:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.083s
+2026-06-14 08:35:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.122s
+2026-06-14 08:35:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.044s
+2026-06-14 08:35:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.046s
+2026-06-14 08:35:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.071s
+2026-06-14 08:35:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.080s
+2026-06-14 08:35:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.041s
+2026-06-14 08:35:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.059s
+2026-06-14 08:35:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.042s
+2026-06-14 08:35:39 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:35:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.049s
+2026-06-14 08:35:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:35:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.044s
+2026-06-14 08:35:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:35:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.075s
+2026-06-14 08:35:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.084s
+2026-06-14 08:35:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.050s
+2026-06-14 08:35:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.057s
+2026-06-14 08:35:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.055s
+2026-06-14 08:35:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:36:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:36:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.041s
+2026-06-14 08:36:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:36:09 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:36:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.098s
+2026-06-14 08:36:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.111s
+2026-06-14 08:36:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.052s
+2026-06-14 08:36:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.056s
+2026-06-14 08:36:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.041s
+2026-06-14 08:36:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:36:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.090s
+2026-06-14 08:36:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.082s
+2026-06-14 08:36:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.094s
+2026-06-14 08:36:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.055s
+2026-06-14 08:36:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.063s
+2026-06-14 08:36:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.096s
+2026-06-14 08:36:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.107s
+2026-06-14 08:36:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.053s
+2026-06-14 08:36:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.062s
+2026-06-14 08:36:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.041s
+2026-06-14 08:36:39 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:36:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.046s
+2026-06-14 08:36:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:36:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:36:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.063s
+2026-06-14 08:36:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.083s
+2026-06-14 08:36:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.089s
+2026-06-14 08:36:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.056s
+2026-06-14 08:36:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.044s
+2026-06-14 08:36:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.097s
+2026-06-14 08:36:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.084s
+2026-06-14 08:37:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.038s
+2026-06-14 08:37:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.044s
+2026-06-14 08:37:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:37:09 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:37:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.083s
+2026-06-14 08:37:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.092s
+2026-06-14 08:37:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:37:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.044s
+2026-06-14 08:37:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:37:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:37:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:37:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.098s
+2026-06-14 08:37:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.107s
+2026-06-14 08:37:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.138s
+2026-06-14 08:37:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.046s
+2026-06-14 08:37:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:37:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.079s
+2026-06-14 08:37:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.087s
+2026-06-14 08:37:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.042s
+2026-06-14 08:37:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.053s
+2026-06-14 08:37:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.038s
+2026-06-14 08:37:39 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:37:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.051s
+2026-06-14 08:37:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:37:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.055s
+2026-06-14 08:37:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:37:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.065s
+2026-06-14 08:37:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.076s
+2026-06-14 08:37:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.076s
+2026-06-14 08:37:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.054s
+2026-06-14 08:37:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:37:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.094s
+2026-06-14 08:38:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.084s
+2026-06-14 08:38:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.050s
+2026-06-14 08:38:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:38:09 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:38:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.074s
+2026-06-14 08:38:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.082s
+2026-06-14 08:38:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:38:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.052s
+2026-06-14 08:38:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:38:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.042s
+2026-06-14 08:38:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.045s
+2026-06-14 08:38:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.093s
+2026-06-14 08:38:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.105s
+2026-06-14 08:38:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.049s
+2026-06-14 08:38:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:38:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.089s
+2026-06-14 08:38:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.094s
+2026-06-14 08:38:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.042s
+2026-06-14 08:38:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.058s
+2026-06-14 08:38:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:38:39 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:38:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.082s
+2026-06-14 08:38:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:38:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:38:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:38:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.063s
+2026-06-14 08:38:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.071s
+2026-06-14 08:38:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.046s
+2026-06-14 08:38:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.051s
+2026-06-14 08:38:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.060s
+2026-06-14 08:38:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.042s
+2026-06-14 08:39:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:39:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.044s
+2026-06-14 08:39:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.056s
+2026-06-14 08:39:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.090s
+2026-06-14 08:39:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.099s
+2026-06-14 08:39:09 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:39:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:39:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:39:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:39:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.045s
+2026-06-14 08:39:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.093s
+2026-06-14 08:39:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.081s
+2026-06-14 08:39:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.115s
+2026-06-14 08:39:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:39:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:39:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.100s
+2026-06-14 08:39:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.102s
+2026-06-14 08:39:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.082s
+2026-06-14 08:39:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:39:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.041s
+2026-06-14 08:39:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.049s
+2026-06-14 08:39:39 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:39:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:39:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.047s
+2026-06-14 08:39:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.058s
+2026-06-14 08:39:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.060s
+2026-06-14 08:39:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.070s
+2026-06-14 08:39:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:39:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.055s
+2026-06-14 08:39:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.069s
+2026-06-14 08:39:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:40:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:40:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.042s
+2026-06-14 08:40:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.051s
+2026-06-14 08:40:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.104s
+2026-06-14 08:40:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.115s
+2026-06-14 08:40:10 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:40:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.038s
+2026-06-14 08:40:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.062s
+2026-06-14 08:40:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.041s
+2026-06-14 08:40:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.057s
+2026-06-14 08:40:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.084s
+2026-06-14 08:40:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.078s
+2026-06-14 08:40:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.094s
+2026-06-14 08:40:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.049s
+2026-06-14 08:40:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.053s
+2026-06-14 08:40:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.102s
+2026-06-14 08:40:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.112s
+2026-06-14 08:40:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.045s
+2026-06-14 08:40:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:40:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.042s
+2026-06-14 08:40:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.047s
+2026-06-14 08:40:40 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:40:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:40:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.054s
+2026-06-14 08:40:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:40:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.075s
+2026-06-14 08:40:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.084s
+2026-06-14 08:40:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.037s
+2026-06-14 08:40:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.046s
+2026-06-14 08:40:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:40:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.049s
+2026-06-14 08:41:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:41:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.042s
+2026-06-14 08:41:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:41:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.101s
+2026-06-14 08:41:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.108s
+2026-06-14 08:41:10 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:41:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.041s
+2026-06-14 08:41:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.072s
+2026-06-14 08:41:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:41:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.047s
+2026-06-14 08:41:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.112s
+2026-06-14 08:41:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.094s
+2026-06-14 08:41:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.123s
+2026-06-14 08:41:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.064s
+2026-06-14 08:41:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.117s
+2026-06-14 08:41:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.073s
+2026-06-14 08:41:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.081s
+2026-06-14 08:41:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:41:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.046s
+2026-06-14 08:41:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.042s
+2026-06-14 08:41:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:41:40 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:41:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.045s
+2026-06-14 08:41:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.060s
+2026-06-14 08:41:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.046s
+2026-06-14 08:41:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.071s
+2026-06-14 08:41:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.080s
+2026-06-14 08:41:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:41:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.052s
+2026-06-14 08:41:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:41:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.051s
+2026-06-14 08:42:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:42:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.052s
+2026-06-14 08:42:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:42:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.117s
+2026-06-14 08:42:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.128s
+2026-06-14 08:42:10 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:42:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:42:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.057s
+2026-06-14 08:42:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:42:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.058s
+2026-06-14 08:42:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.084s
+2026-06-14 08:42:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.182s
+2026-06-14 08:42:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.196s
+2026-06-14 08:42:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.234s
+2026-06-14 08:42:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.069s
+2026-06-14 08:42:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.051s
+2026-06-14 08:42:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.085s
+2026-06-14 08:42:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.096s
+2026-06-14 08:42:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.051s
+2026-06-14 08:42:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.058s
+2026-06-14 08:42:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.055s
+2026-06-14 08:42:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.052s
+2026-06-14 08:42:40 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:42:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.042s
+2026-06-14 08:42:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.076s
+2026-06-14 08:42:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.053s
+2026-06-14 08:42:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.065s
+2026-06-14 08:42:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.070s
+2026-06-14 08:42:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:42:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.051s
+2026-06-14 08:42:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.045s
+2026-06-14 08:42:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.058s
+2026-06-14 08:43:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.046s
+2026-06-14 08:43:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:43:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.057s
+2026-06-14 08:43:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.095s
+2026-06-14 08:43:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.102s
+2026-06-14 08:43:10 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:43:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.038s
+2026-06-14 08:43:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.057s
+2026-06-14 08:43:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.041s
+2026-06-14 08:43:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:43:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.086s
+2026-06-14 08:43:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.091s
+2026-06-14 08:43:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.101s
+2026-06-14 08:43:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.064s
+2026-06-14 08:43:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.067s
+2026-06-14 08:43:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.064s
+2026-06-14 08:43:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.072s
+2026-06-14 08:43:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.054s
+2026-06-14 08:43:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.047s
+2026-06-14 08:43:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:43:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.043s
+2026-06-14 08:43:40 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:43:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.042s
+2026-06-14 08:43:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.064s
+2026-06-14 08:43:45 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.064s
+2026-06-14 08:43:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.066s
+2026-06-14 08:43:49 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.081s
+2026-06-14 08:43:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:43:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.045s
+2026-06-14 08:43:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:43:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.047s
+2026-06-14 08:44:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:44:04 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.042s
+2026-06-14 08:44:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.067s
+2026-06-14 08:44:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.096s
+2026-06-14 08:44:09 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.103s
+2026-06-14 08:44:11 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:44:13 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.062s
+2026-06-14 08:44:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.062s
+2026-06-14 08:44:17 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:44:19 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.050s
+2026-06-14 08:44:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.081s
+2026-06-14 08:44:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.079s
+2026-06-14 08:44:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.111s
+2026-06-14 08:44:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.042s
+2026-06-14 08:44:25 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.073s
+2026-06-14 08:44:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.070s
+2026-06-14 08:44:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.072s
+2026-06-14 08:44:33 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.038s
+2026-06-14 08:44:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.058s
+2026-06-14 08:44:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:44:39 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.044s
+2026-06-14 08:44:41 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.104s
+2026-06-14 08:44:41 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.003s
+2026-06-14 08:44:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.146s
+2026-06-14 08:44:41 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.160s
+2026-06-14 08:44:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.156s
+2026-06-14 08:44:41 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.144s
+2026-06-14 08:44:41 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.091s
+2026-06-14 08:44:41 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.109s
+2026-06-14 08:45:11 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:45:23 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.117s
+2026-06-14 08:45:23 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.162s
+2026-06-14 08:45:23 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.164s
+2026-06-14 08:45:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.175s
+2026-06-14 08:45:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.160s
+2026-06-14 08:45:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.120s
+2026-06-14 08:45:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.156s
+2026-06-14 08:45:26 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.073s
+2026-06-14 08:45:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.076s
+2026-06-14 08:45:30 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.038s
+2026-06-14 08:45:31 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:45:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.042s
+2026-06-14 08:45:36 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.042s
+2026-06-14 08:45:37 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:45:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.046s
+2026-06-14 08:45:41 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:45:42 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.050s
+2026-06-14 08:45:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.074s
+2026-06-14 08:45:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.084s
+2026-06-14 08:45:50 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:45:51 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.064s
+2026-06-14 08:45:52 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.058s
+2026-06-14 08:45:52 | DEBUG    | app.main:log_requests:142 - POST /api/scraper/start - 200 - 0.126s
+2026-06-14 08:45:52 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.068s
+2026-06-14 08:45:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.088s
+2026-06-14 08:45:54 | WARNING  | app.scraper.auth:check_cookies_validity:200 - No specific auth cookies found, but cookies exist. Assuming valid.
+2026-06-14 08:45:54 | INFO     | app.scraper.auth:apply_cookies:216 - Cookies applied to browser context
+2026-06-14 08:45:56 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.063s
+2026-06-14 08:45:56 | INFO     | app.scraper.auth:restore_session:640 - Session restored successfully for 09364751021 (url=https://divar.ir/my-divar/my-posts)
+2026-06-14 08:45:56 | INFO     | app.scraper.divar_scraper:initialize:150 - Session restored successfully
+2026-06-14 08:45:56 | INFO     | app.scraper.divar_scraper:start_scraping_job:1335 - Starting scraping job for urmia/buy-residential
+2026-06-14 08:45:56 | INFO     | app.scraper.divar_scraper:scrape_listing_page:288 - Scraping listing page: https://divar.ir/s/urmia/buy-residential
+2026-06-14 08:45:58 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.068s
+2026-06-14 08:46:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.074s
+2026-06-14 08:46:01 | INFO     | app.scraper.divar_scraper:scrape_listing_page:327 - Found 10 listings on page 1
+2026-06-14 08:46:02 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:46:02 | INFO     | app.scraper.divar_scraper:start_scraping_job:1359 - Found 10 total listings
+2026-06-14 08:46:02 | INFO     | app.scraper.divar_scraper:scrape_property_detail:376 - Scraping property detail: https://divar.ir/v/%D9%85%D9%86%D8%B2%D9%84-%DA%A9%D9%84%D9%86%DA%AF%DB%8C-%D8%AA%D8%A7%D9%BE-%D9%84%D9%88%DA%A9%DB%8C%D8%B4%D9%86-%DB%B2-%D9%85%D8%BA%D8%A7%D8%B2%D9%87/gahoFFx2?tracker_session_id=78414423-b219-4ed8-8d3e-dec1de39ed94_gahoFFx2_P
+2026-06-14 08:46:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.072s
+2026-06-14 08:46:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.081s
+2026-06-14 08:46:10 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.055s
+2026-06-14 08:46:11 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.060s
+2026-06-14 08:46:11 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:46:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.045s
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:_click_show_all_details:982 - No 'Show all details' button found (content may already be expanded)
+2026-06-14 08:46:16 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.257s
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => موردی برای نمایش وجود ندارد
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text => موردی برای نمایش وجود ندارد
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => انتشار آگهی: ۱۴ خرداد ۱۴۰۵، ۱۴:۲۷
+آخرین نردبان: ۲۱ خرداد ۱۴۰۵، ۱۷:۵۴
+آخرین به‌رو
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary.kt-description-row__text--small => انتشار آگهی: ۱۴ خرداد ۱۴۰۵، ۱۴:۲۷
+آخرین نردبان: ۲۱ خرداد ۱۴۰۵، ۱۷:۵۴
+آخرین به‌رو
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => باسلام
+
+#کد_فایل_647
+#فروش_کلنگی ولیعصر بر خیابان گنجوی
+متراژ زمین 70
+عرض گذر 18
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => باسلام
+
+#کد_فایل_647
+#فروش_کلنگی ولیعصر بر خیابان گنجوی
+متراژ زمین 70
+عرض گذر 18
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:16 | INFO     | app.scraper.divar_scraper:scrape_property_detail:469 - Description extracted (359 chars)
+2026-06-14 08:46:18 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.060s
+2026-06-14 08:46:18 | INFO     | app.scraper.contact_extractor:get_phone_number:67 - Found visible contact button with selector: .post-actions__get-contact
+2026-06-14 08:46:19 | INFO     | app.scraper.contact_extractor:get_phone_number:83 - Contact button clicked successfully
+2026-06-14 08:46:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.061s
+2026-06-14 08:46:22 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:46:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.046s
+2026-06-14 08:46:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.075s
+2026-06-14 08:46:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-14 08:46:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.075s
+2026-06-14 08:46:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.084s
+2026-06-14 08:46:28 | INFO     | app.scraper.contact_extractor:_handle_sms_otp_if_present:258 - No SMS-OTP modal detected, continuing normally
+2026-06-14 08:46:28 | INFO     | app.scraper.contact_extractor:get_phone_number:146 - Phone number link found in page content
+2026-06-14 08:46:28 | INFO     | app.scraper.contact_extractor:get_phone_number:186 - Found phone element with selector: a[href^="tel:"]
+2026-06-14 08:46:29 | INFO     | app.scraper.contact_extractor:get_phone_number:193 - Raw phone text: 09149417763
+2026-06-14 08:46:29 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_1.webp
+2026-06-14 08:46:30 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:46:30 | INFO     | app.scraper.divar_scraper:save_property:1265 - Saved new property: gahoFFx2 with tag SF-20260614084630-DD98CE
+2026-06-14 08:46:30 | INFO     | app.crm.lead_service:create_lead_from_property:43 - CRM lead created: id=21 property=21 phone=09149417763
+2026-06-14 08:46:30 | DEBUG    | app.crm.notification:send_telegram:57 - Telegram not configured, skipping notification
+2026-06-14 08:46:30 | DEBUG    | app.crm.notification:_sync_send_email:89 - Email not configured, skipping notification
+2026-06-14 08:46:30 | INFO     | app.crm.pipeline:process_new_property:33 - CRM pipeline done — lead #21 | notified=False | channel=none
+2026-06-14 08:46:31 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.071s
+2026-06-14 08:46:31 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.065s
+2026-06-14 08:46:31 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.058s
+2026-06-14 08:46:32 | INFO     | app.scraper.divar_scraper:scrape_property_detail:376 - Scraping property detail: https://divar.ir/v/%D8%A2%D9%BE%D8%A7%D8%B1%D8%AA%D9%85%D8%A7%D9%86-%DB%B1%DB%B2%DB%B0-%D9%85%D8%AA%D8%B1%DB%8C%DB%B2-%D8%AE%D9%88%D8%A7%D8%A8-%D8%A2%D9%BE%D8%A7%D8%AF%D8%A7%D9%86%D8%A7-%D8%B7%D8%A8%D9%82%D9%87-%DB%B4-%D8%B3%D9%86%D8%AF-%D8%AA%DA%A9-%D8%A8%D8%B1%DA%AF/gats7NQ7?tracker_session_id=78414423-b219-4ed8-8d3e-dec1de39ed94_gats7NQ7_P
+2026-06-14 08:46:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:46:36 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:46:38 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:46:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.052s
+2026-06-14 08:46:41 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:46:42 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:46:45 | INFO     | app.scraper.divar_scraper:_click_show_all_details:982 - No 'Show all details' button found (content may already be expanded)
+2026-06-14 08:46:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.124s
+2026-06-14 08:46:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.135s
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => موردی برای نمایش وجود ندارد
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text => موردی برای نمایش وجود ندارد
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => انتشار آگهی: ۲۴ خرداد ۱۴۰۵، ۰۰:۱۱
+آخرین به‌روز‌رسانی: ۲۴ خرداد ۱۴۰۵، ۰۷:۵۴
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary.kt-description-row__text--small => انتشار آگهی: ۲۴ خرداد ۱۴۰۵، ۰۰:۱۱
+آخرین به‌روز‌رسانی: ۲۴ خرداد ۱۴۰۵، ۰۷:۵۴
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => واحد جنوبی، نورگیر، خوش‌نقشه و شخصی‌ساز. ساختمان دوکله، آسانسور ۱۳ نفره، کابینت 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => واحد جنوبی، نورگیر، خوش‌نقشه و شخصی‌ساز. ساختمان دوکله، آسانسور ۱۳ نفره، کابینت 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:46:46 | INFO     | app.scraper.divar_scraper:scrape_property_detail:469 - Description extracted (328 chars)
+2026-06-14 08:46:48 | INFO     | app.scraper.contact_extractor:get_phone_number:67 - Found visible contact button with selector: .post-actions__get-contact
+2026-06-14 08:46:49 | INFO     | app.scraper.contact_extractor:get_phone_number:83 - Contact button clicked successfully
+2026-06-14 08:46:50 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.045s
+2026-06-14 08:46:51 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.077s
+2026-06-14 08:46:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.051s
+2026-06-14 08:46:56 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.055s
+2026-06-14 08:46:58 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:46:58 | INFO     | app.scraper.contact_extractor:_handle_sms_otp_if_present:258 - No SMS-OTP modal detected, continuing normally
+2026-06-14 08:46:59 | INFO     | app.scraper.contact_extractor:get_phone_number:146 - Phone number link found in page content
+2026-06-14 08:46:59 | INFO     | app.scraper.contact_extractor:get_phone_number:186 - Found phone element with selector: a[href^="tel:"]
+2026-06-14 08:46:59 | INFO     | app.scraper.contact_extractor:get_phone_number:193 - Raw phone text: 09125958488
+2026-06-14 08:46:59 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_1.webp
+2026-06-14 08:47:00 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_2.webp
+2026-06-14 08:47:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.066s
+2026-06-14 08:47:01 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_3.webp
+2026-06-14 08:47:01 | INFO     | app.scraper.divar_scraper:save_property:1265 - Saved new property: gats7NQ7 with tag SF-20260614084701-71D54E
+2026-06-14 08:47:01 | INFO     | app.crm.lead_service:create_lead_from_property:43 - CRM lead created: id=22 property=22 phone=09125958488
+2026-06-14 08:47:01 | DEBUG    | app.crm.notification:send_telegram:57 - Telegram not configured, skipping notification
+2026-06-14 08:47:01 | DEBUG    | app.crm.notification:_sync_send_email:89 - Email not configured, skipping notification
+2026-06-14 08:47:01 | INFO     | app.crm.pipeline:process_new_property:33 - CRM pipeline done — lead #22 | notified=False | channel=none
+2026-06-14 08:47:02 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.051s
+2026-06-14 08:47:03 | INFO     | app.scraper.divar_scraper:scrape_property_detail:376 - Scraping property detail: https://divar.ir/v/%D9%81%D8%B1%D9%88%D8%B4-%D8%AE%D8%A7%D9%86%D9%87-%D8%A8%D8%B1%D8%A7%DB%8C-%D8%A2%D9%BE%D8%A7%D8%B1%D8%AA%D9%85%D8%A7%D9%86-%D8%B3%D8%A7%D8%B2%DB%8C/gaUojFwZ?tracker_session_id=78414423-b219-4ed8-8d3e-dec1de39ed94_gaUojFwZ_N
+2026-06-14 08:47:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.064s
+2026-06-14 08:47:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.071s
+2026-06-14 08:47:06 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.071s
+2026-06-14 08:47:06 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.062s
+2026-06-14 08:47:10 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.063s
+2026-06-14 08:47:11 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.073s
+2026-06-14 08:47:11 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.003s
+2026-06-14 08:47:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.055s
+2026-06-14 08:47:16 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.049s
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:_click_show_all_details:982 - No 'Show all details' button found (content may already be expanded)
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => موردی برای نمایش وجود ندارد
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text => موردی برای نمایش وجود ندارد
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => انتشار آگهی: ۴ خرداد ۱۴۰۵، ۱۵:۳۱
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۴
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary.kt-description-row__text--small => انتشار آگهی: ۴ خرداد ۱۴۰۵، ۱۵:۳۱
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۴
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => خیابان امینی کوی بهار
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => خیابان امینی کوی بهار
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:17 | INFO     | app.scraper.divar_scraper:scrape_property_detail:469 - Description extracted (21 chars)
+2026-06-14 08:47:18 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.173s
+2026-06-14 08:47:19 | INFO     | app.scraper.contact_extractor:get_phone_number:67 - Found visible contact button with selector: .post-actions__get-contact
+2026-06-14 08:47:20 | INFO     | app.scraper.contact_extractor:get_phone_number:83 - Contact button clicked successfully
+2026-06-14 08:47:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.152s
+2026-06-14 08:47:22 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.046s
+2026-06-14 08:47:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.064s
+2026-06-14 08:47:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-14 08:47:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.123s
+2026-06-14 08:47:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.077s
+2026-06-14 08:47:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.085s
+2026-06-14 08:47:29 | INFO     | app.scraper.contact_extractor:_handle_sms_otp_if_present:258 - No SMS-OTP modal detected, continuing normally
+2026-06-14 08:47:30 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.129s
+2026-06-14 08:47:30 | INFO     | app.scraper.contact_extractor:get_phone_number:146 - Phone number link found in page content
+2026-06-14 08:47:30 | INFO     | app.scraper.contact_extractor:get_phone_number:186 - Found phone element with selector: a[href^="tel:"]
+2026-06-14 08:47:30 | INFO     | app.scraper.contact_extractor:get_phone_number:193 - Raw phone text: 02191329729
+2026-06-14 08:47:30 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_1.webp
+2026-06-14 08:47:31 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.067s
+2026-06-14 08:47:31 | INFO     | app.scraper.divar_scraper:save_property:1265 - Saved new property: gaUojFwZ with tag SF-20260614084731-D48957
+2026-06-14 08:47:31 | INFO     | app.crm.lead_service:create_lead_from_property:43 - CRM lead created: id=23 property=23 phone=02191329729
+2026-06-14 08:47:31 | DEBUG    | app.crm.notification:send_telegram:57 - Telegram not configured, skipping notification
+2026-06-14 08:47:31 | DEBUG    | app.crm.notification:_sync_send_email:89 - Email not configured, skipping notification
+2026-06-14 08:47:31 | INFO     | app.crm.pipeline:process_new_property:33 - CRM pipeline done — lead #23 | notified=False | channel=none
+2026-06-14 08:47:33 | INFO     | app.scraper.divar_scraper:scrape_property_detail:376 - Scraping property detail: https://divar.ir/v/%D8%A2%D9%BE%D8%A7%D8%B1%D8%AA%D9%85%D8%A7%D9%86-115-%D9%85%D8%AA%D8%B1-%D8%B1%D9%88%D8%AF%DA%A9%DB%8C-%D8%AC%D9%86%D8%AA-%D8%AA%D9%85%DB%8C%D8%B2/gaugW14y?tracker_session_id=78414423-b219-4ed8-8d3e-dec1de39ed94_gaugW14y_N
+2026-06-14 08:47:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.069s
+2026-06-14 08:47:36 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.056s
+2026-06-14 08:47:36 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.067s
+2026-06-14 08:47:36 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.063s
+2026-06-14 08:47:38 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.045s
+2026-06-14 08:47:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.046s
+2026-06-14 08:47:41 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:47:42 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.060s
+2026-06-14 08:47:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.093s
+2026-06-14 08:47:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.099s
+2026-06-14 08:47:47 | INFO     | app.scraper.divar_scraper:_click_show_all_details:982 - No 'Show all details' button found (content may already be expanded)
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => موردی برای نمایش وجود ندارد
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text => موردی برای نمایش وجود ندارد
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => انتشار آگهی: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۴
+آخرین به‌روز‌رسانی: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۴
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary.kt-description-row__text--small => انتشار آگهی: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۴
+آخرین به‌روز‌رسانی: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۴
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => به نام خدا
+
+خدابخشی هستم مشاور خرید و فروش ملک
+
+
+⬅️واحد مورد نظر در خیابان رودکی
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => به نام خدا
+
+خدابخشی هستم مشاور خرید و فروش ملک
+
+
+⬅️واحد مورد نظر در خیابان رودکی
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:47:48 | INFO     | app.scraper.divar_scraper:scrape_property_detail:469 - Description extracted (367 chars)
+2026-06-14 08:47:49 | INFO     | app.scraper.contact_extractor:get_phone_number:67 - Found visible contact button with selector: .post-actions__get-contact
+2026-06-14 08:47:50 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.057s
+2026-06-14 08:47:51 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.072s
+2026-06-14 08:47:51 | INFO     | app.scraper.contact_extractor:get_phone_number:83 - Contact button clicked successfully
+2026-06-14 08:47:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.041s
+2026-06-14 08:47:56 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:47:58 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.045s
+2026-06-14 08:47:59 | INFO     | app.scraper.contact_extractor:_handle_sms_otp_if_present:258 - No SMS-OTP modal detected, continuing normally
+2026-06-14 08:48:00 | INFO     | app.scraper.contact_extractor:get_phone_number:146 - Phone number link found in page content
+2026-06-14 08:48:00 | INFO     | app.scraper.contact_extractor:get_phone_number:186 - Found phone element with selector: a[href^="tel:"]
+2026-06-14 08:48:00 | INFO     | app.scraper.contact_extractor:get_phone_number:193 - Raw phone text: 09037671966
+2026-06-14 08:48:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.049s
+2026-06-14 08:48:01 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_1.webp
+2026-06-14 08:48:02 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_2.webp
+2026-06-14 08:48:02 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.062s
+2026-06-14 08:48:02 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_3.webp
+2026-06-14 08:48:03 | INFO     | app.scraper.divar_scraper:save_property:1265 - Saved new property: gaugW14y with tag SF-20260614084803-60CE87
+2026-06-14 08:48:03 | INFO     | app.crm.lead_service:create_lead_from_property:43 - CRM lead created: id=24 property=24 phone=09037671966
+2026-06-14 08:48:03 | DEBUG    | app.crm.notification:send_telegram:57 - Telegram not configured, skipping notification
+2026-06-14 08:48:03 | DEBUG    | app.crm.notification:_sync_send_email:89 - Email not configured, skipping notification
+2026-06-14 08:48:03 | INFO     | app.crm.pipeline:process_new_property:33 - CRM pipeline done — lead #24 | notified=False | channel=none
+2026-06-14 08:48:04 | INFO     | app.scraper.divar_scraper:scrape_property_detail:376 - Scraping property detail: https://divar.ir/v/%D8%B4%D9%88%D8%B1%DA%A9%D9%86%D8%AF-%D9%82%D8%B7%D8%B9%D9%87-%D9%88%DB%8C%D9%84%D8%A7%DB%8C%DB%8C/QaiXJW-8?tracker_session_id=78414423-b219-4ed8-8d3e-dec1de39ed94_QaiXJW-8_N
+2026-06-14 08:48:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.538s
+2026-06-14 08:48:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.152s
+2026-06-14 08:48:06 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.069s
+2026-06-14 08:48:06 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.064s
+2026-06-14 08:48:10 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:48:11 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.055s
+2026-06-14 08:48:11 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:48:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:48:16 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.066s
+2026-06-14 08:48:18 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:48:18 | INFO     | app.scraper.divar_scraper:_click_show_all_details:982 - No 'Show all details' button found (content may already be expanded)
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => موردی برای نمایش وجود ندارد
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text => موردی برای نمایش وجود ندارد
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => انتشار آگهی: ۲۸ فروردین ۱۴۰۵، ۲۳:۴۸
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۳
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary.kt-description-row__text--small => انتشار آگهی: ۲۸ فروردین ۱۴۰۵، ۲۳:۴۸
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۳
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => باسلام
+متراژ ۵۰۰ الی ۱۰۰۰متر
+دارای برق و آب گاز داخل کوچه
+آب شرب داخل ملک
+ملک دا
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => باسلام
+متراژ ۵۰۰ الی ۱۰۰۰متر
+دارای برق و آب گاز داخل کوچه
+آب شرب داخل ملک
+ملک دا
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:19 | INFO     | app.scraper.divar_scraper:scrape_property_detail:469 - Description extracted (214 chars)
+2026-06-14 08:48:21 | INFO     | app.scraper.contact_extractor:get_phone_number:67 - Found visible contact button with selector: .post-actions__get-contact
+2026-06-14 08:48:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.088s
+2026-06-14 08:48:22 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.055s
+2026-06-14 08:48:22 | INFO     | app.scraper.contact_extractor:get_phone_number:83 - Contact button clicked successfully
+2026-06-14 08:48:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.068s
+2026-06-14 08:48:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.126s
+2026-06-14 08:48:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.155s
+2026-06-14 08:48:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.090s
+2026-06-14 08:48:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.098s
+2026-06-14 08:48:30 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:48:31 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.062s
+2026-06-14 08:48:31 | INFO     | app.scraper.contact_extractor:_handle_sms_otp_if_present:258 - No SMS-OTP modal detected, continuing normally
+2026-06-14 08:48:32 | INFO     | app.scraper.contact_extractor:get_phone_number:146 - Phone number link found in page content
+2026-06-14 08:48:32 | INFO     | app.scraper.contact_extractor:get_phone_number:186 - Found phone element with selector: a[href^="tel:"]
+2026-06-14 08:48:32 | INFO     | app.scraper.contact_extractor:get_phone_number:193 - Raw phone text: 09141418835
+2026-06-14 08:48:33 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_1.webp
+2026-06-14 08:48:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.052s
+2026-06-14 08:48:34 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_2.webp
+2026-06-14 08:48:34 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_3.webp
+2026-06-14 08:48:35 | INFO     | app.scraper.divar_scraper:save_property:1265 - Saved new property: QaiXJW-8 with tag SF-20260614084835-9FE4E5
+2026-06-14 08:48:35 | INFO     | app.crm.lead_service:create_lead_from_property:43 - CRM lead created: id=25 property=25 phone=09141418835
+2026-06-14 08:48:35 | DEBUG    | app.crm.notification:send_telegram:57 - Telegram not configured, skipping notification
+2026-06-14 08:48:35 | DEBUG    | app.crm.notification:_sync_send_email:89 - Email not configured, skipping notification
+2026-06-14 08:48:35 | INFO     | app.crm.pipeline:process_new_property:33 - CRM pipeline done — lead #25 | notified=False | channel=none
+2026-06-14 08:48:36 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.056s
+2026-06-14 08:48:36 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.070s
+2026-06-14 08:48:36 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.066s
+2026-06-14 08:48:36 | INFO     | app.scraper.divar_scraper:scrape_property_detail:376 - Scraping property detail: https://divar.ir/v/%D8%A2%D9%BE%D8%A7%D8%B1%D8%AA%D9%85%D8%A7%D9%86-%DB%B1%DB%B3%DB%B7%D9%85%D8%AA%D8%B1%DB%8C-%D8%AA%DA%A9-%D9%88%D8%A7%D8%AD%D8%AF%DB%8C-%D8%AF%D8%B1-%D8%AE%DB%8C%D8%A7%D8%A8%D8%A7%D9%86-%D8%A8%D9%87%D8%AF%D8%A7%D8%B1%DB%8C/gaJUGuxe?tracker_session_id=78414423-b219-4ed8-8d3e-dec1de39ed94_gaJUGuxe_N
+2026-06-14 08:48:38 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.084s
+2026-06-14 08:48:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.068s
+2026-06-14 08:48:42 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.073s
+2026-06-14 08:48:42 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:48:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.070s
+2026-06-14 08:48:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.081s
+2026-06-14 08:48:50 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.053s
+2026-06-14 08:48:50 | INFO     | app.scraper.divar_scraper:_click_show_all_details:982 - No 'Show all details' button found (content may already be expanded)
+2026-06-14 08:48:51 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.113s
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => موردی برای نمایش وجود ندارد
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text => موردی برای نمایش وجود ندارد
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => انتشار آگهی: ۲۷ اردیبهشت ۱۴۰۵، ۱۰:۲۴
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۳
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary.kt-description-row__text--small => انتشار آگهی: ۲۷ اردیبهشت ۱۴۰۵، ۱۰:۲۴
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۳
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => آپارتمان تک واحدی
+کلا۴طبقه
+طبقه ۳
+بسیار خوش نقشه
+منطقه خوب
+دوخوابه
+تراس بزرگ
+پار
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => آپارتمان تک واحدی
+کلا۴طبقه
+طبقه ۳
+بسیار خوش نقشه
+منطقه خوب
+دوخوابه
+تراس بزرگ
+پار
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:48:51 | INFO     | app.scraper.divar_scraper:scrape_property_detail:469 - Description extracted (189 chars)
+2026-06-14 08:48:53 | INFO     | app.scraper.contact_extractor:get_phone_number:67 - Found visible contact button with selector: .post-actions__get-contact
+2026-06-14 08:48:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:48:54 | INFO     | app.scraper.contact_extractor:get_phone_number:83 - Contact button clicked successfully
+2026-06-14 08:48:56 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.049s
+2026-06-14 08:48:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:49:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.050s
+2026-06-14 08:49:02 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.064s
+2026-06-14 08:49:03 | INFO     | app.scraper.contact_extractor:_handle_sms_otp_if_present:258 - No SMS-OTP modal detected, continuing normally
+2026-06-14 08:49:04 | INFO     | app.scraper.contact_extractor:get_phone_number:146 - Phone number link found in page content
+2026-06-14 08:49:04 | INFO     | app.scraper.contact_extractor:get_phone_number:186 - Found phone element with selector: a[href^="tel:"]
+2026-06-14 08:49:04 | INFO     | app.scraper.contact_extractor:get_phone_number:193 - Raw phone text: 09020132343
+2026-06-14 08:49:05 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_1.webp
+2026-06-14 08:49:05 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_2.webp
+2026-06-14 08:49:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.094s
+2026-06-14 08:49:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.107s
+2026-06-14 08:49:06 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_3.webp
+2026-06-14 08:49:06 | INFO     | app.scraper.divar_scraper:save_property:1265 - Saved new property: gaJUGuxe with tag SF-20260614084906-6D46F1
+2026-06-14 08:49:06 | INFO     | app.crm.lead_service:create_lead_from_property:43 - CRM lead created: id=26 property=26 phone=09020132343
+2026-06-14 08:49:06 | DEBUG    | app.crm.notification:send_telegram:57 - Telegram not configured, skipping notification
+2026-06-14 08:49:06 | DEBUG    | app.crm.notification:_sync_send_email:89 - Email not configured, skipping notification
+2026-06-14 08:49:06 | INFO     | app.crm.pipeline:process_new_property:33 - CRM pipeline done — lead #26 | notified=False | channel=none
+2026-06-14 08:49:08 | INFO     | app.scraper.divar_scraper:scrape_property_detail:376 - Scraping property detail: https://divar.ir/v/%D8%A7%D9%BE%D8%A7%D8%B1%D8%AA%D9%85%D8%A7%D9%86-%D8%AE%DB%8C%D8%A7%D8%A8%D8%A7%D9%86-%D9%85%D8%AF%D8%B1%D8%B3-%DB%B1%DB%B4%DB%B4-%D8%AF%D9%88-%D9%88%D8%A7%D8%AD%D8%AF-%D9%84%D9%88%DA%A9%D8%B3/gaPgF1d6?tracker_session_id=78414423-b219-4ed8-8d3e-dec1de39ed94_gaPgF1d6_N
+2026-06-14 08:49:10 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.056s
+2026-06-14 08:49:11 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.078s
+2026-06-14 08:49:11 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.089s
+2026-06-14 08:49:11 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.074s
+2026-06-14 08:49:12 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:49:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.044s
+2026-06-14 08:49:16 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.063s
+2026-06-14 08:49:18 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.063s
+2026-06-14 08:49:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.062s
+2026-06-14 08:49:22 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.054s
+2026-06-14 08:49:22 | INFO     | app.scraper.divar_scraper:_click_show_all_details:982 - No 'Show all details' button found (content may already be expanded)
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => موردی برای نمایش وجود ندارد
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text => موردی برای نمایش وجود ندارد
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => انتشار آگهی: ۳۱ اردیبهشت ۱۴۰۵، ۲۲:۴۱
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۳
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary.kt-description-row__text--small => انتشار آگهی: ۳۱ اردیبهشت ۱۴۰۵، ۲۲:۴۱
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۳
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => باسلام
+اپارتمان مورد نظر واقع در خیابان مدرس
+دوواحد
+دوخوابه
+دونبش
+طبقه سوم روبه 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => باسلام
+اپارتمان مورد نظر واقع در خیابان مدرس
+دوواحد
+دوخوابه
+دونبش
+طبقه سوم روبه 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:23 | INFO     | app.scraper.divar_scraper:scrape_property_detail:469 - Description extracted (197 chars)
+2026-06-14 08:49:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.058s
+2026-06-14 08:49:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.096s
+2026-06-14 08:49:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.125s
+2026-06-14 08:49:24 | INFO     | app.scraper.contact_extractor:get_phone_number:67 - Found visible contact button with selector: .post-actions__get-contact
+2026-06-14 08:49:26 | INFO     | app.scraper.contact_extractor:get_phone_number:83 - Contact button clicked successfully
+2026-06-14 08:49:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.166s
+2026-06-14 08:49:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.175s
+2026-06-14 08:49:30 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:49:31 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.052s
+2026-06-14 08:49:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.048s
+2026-06-14 08:49:34 | INFO     | app.scraper.contact_extractor:_handle_sms_otp_if_present:258 - No SMS-OTP modal detected, continuing normally
+2026-06-14 08:49:34 | INFO     | app.scraper.contact_extractor:get_phone_number:146 - Phone number link found in page content
+2026-06-14 08:49:35 | INFO     | app.scraper.contact_extractor:get_phone_number:186 - Found phone element with selector: a[href^="tel:"]
+2026-06-14 08:49:35 | INFO     | app.scraper.contact_extractor:get_phone_number:193 - Raw phone text: 09013894783
+2026-06-14 08:49:35 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_1.webp
+2026-06-14 08:49:36 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.058s
+2026-06-14 08:49:36 | INFO     | app.scraper.divar_scraper:save_property:1265 - Saved new property: gaPgF1d6 with tag SF-20260614084936-2BD616
+2026-06-14 08:49:36 | INFO     | app.crm.lead_service:create_lead_from_property:43 - CRM lead created: id=27 property=27 phone=09013894783
+2026-06-14 08:49:36 | DEBUG    | app.crm.notification:send_telegram:57 - Telegram not configured, skipping notification
+2026-06-14 08:49:36 | DEBUG    | app.crm.notification:_sync_send_email:89 - Email not configured, skipping notification
+2026-06-14 08:49:36 | INFO     | app.crm.pipeline:process_new_property:33 - CRM pipeline done — lead #27 | notified=False | channel=none
+2026-06-14 08:49:37 | INFO     | app.scraper.divar_scraper:scrape_property_detail:376 - Scraping property detail: https://divar.ir/v/%D9%82%D8%B7%D8%B9%D9%87-%D8%A8%D8%A7%D8%BA-%DB%B9%DB%B5%DB%B0-%D9%85%D8%AA%D8%B1%DB%8C/Qat7N5M9?tracker_session_id=78414423-b219-4ed8-8d3e-dec1de39ed94_Qat7N5M9_N
+2026-06-14 08:49:38 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.111s
+2026-06-14 08:49:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.046s
+2026-06-14 08:49:41 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.059s
+2026-06-14 08:49:41 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.065s
+2026-06-14 08:49:42 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.050s
+2026-06-14 08:49:42 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:49:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.069s
+2026-06-14 08:49:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.081s
+2026-06-14 08:49:50 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:49:51 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.073s
+2026-06-14 08:49:51 | INFO     | app.scraper.divar_scraper:_click_show_all_details:982 - No 'Show all details' button found (content may already be expanded)
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => موردی برای نمایش وجود ندارد
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text => موردی برای نمایش وجود ندارد
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => انتشار آگهی: ۶ اردیبهشت ۱۴۰۵، ۱۳:۱۶
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۲
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary.kt-description-row__text--small => انتشار آگهی: ۶ اردیبهشت ۱۴۰۵، ۱۳:۱۶
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۲
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => متراژ زمین : ۹۵۰
+قوطی مکعب
+دارای آب و برق
+گاز جلوی درب
+سند تک برگ آماده انتقال
+چ
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => متراژ زمین : ۹۵۰
+قوطی مکعب
+دارای آب و برق
+گاز جلوی درب
+سند تک برگ آماده انتقال
+چ
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:49:52 | INFO     | app.scraper.divar_scraper:scrape_property_detail:469 - Description extracted (148 chars)
+2026-06-14 08:49:54 | INFO     | app.scraper.contact_extractor:get_phone_number:67 - Found visible contact button with selector: .post-actions__get-contact
+2026-06-14 08:49:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.092s
+2026-06-14 08:49:55 | INFO     | app.scraper.contact_extractor:get_phone_number:83 - Contact button clicked successfully
+2026-06-14 08:49:56 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.050s
+2026-06-14 08:49:57 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-14 08:50:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.046s
+2026-06-14 08:50:02 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.059s
+2026-06-14 08:50:03 | INFO     | app.scraper.contact_extractor:_handle_sms_otp_if_present:258 - No SMS-OTP modal detected, continuing normally
+2026-06-14 08:50:04 | INFO     | app.scraper.contact_extractor:get_phone_number:146 - Phone number link found in page content
+2026-06-14 08:50:04 | INFO     | app.scraper.contact_extractor:get_phone_number:186 - Found phone element with selector: a[href^="tel:"]
+2026-06-14 08:50:04 | INFO     | app.scraper.contact_extractor:get_phone_number:193 - Raw phone text: 09910178266
+2026-06-14 08:50:04 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_1.webp
+2026-06-14 08:50:05 | INFO     | app.scraper.divar_scraper:save_property:1265 - Saved new property: Qat7N5M9 with tag SF-20260614085005-41633C
+2026-06-14 08:50:05 | INFO     | app.crm.lead_service:create_lead_from_property:43 - CRM lead created: id=28 property=28 phone=09910178266
+2026-06-14 08:50:05 | DEBUG    | app.crm.notification:send_telegram:57 - Telegram not configured, skipping notification
+2026-06-14 08:50:05 | DEBUG    | app.crm.notification:_sync_send_email:89 - Email not configured, skipping notification
+2026-06-14 08:50:05 | INFO     | app.crm.pipeline:process_new_property:33 - CRM pipeline done — lead #28 | notified=False | channel=none
+2026-06-14 08:50:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.084s
+2026-06-14 08:50:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.092s
+2026-06-14 08:50:06 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.063s
+2026-06-14 08:50:06 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.064s
+2026-06-14 08:50:06 | INFO     | app.scraper.divar_scraper:scrape_property_detail:376 - Scraping property detail: https://divar.ir/v/%D8%B2%D9%85%DB%8C%D9%86-%DB%B1%DB%B8%DB%B2%D9%85%D8%AA%D8%B1%DB%8C-%D8%AF%D8%B1-%D8%AE%DB%8C%D8%A7%D8%A8%D8%A7%D9%86-%D9%81%D8%A7%D8%B6%D9%84/gaL4ybkX?tracker_session_id=78414423-b219-4ed8-8d3e-dec1de39ed94_gaL4ybkX_N
+2026-06-14 08:50:10 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:50:11 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.058s
+2026-06-14 08:50:12 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:50:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.067s
+2026-06-14 08:50:16 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.061s
+2026-06-14 08:50:18 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.075s
+2026-06-14 08:50:20 | INFO     | app.scraper.divar_scraper:_click_show_all_details:982 - No 'Show all details' button found (content may already be expanded)
+2026-06-14 08:50:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.073s
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => موردی برای نمایش وجود ندارد
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text => موردی برای نمایش وجود ندارد
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => انتشار آگهی: ۲۸ اردیبهشت ۱۴۰۵، ۱۸:۵۲
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۱
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary.kt-description-row__text--small => انتشار آگهی: ۲۸ اردیبهشت ۱۴۰۵، ۱۸:۵۲
+آخرین نردبان: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۱
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => زمین دارای سند ششدانگ
+کوچه ۱۲متری
+کوچه صاف آسفالت
+نزدیک خیابان اصلی
+مناسب جهت سا
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => زمین دارای سند ششدانگ
+کوچه ۱۲متری
+کوچه صاف آسفالت
+نزدیک خیابان اصلی
+مناسب جهت سا
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:21 | INFO     | app.scraper.divar_scraper:scrape_property_detail:469 - Description extracted (201 chars)
+2026-06-14 08:50:22 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.060s
+2026-06-14 08:50:23 | INFO     | app.scraper.contact_extractor:get_phone_number:67 - Found visible contact button with selector: .post-actions__get-contact
+2026-06-14 08:50:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.058s
+2026-06-14 08:50:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.123s
+2026-06-14 08:50:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.120s
+2026-06-14 08:50:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.091s
+2026-06-14 08:50:24 | INFO     | app.scraper.contact_extractor:get_phone_number:83 - Contact button clicked successfully
+2026-06-14 08:50:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.099s
+2026-06-14 08:50:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.108s
+2026-06-14 08:50:30 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.046s
+2026-06-14 08:50:31 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.051s
+2026-06-14 08:50:33 | INFO     | app.scraper.contact_extractor:_handle_sms_otp_if_present:258 - No SMS-OTP modal detected, continuing normally
+2026-06-14 08:50:33 | INFO     | app.scraper.contact_extractor:get_phone_number:146 - Phone number link found in page content
+2026-06-14 08:50:33 | INFO     | app.scraper.contact_extractor:get_phone_number:186 - Found phone element with selector: a[href^="tel:"]
+2026-06-14 08:50:33 | INFO     | app.scraper.contact_extractor:get_phone_number:193 - Raw phone text: 09020132343
+2026-06-14 08:50:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.046s
+2026-06-14 08:50:34 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_1.webp
+2026-06-14 08:50:34 | INFO     | app.scraper.divar_scraper:save_property:1265 - Saved new property: gaL4ybkX with tag SF-20260614085034-C6506A
+2026-06-14 08:50:34 | INFO     | app.crm.lead_service:create_lead_from_property:43 - CRM lead created: id=29 property=29 phone=09020132343
+2026-06-14 08:50:34 | DEBUG    | app.crm.notification:send_telegram:57 - Telegram not configured, skipping notification
+2026-06-14 08:50:34 | DEBUG    | app.crm.notification:_sync_send_email:89 - Email not configured, skipping notification
+2026-06-14 08:50:34 | INFO     | app.crm.pipeline:process_new_property:33 - CRM pipeline done — lead #29 | notified=False | channel=none
+2026-06-14 08:50:35 | INFO     | app.scraper.divar_scraper:scrape_property_detail:376 - Scraping property detail: https://divar.ir/v/%D8%A8%D8%B1-%D8%AC%D8%A7%D8%AF%D9%87-%DA%A9%D9%84%D8%A7%D9%86%D8%AA%D8%B1%DB%8C-%DA%86%D9%87%D8%A7%D8%B1-%D8%AF%DB%8C%D9%88%D8%A7%D8%B1%DB%8C-%DA%A9%DB%B2/gaukWOur?tracker_session_id=78414423-b219-4ed8-8d3e-dec1de39ed94_gaukWOur_N
+2026-06-14 08:50:36 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.058s
+2026-06-14 08:50:36 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.074s
+2026-06-14 08:50:36 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.099s
+2026-06-14 08:50:38 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.059s
+2026-06-14 08:50:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.052s
+2026-06-14 08:50:42 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:50:42 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:50:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.096s
+2026-06-14 08:50:46 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.102s
+2026-06-14 08:50:49 | INFO     | app.scraper.divar_scraper:_click_show_all_details:982 - No 'Show all details' button found (content may already be expanded)
+2026-06-14 08:50:50 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.053s
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => موردی برای نمایش وجود ندارد
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text => موردی برای نمایش وجود ندارد
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => انتشار آگهی: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۱
+آخرین به‌روز‌رسانی: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۲
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary.kt-description-row__text--small => انتشار آگهی: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۱
+آخرین به‌روز‌رسانی: ۲۴ خرداد ۱۴۰۵، ۱۲:۱۲
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => باسلام
+ملک فوق چهار دیواری
+دارای سند
+چاه پروانه
+برق ۳ فاز
+بر ۳۵ متر
+کیلومتر ۲ شه
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => باسلام
+ملک فوق چهار دیواری
+دارای سند
+چاه پروانه
+برق ۳ فاز
+بر ۳۵ متر
+کیلومتر ۲ شه
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] DIV.kt-base-row.kt-base-row--large.kt-description-row.kt-description-row--padded => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:444 - [desc-debug] P.description-a64e0.kt-description-row__text.kt-description-row__text--primary => 
+2026-06-14 08:50:50 | INFO     | app.scraper.divar_scraper:scrape_property_detail:469 - Description extracted (103 chars)
+2026-06-14 08:50:51 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.070s
+2026-06-14 08:50:52 | INFO     | app.scraper.contact_extractor:get_phone_number:67 - Found visible contact button with selector: .post-actions__get-contact
+2026-06-14 08:50:53 | INFO     | app.scraper.contact_extractor:get_phone_number:83 - Contact button clicked successfully
+2026-06-14 08:50:54 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.066s
+2026-06-14 08:50:56 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.060s
+2026-06-14 08:50:58 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.057s
+2026-06-14 08:51:01 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.063s
+2026-06-14 08:51:02 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:51:02 | INFO     | app.scraper.contact_extractor:_handle_sms_otp_if_present:258 - No SMS-OTP modal detected, continuing normally
+2026-06-14 08:51:02 | INFO     | app.scraper.contact_extractor:get_phone_number:146 - Phone number link found in page content
+2026-06-14 08:51:02 | INFO     | app.scraper.contact_extractor:get_phone_number:186 - Found phone element with selector: a[href^="tel:"]
+2026-06-14 08:51:02 | INFO     | app.scraper.contact_extractor:get_phone_number:193 - Raw phone text: 09141418835
+2026-06-14 08:51:03 | DEBUG    | app.scraper.divar_scraper:download_images:1191 - Downloaded image: img_1.webp
+2026-06-14 08:51:03 | INFO     | app.scraper.divar_scraper:save_property:1265 - Saved new property: gaukWOur with tag SF-20260614085103-EEE385
+2026-06-14 08:51:03 | INFO     | app.crm.lead_service:create_lead_from_property:43 - CRM lead created: id=30 property=30 phone=09141418835
+2026-06-14 08:51:03 | DEBUG    | app.crm.notification:send_telegram:57 - Telegram not configured, skipping notification
+2026-06-14 08:51:03 | DEBUG    | app.crm.notification:_sync_send_email:89 - Email not configured, skipping notification
+2026-06-14 08:51:03 | INFO     | app.crm.pipeline:process_new_property:33 - CRM pipeline done — lead #30 | notified=False | channel=none
+2026-06-14 08:51:05 | INFO     | app.scraper.divar_scraper:start_scraping_job:1463 - Scraping job completed. New: 10, Updated: 0, Failed: 0
+2026-06-14 08:51:05 | INFO     | app.scraper.divar_scraper:close:171 - Scraper closed successfully
+2026-06-14 08:51:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.076s
+2026-06-14 08:51:06 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.081s
+2026-06-14 08:51:06 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.072s
+2026-06-14 08:51:06 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.061s
+2026-06-14 08:51:10 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:51:11 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.073s
+2026-06-14 08:51:12 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:51:14 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.049s
+2026-06-14 08:51:16 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.078s
+2026-06-14 08:51:18 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.051s
+2026-06-14 08:51:21 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.058s
+2026-06-14 08:51:22 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.060s
+2026-06-14 08:51:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.066s
+2026-06-14 08:51:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.092s
+2026-06-14 08:51:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.123s
+2026-06-14 08:51:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.090s
+2026-06-14 08:51:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.097s
+2026-06-14 08:51:30 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.047s
+2026-06-14 08:51:31 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.044s
+2026-06-14 08:51:34 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.039s
+2026-06-14 08:51:36 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.048s
+2026-06-14 08:51:38 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.040s
+2026-06-14 08:51:41 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.105s
+2026-06-14 08:51:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.140s
+2026-06-14 08:51:41 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.141s
+2026-06-14 08:51:41 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.151s
+2026-06-14 08:51:41 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.142s
+2026-06-14 08:51:41 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.093s
+2026-06-14 08:51:41 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.107s
+2026-06-14 08:51:42 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:51:51 | DEBUG    | app.main:log_requests:142 - POST /api/users/token - 200 - 0.371s
+2026-06-14 08:51:51 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.163s
+2026-06-14 08:51:51 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.165s
+2026-06-14 08:51:51 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.180s
+2026-06-14 08:51:51 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.175s
+2026-06-14 08:51:51 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.101s
+2026-06-14 08:51:51 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.119s
+2026-06-14 08:51:53 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.069s
+2026-06-14 08:51:53 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.066s
+2026-06-14 08:52:04 | INFO     | app.scraper.auth:login_with_phone:251 - Navigating to Divar login page...
+2026-06-14 08:52:08 | DEBUG    | app.scraper.auth:login_with_phone:260 - Login page screenshot saved to /app/data/debug/debug_login_page.png
+2026-06-14 08:52:08 | INFO     | app.scraper.auth:login_with_phone:265 - Looking for login button...
+2026-06-14 08:52:11 | DEBUG    | app.scraper.auth:login_with_phone:290 - Post-click screenshot saved to /app/data/debug/debug_login_after_click.png
+2026-06-14 08:52:11 | INFO     | app.scraper.auth:login_with_phone:295 - Entering phone number: 09053833026
+2026-06-14 08:52:12 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.004s
+2026-06-14 08:52:15 | INFO     | app.scraper.auth:login_with_phone:303 - Found phone input with selector: input[type="tel"]
+2026-06-14 08:52:18 | INFO     | app.scraper.auth:login_with_phone:319 - Clicking confirm button...
+2026-06-14 08:52:18 | INFO     | app.scraper.auth:login_with_phone:329 - Found confirm button with text: 'بعدی'
+2026-06-14 08:52:18 | INFO     | app.scraper.auth:login_with_phone:342 - Confirm button clicked — waiting for SMS...
+2026-06-14 08:52:22 | INFO     | app.scraper.auth:login_with_phone:347 - Post-submit screenshot: /app/data/debug/debug_after_phone_submit.png
+2026-06-14 08:52:22 | INFO     | app.scraper.auth:login_with_phone:352 - کد OTP به 09053833026 ارسال شد. لطفاً کد ۶ رقمی را وارد کنید.
+2026-06-14 08:52:22 | DEBUG    | app.main:log_requests:142 - POST /api/auth/login - 200 - 18.899s
+2026-06-14 08:52:34 | INFO     | app.scraper.auth:submit_otp_code:380 - Entering verification code...
+2026-06-14 08:52:34 | INFO     | app.scraper.auth:submit_otp_code:380 - Entering verification code...
+2026-06-14 08:52:36 | INFO     | app.scraper.auth:submit_otp_code:385 - Current URL when looking for OTP input: https://divar.ir/my-divar/my-posts
+2026-06-14 08:52:36 | INFO     | app.scraper.auth:submit_otp_code:392 - Trying to find input[name='code']...
+2026-06-14 08:52:36 | INFO     | app.scraper.auth:submit_otp_code:385 - Current URL when looking for OTP input: https://divar.ir/my-divar/my-posts
+2026-06-14 08:52:36 | INFO     | app.scraper.auth:submit_otp_code:392 - Trying to find input[name='code']...
+2026-06-14 08:52:36 | INFO     | app.scraper.auth:submit_otp_code:394 - Found input[name='code']
+2026-06-14 08:52:36 | INFO     | app.scraper.auth:submit_otp_code:394 - Found input[name='code']
+2026-06-14 08:52:39 | INFO     | app.scraper.auth:submit_otp_code:461 - Clicking login button...
+2026-06-14 08:52:39 | INFO     | app.scraper.auth:submit_otp_code:461 - Clicking login button...
+2026-06-14 08:52:39 | INFO     | app.scraper.auth:submit_otp_code:466 - Screenshot saved: debug_before_login_click.png
+2026-06-14 08:52:39 | INFO     | app.scraper.auth:submit_otp_code:466 - Screenshot saved: debug_before_login_click.png
+2026-06-14 08:52:41 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.053s
+2026-06-14 08:52:41 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.096s
+2026-06-14 08:52:41 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.131s
+2026-06-14 08:52:42 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:52:51 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.068s
+2026-06-14 08:52:51 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.136s
+2026-06-14 08:52:51 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.143s
+2026-06-14 08:53:09 | ERROR    | app.scraper.auth:submit_otp_code:588 - OTP verification failed: Timeout 30000ms exceeded.
+2026-06-14 08:53:09 | DEBUG    | app.main:log_requests:142 - POST /api/auth/verify - 200 - 34.855s
+2026-06-14 08:53:09 | ERROR    | app.scraper.auth:submit_otp_code:588 - OTP verification failed: Timeout 30000ms exceeded.
+2026-06-14 08:53:09 | DEBUG    | app.main:log_requests:142 - POST /api/auth/verify - 200 - 34.911s
+2026-06-14 08:53:12 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:53:19 | INFO     | app.scraper.auth:submit_otp_code:380 - Entering verification code...
+2026-06-14 08:53:19 | INFO     | app.scraper.auth:submit_otp_code:380 - Entering verification code...
+2026-06-14 08:53:21 | INFO     | app.scraper.auth:submit_otp_code:385 - Current URL when looking for OTP input: https://divar.ir/my-divar/my-posts
+2026-06-14 08:53:21 | INFO     | app.scraper.auth:submit_otp_code:392 - Trying to find input[name='code']...
+2026-06-14 08:53:21 | INFO     | app.scraper.auth:submit_otp_code:385 - Current URL when looking for OTP input: https://divar.ir/my-divar/my-posts
+2026-06-14 08:53:21 | INFO     | app.scraper.auth:submit_otp_code:392 - Trying to find input[name='code']...
+2026-06-14 08:53:22 | INFO     | app.scraper.auth:submit_otp_code:394 - Found input[name='code']
+2026-06-14 08:53:22 | INFO     | app.scraper.auth:submit_otp_code:394 - Found input[name='code']
+2026-06-14 08:53:24 | INFO     | app.scraper.auth:submit_otp_code:461 - Clicking login button...
+2026-06-14 08:53:24 | INFO     | app.scraper.auth:submit_otp_code:461 - Clicking login button...
+2026-06-14 08:53:24 | INFO     | app.scraper.auth:submit_otp_code:466 - Screenshot saved: debug_before_login_click.png
+2026-06-14 08:53:24 | INFO     | app.scraper.auth:submit_otp_code:466 - Screenshot saved: debug_before_login_click.png
+2026-06-14 08:53:25 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.181s
+2026-06-14 08:53:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.167s
+2026-06-14 08:53:26 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.165s
+2026-06-14 08:53:26 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.178s
+2026-06-14 08:53:26 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.168s
+2026-06-14 08:53:26 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.110s
+2026-06-14 08:53:26 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.127s
+2026-06-14 08:53:31 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.060s
+2026-06-14 08:53:31 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.061s
+2026-06-14 08:53:32 | DEBUG    | app.main:log_requests:142 - DELETE /api/auth/cookies/9 - 200 - 0.054s
+2026-06-14 08:53:33 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.055s
+2026-06-14 08:53:36 | INFO     | app.scraper.auth:login_with_phone:251 - Navigating to Divar login page...
+2026-06-14 08:53:39 | DEBUG    | app.scraper.auth:login_with_phone:260 - Login page screenshot saved to /app/data/debug/debug_login_page.png
+2026-06-14 08:53:39 | INFO     | app.scraper.auth:login_with_phone:265 - Looking for login button...
+2026-06-14 08:53:42 | DEBUG    | app.scraper.auth:login_with_phone:290 - Post-click screenshot saved to /app/data/debug/debug_login_after_click.png
+2026-06-14 08:53:42 | INFO     | app.scraper.auth:login_with_phone:295 - Entering phone number: 09053833026
+2026-06-14 08:53:42 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.086s
+2026-06-14 08:53:42 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:53:43 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.154s
+2026-06-14 08:53:43 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.152s
+2026-06-14 08:53:43 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.153s
+2026-06-14 08:53:43 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.139s
+2026-06-14 08:53:43 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.139s
+2026-06-14 08:53:43 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.069s
+2026-06-14 08:53:43 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.171s
+2026-06-14 08:53:44 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.132s
+2026-06-14 08:53:44 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.135s
+2026-06-14 08:53:45 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.094s
+2026-06-14 08:53:45 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.109s
+2026-06-14 08:53:46 | INFO     | app.scraper.auth:login_with_phone:303 - Found phone input with selector: input[type="tel"]
+2026-06-14 08:53:46 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.071s
+2026-06-14 08:53:46 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.064s
+2026-06-14 08:53:46 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.075s
+2026-06-14 08:53:49 | INFO     | app.scraper.auth:login_with_phone:319 - Clicking confirm button...
+2026-06-14 08:53:49 | INFO     | app.scraper.auth:login_with_phone:329 - Found confirm button with text: 'بعدی'
+2026-06-14 08:53:49 | INFO     | app.scraper.auth:login_with_phone:342 - Confirm button clicked — waiting for SMS...
+2026-06-14 08:53:51 | INFO     | app.scraper.auth:login_with_phone:251 - Navigating to Divar login page...
+2026-06-14 08:53:54 | INFO     | app.scraper.auth:login_with_phone:347 - Post-submit screenshot: /app/data/debug/debug_after_phone_submit.png
+2026-06-14 08:53:54 | INFO     | app.scraper.auth:login_with_phone:352 - کد OTP به 09053833026 ارسال شد. لطفاً کد ۶ رقمی را وارد کنید.
+2026-06-14 08:53:54 | DEBUG    | app.main:log_requests:142 - POST /api/auth/login - 200 - 18.784s
+2026-06-14 08:53:54 | ERROR    | app.scraper.auth:submit_otp_code:588 - OTP verification failed: Timeout 30000ms exceeded.
+2026-06-14 08:53:54 | DEBUG    | app.main:log_requests:142 - POST /api/auth/verify - 200 - 34.954s
+2026-06-14 08:53:54 | ERROR    | app.scraper.auth:submit_otp_code:588 - OTP verification failed: Timeout 30000ms exceeded.
+2026-06-14 08:53:54 | DEBUG    | app.scraper.auth:login_with_phone:260 - Login page screenshot saved to /app/data/debug/debug_login_page.png
+2026-06-14 08:53:54 | INFO     | app.scraper.auth:login_with_phone:265 - Looking for login button...
+2026-06-14 08:53:54 | DEBUG    | app.main:log_requests:142 - POST /api/auth/verify - 200 - 35.045s
+2026-06-14 08:53:57 | DEBUG    | app.scraper.auth:login_with_phone:290 - Post-click screenshot saved to /app/data/debug/debug_login_after_click.png
+2026-06-14 08:53:57 | INFO     | app.scraper.auth:login_with_phone:295 - Entering phone number: 09053833026
+2026-06-14 08:54:01 | INFO     | app.scraper.auth:login_with_phone:303 - Found phone input with selector: input[type="tel"]
+2026-06-14 08:54:04 | INFO     | app.scraper.auth:login_with_phone:319 - Clicking confirm button...
+2026-06-14 08:54:04 | INFO     | app.scraper.auth:login_with_phone:329 - Found confirm button with text: 'بعدی'
+2026-06-14 08:54:04 | INFO     | app.scraper.auth:login_with_phone:342 - Confirm button clicked — waiting for SMS...
+2026-06-14 08:54:09 | INFO     | app.scraper.auth:login_with_phone:347 - Post-submit screenshot: /app/data/debug/debug_after_phone_submit.png
+2026-06-14 08:54:09 | INFO     | app.scraper.auth:login_with_phone:352 - کد OTP به 09053833026 ارسال شد. لطفاً کد ۶ رقمی را وارد کنید.
+2026-06-14 08:54:09 | DEBUG    | app.main:log_requests:142 - POST /api/auth/login - 200 - 19.020s
+2026-06-14 08:54:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 08:54:13 | INFO     | app.scraper.auth:submit_otp_code:380 - Entering verification code...
+2026-06-14 08:54:15 | INFO     | app.scraper.auth:submit_otp_code:385 - Current URL when looking for OTP input: https://divar.ir/my-divar/my-posts
+2026-06-14 08:54:15 | INFO     | app.scraper.auth:submit_otp_code:392 - Trying to find input[name='code']...
+2026-06-14 08:54:16 | INFO     | app.scraper.auth:submit_otp_code:394 - Found input[name='code']
+2026-06-14 08:54:18 | INFO     | app.scraper.auth:submit_otp_code:461 - Clicking login button...
+2026-06-14 08:54:18 | INFO     | app.scraper.auth:submit_otp_code:466 - Screenshot saved: debug_before_login_click.png
+2026-06-14 08:54:19 | INFO     | app.scraper.auth:submit_otp_code:494 - Login button clicked
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:500 - Screenshot saved: debug_after_login_click.png
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:510 - All cookies after login: 9 found
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sRefreshToken = 8rA9wpqOWteCx5HML%2FXd%2FoPlVvyOh47t2esf1d6oZBB44V...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: did = 82386b9b-981f-4ae0-bdd9-600635692b50...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: cdid = fc17b65b-5f16-48af-9cc9-aaa526e66f99...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: ff = %7B%22f%22%3A%7B%22foreigner_payment_enabled%22%3A...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: referrer = ...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: theme = light...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sAccessToken = eyJraWQiOiJkLTE3ODA4MzAyNzk4MDIiLCJ0eXAiOiJKV1QiLC...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sFrontToken = eyJ1aWQiOiIyZGFkZjQ3MS1iMmEwLTRiOWMtYWVkOC0xMmE3ND...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: csid = 14b4541efcf95fa4a3...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:529 - localStorage items: 9
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:532 - localStorage auth item: auth-state-sync = 1781427257146...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:532 - localStorage auth item: auth-clock-drift = NORMAL...
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:534 - sessionStorage items: 0
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:562 - Found potential auth cookies: []
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:563 - Found potential auth storage: ['auth-state-sync', 'auth-clock-drift']
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:save_cookies_to_file:76 - Cookies saved to file for 09053833026
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:save_cookies_to_db:132 - Cookies saved to database for 09053833026
+2026-06-14 08:54:24 | INFO     | app.scraper.auth:submit_otp_code:576 - Login successful, cookies saved for 09053833026!
+2026-06-14 08:54:24 | DEBUG    | app.main:log_requests:142 - POST /api/auth/verify - 200 - 10.879s
+2026-06-14 08:54:24 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.075s
+2026-06-14 08:54:24 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.084s
+2026-06-14 08:54:25 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.081s
+2026-06-14 08:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.050s
+2026-06-14 08:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.178s
+2026-06-14 08:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.173s
+2026-06-14 08:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.177s
+2026-06-14 08:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.135s
+2026-06-14 08:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.083s
+2026-06-14 08:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.091s
+2026-06-14 08:54:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:54:46 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.050s
+2026-06-14 08:54:46 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.067s
+2026-06-14 08:54:51 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.077s
+2026-06-14 08:54:51 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.139s
+2026-06-14 08:54:51 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.176s
+2026-06-14 08:54:58 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.080s
+2026-06-14 08:54:58 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.085s
+2026-06-14 08:54:59 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.090s
+2026-06-14 08:54:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.095s
+2026-06-14 08:54:59 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.063s
+2026-06-14 08:54:59 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.065s
+2026-06-14 08:55:04 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.055s
+2026-06-14 08:55:04 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.094s
+2026-06-14 08:55:04 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.110s
+2026-06-14 08:55:07 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.082s
+2026-06-14 08:55:07 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.123s
+2026-06-14 08:55:09 | DEBUG    | app.main:log_requests:142 - POST /api/properties/export - 200 - 0.082s
+2026-06-14 08:55:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:55:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.071s
+2026-06-14 08:55:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.095s
+2026-06-14 08:55:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.105s
+2026-06-14 08:55:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.003s
+2026-06-14 08:55:55 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.150s
+2026-06-14 08:55:55 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.321s
+2026-06-14 08:55:55 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.392s
+2026-06-14 08:56:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:56:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.043s
+2026-06-14 08:56:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.091s
+2026-06-14 08:56:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.101s
+2026-06-14 08:56:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:57:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:57:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 08:57:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-14 08:57:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.115s
+2026-06-14 08:57:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:58:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:58:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.043s
+2026-06-14 08:58:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.086s
+2026-06-14 08:58:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.098s
+2026-06-14 08:58:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:59:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 08:59:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.040s
+2026-06-14 08:59:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.116s
+2026-06-14 08:59:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.097s
+2026-06-14 08:59:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.159s
+2026-06-14 08:59:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:00:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:00:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.053s
+2026-06-14 09:00:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.102s
+2026-06-14 09:00:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.113s
+2026-06-14 09:00:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:01:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:01:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.042s
+2026-06-14 09:01:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.089s
+2026-06-14 09:01:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.124s
+2026-06-14 09:01:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:02:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.003s
+2026-06-14 09:02:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.048s
+2026-06-14 09:02:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.096s
+2026-06-14 09:02:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.103s
+2026-06-14 09:02:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:03:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:03:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.042s
+2026-06-14 09:03:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.089s
+2026-06-14 09:03:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.118s
+2026-06-14 09:03:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:04:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:04:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.066s
+2026-06-14 09:04:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.109s
+2026-06-14 09:04:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.119s
+2026-06-14 09:04:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.159s
+2026-06-14 09:04:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:05:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:05:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.043s
+2026-06-14 09:05:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.076s
+2026-06-14 09:05:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.091s
+2026-06-14 09:05:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:06:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 09:06:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.042s
+2026-06-14 09:06:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.080s
+2026-06-14 09:06:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.108s
+2026-06-14 09:06:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:07:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:07:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.043s
+2026-06-14 09:07:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.075s
+2026-06-14 09:07:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-14 09:07:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:08:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:08:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.071s
+2026-06-14 09:08:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.121s
+2026-06-14 09:08:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.161s
+2026-06-14 09:08:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 09:09:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:09:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.051s
+2026-06-14 09:09:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.127s
+2026-06-14 09:09:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.139s
+2026-06-14 09:09:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.140s
+2026-06-14 09:09:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:10:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:10:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.062s
+2026-06-14 09:10:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.099s
+2026-06-14 09:10:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.135s
+2026-06-14 09:10:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:11:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:11:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.042s
+2026-06-14 09:11:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.077s
+2026-06-14 09:11:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.086s
+2026-06-14 09:11:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:12:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:12:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.052s
+2026-06-14 09:12:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.095s
+2026-06-14 09:12:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.127s
+2026-06-14 09:12:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 09:13:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:13:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 09:13:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.079s
+2026-06-14 09:13:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-14 09:13:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:14:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:14:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.043s
+2026-06-14 09:14:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.113s
+2026-06-14 09:14:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.107s
+2026-06-14 09:14:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.161s
+2026-06-14 09:14:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:15:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 09:15:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 09:15:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.089s
+2026-06-14 09:15:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.097s
+2026-06-14 09:15:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 09:16:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:16:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.042s
+2026-06-14 09:16:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.101s
+2026-06-14 09:16:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.129s
+2026-06-14 09:16:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:17:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:17:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.064s
+2026-06-14 09:17:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.078s
+2026-06-14 09:17:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.089s
+2026-06-14 09:17:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:18:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:18:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.040s
+2026-06-14 09:18:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-14 09:18:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.120s
+2026-06-14 09:18:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:19:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:19:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.048s
+2026-06-14 09:19:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.139s
+2026-06-14 09:19:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.140s
+2026-06-14 09:19:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.184s
+2026-06-14 09:19:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:20:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:20:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.064s
+2026-06-14 09:20:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.081s
+2026-06-14 09:20:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.089s
+2026-06-14 09:20:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:21:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:21:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 09:21:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.098s
+2026-06-14 09:21:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.131s
+2026-06-14 09:21:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:22:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:22:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.040s
+2026-06-14 09:22:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.079s
+2026-06-14 09:22:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.086s
+2026-06-14 09:22:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:23:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 09:23:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.049s
+2026-06-14 09:23:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-14 09:23:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.112s
+2026-06-14 09:23:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:24:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 09:24:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.090s
+2026-06-14 09:24:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.145s
+2026-06-14 09:24:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.147s
+2026-06-14 09:24:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.186s
+2026-06-14 09:24:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:25:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:25:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.057s
+2026-06-14 09:25:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.072s
+2026-06-14 09:25:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.082s
+2026-06-14 09:25:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:26:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:26:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.047s
+2026-06-14 09:26:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.092s
+2026-06-14 09:26:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.124s
+2026-06-14 09:26:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:27:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:27:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.058s
+2026-06-14 09:27:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.084s
+2026-06-14 09:27:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.092s
+2026-06-14 09:27:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:28:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:28:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.059s
+2026-06-14 09:28:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.102s
+2026-06-14 09:28:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.140s
+2026-06-14 09:28:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:29:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:29:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.040s
+2026-06-14 09:29:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.123s
+2026-06-14 09:29:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.134s
+2026-06-14 09:29:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.139s
+2026-06-14 09:29:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:30:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:30:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 09:30:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.103s
+2026-06-14 09:30:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.136s
+2026-06-14 09:30:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:31:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:31:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.042s
+2026-06-14 09:31:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.082s
+2026-06-14 09:31:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.091s
+2026-06-14 09:31:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:32:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 09:32:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 09:32:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.086s
+2026-06-14 09:32:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.114s
+2026-06-14 09:32:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:33:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:33:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.043s
+2026-06-14 09:33:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.101s
+2026-06-14 09:33:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.106s
+2026-06-14 09:33:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:34:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:34:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.051s
+2026-06-14 09:34:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.156s
+2026-06-14 09:34:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.161s
+2026-06-14 09:34:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.208s
+2026-06-14 09:34:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:35:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:35:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.040s
+2026-06-14 09:35:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.079s
+2026-06-14 09:35:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.091s
+2026-06-14 09:35:50 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:36:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:36:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.052s
+2026-06-14 09:36:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-14 09:36:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.123s
+2026-06-14 09:36:50 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:37:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:37:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 09:37:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.083s
+2026-06-14 09:37:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.094s
+2026-06-14 09:37:50 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:38:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:38:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.063s
+2026-06-14 09:38:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.090s
+2026-06-14 09:38:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.114s
+2026-06-14 09:38:50 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:39:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:39:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.064s
+2026-06-14 09:39:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.143s
+2026-06-14 09:39:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.142s
+2026-06-14 09:39:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.179s
+2026-06-14 09:39:50 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:40:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:40:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.045s
+2026-06-14 09:40:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.092s
+2026-06-14 09:40:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-14 09:40:50 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:41:21 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:41:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 09:41:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.087s
+2026-06-14 09:41:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.117s
+2026-06-14 09:41:51 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:42:21 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:42:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.043s
+2026-06-14 09:42:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.099s
+2026-06-14 09:42:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.107s
+2026-06-14 09:42:51 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:43:21 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:43:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.048s
+2026-06-14 09:43:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-14 09:43:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.114s
+2026-06-14 09:43:51 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:44:21 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:44:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.050s
+2026-06-14 09:44:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.130s
+2026-06-14 09:44:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.105s
+2026-06-14 09:44:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.177s
+2026-06-14 09:44:51 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-14 09:45:21 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:45:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 09:45:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.083s
+2026-06-14 09:45:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.095s
+2026-06-14 09:45:51 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:46:21 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:46:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 09:46:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.084s
+2026-06-14 09:46:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.115s
+2026-06-14 09:46:52 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:47:22 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:47:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.042s
+2026-06-14 09:47:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.080s
+2026-06-14 09:47:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.092s
+2026-06-14 09:47:52 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:48:22 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:48:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.044s
+2026-06-14 09:48:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.088s
+2026-06-14 09:48:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.123s
+2026-06-14 09:48:52 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:49:22 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:49:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.041s
+2026-06-14 09:49:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.109s
+2026-06-14 09:49:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.073s
+2026-06-14 09:49:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.087s
+2026-06-14 09:49:52 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:50:22 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:50:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.068s
+2026-06-14 09:50:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.135s
+2026-06-14 09:50:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.171s
+2026-06-14 09:50:52 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:51:22 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:51:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.045s
+2026-06-14 09:51:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.081s
+2026-06-14 09:51:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.092s
+2026-06-14 09:51:52 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:52:23 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:52:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.044s
+2026-06-14 09:52:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.094s
+2026-06-14 09:52:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.124s
+2026-06-14 09:52:53 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:53:23 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:53:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.046s
+2026-06-14 09:53:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.085s
+2026-06-14 09:53:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.096s
+2026-06-14 09:53:53 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:54:23 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.042s
+2026-06-14 09:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.134s
+2026-06-14 09:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.145s
+2026-06-14 09:54:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.183s
+2026-06-14 09:54:53 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:55:23 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:55:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.064s
+2026-06-14 09:55:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.097s
+2026-06-14 09:55:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.103s
+2026-06-14 09:55:53 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:56:23 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:56:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.042s
+2026-06-14 09:56:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.078s
+2026-06-14 09:56:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.105s
+2026-06-14 09:56:53 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:57:23 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:57:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.055s
+2026-06-14 09:57:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.122s
+2026-06-14 09:57:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.149s
+2026-06-14 09:57:53 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:58:24 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:58:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.046s
+2026-06-14 09:58:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.078s
+2026-06-14 09:58:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.089s
+2026-06-14 09:58:54 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:59:24 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 09:59:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.058s
+2026-06-14 09:59:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.116s
+2026-06-14 09:59:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.119s
+2026-06-14 09:59:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.155s
+2026-06-14 09:59:54 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 10:00:24 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 10:00:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.043s
+2026-06-14 10:00:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.085s
+2026-06-14 10:00:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.096s
+2026-06-14 10:00:54 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 10:01:24 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 10:01:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.047s
+2026-06-14 10:01:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.083s
+2026-06-14 10:01:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.108s
+2026-06-14 10:01:54 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 10:02:24 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-14 10:02:29 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.051s
+2026-06-14 10:02:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.087s
+2026-06-14 10:02:29 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.100s
