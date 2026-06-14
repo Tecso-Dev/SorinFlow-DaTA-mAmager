@@ -56,6 +56,7 @@ class PropertyResponse(PropertyBase):
     url: str
     phone_number: Optional[str] = None
     seller_name: Optional[str] = None
+    owner_phone: Optional[str] = None
     images: List[str] = []
     has_images: bool = False
     thumbnail_url: Optional[str] = None
@@ -102,6 +103,7 @@ class ScrapingJobCreate(BaseModel):
     category: str
     max_pages: int = 10
     download_images: bool = True
+    divar_phone: Optional[str] = None
     min_price: Optional[int] = None
     max_price: Optional[int] = None
     min_deposit: Optional[int] = None
@@ -116,6 +118,7 @@ class ScrapingJobResponse(BaseModel):
     job_id: str
     city_id: Optional[int] = None
     category_id: Optional[int] = None
+    divar_phone: Optional[str] = None
     status: str
     total_pages: int = 0
     scraped_pages: int = 0
@@ -289,6 +292,7 @@ class UserResponse(BaseModel):
     full_name: Optional[str] = None
     role: str
     is_active: bool
+    divar_phone: Optional[str] = None
     last_login: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
@@ -302,6 +306,7 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     password: str = Field(..., min_length=6)
     role: str = Field(default="user")
+    divar_phone: Optional[str] = None
 
     def model_post_init(self, __context: Any) -> None:
         if self.role not in VALID_ROLES:
@@ -313,6 +318,7 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    divar_phone: Optional[str] = None
 
     def model_post_init(self, __context: Any) -> None:
         if self.role and self.role not in VALID_ROLES:

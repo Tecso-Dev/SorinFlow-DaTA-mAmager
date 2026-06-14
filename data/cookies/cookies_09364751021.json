@@ -1,0 +1,96 @@
+{
+  "phone_number": "09364751021",
+  "cookies": [
+    {
+      "name": "sRefreshToken",
+      "value": "Z%2B3%2B3fBMxlo4lJqCuN1HMK6Znjnwma%2FDcnasjZyiNhBX4N%2FY%2BEOqfazj6rx2Rqq9%2B0GfXBUqDeCglFUXG5jdic2U0j66t%2FQE5iQndFsYWtVJ2ILJo6dI0p8dWrCgi8znAu1nc4Onlrt9rjjO%2BdmT2T4NRY%2B0wYzZPppgystN3BFdldZnvDLjfie7NoUEFzJEGkal1OCm8DrwA2dpz6X33hDTfrhFKa8He9t8dsDndxr2subHGVj%2BOH%2BEWuG4%2BC%2BFB8k1oMWt7D9A7S1BwVz8.4ded318918e7731a765a3cb748846c12f71b08f0f5b780c4457de6caa207901b.V2",
+      "domain": ".divar.ir",
+      "path": "/v8/authenticate/session/refresh",
+      "expires": 1784015988.762274,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "did",
+      "value": "94bfb25d-7b22-4efd-b2a3-b2e51a169d5d",
+      "domain": ".divar.ir",
+      "path": "/",
+      "expires": 1815983934.169808,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "cdid",
+      "value": "7c4fc48e-386f-4404-8c24-378d018fa529",
+      "domain": ".divar.ir",
+      "path": "/",
+      "expires": 1815983934.170091,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ff",
+      "value": "%7B%22f%22%3A%7B%22foreigner_payment_enabled%22%3Atrue%2C%22enable_filter_post_count_web%22%3Atrue%2C%22device_fp_enable%22%3Atrue%2C%22enable-places-selector-online-search-web%22%3Atrue%2C%22chat_message_disabled%22%3Atrue%2C%22web_sentry_sample_rate%22%3A0.2%2C%22web_sentry_traces_sample_rate%22%3A0.01%7D%2C%22e%22%3A1781427532812%2C%22r%22%3A1781510332812%7D",
+      "domain": ".divar.ir",
+      "path": "/",
+      "expires": 1781510334.170167,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "referrer",
+      "value": "",
+      "domain": ".divar.ir",
+      "path": "/",
+      "expires": 1815983934.170211,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "theme",
+      "value": "light",
+      "domain": ".divar.ir",
+      "path": "/",
+      "expires": 1815983935.509699,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "sAccessToken",
+      "value": "eyJraWQiOiJkLTE3ODA4MzAyNzk4MDIiLCJ0eXAiOiJKV1QiLCJ2ZXJzaW9uIjoiNCIsImFsZyI6IlJTMjU2In0.eyJpYXQiOjE3ODE0MjM5ODcsImV4cCI6MTc4MTQzNDc4Nywic3ViIjoiN2ExY2I1YTgtM2ZmZS00NzIzLWJlNDAtOWQ3M2VlYWZmYzc5IiwidElkIjoicHVibGljIiwic2Vzc2lvbkhhbmRsZSI6IjQ0ZDYwNmQ4LTM4NWItNDNkOC04NGVmLTA3YzFiODBiNTQyNiIsInJlZnJlc2hUb2tlbkhhc2gxIjoiNzIzOTMyNGVjNThmMDdmODU2NWQ4MTZmNGUwZmUzZGM3Y2VjOTM5NWJhNWM5OTdlMzU4NGU2Yjc4MTNlM2U4OCIsInBhcmVudFJlZnJlc2hUb2tlbkhhc2gxIjpudWxsLCJhbnRpQ3NyZlRva2VuIjpudWxsLCJpc3MiOiJodHRwczovL2FwaS5kaXZhci5pci92OC9hdXRoZW50aWNhdGUiLCJwaG9uZU51bWJlciI6Iis5ODkzNjQ3NTEwMjEiLCJzdC1wZXJtIjp7InQiOjE3ODE0MjM5ODc0MDgsInYiOltdfSwic3Qtcm9sZSI6eyJ0IjoxNzgxNDIzOTg3NDA4LCJ2IjpbXX19.LGEUmRQrLiyLajpG8r9bx5e0a05Ms4Jo8KKP6L5ADPxe6iUfML1cH9KibwlN6iKdYgGk-dDgxRrcMHwRlOHgg_O0aJYCAmcQZV81zvu3qHumJBPXX-hxgBOzoPRZzZJZUsi_XPPKRSAyjkI8wheInYaZDqoG8zqMRqMfICGoOl5lKVcTRGeKwxNrNBXwIXdD3u9aAKrpjlNaBwlacI4U6cXjytdFBrB-XqjRRdO3Gc8d5BWXPb9n5jhoIpxAtvJ12Jmqbqtpm8pGgPRj52D2hrK-WhGlGIDf5t9pJwh_YfjuEBXCTfcNDFbCL1ZOzKhXgN6v7JrFdfUFQWWxRx9qJg",
+      "domain": ".divar.ir",
+      "path": "/",
+      "expires": 1812959988.762069,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "sFrontToken",
+      "value": "eyJ1aWQiOiI3YTFjYjVhOC0zZmZlLTQ3MjMtYmU0MC05ZDczZWVhZmZjNzkiLCJhdGUiOjE3ODE0MzQ3ODcwMDAsInVwIjp7ImFudGlDc3JmVG9rZW4iOm51bGwsImV4cCI6MTc4MTQzNDc4NywiaWF0IjoxNzgxNDIzOTg3LCJpc3MiOiJodHRwczovL2FwaS5kaXZhci5pci92OC9hdXRoZW50aWNhdGUiLCJwYXJlbnRSZWZyZXNoVG9rZW5IYXNoMSI6bnVsbCwicGhvbmVOdW1iZXIiOiIrOTg5MzY0NzUxMDIxIiwicmVmcmVzaFRva2VuSGFzaDEiOiI3MjM5MzI0ZWM1OGYwN2Y4NTY1ZDgxNmY0ZTBmZTNkYzdjZWM5Mzk1YmE1Yzk5N2UzNTg0ZTZiNzgxM2UzZTg4Iiwic2Vzc2lvbkhhbmRsZSI6IjQ0ZDYwNmQ4LTM4NWItNDNkOC04NGVmLTA3YzFiODBiNTQyNiIsInN0LXBlcm0iOnsidCI6MTc4MTQyMzk4NzQwOCwidiI6W119LCJzdC1yb2xlIjp7InQiOjE3ODE0MjM5ODc0MDgsInYiOltdfSwic3ViIjoiN2ExY2I1YTgtM2ZmZS00NzIzLWJlNDAtOWQ3M2VlYWZmYzc5IiwidElkIjoicHVibGljIn19",
+      "domain": ".divar.ir",
+      "path": "/",
+      "expires": 1815983988.765352,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "csid",
+      "value": "f7bf510266f0e0c174",
+      "domain": ".divar.ir",
+      "path": "/",
+      "expires": 1815983988.844867,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "saved_at": "2026-06-14T07:59:56.499225"
+}

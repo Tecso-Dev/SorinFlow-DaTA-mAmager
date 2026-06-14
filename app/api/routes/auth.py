@@ -10,8 +10,10 @@ from typing import Any, List, Optional
 
 from app.database import get_db
 from app.models.cookie import Cookie
+from app.models.user import User
 from app.scraper.auth import DivarAuth
 from app.config import get_settings
+from app.auth.dependencies import get_current_user_optional
 from app.schemas import (
     LoginRequest,
     OTPVerifyRequest,
@@ -56,7 +58,8 @@ async def initiate_login(
 async def verify_otp(
     request: OTPVerifyRequest,
     phone_number: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_optional),
 ):
     """Verify OTP code and complete login"""
     
@@ -72,6 +75,12 @@ async def verify_otp(
         result = await auth.submit_otp_code(request.code, phone_number)
         
         if result.get("success"):
+            # Auto-link this Divar phone to the current dashboard user
+            if current_user:
+                current_user.divar_phone = phone_number
+                # flush so the cookie-save below sees the updated user
+                await db.flush()
+
             # Ensure cookies are saved to database
             cookies = result.get("cookies", [])
             if cookies:
@@ -135,18 +144,41 @@ async def get_cookie_status(
     """Get current cookie/session status"""
     
     phone = phone_number or settings.divar_phone_number
-    
-    if not phone:
+
+    auth = DivarAuth(db)
+
+    # If a specific phone was requested, return its status directly
+    if phone:
+        status = await auth.get_cookie_status(phone)
+        # If that number has no valid session, fall back to any active session in DB
+        if not status.get("is_valid"):
+            result = await db.execute(
+                select(Cookie)
+                .where(Cookie.is_valid == True)
+                .order_by(Cookie.updated_at.desc())
+                .limit(1)
+            )
+            fallback = result.scalar_one_or_none()
+            if fallback:
+                status = await auth.get_cookie_status(fallback.phone_number)
+        return CookieStatusResponse(**status)
+
+    # No phone configured at all — find any valid session
+    result = await db.execute(
+        select(Cookie)
+        .where(Cookie.is_valid == True)
+        .order_by(Cookie.updated_at.desc())
+        .limit(1)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
         return CookieStatusResponse(
             has_cookies=False,
             is_valid=False,
             phone_number="",
             message="No phone number configured"
         )
-    
-    auth = DivarAuth(db)
-    status = await auth.get_cookie_status(phone)
-    
+    status = await auth.get_cookie_status(record.phone_number)
     return CookieStatusResponse(**status)
 
 
@@ -230,6 +262,7 @@ class CookieImportRequest(BaseModel):
 async def import_cookies(
     request: CookieImportRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_optional),
 ):
     """Manually import cookies exported from a browser (e.g. via EditThisCookie extension)."""
     if not request.cookies:
@@ -265,6 +298,10 @@ async def import_cookies(
             is_valid=True,
             expires_at=expires_at,
         ))
+
+    # Auto-link this Divar phone to the current dashboard user
+    if current_user:
+        current_user.divar_phone = request.phone_number
 
     await db.commit()
     return {"success": True, "message": f"Cookies imported for {request.phone_number}"}
