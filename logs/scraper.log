@@ -73525,3 +73525,494 @@ _
 2026-06-12 14:23:38 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.220s
 2026-06-12 14:23:47 | INFO     | app.main:lifespan:60 - Shutting down...
 2026-06-12 14:23:47 | INFO     | app.main:lifespan:63 - Shutdown complete
+2026-06-12 16:15:50 | INFO     | app.main:lifespan:40 - Starting SorinFlow Divar Scraper...
+2026-06-12 16:15:50 | WARNING  | app.main:lifespan:47 - DATABASE_URL is using default credentials — change in .env for production
+2026-06-12 16:15:51 | INFO     | app.database:_seed_super_admin:127 - Default super_admin created: username='admin'
+2026-06-12 16:15:51 | INFO     | app.main:lifespan:51 - Database initialized
+2026-06-12 16:16:12 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:16:42 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:17:12 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:17:42 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:17:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:17:47 | DEBUG    | app.main:log_requests:142 - GET /dashboard/ - 200 - 0.007s
+2026-06-12 16:17:47 | DEBUG    | app.main:log_requests:142 - GET /api/docs - 200 - 0.001s
+2026-06-12 16:18:12 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:18:42 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:19:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:19:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:20:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:20:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:21:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:21:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:22:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:22:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:23:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:23:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:24:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:24:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:25:13 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:25:43 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:26:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:26:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:27:06 | DEBUG    | app.main:log_requests:142 - GET /dashboard/ - 200 - 0.002s
+2026-06-12 16:27:06 | DEBUG    | app.main:log_requests:142 - GET /dashboard/css/style.css - 200 - 0.005s
+2026-06-12 16:27:06 | DEBUG    | app.main:log_requests:142 - GET /dashboard/js/app.js - 200 - 0.005s
+2026-06-12 16:27:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:27:31 | DEBUG    | app.main:log_requests:142 - POST /api/users/token - 200 - 0.309s
+2026-06-12 16:27:31 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.172s
+2026-06-12 16:27:31 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.172s
+2026-06-12 16:27:31 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.175s
+2026-06-12 16:27:31 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.183s
+2026-06-12 16:27:31 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.219s
+2026-06-12 16:27:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:27:44 | DEBUG    | app.main:log_requests:142 - GET /api/docs - 200 - 0.001s
+2026-06-12 16:27:46 | DEBUG    | app.main:log_requests:142 - GET /api/openapi.json - 200 - 0.069s
+2026-06-12 16:27:48 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.078s
+2026-06-12 16:27:48 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.079s
+2026-06-12 16:28:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:28:19 | INFO     | app.scraper.auth:login_with_phone:251 - Navigating to Divar login page...
+2026-06-12 16:28:22 | DEBUG    | app.scraper.auth:login_with_phone:260 - Login page screenshot saved to /app/data/debug/debug_login_page.png
+2026-06-12 16:28:22 | INFO     | app.scraper.auth:login_with_phone:265 - Looking for login button...
+2026-06-12 16:28:25 | DEBUG    | app.scraper.auth:login_with_phone:290 - Post-click screenshot saved to /app/data/debug/debug_login_after_click.png
+2026-06-12 16:28:25 | INFO     | app.scraper.auth:login_with_phone:295 - Entering phone number: 09058432452
+2026-06-12 16:28:27 | INFO     | app.scraper.auth:login_with_phone:251 - Navigating to Divar login page...
+2026-06-12 16:28:29 | INFO     | app.scraper.auth:login_with_phone:303 - Found phone input with selector: input[type="tel"]
+2026-06-12 16:28:31 | DEBUG    | app.scraper.auth:login_with_phone:260 - Login page screenshot saved to /app/data/debug/debug_login_page.png
+2026-06-12 16:28:31 | INFO     | app.scraper.auth:login_with_phone:265 - Looking for login button...
+2026-06-12 16:28:31 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.079s
+2026-06-12 16:28:31 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.087s
+2026-06-12 16:28:31 | INFO     | app.scraper.auth:login_with_phone:319 - Clicking confirm button...
+2026-06-12 16:28:31 | INFO     | app.scraper.auth:login_with_phone:329 - Found confirm button with text: 'بعدی'
+2026-06-12 16:28:31 | INFO     | app.scraper.auth:login_with_phone:342 - Confirm button clicked — waiting for SMS...
+2026-06-12 16:28:33 | DEBUG    | app.scraper.auth:login_with_phone:290 - Post-click screenshot saved to /app/data/debug/debug_login_after_click.png
+2026-06-12 16:28:33 | INFO     | app.scraper.auth:login_with_phone:295 - Entering phone number: 09058432452
+2026-06-12 16:28:36 | INFO     | app.scraper.auth:login_with_phone:348 - Post-submit screenshot: /app/data/debug/debug_after_phone_submit.png
+2026-06-12 16:28:36 | INFO     | app.scraper.auth:login_with_phone:356 - کد OTP به 09058432452 ارسال شد. لطفاً کد ۶ رقمی را وارد کنید.
+2026-06-12 16:28:36 | DEBUG    | app.main:log_requests:142 - POST /api/auth/login - 200 - 17.800s
+2026-06-12 16:28:37 | INFO     | app.scraper.auth:login_with_phone:303 - Found phone input with selector: input[type="tel"]
+2026-06-12 16:28:40 | INFO     | app.scraper.auth:login_with_phone:319 - Clicking confirm button...
+2026-06-12 16:28:40 | INFO     | app.scraper.auth:login_with_phone:329 - Found confirm button with text: 'بعدی'
+2026-06-12 16:28:40 | INFO     | app.scraper.auth:login_with_phone:342 - Confirm button clicked — waiting for SMS...
+2026-06-12 16:28:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-12 16:28:44 | INFO     | app.scraper.auth:login_with_phone:348 - Post-submit screenshot: /app/data/debug/debug_after_phone_submit.png
+2026-06-12 16:28:44 | INFO     | app.scraper.auth:login_with_phone:356 - کد OTP به 09058432452 ارسال شد. لطفاً کد ۶ رقمی را وارد کنید.
+2026-06-12 16:28:44 | DEBUG    | app.main:log_requests:142 - POST /api/auth/login - 200 - 17.721s
+2026-06-12 16:28:50 | INFO     | app.scraper.auth:submit_otp_code:380 - Entering verification code...
+2026-06-12 16:28:52 | INFO     | app.scraper.auth:submit_otp_code:385 - Current URL when looking for OTP input: https://divar.ir/my-divar/my-posts
+2026-06-12 16:28:52 | INFO     | app.scraper.auth:submit_otp_code:392 - Trying to find input[name='code']...
+2026-06-12 16:28:52 | INFO     | app.scraper.auth:submit_otp_code:394 - Found input[name='code']
+2026-06-12 16:28:54 | INFO     | app.scraper.auth:submit_otp_code:461 - Clicking login button...
+2026-06-12 16:28:55 | INFO     | app.scraper.auth:submit_otp_code:466 - Screenshot saved: debug_before_login_click.png
+2026-06-12 16:28:55 | INFO     | app.scraper.auth:submit_otp_code:494 - Login button clicked
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:500 - Screenshot saved: debug_after_login_click.png
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:510 - All cookies after login: 8 found
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sRefreshToken = GX3bUNdRnkiOTbRIsF7VAI86r79uv0Tr%2B3kyswB%2B2E9mTh...
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: did = 4f31c042-2c52-482d-9327-50fbe25ae880...
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: cdid = c7875d5e-2644-40f4-b1d6-bc269c1e7050...
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: ff = %7B%22f%22%3A%7B%22foreigner_payment_enabled%22%3A...
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: theme = light...
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sAccessToken = eyJraWQiOiJkLTE3ODA4MzAyNzk4MDIiLCJ0eXAiOiJKV1QiLC...
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sFrontToken = eyJ1aWQiOiJmZWMyMWJkMy1mZWQ2LTQ5NjgtYTQ1ZC00ZDhiMz...
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: csid = 80cbf50a3cc7c81465...
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:529 - localStorage items: 8
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:532 - localStorage auth item: auth-state-sync = 1781281734030...
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:532 - localStorage auth item: auth-clock-drift = NORMAL...
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:534 - sessionStorage items: 0
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:562 - Found potential auth cookies: []
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:563 - Found potential auth storage: ['auth-state-sync', 'auth-clock-drift']
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:save_cookies_to_file:76 - Cookies saved to file for 09058432452
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:save_cookies_to_db:132 - Cookies saved to database for 09058432452
+2026-06-12 16:29:00 | INFO     | app.scraper.auth:submit_otp_code:576 - Login successful, cookies saved for 09058432452!
+2026-06-12 16:29:00 | DEBUG    | app.main:log_requests:142 - POST /api/auth/verify - 200 - 9.555s
+2026-06-12 16:29:00 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.049s
+2026-06-12 16:29:00 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.048s
+2026-06-12 16:29:06 | DEBUG    | app.main:log_requests:142 - GET /dashboard/ - 304 - 0.002s
+2026-06-12 16:29:07 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.056s
+2026-06-12 16:29:07 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.175s
+2026-06-12 16:29:07 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.193s
+2026-06-12 16:29:07 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.211s
+2026-06-12 16:29:07 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.235s
+2026-06-12 16:29:07 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.280s
+2026-06-12 16:29:10 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.077s
+2026-06-12 16:29:10 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.079s
+2026-06-12 16:29:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:29:22 | DEBUG    | app.main:log_requests:142 - GET /dashboard/ - 304 - 0.002s
+2026-06-12 16:29:22 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.053s
+2026-06-12 16:29:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.169s
+2026-06-12 16:29:23 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.169s
+2026-06-12 16:29:23 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.171s
+2026-06-12 16:29:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.171s
+2026-06-12 16:29:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.176s
+2026-06-12 16:29:24 | DEBUG    | app.main:log_requests:142 - GET /api/docs - 200 - 0.001s
+2026-06-12 16:29:24 | DEBUG    | app.main:log_requests:142 - GET /api/docs - 200 - 0.001s
+2026-06-12 16:29:24 | DEBUG    | app.main:log_requests:142 - GET /api/openapi.json - 200 - 0.003s
+2026-06-12 16:29:40 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.071s
+2026-06-12 16:29:43 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.092s
+2026-06-12 16:29:43 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.096s
+2026-06-12 16:29:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:29:47 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.046s
+2026-06-12 16:29:48 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.067s
+2026-06-12 16:29:51 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.043s
+2026-06-12 16:29:53 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.045s
+2026-06-12 16:29:55 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.045s
+2026-06-12 16:29:58 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.057s
+2026-06-12 16:29:59 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/otp-pending - 200 - 0.050s
+2026-06-12 16:30:01 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.078s
+2026-06-12 16:30:01 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.082s
+2026-06-12 16:30:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:30:22 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.092s
+2026-06-12 16:30:22 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.111s
+2026-06-12 16:30:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:30:55 | DEBUG    | app.main:log_requests:142 - GET /dashboard/ - 200 - 0.002s
+2026-06-12 16:30:55 | DEBUG    | app.main:log_requests:142 - GET /dashboard/css/style.css - 200 - 0.010s
+2026-06-12 16:30:55 | DEBUG    | app.main:log_requests:142 - GET /dashboard/js/app.js - 200 - 0.012s
+2026-06-12 16:30:56 | DEBUG    | app.main:log_requests:142 - GET /dashboard/js/app.js - 200 - 0.001s
+2026-06-12 16:30:57 | DEBUG    | app.main:log_requests:142 - GET /favicon.ico - 401 - 0.001s
+2026-06-12 16:31:04 | DEBUG    | app.main:log_requests:142 - POST /api/users/token - 200 - 0.323s
+2026-06-12 16:31:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.176s
+2026-06-12 16:31:05 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.183s
+2026-06-12 16:31:05 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.188s
+2026-06-12 16:31:05 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.183s
+2026-06-12 16:31:05 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.192s
+2026-06-12 16:31:08 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.084s
+2026-06-12 16:31:08 | DEBUG    | app.main:log_requests:142 - GET /api/auth/cookies - 200 - 0.084s
+2026-06-12 16:31:12 | INFO     | app.scraper.auth:login_with_phone:251 - Navigating to Divar login page...
+2026-06-12 16:31:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-12 16:31:16 | DEBUG    | app.scraper.auth:login_with_phone:260 - Login page screenshot saved to /app/data/debug/debug_login_page.png
+2026-06-12 16:31:16 | INFO     | app.scraper.auth:login_with_phone:265 - Looking for login button...
+2026-06-12 16:31:18 | DEBUG    | app.scraper.auth:login_with_phone:290 - Post-click screenshot saved to /app/data/debug/debug_login_after_click.png
+2026-06-12 16:31:18 | INFO     | app.scraper.auth:login_with_phone:295 - Entering phone number: 09058432452
+2026-06-12 16:31:22 | INFO     | app.scraper.auth:login_with_phone:303 - Found phone input with selector: input[type="tel"]
+2026-06-12 16:31:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.081s
+2026-06-12 16:31:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.105s
+2026-06-12 16:31:24 | INFO     | app.scraper.auth:login_with_phone:251 - Navigating to Divar login page...
+2026-06-12 16:31:24 | INFO     | app.scraper.auth:login_with_phone:319 - Clicking confirm button...
+2026-06-12 16:31:25 | INFO     | app.scraper.auth:login_with_phone:329 - Found confirm button with text: 'بعدی'
+2026-06-12 16:31:25 | INFO     | app.scraper.auth:login_with_phone:342 - Confirm button clicked — waiting for SMS...
+2026-06-12 16:31:28 | DEBUG    | app.scraper.auth:login_with_phone:260 - Login page screenshot saved to /app/data/debug/debug_login_page.png
+2026-06-12 16:31:28 | INFO     | app.scraper.auth:login_with_phone:265 - Looking for login button...
+2026-06-12 16:31:29 | INFO     | app.scraper.auth:login_with_phone:348 - Post-submit screenshot: /app/data/debug/debug_after_phone_submit.png
+2026-06-12 16:31:29 | INFO     | app.scraper.auth:login_with_phone:356 - کد OTP به 09058432452 ارسال شد. لطفاً کد ۶ رقمی را وارد کنید.
+2026-06-12 16:31:29 | DEBUG    | app.main:log_requests:142 - POST /api/auth/login - 200 - 17.201s
+2026-06-12 16:31:30 | DEBUG    | app.scraper.auth:login_with_phone:290 - Post-click screenshot saved to /app/data/debug/debug_login_after_click.png
+2026-06-12 16:31:30 | INFO     | app.scraper.auth:login_with_phone:295 - Entering phone number: 09058432452
+2026-06-12 16:31:34 | INFO     | app.scraper.auth:login_with_phone:303 - Found phone input with selector: input[type="tel"]
+2026-06-12 16:31:37 | INFO     | app.scraper.auth:login_with_phone:319 - Clicking confirm button...
+2026-06-12 16:31:37 | INFO     | app.scraper.auth:login_with_phone:329 - Found confirm button with text: 'بعدی'
+2026-06-12 16:31:37 | INFO     | app.scraper.auth:login_with_phone:342 - Confirm button clicked — waiting for SMS...
+2026-06-12 16:31:39 | INFO     | app.scraper.auth:submit_otp_code:380 - Entering verification code...
+2026-06-12 16:31:41 | INFO     | app.scraper.auth:submit_otp_code:385 - Current URL when looking for OTP input: https://divar.ir/my-divar/my-posts
+2026-06-12 16:31:41 | INFO     | app.scraper.auth:submit_otp_code:392 - Trying to find input[name='code']...
+2026-06-12 16:31:41 | INFO     | app.scraper.auth:submit_otp_code:394 - Found input[name='code']
+2026-06-12 16:31:41 | INFO     | app.scraper.auth:login_with_phone:348 - Post-submit screenshot: /app/data/debug/debug_after_phone_submit.png
+2026-06-12 16:31:41 | INFO     | app.scraper.auth:login_with_phone:356 - کد OTP به 09058432452 ارسال شد. لطفاً کد ۶ رقمی را وارد کنید.
+2026-06-12 16:31:41 | DEBUG    | app.main:log_requests:142 - POST /api/auth/login - 200 - 17.439s
+2026-06-12 16:31:43 | INFO     | app.scraper.auth:submit_otp_code:461 - Clicking login button...
+2026-06-12 16:31:43 | INFO     | app.scraper.auth:submit_otp_code:466 - Screenshot saved: debug_before_login_click.png
+2026-06-12 16:31:44 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:31:51 | INFO     | app.scraper.auth:submit_otp_code:380 - Entering verification code...
+2026-06-12 16:31:53 | INFO     | app.scraper.auth:submit_otp_code:385 - Current URL when looking for OTP input: https://divar.ir/my-divar/my-posts
+2026-06-12 16:31:53 | INFO     | app.scraper.auth:submit_otp_code:392 - Trying to find input[name='code']...
+2026-06-12 16:31:53 | INFO     | app.scraper.auth:submit_otp_code:394 - Found input[name='code']
+2026-06-12 16:31:54 | ERROR    | app.scraper.auth:submit_otp_code:588 - OTP verification failed: Element is not attached to the DOM
+2026-06-12 16:31:54 | DEBUG    | app.main:log_requests:142 - POST /api/auth/verify - 200 - 15.740s
+2026-06-12 16:31:55 | INFO     | app.scraper.auth:submit_otp_code:461 - Clicking login button...
+2026-06-12 16:31:55 | INFO     | app.scraper.auth:submit_otp_code:466 - Screenshot saved: debug_before_login_click.png
+2026-06-12 16:31:55 | INFO     | app.scraper.auth:submit_otp_code:494 - Login button clicked
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:500 - Screenshot saved: debug_after_login_click.png
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:510 - All cookies after login: 8 found
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sRefreshToken = bZ%2FoodPRk1o1HJZAOsc7B4ZFHy12fFEOVWft%2BV0mOt7Nxc...
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: did = 9721e536-10c0-43a5-8bff-0685b19a3d12...
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: cdid = 039de154-c678-416f-a87a-efce3b06af9c...
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: ff = %7B%22f%22%3A%7B%22foreigner_payment_enabled%22%3A...
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: theme = light...
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sAccessToken = eyJraWQiOiJkLTE3ODA4MzAyNzk4MDIiLCJ0eXAiOiJKV1QiLC...
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: sFrontToken = eyJ1aWQiOiJmZWMyMWJkMy1mZWQ2LTQ5NjgtYTQ1ZC00ZDhiMz...
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:513 - Cookie: csid = ded20b48d92e7bcc3d...
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:529 - localStorage items: 8
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:532 - localStorage auth item: auth-state-sync = 1781281914589...
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:532 - localStorage auth item: auth-clock-drift = NORMAL...
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:534 - sessionStorage items: 0
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:562 - Found potential auth cookies: []
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:submit_otp_code:563 - Found potential auth storage: ['auth-state-sync', 'auth-clock-drift']
+2026-06-12 16:32:00 | INFO     | app.scraper.auth:save_cookies_to_file:76 - Cookies saved to file for 09058432452
+2026-06-12 16:32:01 | INFO     | app.scraper.auth:save_cookies_to_db:132 - Cookies saved to database for 09058432452
+2026-06-12 16:32:01 | INFO     | app.scraper.auth:submit_otp_code:576 - Login successful, cookies saved for 09058432452!
+2026-06-12 16:32:01 | DEBUG    | app.main:log_requests:142 - POST /api/auth/verify - 200 - 9.522s
+2026-06-12 16:32:01 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.048s
+2026-06-12 16:32:01 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.046s
+2026-06-12 16:32:05 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.080s
+2026-06-12 16:32:05 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.089s
+2026-06-12 16:32:08 | WARNING  | app.scraper.auth:check_cookies_validity:200 - No specific auth cookies found, but cookies exist. Assuming valid.
+2026-06-12 16:32:08 | INFO     | app.scraper.auth:apply_cookies:216 - Cookies applied to browser context
+2026-06-12 16:32:10 | INFO     | app.scraper.auth:restore_session:640 - Session restored successfully for 09053833026 (url=https://divar.ir/my-divar)
+2026-06-12 16:32:11 | DEBUG    | app.main:log_requests:142 - POST /api/auth/refresh - 200 - 2.694s
+2026-06-12 16:32:11 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.056s
+2026-06-12 16:32:11 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.050s
+2026-06-12 16:32:14 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:32:15 | DEBUG    | app.main:log_requests:142 - GET /dashboard/ - 304 - 0.003s
+2026-06-12 16:32:15 | DEBUG    | app.main:log_requests:142 - GET /favicon.ico - 401 - 0.001s
+2026-06-12 16:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/users/me - 200 - 0.115s
+2026-06-12 16:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/cities - 200 - 0.187s
+2026-06-12 16:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/categories - 200 - 0.192s
+2026-06-12 16:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.200s
+2026-06-12 16:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.196s
+2026-06-12 16:32:15 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.208s
+2026-06-12 16:32:22 | DEBUG    | app.main:log_requests:142 - GET /api/properties - 200 - 0.068s
+2026-06-12 16:32:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.079s
+2026-06-12 16:32:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-12 16:32:24 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.104s
+2026-06-12 16:32:24 | DEBUG    | app.main:log_requests:142 - GET /api/scraper/jobs - 200 - 0.108s
+2026-06-12 16:32:24 | DEBUG    | app.main:log_requests:142 - GET /api/crm/tasks - 200 - 0.056s
+2026-06-12 16:32:25 | DEBUG    | app.main:log_requests:142 - GET /api/crm/contacts - 200 - 0.062s
+2026-06-12 16:32:26 | DEBUG    | app.main:log_requests:142 - GET /api/crm/deals - 200 - 0.068s
+2026-06-12 16:32:27 | DEBUG    | app.main:log_requests:142 - GET /api/crm/notes - 200 - 0.051s
+2026-06-12 16:32:27 | DEBUG    | app.main:log_requests:142 - GET /api/crm/reminders - 200 - 0.052s
+2026-06-12 16:32:28 | DEBUG    | app.main:log_requests:142 - GET /api/crm/sms/logs - 200 - 0.063s
+2026-06-12 16:32:28 | DEBUG    | app.main:log_requests:142 - GET /api/crm/leads - 200 - 0.064s
+2026-06-12 16:32:29 | DEBUG    | app.main:log_requests:142 - GET /api/crm/stats - 200 - 0.092s
+2026-06-12 16:32:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:33:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:33:16 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.084s
+2026-06-12 16:33:16 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.102s
+2026-06-12 16:33:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.074s
+2026-06-12 16:33:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.081s
+2026-06-12 16:33:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:34:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:34:16 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.074s
+2026-06-12 16:34:16 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.082s
+2026-06-12 16:34:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.107s
+2026-06-12 16:34:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.114s
+2026-06-12 16:34:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.135s
+2026-06-12 16:34:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:35:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:35:16 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.074s
+2026-06-12 16:35:16 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.087s
+2026-06-12 16:35:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.075s
+2026-06-12 16:35:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.082s
+2026-06-12 16:35:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:36:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:36:15 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.125s
+2026-06-12 16:36:15 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.150s
+2026-06-12 16:36:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.088s
+2026-06-12 16:36:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-12 16:36:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:37:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:37:16 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.111s
+2026-06-12 16:37:16 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.118s
+2026-06-12 16:37:16 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.138s
+2026-06-12 16:37:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.089s
+2026-06-12 16:37:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.094s
+2026-06-12 16:37:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:38:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:38:16 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.072s
+2026-06-12 16:38:16 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.080s
+2026-06-12 16:38:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-12 16:38:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.104s
+2026-06-12 16:38:45 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:39:15 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:39:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.115s
+2026-06-12 16:39:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.126s
+2026-06-12 16:39:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.145s
+2026-06-12 16:39:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:39:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.076s
+2026-06-12 16:39:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.088s
+2026-06-12 16:40:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:40:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.092s
+2026-06-12 16:40:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.097s
+2026-06-12 16:40:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:40:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.105s
+2026-06-12 16:40:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.141s
+2026-06-12 16:41:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:41:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.077s
+2026-06-12 16:41:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.082s
+2026-06-12 16:41:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:41:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.078s
+2026-06-12 16:41:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.088s
+2026-06-12 16:42:16 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.059s
+2026-06-12 16:42:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:42:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.083s
+2026-06-12 16:42:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.105s
+2026-06-12 16:42:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:42:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.086s
+2026-06-12 16:42:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.098s
+2026-06-12 16:43:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:43:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.078s
+2026-06-12 16:43:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-12 16:43:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:43:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.096s
+2026-06-12 16:43:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.118s
+2026-06-12 16:44:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:44:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.121s
+2026-06-12 16:44:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.121s
+2026-06-12 16:44:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.127s
+2026-06-12 16:44:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:44:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.083s
+2026-06-12 16:44:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.091s
+2026-06-12 16:45:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:45:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.086s
+2026-06-12 16:45:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.107s
+2026-06-12 16:45:46 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:45:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.086s
+2026-06-12 16:45:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.099s
+2026-06-12 16:46:16 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:46:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.078s
+2026-06-12 16:46:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.082s
+2026-06-12 16:46:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:46:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-12 16:46:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.120s
+2026-06-12 16:47:16 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.051s
+2026-06-12 16:47:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:47:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.093s
+2026-06-12 16:47:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.098s
+2026-06-12 16:47:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:47:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.078s
+2026-06-12 16:47:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.088s
+2026-06-12 16:48:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:48:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.094s
+2026-06-12 16:48:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.114s
+2026-06-12 16:48:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:48:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.085s
+2026-06-12 16:48:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.099s
+2026-06-12 16:49:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:49:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.117s
+2026-06-12 16:49:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.124s
+2026-06-12 16:49:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.144s
+2026-06-12 16:49:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:49:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.080s
+2026-06-12 16:49:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.090s
+2026-06-12 16:50:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:50:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.075s
+2026-06-12 16:50:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.083s
+2026-06-12 16:50:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:50:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.090s
+2026-06-12 16:50:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.114s
+2026-06-12 16:51:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:51:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.073s
+2026-06-12 16:51:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.081s
+2026-06-12 16:51:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:51:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.099s
+2026-06-12 16:51:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.110s
+2026-06-12 16:52:16 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.054s
+2026-06-12 16:52:17 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:52:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.080s
+2026-06-12 16:52:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.102s
+2026-06-12 16:52:47 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:52:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.088s
+2026-06-12 16:52:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.097s
+2026-06-12 16:53:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:53:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.073s
+2026-06-12 16:53:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.080s
+2026-06-12 16:53:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-12 16:53:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.120s
+2026-06-12 16:53:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:54:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:54:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.104s
+2026-06-12 16:54:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.105s
+2026-06-12 16:54:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.113s
+2026-06-12 16:54:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.089s
+2026-06-12 16:54:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.100s
+2026-06-12 16:54:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:55:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:55:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.092s
+2026-06-12 16:55:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.113s
+2026-06-12 16:55:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.090s
+2026-06-12 16:55:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.096s
+2026-06-12 16:55:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:56:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:56:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.080s
+2026-06-12 16:56:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-12 16:56:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.089s
+2026-06-12 16:56:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.114s
+2026-06-12 16:56:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:57:16 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.059s
+2026-06-12 16:57:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:57:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.077s
+2026-06-12 16:57:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.082s
+2026-06-12 16:57:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.090s
+2026-06-12 16:57:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.097s
+2026-06-12 16:57:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:58:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:58:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-12 16:58:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.112s
+2026-06-12 16:58:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.084s
+2026-06-12 16:58:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.091s
+2026-06-12 16:58:48 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:59:18 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 16:59:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.107s
+2026-06-12 16:59:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.106s
+2026-06-12 16:59:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.113s
+2026-06-12 16:59:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.095s
+2026-06-12 16:59:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.125s
+2026-06-12 16:59:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:00:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:00:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.078s
+2026-06-12 17:00:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.086s
+2026-06-12 17:00:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.078s
+2026-06-12 17:00:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-12 17:00:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:01:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:01:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.087s
+2026-06-12 17:01:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.106s
+2026-06-12 17:01:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.082s
+2026-06-12 17:01:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.089s
+2026-06-12 17:01:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:02:16 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.046s
+2026-06-12 17:02:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:02:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.079s
+2026-06-12 17:02:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.087s
+2026-06-12 17:02:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.094s
+2026-06-12 17:02:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.123s
+2026-06-12 17:02:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:03:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.002s
+2026-06-12 17:03:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.091s
+2026-06-12 17:03:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.099s
+2026-06-12 17:03:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.085s
+2026-06-12 17:03:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.099s
+2026-06-12 17:03:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:04:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:04:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.125s
+2026-06-12 17:04:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.138s
+2026-06-12 17:04:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.157s
+2026-06-12 17:04:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.077s
+2026-06-12 17:04:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-12 17:04:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:05:19 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:05:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.078s
+2026-06-12 17:05:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.085s
+2026-06-12 17:05:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.093s
+2026-06-12 17:05:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.115s
+2026-06-12 17:05:49 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:06:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:06:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.081s
+2026-06-12 17:06:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.087s
+2026-06-12 17:06:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.089s
+2026-06-12 17:06:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.098s
+2026-06-12 17:06:50 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:07:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:07:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.088s
+2026-06-12 17:07:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.109s
+2026-06-12 17:07:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.127s
+2026-06-12 17:07:48 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.126s
+2026-06-12 17:07:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.134s
+2026-06-12 17:07:50 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:08:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:08:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.072s
+2026-06-12 17:08:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.078s
+2026-06-12 17:08:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.098s
+2026-06-12 17:08:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.123s
+2026-06-12 17:08:50 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:09:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:09:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.108s
+2026-06-12 17:09:23 | DEBUG    | app.main:log_requests:142 - GET /api/auth/status - 200 - 0.106s
+2026-06-12 17:09:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.115s
+2026-06-12 17:09:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.091s
+2026-06-12 17:09:48 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.102s
+2026-06-12 17:09:50 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:10:20 | DEBUG    | app.main:log_requests:142 - GET /health - 200 - 0.001s
+2026-06-12 17:10:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.087s
+2026-06-12 17:10:23 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.104s
+2026-06-12 17:10:35 | DEBUG    | app.main:log_requests:142 - GET /api/stats/dashboard - 200 - 0.122s
+2026-06-12 17:10:35 | DEBUG    | app.main:log_requests:142 - GET /api/stats/health - 200 - 0.139s
+2026-06-12 17:10:47 | INFO     | app.main:lifespan:60 - Shutting down...
+2026-06-12 17:10:47 | INFO     | app.main:lifespan:63 - Shutdown complete

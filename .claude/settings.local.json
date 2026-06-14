@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node --check frontend/js/app.js)"
+      "Bash(node --check frontend/js/app.js)",
+      "Bash(docker info *)",
+      "Bash(open -a Docker)",
+      "Bash(break)",
+      "Bash(docker compose *)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s -o /dev/null -w \"dashboard: %{http_code}\\\\n\" http://localhost:8000/dashboard/)",
+      "Bash(curl -s -o /dev/null -w \"api docs: %{http_code}\\\\n\" http://localhost:8000/api/docs)",
+      "Bash(curl -s -o /dev/null -w \"nginx: %{http_code}\\\\n\" http://localhost/)",
+      "Bash(open -g \"vscode://ms-vscode.simple-browser?url=http%3A%2F%2Flocalhost%3A8000%2Fdashboard%2F\")",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }

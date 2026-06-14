@@ -1,0 +1,7 @@
+# Local-dev override (picked up automatically by `docker compose`):
+# use Dockerfile.local because docker.io is unreachable from this network.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
