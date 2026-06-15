@@ -1023,6 +1023,37 @@ textarea.form-control { resize: vertical; }
    ════════════════════════════════════════════════════ */
 .btn-xs { padding: .15rem .4rem; font-size: .72rem; line-height: 1.3; border-radius: .25rem; }
 
+/* Leads date filter strip */
+.leads-date-strip {
+    background: var(--bg-secondary, #1e2030);
+    border-bottom: 1px solid var(--border, #2d3148);
+}
+.leads-date-input-group { width: 155px; }
+.leads-date-input-group .form-control { font-size: .8rem; cursor: pointer; }
+.leads-date-input-group .input-group-text { font-size: .8rem; padding: .25rem .5rem; }
+
+/* Persian datepicker dark theme override */
+.datepicker-plot-area {
+    background: var(--surface, #1a1d2e) !important;
+    border: 1px solid var(--border, #2d3148) !important;
+    border-radius: .5rem !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,.45) !important;
+    font-family: inherit !important;
+}
+.datepicker-plot-area .header-section { background: var(--accent, #6366f1) !important; border-radius: .4rem .4rem 0 0 !important; }
+.datepicker-plot-area .header-section button, .datepicker-plot-area .header-section .title { color: #fff !important; }
+.datepicker-plot-area .day-section .rounder { color: var(--text, #e2e4f0) !important; }
+.datepicker-plot-area .day-section .rounder:hover { background: var(--accent, #6366f1) !important; color: #fff !important; border-radius: 50% !important; }
+.datepicker-plot-area .selected .rounder { background: var(--accent, #6366f1) !important; color: #fff !important; border-radius: 50% !important; }
+.datepicker-plot-area .today .rounder { border: 1px solid var(--accent, #6366f1) !important; border-radius: 50% !important; }
+.datepicker-plot-area .header-section .title-section span { color: #fff !important; }
+.datepicker-plot-area .month-grid-box .header .title { color: var(--text, #e2e4f0) !important; }
+.datepicker-plot-area .month-grid-box .header .title:hover { color: var(--accent, #6366f1) !important; }
+.datepicker-plot-area .navigator .table-header .navigator-title { color: var(--text, #e2e4f0) !important; }
+.datepicker-plot-area td { color: var(--text-muted, #9096b8) !important; }
+.datepicker-plot-area td.selected { color: #fff !important; background: var(--accent, #6366f1) !important; border-radius: 50% !important; }
+.datepicker-plot-area .prev-month td, .datepicker-plot-area .next-month td { color: var(--text-dim, #555) !important; }
+
 /* Dark-theme nav-tabs override for CRM */
 #crm-main-tabs {
     border-bottom: 1px solid var(--border);

@@ -104,12 +104,30 @@ class ScrapingJobCreate(BaseModel):
     max_pages: int = 10
     download_images: bool = True
     divar_phone: Optional[str] = None
+    # Price filters
     min_price: Optional[int] = None
     max_price: Optional[int] = None
     min_deposit: Optional[int] = None
     max_deposit: Optional[int] = None
     min_rent: Optional[int] = None
     max_rent: Optional[int] = None
+    min_price_per_meter: Optional[int] = None
+    max_price_per_meter: Optional[int] = None
+    # Area / rooms filters
+    min_area: Optional[int] = None
+    max_area: Optional[int] = None
+    min_rooms: Optional[int] = None
+    max_rooms: Optional[int] = None
+    # Feature filters (None = no filter, True = must have, False = must not have)
+    has_images: Optional[bool] = None
+    has_elevator: Optional[bool] = None
+    has_parking: Optional[bool] = None
+    has_storage: Optional[bool] = None
+    has_balcony: Optional[bool] = None
+    # Advertiser type: "personal" | "agency" | None
+    advertiser_type: Optional[str] = None
+    # Only include listings posted within the last N hours
+    max_age_hours: Optional[int] = None
 
 
 class ScrapingJobResponse(BaseModel):

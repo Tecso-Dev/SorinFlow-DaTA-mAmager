@@ -9,6 +9,8 @@ let trendChart = null;
 let loginPhoneNumber = '';
 let cookieStatus = { is_valid: false, has_cookies: false };
 let pendingScrapingAction = null;
+let _leadsDateFrom = '';   // Gregorian "YYYY-MM-DD"
+let _leadsDateTo   = '';   // Gregorian "YYYY-MM-DD"
 
 // ═══ Auth state ═══════════════════════════════════════════════
 let _authToken = null;
@@ -1234,6 +1236,7 @@ function onScraperCategoryChange() {
     const isBuy  = cat.startsWith('buy-');
     document.getElementById('scraper-buy-filters').classList.toggle('d-none', !isBuy);
     document.getElementById('scraper-rent-filters').classList.toggle('d-none', !isRent);
+    document.getElementById('scraper-common-filters').classList.toggle('d-none', !isBuy && !isRent);
 }
 
 function _intOrNull(id) {
@@ -1250,35 +1253,60 @@ async function startScraping(e) {
     const maxPages = parseInt(document.getElementById('scraper-pages').value);
     const downloadImages = document.getElementById('scraper-images').checked;
 
-    const priceFilters = {
-        min_price:   _intOrNull('scraper-min-price'),
-        max_price:   _intOrNull('scraper-max-price'),
-        min_deposit: _intOrNull('scraper-min-deposit'),
-        max_deposit: _intOrNull('scraper-max-deposit'),
-        min_rent:    _intOrNull('scraper-min-rent'),
-        max_rent:    _intOrNull('scraper-max-rent'),
+    const _chk = id => document.getElementById(id)?.checked ? true : null;
+
+    const filters = {
+        // قیمت خرید
+        min_price:             _intOrNull('scraper-min-price'),
+        max_price:             _intOrNull('scraper-max-price'),
+        min_price_per_meter:   _intOrNull('scraper-min-ppm'),
+        max_price_per_meter:   _intOrNull('scraper-max-ppm'),
+        // قیمت اجاره
+        min_deposit:           _intOrNull('scraper-min-deposit'),
+        max_deposit:           _intOrNull('scraper-max-deposit'),
+        min_rent:              _intOrNull('scraper-min-rent'),
+        max_rent:              _intOrNull('scraper-max-rent'),
+        // متراژ و اتاق
+        min_area:              _intOrNull('scraper-min-area'),
+        max_area:              _intOrNull('scraper-max-area'),
+        min_rooms:             _intOrNull('scraper-min-rooms'),
+        max_rooms:             _intOrNull('scraper-max-rooms'),
+        // ویژگی‌ها
+        has_images:            _chk('scraper-has-images'),
+        has_elevator:          _chk('scraper-has-elevator'),
+        has_parking:           _chk('scraper-has-parking'),
+        has_storage:           _chk('scraper-has-storage'),
+        has_balcony:           _chk('scraper-has-balcony'),
+        // آگهی‌دهنده
+        advertiser_type:       document.getElementById('scraper-advertiser-type')?.value || null,
+        // زمان انتشار
+        max_age_hours:         _intOrNull('scraper-max-age'),
     };
 
     // Check cookie status before scraping
     if (!cookieStatus.is_valid) {
-        pendingScrapingAction = { type: 'bulk', city, category, maxPages, downloadImages, priceFilters };
+        pendingScrapingAction = { type: 'bulk', city, category, maxPages, downloadImages, filters };
         showCookieWarning();
         return;
     }
 
-    await executeBulkScraping(city, category, maxPages, downloadImages, priceFilters);
+    await executeBulkScraping(city, category, maxPages, downloadImages, filters);
 }
 
-async function executeBulkScraping(city, category, maxPages, downloadImages, priceFilters = {}) {
+async function executeBulkScraping(city, category, maxPages, downloadImages, filters = {}) {
     try {
         // Auto-use the active Divar session — no manual phone selection needed
         const session = await _getActiveSession();
+        // Strip null/undefined values so the API doesn't receive empty fields
+        const cleanFilters = Object.fromEntries(
+            Object.entries(filters).filter(([, v]) => v !== null && v !== undefined)
+        );
         const body = {
             city,
             category,
             max_pages: maxPages,
             download_images: downloadImages,
-            ...priceFilters,
+            ...cleanFilters,
         };
         if (session) body.divar_phone = session.phone_number;
 
@@ -1379,8 +1407,8 @@ function continueScraping() {
     if (!pendingScrapingAction) return;
     
     if (pendingScrapingAction.type === 'bulk') {
-        const { city, category, maxPages, downloadImages, priceFilters } = pendingScrapingAction;
-        executeBulkScraping(city, category, maxPages, downloadImages, priceFilters);
+        const { city, category, maxPages, downloadImages, filters } = pendingScrapingAction;
+        executeBulkScraping(city, category, maxPages, downloadImages, filters);
     } else if (pendingScrapingAction.type === 'single') {
         executeSingleScraping(pendingScrapingAction.url);
     }
@@ -2099,18 +2127,115 @@ function _renderCrmCharts(data) {
     });
 }
 
+// ── Persian date helpers ──────────────────────────────────────────────────────
+
+function _toDateStr(jsDate) {
+    return `${jsDate.getFullYear()}-${String(jsDate.getMonth()+1).padStart(2,'0')}-${String(jsDate.getDate()).padStart(2,'0')}`;
+}
+
+function jalaliToGregorian(jalaliStr) {
+    if (!jalaliStr || !jalaliStr.trim()) return '';
+    try {
+        const parts = jalaliStr.trim().split('/').map(Number);
+        if (parts.length < 3 || parts.some(isNaN)) return '';
+        const jsDate = new persianDate(parts).toDate();
+        const result = _toDateStr(jsDate);
+        // sanity check
+        const y = jsDate.getFullYear();
+        if (y < 2000 || y > 2100) return '';
+        return result;
+    } catch(e) { console.warn('jalaliToGregorian failed:', jalaliStr, e); return ''; }
+}
+
+function gregorianToJalali(jsDate) {
+    try {
+        const pd = new persianDate(jsDate);
+        return `${pd.year()}/${String(pd.month()).padStart(2,'0')}/${String(pd.date()).padStart(2,'0')}`;
+    } catch(e) { return ''; }
+}
+
+function _initLeadsDatePickers() {
+    const opts = {
+        format: 'YYYY/MM/DD',
+        autoClose: true,
+        observer: true,
+        calendar: { persian: { locale: 'fa' } },
+        onSelect: () => {
+            const fromJ = document.getElementById('crm-filter-date-from').value;
+            const toJ   = document.getElementById('crm-filter-date-to').value;
+            _leadsDateFrom = jalaliToGregorian(fromJ);
+            _leadsDateTo   = jalaliToGregorian(toJ);
+            _updateActiveDateLabel();
+            loadLeads();
+        },
+    };
+    $('#crm-filter-date-from').persianDatepicker(opts);
+    $('#crm-filter-date-to').persianDatepicker(opts);
+}
+
+function _updateActiveDateLabel() {
+    const from = document.getElementById('crm-filter-date-from').value;
+    const to   = document.getElementById('crm-filter-date-to').value;
+    const label = document.getElementById('leads-active-date-label');
+    if (!label) return;
+    if (from || to) {
+        label.textContent = `${from || '…'} تا ${to || '…'}`;
+        label.classList.remove('d-none');
+    } else {
+        label.classList.add('d-none');
+    }
+}
+
+function setLeadsDatePreset(preset) {
+    const now = new Date();
+    let from = new Date(now);
+    if (preset === 'week')        { from.setDate(now.getDate() - 6); }
+    else if (preset === 'month')  { from.setDate(1); }
+    else if (preset === 'last30') { from.setDate(now.getDate() - 30); }
+    // 'today': from = now (same date)
+
+    // Store Gregorian directly — no Jalali round-trip needed
+    _leadsDateFrom = _toDateStr(from);
+    _leadsDateTo   = _toDateStr(now);
+
+    document.getElementById('crm-filter-date-from').value = gregorianToJalali(from);
+    document.getElementById('crm-filter-date-to').value   = gregorianToJalali(now);
+    _updateActiveDateLabel();
+    loadLeads();
+}
+
+function clearLeadsDateFilter() {
+    _leadsDateFrom = '';
+    _leadsDateTo   = '';
+    document.getElementById('crm-filter-date-from').value = '';
+    document.getElementById('crm-filter-date-to').value   = '';
+    _updateActiveDateLabel();
+    loadLeads();
+}
+
+function clearLeadsFilter() {
+    document.getElementById('crm-filter-status').value   = '';
+    document.getElementById('crm-filter-notified').value = '';
+    clearLeadsDateFilter();
+}
+
 async function loadLeads() {
-    const status = document.getElementById('crm-filter-status').value;
+    const status   = document.getElementById('crm-filter-status').value;
     const notified = document.getElementById('crm-filter-notified').value;
 
-    let url = '/crm/leads?limit=50';
-    if (status) url += `&status=${status}`;
+    let url = '/crm/leads?limit=100';
+    if (status)          url += `&status=${status}`;
     if (notified !== '') url += `&notified=${notified}`;
+    if (_leadsDateFrom)  url += `&date_from=${_leadsDateFrom}`;
+    if (_leadsDateTo)    url += `&date_to=${_leadsDateTo}`;
 
     try {
         const data = await apiCall(url);
         const tbody = document.getElementById('crm-leads-table');
         tbody.innerHTML = '';
+
+        const badge = document.getElementById('leads-count-badge');
+        if (badge) badge.textContent = data.total ?? data.items.length;
 
         if (data.items.length === 0) {
             tbody.innerHTML = `
@@ -2875,6 +3000,15 @@ document.addEventListener('DOMContentLoaded', () => {
         msgEl.addEventListener('input', () => {
             countEl.textContent = `${msgEl.value.length} کاراکتر`;
         });
+    }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof $ !== 'undefined' && $.fn.persianDatepicker) {
+        _initLeadsDatePickers();
+    } else {
+        // jQuery or persian-datepicker not yet loaded — retry after scripts settle
+        window.addEventListener('load', _initLeadsDatePickers);
     }
 });
 
