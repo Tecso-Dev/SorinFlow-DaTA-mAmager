@@ -105,6 +105,7 @@ class Property(Base):
     # Contact
     phone_number = Column(String(20), index=True)
     seller_name = Column(String(200))
+    advertiser_type = Column(String(20))  # personal, agency
     
     # URLs
     url = Column(String(500), nullable=False)

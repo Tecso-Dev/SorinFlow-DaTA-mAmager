@@ -6,7 +6,7 @@ import asyncio
 import random
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from pathlib import Path
 from urllib.parse import urljoin
@@ -504,13 +504,22 @@ class DivarScraper:
             if property_data.get("images"):
                 property_data["has_images"] = True
             
+            # Extract advertiser type and posting time
+            advertiser_type = await self._extract_advertiser_type()
+            if advertiser_type:
+                property_data["advertiser_type"] = advertiser_type
+
+            posted_at = await self._extract_posted_at()
+            if posted_at:
+                property_data["posted_at"] = posted_at
+
             # Get phone number (requires login)
             _otp_key = f"{self.current_job.job_id}:{property_data.get('divar_id','')}" if self.current_job else None
             contact_extractor = ContactExtractor(self.page, self.images_dir, otp_key=_otp_key)
             phone_number = await contact_extractor.get_phone_number()
             if phone_number:
                 property_data["phone_number"] = phone_number
-            
+
             return property_data
             
         except Exception as e:
@@ -1162,6 +1171,97 @@ class DivarScraper:
             logger.warning(f"Failed to get phone number: {e}")
             return None
     
+    async def _extract_advertiser_type(self) -> Optional[str]:
+        """Detect whether the seller is personal (شخصی) or an agency (مشاور)."""
+        try:
+            result = await self.page.evaluate("""() => {
+                // Check dedicated advertiser-type rows first
+                const rows = document.querySelectorAll('.kt-base-row, .kt-unexpandable-row');
+                for (const row of rows) {
+                    const title = row.querySelector('[class*="__title"]');
+                    const value = row.querySelector('[class*="__value"], [class*="__end"]');
+                    if (!title) continue;
+                    const tt = title.innerText || '';
+                    if (tt.includes('آگهی') || tt.includes('فروشنده') || tt.includes('نوع')) {
+                        const vt = value ? value.innerText : '';
+                        if (vt.includes('مشاور') || vt.includes('آژانس') || vt.includes('بنگاه'))
+                            return 'agency';
+                        if (vt.includes('شخصی'))
+                            return 'personal';
+                    }
+                }
+                // Fallback: look for seller badge / chip near contact section
+                const contact = document.querySelector(
+                    '[class*="contact"], [class*="seller"], [class*="advertiser"]'
+                );
+                if (contact) {
+                    const ct = contact.innerText || '';
+                    if (ct.includes('مشاور') || ct.includes('آژانس') || ct.includes('بنگاه'))
+                        return 'agency';
+                    if (ct.includes('شخصی'))
+                        return 'personal';
+                }
+                return null;
+            }""")
+            return result
+        except Exception as e:
+            logger.debug(f"Could not extract advertiser type: {e}")
+            return None
+
+    def _parse_relative_time(self, text: str) -> Optional[datetime]:
+        """Convert Persian relative time strings (e.g. '۱۲ ساعت پیش') to datetime."""
+        from app.scraper.parsers import normalize_persian_digits
+        if not text:
+            return None
+        normalized = normalize_persian_digits(text)
+        now = datetime.now()
+        m = re.search(r'(\d+)', normalized)
+        n = int(m.group(1)) if m else 1
+        if 'دقیقه' in normalized:
+            return now - timedelta(minutes=n)
+        if 'ساعت' in normalized:
+            return now - timedelta(hours=n)
+        if 'دیروز' in normalized:
+            return now - timedelta(days=1)
+        if 'روز' in normalized:
+            return now - timedelta(days=n)
+        if 'هفته' in normalized:
+            return now - timedelta(weeks=n)
+        if 'ماه' in normalized:
+            return now - timedelta(days=n * 30)
+        return None
+
+    async def _extract_posted_at(self) -> Optional[datetime]:
+        """Extract the listing's publication time from the property page."""
+        try:
+            raw = await self.page.evaluate("""() => {
+                // <time datetime="..."> element
+                const timeEl = document.querySelector('time[datetime]');
+                if (timeEl) return timeEl.getAttribute('datetime');
+                // Small text elements that contain relative time keywords
+                const candidates = document.querySelectorAll(
+                    'p[class*="--small"], span[class*="--small"], [class*="publish"], [class*="date"]'
+                );
+                for (const el of candidates) {
+                    const t = (el.innerText || '').trim();
+                    if (t.includes('پیش') || t.includes('دیروز') || t.includes('هفته') || t.includes('ساعت'))
+                        return t;
+                }
+                return null;
+            }""")
+            if not raw:
+                return None
+            # Try ISO datetime first
+            try:
+                from datetime import timezone
+                return datetime.fromisoformat(raw.replace('Z', '+00:00')).replace(tzinfo=None)
+            except Exception:
+                pass
+            return self._parse_relative_time(raw)
+        except Exception as e:
+            logger.debug(f"Could not extract posted_at: {e}")
+            return None
+
     async def download_images(
         self,
         images: List[str],
@@ -1291,6 +1391,19 @@ class DivarScraper:
         max_deposit: Optional[int] = None,
         min_rent: Optional[int] = None,
         max_rent: Optional[int] = None,
+        min_price_per_meter: Optional[int] = None,
+        max_price_per_meter: Optional[int] = None,
+        min_area: Optional[int] = None,
+        max_area: Optional[int] = None,
+        min_rooms: Optional[int] = None,
+        max_rooms: Optional[int] = None,
+        has_images: Optional[bool] = None,
+        has_elevator: Optional[bool] = None,
+        has_parking: Optional[bool] = None,
+        has_storage: Optional[bool] = None,
+        has_balcony: Optional[bool] = None,
+        advertiser_type: Optional[str] = None,
+        max_age_hours: Optional[int] = None,
     ) -> ScrapingJob:
         """Start a complete scraping job for a city and category"""
         
@@ -1384,42 +1497,86 @@ class DivarScraper:
                         listing_type = CATEGORIES.get(category, {}).get('type', 'unknown')
                         property_data['listing_type'] = listing_type
 
-                        # Price range filter
+                        did = listing['divar_id']
+
+                        def _skip(reason: str) -> bool:
+                            logger.debug(f"Skipping {did}: {reason}")
+                            return True
+
+                        skip = False
+
+                        # ── Price filters (listing-type specific) ──────────────────
                         if listing_type == 'buy':
                             price = detail.get('total_price') or detail.get('price')
                             if min_price and price and price < min_price:
-                                logger.debug(f"Skipping {listing['divar_id']}: price {price} < min {min_price}")
-                                job.scraped_items = i + 1
-                                await self.db_session.commit()
-                                continue
-                            if max_price and price and price > max_price:
-                                logger.debug(f"Skipping {listing['divar_id']}: price {price} > max {max_price}")
-                                job.scraped_items = i + 1
-                                await self.db_session.commit()
-                                continue
+                                skip = _skip(f"price {price} < min {min_price}")
+                            elif max_price and price and price > max_price:
+                                skip = _skip(f"price {price} > max {max_price}")
+                            ppm = detail.get('price_per_meter')
+                            if not skip and min_price_per_meter and ppm and ppm < min_price_per_meter:
+                                skip = _skip(f"price/m² {ppm} < min {min_price_per_meter}")
+                            elif not skip and max_price_per_meter and ppm and ppm > max_price_per_meter:
+                                skip = _skip(f"price/m² {ppm} > max {max_price_per_meter}")
                         elif listing_type == 'rent':
                             deposit = detail.get('deposit')
                             rent = detail.get('rent_price')
                             if min_deposit and deposit and deposit < min_deposit:
-                                logger.debug(f"Skipping {listing['divar_id']}: deposit {deposit} < min {min_deposit}")
-                                job.scraped_items = i + 1
-                                await self.db_session.commit()
-                                continue
-                            if max_deposit and deposit and deposit > max_deposit:
-                                logger.debug(f"Skipping {listing['divar_id']}: deposit {deposit} > max {max_deposit}")
-                                job.scraped_items = i + 1
-                                await self.db_session.commit()
-                                continue
-                            if min_rent and rent and rent < min_rent:
-                                logger.debug(f"Skipping {listing['divar_id']}: rent {rent} < min {min_rent}")
-                                job.scraped_items = i + 1
-                                await self.db_session.commit()
-                                continue
-                            if max_rent and rent and rent > max_rent:
-                                logger.debug(f"Skipping {listing['divar_id']}: rent {rent} > max {max_rent}")
-                                job.scraped_items = i + 1
-                                await self.db_session.commit()
-                                continue
+                                skip = _skip(f"deposit {deposit} < min {min_deposit}")
+                            elif max_deposit and deposit and deposit > max_deposit:
+                                skip = _skip(f"deposit {deposit} > max {max_deposit}")
+                            elif min_rent and rent and rent < min_rent:
+                                skip = _skip(f"rent {rent} < min {min_rent}")
+                            elif max_rent and rent and rent > max_rent:
+                                skip = _skip(f"rent {rent} > max {max_rent}")
+
+                        # ── Area filter ────────────────────────────────────────────
+                        if not skip:
+                            area = detail.get('area')
+                            if min_area and area and area < min_area:
+                                skip = _skip(f"area {area} < min {min_area}")
+                            elif max_area and area and area > max_area:
+                                skip = _skip(f"area {area} > max {max_area}")
+
+                        # ── Rooms filter ───────────────────────────────────────────
+                        if not skip:
+                            rooms = detail.get('rooms')
+                            if min_rooms is not None and rooms is not None and rooms < min_rooms:
+                                skip = _skip(f"rooms {rooms} < min {min_rooms}")
+                            elif max_rooms is not None and rooms is not None and rooms > max_rooms:
+                                skip = _skip(f"rooms {rooms} > max {max_rooms}")
+
+                        # ── Boolean amenity filters ────────────────────────────────
+                        bool_filters = [
+                            ('has_images', has_images),
+                            ('has_elevator', has_elevator),
+                            ('has_parking', has_parking),
+                            ('has_storage', has_storage),
+                            ('has_balcony', has_balcony),
+                        ]
+                        for field, wanted in bool_filters:
+                            if not skip and wanted is not None:
+                                actual = bool(detail.get(field) or (field == 'has_images' and detail.get('images')))
+                                if wanted and not actual:
+                                    skip = _skip(f"{field} required but not present")
+                                elif not wanted and actual:
+                                    skip = _skip(f"{field} must be absent")
+
+                        # ── Advertiser type filter ─────────────────────────────────
+                        if not skip and advertiser_type:
+                            actual_type = detail.get('advertiser_type')
+                            if actual_type and actual_type != advertiser_type:
+                                skip = _skip(f"advertiser_type {actual_type} != {advertiser_type}")
+
+                        # ── Age filter ─────────────────────────────────────────────
+                        if not skip and max_age_hours:
+                            posted = detail.get('posted_at')
+                            if posted and posted < datetime.now() - timedelta(hours=max_age_hours):
+                                skip = _skip(f"posted_at {posted} older than {max_age_hours}h")
+
+                        if skip:
+                            job.scraped_items = i + 1
+                            await self.db_session.commit()
+                            continue
 
                         # Download images if enabled
                         if download_images and property_data.get('images'):

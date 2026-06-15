@@ -6,7 +6,8 @@
     <title>SorinFlow — داشبورد مدیریت</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=20260616">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
 
@@ -339,12 +340,21 @@
                                     <!-- فیلتر قیمت خرید -->
                                     <div id="scraper-buy-filters" class="d-none">
                                         <div class="mb-2">
-                                            <label class="form-label small text-muted">فیلتر قیمت (تومان) — اختیاری</label>
+                                            <label class="form-label small text-muted">قیمت کل (تومان)</label>
                                             <div class="d-flex gap-2">
                                                 <input type="number" id="scraper-min-price" class="form-control form-control-sm"
-                                                       placeholder="حداقل قیمت">
+                                                       placeholder="از">
                                                 <input type="number" id="scraper-max-price" class="form-control form-control-sm"
-                                                       placeholder="حداکثر قیمت">
+                                                       placeholder="تا">
+                                            </div>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label small text-muted">قیمت هر متر مربع (تومان)</label>
+                                            <div class="d-flex gap-2">
+                                                <input type="number" id="scraper-min-ppm" class="form-control form-control-sm"
+                                                       placeholder="از">
+                                                <input type="number" id="scraper-max-ppm" class="form-control form-control-sm"
+                                                       placeholder="تا">
                                             </div>
                                         </div>
                                     </div>
@@ -352,21 +362,86 @@
                                     <!-- فیلتر قیمت اجاره -->
                                     <div id="scraper-rent-filters" class="d-none">
                                         <div class="mb-2">
-                                            <label class="form-label small text-muted">فیلتر ودیعه (تومان) — اختیاری</label>
+                                            <label class="form-label small text-muted">ودیعه (تومان)</label>
                                             <div class="d-flex gap-2">
                                                 <input type="number" id="scraper-min-deposit" class="form-control form-control-sm"
-                                                       placeholder="حداقل ودیعه">
+                                                       placeholder="از">
                                                 <input type="number" id="scraper-max-deposit" class="form-control form-control-sm"
-                                                       placeholder="حداکثر ودیعه">
+                                                       placeholder="تا">
                                             </div>
                                         </div>
                                         <div class="mb-2">
-                                            <label class="form-label small text-muted">فیلتر اجاره ماهانه (تومان) — اختیاری</label>
+                                            <label class="form-label small text-muted">اجاره ماهانه (تومان)</label>
                                             <div class="d-flex gap-2">
                                                 <input type="number" id="scraper-min-rent" class="form-control form-control-sm"
-                                                       placeholder="حداقل اجاره">
+                                                       placeholder="از">
                                                 <input type="number" id="scraper-max-rent" class="form-control form-control-sm"
-                                                       placeholder="حداکثر اجاره">
+                                                       placeholder="تا">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- فیلترهای مشترک -->
+                                    <div id="scraper-common-filters" class="d-none">
+                                        <div class="mb-2">
+                                            <label class="form-label small text-muted">متراژ (متر)</label>
+                                            <div class="d-flex gap-2">
+                                                <input type="number" id="scraper-min-area" class="form-control form-control-sm"
+                                                       placeholder="از">
+                                                <input type="number" id="scraper-max-area" class="form-control form-control-sm"
+                                                       placeholder="تا">
+                                            </div>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label small text-muted">تعداد اتاق</label>
+                                            <div class="d-flex gap-2">
+                                                <input type="number" id="scraper-min-rooms" class="form-control form-control-sm"
+                                                       placeholder="از" min="0">
+                                                <input type="number" id="scraper-max-rooms" class="form-control form-control-sm"
+                                                       placeholder="تا" min="0">
+                                            </div>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label small text-muted">آگهی‌دهنده</label>
+                                            <select id="scraper-advertiser-type" class="form-select form-select-sm">
+                                                <option value="">همه</option>
+                                                <option value="personal">شخصی</option>
+                                                <option value="agency">مشاور املاک</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label small text-muted">زمان انتشار</label>
+                                            <select id="scraper-max-age" class="form-select form-select-sm">
+                                                <option value="">همه</option>
+                                                <option value="12">۱۲ ساعت اخیر</option>
+                                                <option value="24">۲۴ ساعت اخیر</option>
+                                                <option value="72">۳ روز اخیر</option>
+                                                <option value="168">۷ روز اخیر</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label small text-muted">ویژگی‌ها</label>
+                                            <div class="d-flex flex-wrap gap-2">
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="scraper-has-images">
+                                                    <label class="form-check-label small" for="scraper-has-images">دارای عکس</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="scraper-has-elevator">
+                                                    <label class="form-check-label small" for="scraper-has-elevator">آسانسور</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="scraper-has-parking">
+                                                    <label class="form-check-label small" for="scraper-has-parking">پارکینگ</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="scraper-has-storage">
+                                                    <label class="form-check-label small" for="scraper-has-storage">انباری</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="scraper-has-balcony">
+                                                    <label class="form-check-label small" for="scraper-has-balcony">بالکن</label>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -776,9 +851,12 @@
                     <!-- ── LEADS ── -->
                     <div class="tab-pane fade" id="crm-tab-leads" role="tabpanel">
                         <div class="card">
+                            <!-- Header: title + status + notified -->
                             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                <span><i class="bi bi-people"></i> لیدهای اسکرپ شده</span>
-                                <div class="d-flex gap-2 flex-wrap">
+                                <span><i class="bi bi-people"></i> لیدهای اسکرپ شده
+                                    <span id="leads-count-badge" class="badge bg-secondary ms-1" style="font-size:.7rem"></span>
+                                </span>
+                                <div class="d-flex gap-2 flex-wrap align-items-center">
                                     <select id="crm-filter-status" class="form-select form-select-sm" style="width:140px;">
                                         <option value="">همه وضعیت‌ها</option>
                                         <option value="new">جدید</option>
@@ -787,15 +865,51 @@
                                         <option value="closed">بسته شده</option>
                                         <option value="rejected">رد شده</option>
                                     </select>
-                                    <select id="crm-filter-notified" class="form-select form-select-sm" style="width:140px;">
-                                        <option value="">همه</option>
+                                    <select id="crm-filter-notified" class="form-select form-select-sm" style="width:130px;">
+                                        <option value="">همه اطلاع‌رسانی</option>
                                         <option value="false">بدون اطلاع</option>
                                         <option value="true">اطلاع داده شده</option>
                                     </select>
-                                    <button class="btn btn-primary btn-sm" onclick="loadLeads()"><i class="bi bi-search"></i> فیلتر</button>
-                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadLeads()"><i class="bi bi-arrow-clockwise"></i></button>
+                                    <button class="btn btn-primary btn-sm" onclick="loadLeads()">
+                                        <i class="bi bi-search"></i> جستجو
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="clearLeadsFilter()" title="پاک کردن همه فیلترها">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadLeads()" title="بارگیری مجدد">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
                                 </div>
                             </div>
+
+                            <!-- Date filter strip -->
+                            <div class="leads-date-strip px-3 py-2">
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <i class="bi bi-calendar3 text-muted"></i>
+                                    <span class="small fw-semibold text-muted">بازه تاریخ:</span>
+                                    <button class="btn btn-xs btn-outline-secondary" onclick="setLeadsDatePreset('today')">امروز</button>
+                                    <button class="btn btn-xs btn-outline-secondary" onclick="setLeadsDatePreset('week')">این هفته</button>
+                                    <button class="btn btn-xs btn-outline-secondary" onclick="setLeadsDatePreset('month')">این ماه</button>
+                                    <button class="btn btn-xs btn-outline-secondary" onclick="setLeadsDatePreset('last30')">۳۰ روز اخیر</button>
+                                    <div class="vr mx-1"></div>
+                                    <div class="input-group input-group-sm leads-date-input-group">
+                                        <span class="input-group-text"><i class="bi bi-calendar-event"></i></span>
+                                        <input type="text" id="crm-filter-date-from" class="form-control"
+                                               placeholder="از تاریخ" autocomplete="off" readonly>
+                                    </div>
+                                    <span class="text-muted small">←</span>
+                                    <div class="input-group input-group-sm leads-date-input-group">
+                                        <span class="input-group-text"><i class="bi bi-calendar-event"></i></span>
+                                        <input type="text" id="crm-filter-date-to" class="form-control"
+                                               placeholder="تا تاریخ" autocomplete="off" readonly>
+                                    </div>
+                                    <button class="btn btn-xs btn-outline-danger" onclick="clearLeadsDateFilter()" title="پاک کردن تاریخ">
+                                        <i class="bi bi-x"></i> پاک
+                                    </button>
+                                    <span id="leads-active-date-label" class="badge bg-primary-subtle text-primary-emphasis d-none" style="font-size:.75rem;"></span>
+                                </div>
+                            </div>
+
                             <div class="table-responsive">
                                 <table class="table">
                                     <thead><tr><th>#</th><th>عنوان ملک</th><th>شهر</th><th>قیمت</th><th>شماره تماس</th><th>وضعیت CRM</th><th>اطلاع‌رسانی</th><th>تاریخ</th><th>عملیات</th></tr></thead>
@@ -1246,6 +1360,9 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-<script src="js/app.js"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
+<script src="js/app.js?v=20260617"></script>
 </body>
 </html>

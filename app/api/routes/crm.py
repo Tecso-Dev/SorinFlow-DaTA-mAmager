@@ -34,10 +34,13 @@ async def list_leads(
     status: Optional[str] = None,
     city: Optional[str] = None,
     notified: Optional[bool] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
+    from datetime import datetime
     query = select(Lead).order_by(Lead.created_at.desc())
     if status:
         query = query.where(Lead.status == status)
@@ -45,6 +48,21 @@ async def list_leads(
         query = query.where(Lead.city_name == city)
     if notified is not None:
         query = query.where(Lead.notified == notified)
+    if date_from:
+        try:
+            query = query.where(Lead.created_at >= datetime.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            dt_to = datetime.fromisoformat(date_to)
+            # include the full end day
+            if len(date_to) == 10:
+                from datetime import timedelta
+                dt_to = dt_to + timedelta(days=1)
+            query = query.where(Lead.created_at < dt_to)
+        except ValueError:
+            pass
 
     count_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = count_result.scalar_one()

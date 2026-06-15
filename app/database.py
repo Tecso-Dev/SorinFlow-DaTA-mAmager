@@ -148,6 +148,9 @@ async def _migrate_properties_owner_phone(conn):
             await conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_properties_owner_phone ON properties (owner_phone)"
             ))
+            await conn.execute(text(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS advertiser_type VARCHAR(20)"
+            ))
     except Exception:
         pass
 

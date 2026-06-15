@@ -2,10 +2,12 @@
 Image downloader for Divar property listings.
 """
 import asyncio
+import io
 from pathlib import Path
 from typing import List
 
 import httpx
+from PIL import Image
 from loguru import logger
 
 
@@ -14,7 +16,7 @@ async def download_property_images(
     divar_id: str,
     images_dir: Path,
 ) -> List[str]:
-    """Download images to <images_dir>/<divar_id>/ and return local file paths."""
+    """Download images to <images_dir>/<divar_id>/ as JPEG and return local file paths."""
     local_paths: List[str] = []
     try:
         property_dir = images_dir / divar_id
@@ -24,9 +26,9 @@ async def download_property_images(
                 try:
                     response = await client.get(url, timeout=30)
                     if response.status_code == 200:
-                        ext = 'webp' if 'webp' in url else 'jpg'
-                        filepath = property_dir / f"img_{i + 1}.{ext}"
-                        filepath.write_bytes(response.content)
+                        filepath = property_dir / f"img_{i + 1}.jpg"
+                        img = Image.open(io.BytesIO(response.content)).convert("RGB")
+                        img.save(filepath, format="JPEG", quality=85)
                         local_paths.append(str(filepath))
                         logger.debug(f"Downloaded image {i + 1} for {divar_id}")
                     await asyncio.sleep(0.5)

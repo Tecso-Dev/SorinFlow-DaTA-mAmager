@@ -40,6 +40,19 @@ async def run_scraping_job(
     max_deposit: int = None,
     min_rent: int = None,
     max_rent: int = None,
+    min_price_per_meter: int = None,
+    max_price_per_meter: int = None,
+    min_area: int = None,
+    max_area: int = None,
+    min_rooms: int = None,
+    max_rooms: int = None,
+    has_images: bool = None,
+    has_elevator: bool = None,
+    has_parking: bool = None,
+    has_storage: bool = None,
+    has_balcony: bool = None,
+    advertiser_type: str = None,
+    max_age_hours: int = None,
 ):
     """Background task to run scraping job"""
     # Import here to avoid circular imports and ensure fresh event loop
@@ -106,6 +119,19 @@ async def run_scraping_job(
                 max_deposit=max_deposit,
                 min_rent=min_rent,
                 max_rent=max_rent,
+                min_price_per_meter=min_price_per_meter,
+                max_price_per_meter=max_price_per_meter,
+                min_area=min_area,
+                max_area=max_area,
+                min_rooms=min_rooms,
+                max_rooms=max_rooms,
+                has_images=has_images,
+                has_elevator=has_elevator,
+                has_parking=has_parking,
+                has_storage=has_storage,
+                has_balcony=has_balcony,
+                advertiser_type=advertiser_type,
+                max_age_hours=max_age_hours,
             )
             
             logger.info(f"[{job_id}] Job completed: {result.new_items} new, {result.failed_items} failed, Status={result.status}")
@@ -228,6 +254,19 @@ async def start_scraping_job(
         job_config.max_deposit,
         job_config.min_rent,
         job_config.max_rent,
+        job_config.min_price_per_meter,
+        job_config.max_price_per_meter,
+        job_config.min_area,
+        job_config.max_area,
+        job_config.min_rooms,
+        job_config.max_rooms,
+        job_config.has_images,
+        job_config.has_elevator,
+        job_config.has_parking,
+        job_config.has_storage,
+        job_config.has_balcony,
+        job_config.advertiser_type,
+        job_config.max_age_hours,
     )
     
     logger.info(f"Started background task for job {job_id}")
