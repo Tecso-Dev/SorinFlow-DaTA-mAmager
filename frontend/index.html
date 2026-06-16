@@ -6,7 +6,7 @@
     <title>SorinFlow — داشبورد مدیریت</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260616">
+    <link rel="stylesheet" href="css/style.css?v=20260616c">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -61,6 +61,46 @@
             <button class="btn-login" style="background:transparent;border:1px solid #444;margin-top:.5rem;font-size:.85rem;" onclick="backToLogin()">
                 <i class="bi bi-arrow-right"></i> بازگشت
             </button>
+        </div>
+
+        <!-- Step 3: Register form -->
+        <div id="login-step-register" class="d-none">
+            <div class="login-input-wrap">
+                <span class="input-icon"><i class="bi bi-person"></i></span>
+                <input type="text" id="reg-username" placeholder="نام کاربری" autocomplete="username">
+            </div>
+            <div class="login-input-wrap">
+                <span class="input-icon"><i class="bi bi-person-badge"></i></span>
+                <input type="text" id="reg-fullname" placeholder="نام کامل">
+            </div>
+            <div class="login-input-wrap">
+                <span class="input-icon"><i class="bi bi-phone"></i></span>
+                <input type="text" id="reg-divar-phone" placeholder="شماره دیوار (09xxxxxxxxx)" maxlength="11" inputmode="tel">
+            </div>
+            <div class="login-input-wrap">
+                <span class="input-icon"><i class="bi bi-lock"></i></span>
+                <input type="password" id="reg-password" placeholder="رمز عبور (حداقل ۶ کاراکتر)" autocomplete="new-password">
+            </div>
+            <div class="login-input-wrap">
+                <span class="input-icon"><i class="bi bi-lock-fill"></i></span>
+                <input type="password" id="reg-password2" placeholder="تکرار رمز عبور" autocomplete="new-password">
+            </div>
+            <button id="reg-btn" class="btn-login" onclick="doRegister()">
+                <i class="bi bi-person-plus"></i> ایجاد حساب کاربری
+            </button>
+            <button class="btn-login" style="background:transparent;border:1px solid #444;margin-top:.5rem;font-size:.85rem;" onclick="showLoginForm()">
+                <i class="bi bi-arrow-right"></i> بازگشت به ورود
+            </button>
+        </div>
+
+        <!-- Login / Register toggle link -->
+        <div id="login-toggle-link" style="text-align:center;margin-top:1rem;font-size:.85rem;color:var(--text-muted,#aaa);">
+            حساب ندارید؟
+            <a href="#" onclick="showRegisterForm();return false;" style="color:#7c6ef5;text-decoration:none;">ثبت نام کنید</a>
+        </div>
+        <div id="register-toggle-link" style="text-align:center;margin-top:1rem;font-size:.85rem;color:var(--text-muted,#aaa);display:none;">
+            قبلاً ثبت نام کرده‌اید؟
+            <a href="#" onclick="showLoginForm();return false;" style="color:#7c6ef5;text-decoration:none;">ورود کنید</a>
         </div>
     </div>
 </div>
@@ -544,6 +584,9 @@
                                     <button id="otp-verify-btn" class="btn btn-success btn-w100" onclick="verifyCode()">
                                         <i class="bi bi-check-circle"></i> تأیید و ورود
                                     </button>
+                                    <button class="btn btn-outline-secondary btn-w100 mt-2" onclick="cancelDivarOtp()">
+                                        <i class="bi bi-arrow-right"></i> بازگشت — ارسال مجدد کد
+                                    </button>
                                 </div>
 
                                 <hr style="border-color:var(--border); margin:1.2rem 0;">
@@ -861,6 +904,8 @@
                                         <option value="">همه وضعیت‌ها</option>
                                         <option value="new">جدید</option>
                                         <option value="contacted">تماس گرفته</option>
+                                        <option value="visit">بازدید از فایل</option>
+                                        <option value="contract_meeting">نشست و تنظیم قرارداد</option>
                                         <option value="qualified">واجد شرایط</option>
                                         <option value="closed">بسته شده</option>
                                         <option value="rejected">رد شده</option>
@@ -1363,6 +1408,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260617"></script>
+<script src="js/app.js?v=20260616e"></script>
 </body>
 </html>

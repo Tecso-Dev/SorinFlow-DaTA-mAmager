@@ -67,10 +67,15 @@ a:hover { color: var(--accent); }
 #login-page {
   position: fixed; inset: 0; z-index: 9999;
   display: none;
-  align-items: center; justify-content: center;
+  flex-direction: column;
+  align-items: center;
   background: var(--bg);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 1rem;
 }
+/* spacers that shrink when card is too tall, keeping card centered on large screens */
+#login-page::before, #login-page::after { content: ''; flex: 1; }
 
 .login-bg {
   position: absolute; inset: 0;
@@ -591,6 +596,8 @@ a:hover { color: var(--accent); }
 .bg-warning   { background: rgba(245,158,11,.15) !important; color: #fcd34d !important; border: 1px solid rgba(245,158,11,.3) !important; color: #fcd34d !important; }
 .bg-danger    { background: rgba(239,68,68,.15)  !important; color: #fca5a5 !important; border: 1px solid rgba(239,68,68,.3) !important; }
 .bg-secondary { background: rgba(100,116,139,.15)!important; color: #94a3b8 !important; border: 1px solid rgba(100,116,139,.3) !important; }
+.bg-orange    { background: rgba(234,88,12,.15)   !important; color: #fb923c !important; border: 1px solid rgba(234,88,12,.3) !important; }
+.bg-purple    { background: rgba(139,92,246,.15)  !important; color: #c4b5fd !important; border: 1px solid rgba(139,92,246,.3) !important; }
 .bg-light     { background: var(--surface3) !important; color: var(--text-dim) !important; border: 1px solid var(--border) !important; }
 .bg-dark      { background: var(--surface2) !important; color: var(--text) !important; }
 .text-dark    { color: var(--text) !important; }

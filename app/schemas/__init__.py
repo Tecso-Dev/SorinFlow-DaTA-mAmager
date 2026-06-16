@@ -331,6 +331,15 @@ class UserCreate(BaseModel):
             raise ValueError(f"role must be one of {VALID_ROLES}")
 
 
+class UserRegister(BaseModel):
+    """Public self-registration — always creates a 'user' role account."""
+    username: str = Field(..., min_length=3, max_length=100)
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    password: str = Field(..., min_length=6)
+    divar_phone: Optional[str] = Field(None, pattern=r'^(09\d{9})?$')
+
+
 class UserUpdate(BaseModel):
     email: Optional[str] = None
     full_name: Optional[str] = None

@@ -17,7 +17,7 @@ from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog
 from app.schemas import LeadResponse, LeadUpdate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
-from app.auth.dependencies import get_current_user, require_super_admin
+from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
 from app.models.user import User
 
 router = APIRouter()
@@ -26,7 +26,7 @@ router = APIRouter()
 # LEADS (existing — from scraper)
 # ─────────────────────────────────────────────────────────────────────────────
 
-VALID_LEAD_STATUSES = {"new", "contacted", "qualified", "closed", "rejected"}
+VALID_LEAD_STATUSES = {"new", "contacted", "visit", "contract_meeting", "qualified", "closed", "rejected"}
 
 
 @router.get("/leads", response_model=LeadList)
@@ -39,9 +39,17 @@ async def list_leads(
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     from datetime import datetime
     query = select(Lead).order_by(Lead.created_at.desc())
+
+    # Isolate leads to the current user's Divar phone via the linked property
+    if current_user and current_user.divar_phone:
+        query = query.join(Property, Lead.property_id == Property.id).where(
+            Property.owner_phone == current_user.divar_phone
+        )
+
     if status:
         query = query.where(Lead.status == status)
     if city:
@@ -723,14 +731,36 @@ async def list_sms_logs(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/stats")
-async def crm_stats(db: AsyncSession = Depends(get_db)):
+async def crm_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    # Helper: count leads scoped to the current user's Divar phone
+    def _lead_count(*extra_where):
+        q = select(func.count(Lead.id))
+        if current_user and current_user.divar_phone:
+            q = q.join(Property, Lead.property_id == Property.id).where(
+                Property.owner_phone == current_user.divar_phone
+            )
+        for w in extra_where:
+            q = q.where(w)
+        return q
+
+    def _lead_group(group_col):
+        q = select(group_col, func.count(Lead.id)).group_by(group_col)
+        if current_user and current_user.divar_phone:
+            q = q.join(Property, Lead.property_id == Property.id).where(
+                Property.owner_phone == current_user.divar_phone
+            )
+        return q
+
     # Leads
-    total_leads = (await db.execute(select(func.count(Lead.id)))).scalar_one()
+    total_leads = (await db.execute(_lead_count())).scalar_one()
     leads_by_status = {
         row[0]: row[1]
-        for row in (await db.execute(select(Lead.status, func.count(Lead.id)).group_by(Lead.status))).all()
+        for row in (await db.execute(_lead_group(Lead.status))).all()
     }
-    notified = (await db.execute(select(func.count(Lead.id)).where(Lead.notified == True))).scalar_one()
+    notified = (await db.execute(_lead_count(Lead.notified == True))).scalar_one()
 
     # Contacts
     total_contacts = (await db.execute(select(func.count(Contact.id)))).scalar_one()

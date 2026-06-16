@@ -116,7 +116,8 @@ app.add_middleware(
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
     public_paths = {"/health", "/", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info", "/api/config",
-                    "/api/users/token", "/api/users/token/verify-totp", "/api/users/me"}
+                    "/api/users/token", "/api/users/token/verify-totp", "/api/users/me",
+                    "/api/users/register"}
     is_dashboard = request.url.path.startswith("/dashboard")
     is_public = request.url.path in public_paths or is_dashboard
 
