@@ -1,62 +1,14 @@
-# HTTP → HTTPS redirect
-apiVersion: traefik.containo.us/v1alpha1
-kind: Middleware
-metadata:
-  name: redirect-https
-  namespace: sorinflow
-spec:
-  redirectScheme:
-    scheme: https
-    permanent: true
----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: sorinflow-http
+  name: sorinflow-ingress
   namespace: sorinflow
   annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: "web"
-    traefik.ingress.kubernetes.io/router.middlewares: "sorinflow-redirect-https@kubernetescrd"
-spec:
-  rules:
-    - host: sorinflow.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: backend
-                port:
-                  number: 8000
-    - host: www.sorinflow.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: backend
-                port:
-                  number: 8000
----
-# HTTPS with TLS
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: sorinflow-https
-  namespace: sorinflow
-  annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
+    traefik.ingress.kubernetes.io/router.entrypoints: "web,websecure"
     traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: "letsencrypt"
 spec:
   ingressClassName: traefik
-  tls:
-    - hosts:
-        - sorinflow.com
-        - www.sorinflow.com
-      secretName: sorinflow-tls
   rules:
     - host: sorinflow.com
       http:
