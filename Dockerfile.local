@@ -1,0 +1,23 @@
+# Local-dev Dockerfile: Docker Hub is unreachable from this network (403),
+# so build from the locally available Playwright image which already bundles
+# Python + Chromium matching playwright==1.41.0 in requirements.txt.
+FROM mcr.microsoft.com/playwright/python:v1.41.0-jammy
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir "numpy<2" && \
+    pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+RUN mkdir -p /app/data/images /app/data/cookies /app/logs
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
