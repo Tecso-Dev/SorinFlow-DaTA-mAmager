@@ -63,3 +63,6 @@ docker-compose.override.yml
 
 # Claude
 .claude/settings.local.json
+
+# Kubernetes secrets (never commit)
+k8s/01-secrets.yaml
