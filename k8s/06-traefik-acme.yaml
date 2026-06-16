@@ -1,0 +1,23 @@
+# Configure Traefik (built-in k3s) with Let's Encrypt ACME
+# This replaces cert-manager — no external image needed
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    certificatesResolvers:
+      letsencrypt:
+        acme:
+          email: sahand.mosanejad4488@gmail.com
+          storage: /data/acme.json
+          httpChallenge:
+            entryPoint: web
+    persistence:
+      enabled: true
+      size: 128Mi
+    ports:
+      web:
+        redirectTo:
+          port: websecure

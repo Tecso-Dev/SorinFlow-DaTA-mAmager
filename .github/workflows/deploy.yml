@@ -61,7 +61,7 @@ jobs:
           kubectl apply -f k8s/02b-postgres-init-configmap.yaml
           kubectl apply -f k8s/02-postgres.yaml
           kubectl apply -f k8s/03-redis.yaml
-          kubectl apply -f k8s/06-cert-issuer.yaml
+          kubectl apply -f k8s/06-traefik-acme.yaml
           kubectl apply -f k8s/05-ingress.yaml
 
       - name: Deploy new backend image
