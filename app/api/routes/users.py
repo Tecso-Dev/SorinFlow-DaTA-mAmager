@@ -28,7 +28,7 @@ from app.models.user import User
 from app.auth.jwt import verify_password, get_password_hash, create_access_token, decode_token
 from app.auth.dependencies import get_current_user, _role_dep
 from app.schemas import (
-    UserResponse, UserCreate, UserUpdate, UserPasswordReset, TokenResponse, UserList,
+    UserResponse, UserCreate, UserRegister, UserUpdate, UserPasswordReset, TokenResponse, UserList,
     TotpSetupResponse, TotpEnableRequest, TotpDisableRequest, TotpLoginRequest,
 )
 
@@ -109,6 +109,43 @@ async def verify_totp_login(
         username=user.username,
         full_name=user.full_name,
     )
+
+
+# ── Public: self-registration ─────────────────────────────────────────────────
+
+@router.post("/register", response_model=UserResponse, status_code=201)
+async def register_user(
+    data: UserRegister,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public endpoint — anyone can create a 'user' account."""
+    existing = await db.execute(select(User).where(User.username == data.username))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="نام کاربری قبلاً ثبت شده است")
+
+    if data.email:
+        dup = await db.execute(select(User).where(User.email == data.email))
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="ایمیل قبلاً ثبت شده است")
+
+    if data.divar_phone:
+        dup = await db.execute(select(User).where(User.divar_phone == data.divar_phone))
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="این شماره دیوار قبلاً برای یک حساب ثبت شده است")
+
+    user = User(
+        username=data.username,
+        email=data.email,
+        full_name=data.full_name,
+        hashed_password=get_password_hash(data.password),
+        role="user",
+        divar_phone=data.divar_phone or None,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
 
 
 # ── Authenticated ─────────────────────────────────────────────────────────────

@@ -104,6 +104,73 @@ function backToLogin() {
     document.getElementById('login-error').classList.add('d-none');
 }
 
+function showRegisterForm() {
+    document.getElementById('login-step-1').classList.add('d-none');
+    document.getElementById('login-step-2').classList.add('d-none');
+    document.getElementById('login-step-register').classList.remove('d-none');
+    document.getElementById('login-toggle-link').style.display = 'none';
+    document.getElementById('register-toggle-link').style.display = 'block';
+    document.getElementById('login-error').classList.add('d-none');
+}
+
+function showLoginForm() {
+    document.getElementById('login-step-register').classList.add('d-none');
+    document.getElementById('login-step-1').classList.remove('d-none');
+    document.getElementById('register-toggle-link').style.display = 'none';
+    document.getElementById('login-toggle-link').style.display = 'block';
+    document.getElementById('login-error').classList.add('d-none');
+}
+
+async function doRegister() {
+    const username   = document.getElementById('reg-username').value.trim();
+    const full_name  = document.getElementById('reg-fullname').value.trim();
+    const divar_phone = document.getElementById('reg-divar-phone').value.trim() || null;
+    const password   = document.getElementById('reg-password').value;
+    const password2  = document.getElementById('reg-password2').value;
+    const errEl      = document.getElementById('login-error');
+    const btn        = document.getElementById('reg-btn');
+
+    errEl.classList.add('d-none');
+
+    if (!username) { errEl.textContent = 'نام کاربری الزامی است'; errEl.classList.remove('d-none'); return; }
+    if (!password || password.length < 6) { errEl.textContent = 'رمز عبور باید حداقل ۶ کاراکتر باشد'; errEl.classList.remove('d-none'); return; }
+    if (password !== password2) { errEl.textContent = 'رمزهای عبور یکسان نیستند'; errEl.classList.remove('d-none'); return; }
+    if (divar_phone && !/^09\d{9}$/.test(divar_phone)) { errEl.textContent = 'شماره دیوار باید با فرمت 09xxxxxxxxx باشد'; errEl.classList.remove('d-none'); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال ثبت‌نام...';
+
+    try {
+        const resp = await fetch(`${API_BASE}/users/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, full_name: full_name || null, divar_phone, password })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'خطا در ثبت‌نام');
+
+        // Auto-login after successful registration
+        const form = new URLSearchParams();
+        form.append('username', username);
+        form.append('password', password);
+        const loginResp = await fetch(`${API_BASE}/users/token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: form.toString()
+        });
+        const loginData = await loginResp.json();
+        if (!loginResp.ok) throw new Error(loginData.detail || 'ثبت نام موفق، لطفاً وارد شوید');
+        _finishLogin(loginData);
+
+    } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-person-plus"></i> ایجاد حساب کاربری';
+    }
+}
+
 function _finishLogin(data) {
     setToken(data.access_token);
     _currentUser = { username: data.username, role: data.role, full_name: data.full_name };
@@ -232,10 +299,13 @@ function copyTotpSecret() {
 function showLoginPage() {
     document.getElementById('login-page').style.display = 'flex';
     document.getElementById('main-app').style.display = 'none';
-    // Reset login form to step 1
+    // Reset to step 1 (login form)
     document.getElementById('login-step-1')?.classList.remove('d-none');
     document.getElementById('login-step-2')?.classList.add('d-none');
+    document.getElementById('login-step-register')?.classList.add('d-none');
     document.getElementById('login-error')?.classList.add('d-none');
+    document.getElementById('login-toggle-link') && (document.getElementById('login-toggle-link').style.display = '');
+    document.getElementById('register-toggle-link') && (document.getElementById('register-toggle-link').style.display = 'none');
     document.getElementById('login-totp-code') && (document.getElementById('login-totp-code').value = '');
 }
 
@@ -244,7 +314,16 @@ function showMainApp() {
     document.getElementById('main-app').style.display = 'flex';
     applyRoleUI();
     initApp();
+    // Navigate to the correct default section for this role
+    showSection(_defaultSection());
 }
+
+// Which nav items are visible per role
+const ROLE_NAV_VISIBILITY = {
+    super_admin: ['nav-link-dashboard', 'nav-link-properties', 'nav-link-scraper', 'nav-link-crm', 'nav-link-auth', 'nav-link-proxies', 'nav-users'],
+    admin:       ['nav-link-dashboard', 'nav-link-properties', 'nav-link-scraper', 'nav-link-crm', 'nav-link-auth', 'nav-link-proxies'],
+    user:        ['nav-link-dashboard', 'nav-link-properties'],
+};
 
 function applyRoleUI() {
     if (!_currentUser) return;
@@ -253,13 +332,18 @@ function applyRoleUI() {
     // Sidebar user card
     const elName = document.getElementById('sidebar-username');
     const elRole = document.getElementById('sidebar-role');
-    const roleMap = { super_admin: 'Super Admin', admin: 'Admin', user: 'User' };
+    const roleMap = { super_admin: 'Super Admin', admin: 'مدیر', user: 'کاربر' };
     if (elName) elName.textContent = full_name || username;
     if (elRole) elRole.textContent = roleMap[role] || role;
 
-    // Show Users nav only for super_admin
-    const navUsers = document.getElementById('nav-users');
-    if (navUsers) navUsers.classList.toggle('d-none', role !== 'super_admin');
+    // Show / hide nav items based on role
+    const allowed = ROLE_NAV_VISIBILITY[role] || ROLE_NAV_VISIBILITY['user'];
+    const allNavIds = ['nav-link-dashboard', 'nav-link-properties', 'nav-link-scraper',
+                       'nav-link-crm', 'nav-link-auth', 'nav-link-proxies', 'nav-users'];
+    allNavIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('d-none', !allowed.includes(id));
+    });
 }
 
 // Initialize on page load
@@ -313,7 +397,31 @@ const SECTION_META = {
 };
 
 // Section Navigation
+function _defaultSection() {
+    // 'user' role lands on properties; others land on dashboard
+    return (_currentUser?.role === 'user') ? 'properties' : 'dashboard';
+}
+
+function _isSectionAllowed(sectionName) {
+    const role = _currentUser?.role || 'user';
+    const allowed = ROLE_NAV_VISIBILITY[role] || ROLE_NAV_VISIBILITY['user'];
+    // Map section names to nav IDs
+    const sectionNavMap = {
+        dashboard: 'nav-link-dashboard', properties: 'nav-link-properties',
+        scraper: 'nav-link-scraper', crm: 'nav-link-crm',
+        auth: 'nav-link-auth', proxies: 'nav-link-proxies', users: 'nav-users',
+    };
+    const navId = sectionNavMap[sectionName];
+    return !navId || allowed.includes(navId);
+}
+
 function showSection(sectionName) {
+    // Guard: redirect to default section if not allowed for this role
+    if (!_isSectionAllowed(sectionName)) {
+        showSection(_defaultSection());
+        return;
+    }
+
     stopOtpPolling();
     stopJobPolling();
     document.querySelectorAll('.section-content').forEach(el => {
@@ -1756,6 +1864,19 @@ function initOtpBoxes() {
     });
 }
 
+function cancelDivarOtp() {
+    _clearOtpBoxes();
+    loginPhoneNumber = '';
+    // Remove the wait message if it was injected
+    const waitMsg = document.querySelector('#auth-verify-form .otp-wait-msg');
+    if (waitMsg) waitMsg.remove();
+    document.getElementById('auth-verify-form').style.display = 'none';
+    const loginForm = document.getElementById('auth-login-form');
+    loginForm.style.display = 'block';
+    const btn = loginForm.querySelector('button');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> ارسال کد تأیید'; }
+}
+
 async function verifyCode() {
     const code = _getOtpCode();
 
@@ -2037,6 +2158,8 @@ async function testAllProxies() {
 const CRM_STATUS_LABELS = {
     new: { label: 'جدید', cls: 'bg-warning text-dark' },
     contacted: { label: 'تماس گرفته', cls: 'bg-info text-white' },
+    visit: { label: 'بازدید از فایل', cls: 'bg-warning text-dark' },
+    contract_meeting: { label: 'نشست و تنظیم قرارداد', cls: 'bg-warning text-dark' },
     qualified: { label: 'واجد شرایط', cls: 'bg-primary text-white' },
     closed: { label: 'بسته شده', cls: 'bg-success text-white' },
     rejected: { label: 'رد شده', cls: 'bg-danger text-white' },

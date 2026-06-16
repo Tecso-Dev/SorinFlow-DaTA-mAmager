@@ -17,6 +17,8 @@ from app.models.scraping_job import ScrapingJob
 from app.scraper.divar_scraper import DivarScraper
 from app.config import get_settings, CITIES, CATEGORIES
 from app.schemas import ScrapingJobCreate, ScrapingJobResponse, ScrapingJobList
+from app.auth.dependencies import get_current_user_optional
+from app.models.user import User
 
 router = APIRouter()
 settings = get_settings()
@@ -284,14 +286,19 @@ async def start_scraping_job(
 async def get_scraping_jobs(
     status: Optional[str] = None,
     limit: int = 20,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """Get list of scraping jobs"""
     query = select(ScrapingJob).order_by(ScrapingJob.created_at.desc())
-    
+
     if status:
         query = query.where(ScrapingJob.status == status)
-    
+
+    # Isolate jobs by the user's linked Divar phone
+    if current_user and current_user.divar_phone:
+        query = query.where(ScrapingJob.divar_phone == current_user.divar_phone)
+
     query = query.limit(limit)
     result = await db.execute(query)
     jobs = result.scalars().all()
