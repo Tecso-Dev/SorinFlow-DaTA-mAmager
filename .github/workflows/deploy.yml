@@ -46,32 +46,37 @@ jobs:
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: type=inline
 
-      - name: Deploy to server via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 94.184.6.67 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy to server
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GIT_ACTOR: ${{ github.actor }}
           COMMIT_SHA: ${{ github.sha }}
-        with:
-          host: 94.184.6.67
-          username: root
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: GHCR_TOKEN,GIT_ACTOR,COMMIT_SHA
-          script: |
-            SHORT_SHA="${COMMIT_SHA:0:7}"
-            IMAGE="ghcr.io/tecso-dev/sorinflow-data-manager:${SHORT_SHA}"
+        run: |
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          IMAGE="ghcr.io/tecso-dev/sorinflow-data-manager:${SHORT_SHA}"
 
-            # Refresh GHCR pull secret so cluster can pull the new image
-            kubectl create secret docker-registry ghcr-secret \
-              --docker-server=ghcr.io \
-              --docker-username="$GIT_ACTOR" \
-              --docker-password="$GHCR_TOKEN" \
-              --namespace=sorinflow \
-              --dry-run=client -o yaml | kubectl apply -f -
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@94.184.6.67 \
+            GHCR_TOKEN="$GHCR_TOKEN" GIT_ACTOR="$GIT_ACTOR" IMAGE="$IMAGE" \
+            bash -s << 'ENDSSH'
+              # Refresh GHCR pull secret
+              kubectl create secret docker-registry ghcr-secret \
+                --docker-server=ghcr.io \
+                --docker-username="$GIT_ACTOR" \
+                --docker-password="$GHCR_TOKEN" \
+                --namespace=sorinflow \
+                --dry-run=client -o yaml | kubectl apply -f -
 
-            # Update backend to new image and wait for rollout
-            kubectl set image deployment/backend backend="$IMAGE" -n sorinflow
-            kubectl rollout status deployment/backend -n sorinflow --timeout=120s
+              # Update backend image and wait
+              kubectl set image deployment/backend backend="$IMAGE" -n sorinflow
+              kubectl rollout status deployment/backend -n sorinflow --timeout=120s
 
-            echo "=== Pods ==="
-            kubectl get pods -n sorinflow
+              echo "=== Pods ==="
+              kubectl get pods -n sorinflow
+          ENDSSH
