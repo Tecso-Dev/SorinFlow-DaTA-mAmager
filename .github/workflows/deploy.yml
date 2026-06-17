@@ -55,12 +55,22 @@ jobs:
           echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
 
+      - name: Refresh GHCR pull secret on cluster
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }} \
+            --namespace=sorinflow \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply -f k8s/00-namespace.yaml
           kubectl apply -f k8s/02b-postgres-init-configmap.yaml
           kubectl apply -f k8s/02-postgres.yaml
           kubectl apply -f k8s/03-redis.yaml
+          kubectl apply -f k8s/04-backend.yaml
           kubectl apply -f k8s/06-traefik-acme.yaml
           kubectl apply -f k8s/05-ingress.yaml
 
