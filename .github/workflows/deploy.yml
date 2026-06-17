@@ -60,19 +60,17 @@ jobs:
       packages: read
 
     steps:
-      - name: Refresh GHCR pull secret
+      - name: Pull image into server cache
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          kubectl create secret docker-registry ghcr-secret \
-            --docker-server=ghcr.io \
-            --docker-username=${{ github.actor }} \
-            --docker-password=${{ secrets.GITHUB_TOKEN }} \
-            --namespace=sorinflow \
-            --dry-run=client -o yaml | kubectl apply -f -
+          IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
+          k3s ctr images pull --user "${{ github.actor }}:${GHCR_TOKEN}" "${IMAGE}"
 
       - name: Deploy new image
         run: |
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
-          kubectl set image deployment/backend backend="$IMAGE" -n sorinflow
+          kubectl set image deployment/backend backend="${IMAGE}" -n sorinflow
           kubectl rollout status deployment/backend -n sorinflow --timeout=120s
 
       - name: Verify
