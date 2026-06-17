@@ -1445,7 +1445,19 @@ class DivarScraper:
         self.current_job = job
         
         try:
-            logger.info(f"Starting scraping job for {city}/{category}")
+            active_filters = {k: v for k, v in {
+                'min_price': min_price, 'max_price': max_price,
+                'min_deposit': min_deposit, 'max_deposit': max_deposit,
+                'min_rent': min_rent, 'max_rent': max_rent,
+                'min_price_per_meter': min_price_per_meter, 'max_price_per_meter': max_price_per_meter,
+                'min_area': min_area, 'max_area': max_area,
+                'min_rooms': min_rooms, 'max_rooms': max_rooms,
+                'has_images': has_images, 'has_elevator': has_elevator,
+                'has_parking': has_parking, 'has_storage': has_storage,
+                'has_balcony': has_balcony, 'advertiser_type': advertiser_type,
+                'max_age_hours': max_age_hours,
+            }.items() if v is not None}
+            logger.info(f"Starting scraping job for {city}/{category} | filters={active_filters}")
             
             # Scrape listing pages
             all_listings = []
@@ -1500,7 +1512,7 @@ class DivarScraper:
                         did = listing['divar_id']
 
                         def _skip(reason: str) -> bool:
-                            logger.debug(f"Skipping {did}: {reason}")
+                            logger.info(f"Skipping {did}: {reason}")
                             return True
 
                         skip = False
