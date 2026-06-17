@@ -30,6 +30,7 @@ spec:
       containers:
         - name: backend
           image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
           env:

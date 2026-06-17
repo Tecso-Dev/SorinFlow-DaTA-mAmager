@@ -20,13 +20,3 @@ spec:
                 name: backend
                 port:
                   number: 8000
-    - host: www.sorinflow.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: backend
-                port:
-                  number: 8000
