@@ -7,10 +7,10 @@ from sqlalchemy import select
 from typing import Optional, List
 from datetime import datetime
 import asyncio
-import logging
 import sys
 import os
 import uuid
+from loguru import logger
 
 from app.database import get_db, get_redis
 from app.models.scraping_job import ScrapingJob
@@ -22,7 +22,6 @@ from app.models.user import User
 
 router = APIRouter()
 settings = get_settings()
-logger = logging.getLogger(__name__)
 
 # Store active scraping job IDs for tracking
 active_tasks = {}
@@ -200,7 +199,8 @@ async def start_scraping_job(
 ):
     """Start a new scraping job"""
     
-    logger.info(f"Received scraping job request - City: {job_config.city}, Category: {job_config.category}")
+    active = {k: v for k, v in job_config.model_dump().items() if v is not None and k not in ('city', 'category', 'max_pages', 'download_images', 'divar_phone')}
+    logger.info(f"Scraping job request — city={job_config.city} category={job_config.category} pages={job_config.max_pages} images={job_config.download_images} filters={active}")
     
     # Validate city and category
     if job_config.city not in CITIES:
