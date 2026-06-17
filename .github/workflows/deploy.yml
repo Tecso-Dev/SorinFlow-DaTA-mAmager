@@ -46,41 +46,32 @@ jobs:
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: type=inline
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_ACTOR: ${{ github.actor }}
+          COMMIT_SHA: ${{ github.sha }}
+        with:
+          host: 94.184.6.67
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: GHCR_TOKEN,GIT_ACTOR,COMMIT_SHA
+          script: |
+            SHORT_SHA="${COMMIT_SHA:0:7}"
+            IMAGE="ghcr.io/tecso-dev/sorinflow-data-manager:${SHORT_SHA}"
 
-      - name: Configure kubectl
-        run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
-          chmod 600 ~/.kube/config
+            # Refresh GHCR pull secret so cluster can pull the new image
+            kubectl create secret docker-registry ghcr-secret \
+              --docker-server=ghcr.io \
+              --docker-username="$GIT_ACTOR" \
+              --docker-password="$GHCR_TOKEN" \
+              --namespace=sorinflow \
+              --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Refresh GHCR pull secret on cluster
-        run: |
-          kubectl create secret docker-registry ghcr-secret \
-            --docker-server=ghcr.io \
-            --docker-username=${{ github.actor }} \
-            --docker-password=${{ secrets.GITHUB_TOKEN }} \
-            --namespace=sorinflow \
-            --dry-run=client -o yaml | kubectl apply -f -
+            # Update backend to new image and wait for rollout
+            kubectl set image deployment/backend backend="$IMAGE" -n sorinflow
+            kubectl rollout status deployment/backend -n sorinflow --timeout=120s
 
-      - name: Apply Kubernetes manifests
-        run: |
-          kubectl apply -f k8s/00-namespace.yaml
-          kubectl apply -f k8s/02b-postgres-init-configmap.yaml
-          kubectl apply -f k8s/02-postgres.yaml
-          kubectl apply -f k8s/03-redis.yaml
-          kubectl apply -f k8s/04-backend.yaml
-          kubectl apply -f k8s/06-traefik-acme.yaml
-          kubectl apply -f k8s/05-ingress.yaml
-
-      - name: Deploy new backend image
-        run: |
-          IMAGE_SHA="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$(echo ${{ github.sha }} | cut -c1-7)"
-          kubectl set image deployment/backend backend=$IMAGE_SHA -n sorinflow
-          kubectl rollout status deployment/backend -n sorinflow --timeout=120s
-
-      - name: Verify deployment
-        run: |
-          kubectl get pods -n sorinflow
-          kubectl get ingress -n sorinflow
+            echo "=== Pods ==="
+            kubectl get pods -n sorinflow
