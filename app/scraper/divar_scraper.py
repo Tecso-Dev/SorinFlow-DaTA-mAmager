@@ -279,57 +279,70 @@ class DivarScraper:
     ) -> List[Dict[str, Any]]:
         """Scrape a listing page to get property cards"""
         listings = []
-        
+
+        # ── Approach 1: intercept the API responses the React app loads ──────
+        captured_api_responses: list = []
+
+        async def _on_response(response):
+            try:
+                if 'api.divar.ir' in response.url and response.status == 200:
+                    ct = response.headers.get('content-type', '')
+                    if 'json' in ct:
+                        data = await response.json()
+                        captured_api_responses.append(data)
+                        logger.debug(f"Intercepted API response: {response.url}")
+            except Exception:
+                pass
+
+        self.page.on("response", _on_response)
+
         try:
             url = f"{self.BASE_URL}/s/{city}/{category}"
             if page_num > 1:
                 url += f"?page={page_num}"
-            
-            logger.info(f"Scraping listing page: {url}")
-            
-            await self._check_rate_limit()
-            
-            # Use domcontentloaded for faster loading, then wait for content
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(2)  # Wait for JS to render
-            await self._simulate_scroll()
-            await asyncio.sleep(1.0)  # Wait after scroll
 
-            # Wait for listings to load
+            logger.info(f"Scraping listing page: {url}")
+            await self._check_rate_limit()
+
+            await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(3)  # Give React time to fire API requests
+            await self._simulate_scroll()
+            await asyncio.sleep(2)
+
+            # Wait for listing links (or timeout gracefully)
             try:
                 await self.page.wait_for_selector('a[href*="/v/"]', timeout=20000)
             except Exception:
-                logger.warning("Primary selector not found, waiting more...")
-                await asyncio.sleep(5)
+                logger.warning("Primary selector timed out, continuing...")
 
-            # Diagnose the actual page state before parsing
             actual_url = self.page.url
             if actual_url != url:
                 logger.warning(f"Redirected: {url} → {actual_url}")
 
-            # Get page content
+            # Try intercepted API data first
+            for api_data in captured_api_responses:
+                parsed = self._parse_api_response(api_data)
+                if parsed:
+                    listings.extend(parsed)
+
+            if listings:
+                # Remove duplicates by divar_id
+                seen = set()
+                listings = [l for l in listings if not (l['divar_id'] in seen or seen.add(l['divar_id']))]
+                logger.info(f"Got {len(listings)} listings via API interception on page {page_num}")
+                return listings
+
+            # ── Approach 2: parse rendered HTML ──────────────────────────────
             content = await self.page.content()
             soup = BeautifulSoup(content, 'lxml')
 
-            # Find all property cards - try multiple selectors
             cards = soup.select('a.kt-post-card__action')
             if not cards:
                 cards = soup.select('div.post-card-item a')
             if not cards:
                 cards = soup.select('article a[href*="/v/"]')
             if not cards:
-                # Try finding any links to property pages
                 cards = soup.select('a[href*="/v/"]')
-
-            if not cards:
-                page_title = soup.title.get_text(strip=True) if soup.title else "(no title)"
-                # Grab a short text snippet to spot CAPTCHA / block pages
-                body_text = soup.get_text(separator=' ', strip=True)[:300]
-                logger.warning(
-                    f"No listing cards found on page {page_num} | "
-                    f"title='{page_title}' | url={actual_url} | "
-                    f"body_snippet={body_text!r}"
-                )
 
             for card in cards:
                 try:
@@ -339,11 +352,141 @@ class DivarScraper:
                 except Exception as e:
                     logger.warning(f"Failed to parse listing card: {e}")
 
-            logger.info(f"Found {len(listings)} listings on page {page_num}")
-            
+            if listings:
+                logger.info(f"Got {len(listings)} listings via HTML parsing on page {page_num}")
+                return listings
+
+            # Log diagnostics and save screenshot when both approaches fail
+            page_title = soup.title.get_text(strip=True) if soup.title else "(no title)"
+            body_text = soup.get_text(separator=' ', strip=True)[:400]
+            logger.warning(
+                f"No listing cards found on page {page_num} | "
+                f"title='{page_title}' | url={actual_url} | "
+                f"api_responses={len(captured_api_responses)} | "
+                f"body_snippet={body_text!r}"
+            )
+            try:
+                screenshot_path = self.images_dir / f"debug_listing_p{page_num}.png"
+                await self.page.screenshot(path=str(screenshot_path))
+                logger.info(f"Saved debug screenshot: {screenshot_path}")
+            except Exception:
+                pass
+
         except Exception as e:
-            logger.error(f"Failed to scrape listing page: {e}")
-        
+            logger.error(f"Failed to scrape listing page via Playwright: {e}")
+        finally:
+            self.page.remove_listener("response", _on_response)
+
+        # ── Approach 3: direct httpx call to Divar JSON API ──────────────────
+        if not listings:
+            listings = await self._fetch_listings_direct_api(city, category, page_num)
+
+        logger.info(f"Found {len(listings)} listings on page {page_num}")
+        return listings
+
+    async def _fetch_listings_direct_api(
+        self, city: str, category: str, page_num: int
+    ) -> List[Dict[str, Any]]:
+        """Fetch listings by calling Divar's internal JSON API directly via httpx."""
+        listings: List[Dict[str, Any]] = []
+        headers = {
+            "User-Agent": self.stealth_config.get_random_user_agent(),
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer": f"https://divar.ir/s/{city}/{category}",
+            "Origin": "https://divar.ir",
+            "x-render-type": "CSR",
+            "x-standard-divar-error": "true",
+        }
+        endpoints = [
+            f"https://api.divar.ir/v8/web-search/{city}/{category}",
+            f"https://api.divar.ir/v8/web-search/{city}/{category}?page={page_num}",
+        ]
+        try:
+            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+                for api_url in endpoints:
+                    try:
+                        resp = await client.get(api_url, headers=headers)
+                        logger.info(f"Direct API GET {api_url} → {resp.status_code}")
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            listings = self._parse_api_response(data)
+                            if listings:
+                                logger.info(f"Got {len(listings)} listings via direct API")
+                                return listings
+                    except Exception as e:
+                        logger.debug(f"Direct API attempt failed ({api_url}): {e}")
+
+                # POST variant – some Divar endpoints accept JSON body
+                post_url = f"https://api.divar.ir/v8/web-search/{city}/{category}"
+                try:
+                    resp = await client.post(
+                        post_url,
+                        headers={**headers, "Content-Type": "application/json"},
+                        json={"page": page_num, "city_ids": [city]},
+                    )
+                    logger.info(f"Direct API POST {post_url} → {resp.status_code}")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        listings = self._parse_api_response(data)
+                        if listings:
+                            logger.info(f"Got {len(listings)} listings via direct API (POST)")
+                except Exception as e:
+                    logger.debug(f"Direct API POST failed: {e}")
+        except Exception as e:
+            logger.warning(f"Direct API fetch failed: {e}")
+        return listings
+
+    def _parse_api_response(self, data: dict) -> List[Dict[str, Any]]:
+        """Parse Divar API JSON response (handles multiple known response shapes)."""
+        listings: List[Dict[str, Any]] = []
+        if not isinstance(data, dict):
+            return listings
+
+        widget_list = data.get('widget_list') or data.get('items') or []
+        if not widget_list:
+            # Flat structure with direct token list
+            if data.get('token'):
+                token = data['token']
+                listings.append({
+                    'url': f"https://divar.ir/v/{token}",
+                    'divar_id': token,
+                    'title': data.get('title'),
+                    'descriptions': [data.get('description', '')],
+                })
+            return listings
+
+        for widget in widget_list:
+            try:
+                if not isinstance(widget, dict):
+                    continue
+                widget_data = widget.get('data', widget)
+
+                # Extract token through multiple known paths
+                token = (
+                    widget_data.get('token')
+                    or widget_data.get('action', {}).get('payload', {}).get('token')
+                    or widget_data.get('header_action', {}).get('payload', {}).get('token')
+                    or widget_data.get('action_log', {}).get('token')
+                )
+                if not token:
+                    continue
+
+                listing_url = f"https://divar.ir/v/{token}"
+                listings.append({
+                    'url': listing_url,
+                    'divar_id': token,
+                    'title': widget_data.get('title') or widget_data.get('header_description'),
+                    'descriptions': [
+                        widget_data.get('top_description_text', ''),
+                        widget_data.get('bottom_description_text', ''),
+                    ],
+                    'thumbnail_url': widget_data.get('image_url'),
+                    'category_hint': widget_data.get('bottom_description_text'),
+                })
+            except Exception as e:
+                logger.debug(f"Failed to parse API widget: {e}")
+
         return listings
     
     def _parse_listing_card(self, card) -> Optional[Dict[str, Any]]:
