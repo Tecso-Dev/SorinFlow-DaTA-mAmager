@@ -53,8 +53,11 @@ async def get_properties(
     # Build query
     query = select(Property).where(Property.is_active == True)
 
-    # Server-enforced isolation: user's divar_phone takes priority over query param
-    effective_phone = (current_user.divar_phone if current_user else None) or owner_phone or None
+    # Server-enforced isolation: admins bypass, regular users are filtered by their divar_phone
+    is_privileged = current_user and current_user.role in ("super_admin", "admin")
+    effective_phone = None if is_privileged else (
+        (current_user.divar_phone if current_user else None) or owner_phone or None
+    )
     if effective_phone:
         query = query.where(Property.owner_phone == effective_phone)
 

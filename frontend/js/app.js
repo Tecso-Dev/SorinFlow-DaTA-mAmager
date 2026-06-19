@@ -415,12 +415,31 @@ function _isSectionAllowed(sectionName) {
     return !navId || allowed.includes(navId);
 }
 
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const isOpen  = sidebar.classList.toggle('open');
+    overlay.classList.toggle('open', isOpen);
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+}
+
+function closeSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    sidebar.classList.remove('open');
+    overlay.classList.remove('open');
+    document.body.style.overflow = '';
+}
+
 function showSection(sectionName) {
     // Guard: redirect to default section if not allowed for this role
     if (!_isSectionAllowed(sectionName)) {
         showSection(_defaultSection());
         return;
     }
+
+    // Close mobile sidebar when navigating
+    closeSidebar();
 
     stopOtpPolling();
     stopJobPolling();

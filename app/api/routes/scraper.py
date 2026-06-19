@@ -295,8 +295,9 @@ async def get_scraping_jobs(
     if status:
         query = query.where(ScrapingJob.status == status)
 
-    # Isolate jobs by the user's linked Divar phone
-    if current_user and current_user.divar_phone:
+    # Isolate jobs by the user's linked Divar phone (admins see all jobs)
+    is_privileged = current_user and current_user.role in ("super_admin", "admin")
+    if not is_privileged and current_user and current_user.divar_phone:
         query = query.where(ScrapingJob.divar_phone == current_user.divar_phone)
 
     query = query.limit(limit)
