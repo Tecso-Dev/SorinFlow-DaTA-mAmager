@@ -301,11 +301,16 @@ class DivarScraper:
             except Exception:
                 logger.warning("Primary selector not found, waiting more...")
                 await asyncio.sleep(5)
-            
+
+            # Diagnose the actual page state before parsing
+            actual_url = self.page.url
+            if actual_url != url:
+                logger.warning(f"Redirected: {url} → {actual_url}")
+
             # Get page content
             content = await self.page.content()
             soup = BeautifulSoup(content, 'lxml')
-            
+
             # Find all property cards - try multiple selectors
             cards = soup.select('a.kt-post-card__action')
             if not cards:
@@ -315,7 +320,17 @@ class DivarScraper:
             if not cards:
                 # Try finding any links to property pages
                 cards = soup.select('a[href*="/v/"]')
-            
+
+            if not cards:
+                page_title = soup.title.get_text(strip=True) if soup.title else "(no title)"
+                # Grab a short text snippet to spot CAPTCHA / block pages
+                body_text = soup.get_text(separator=' ', strip=True)[:300]
+                logger.warning(
+                    f"No listing cards found on page {page_num} | "
+                    f"title='{page_title}' | url={actual_url} | "
+                    f"body_snippet={body_text!r}"
+                )
+
             for card in cards:
                 try:
                     listing = self._parse_listing_card(card)
@@ -323,7 +338,7 @@ class DivarScraper:
                         listings.append(listing)
                 except Exception as e:
                     logger.warning(f"Failed to parse listing card: {e}")
-            
+
             logger.info(f"Found {len(listings)} listings on page {page_num}")
             
         except Exception as e:
