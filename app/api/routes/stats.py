@@ -276,6 +276,28 @@ async def get_jobs_summary(
     }
 
 
+@router.get("/logs")
+async def get_recent_logs(
+    lines: int = 200,
+    grep: str = "",
+    current_user: User = Depends(get_current_user),
+):
+    """Return last N lines from the scraper log file (admin only)."""
+    import os
+    log_path = "/app/logs/scraper.log"
+    try:
+        if not os.path.exists(log_path):
+            return {"lines": [], "note": "log file not found"}
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+        if grep:
+            all_lines = [l for l in all_lines if grep.lower() in l.lower()]
+        tail = all_lines[-lines:]
+        return {"lines": [l.rstrip() for l in tail], "total_returned": len(tail)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.get("/property-trends")
 async def get_property_trends(
     days: int = 30,
