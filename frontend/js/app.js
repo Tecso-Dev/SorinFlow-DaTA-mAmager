@@ -985,34 +985,6 @@ async function viewProperty(id) {
                     </div>
                 </div>
                 
-                <!-- Amenities -->
-                <div class="card mb-3">
-                    <div class="card-header bg-secondary text-white">
-                        <i class="bi bi-stars"></i> امکانات
-                    </div>
-                    <div class="card-body">
-                        <div class="d-flex flex-wrap gap-2">
-                            ${property.has_elevator ? '<span class="badge bg-success"><i class="bi bi-arrow-up"></i> آسانسور</span>' : '<span class="badge bg-light text-dark"><i class="bi bi-arrow-up"></i> بدون آسانسور</span>'}
-                            ${property.has_parking ? '<span class="badge bg-success"><i class="bi bi-p-square"></i> پارکینگ</span>' : '<span class="badge bg-light text-dark"><i class="bi bi-p-square"></i> بدون پارکینگ</span>'}
-                            ${property.has_storage ? '<span class="badge bg-success"><i class="bi bi-box"></i> انباری</span>' : '<span class="badge bg-light text-dark"><i class="bi bi-box"></i> بدون انباری</span>'}
-                            ${property.has_balcony ? '<span class="badge bg-success"><i class="bi bi-wind"></i> بالکن</span>' : '<span class="badge bg-light text-dark"><i class="bi bi-wind"></i> بدون بالکن</span>'}
-                        </div>
-                        ${property.amenities && property.amenities.length > 0 ? `
-                            <hr>
-                            <label class="text-muted small">سایر امکانات:</label>
-                            <div class="d-flex flex-wrap gap-1 mt-2">
-                                ${property.amenities.map(a => `<span class="badge bg-info">${a}</span>`).join('')}
-                            </div>
-                        ` : ''}
-                        ${property.features && property.features.length > 0 ? `
-                            <hr>
-                            <label class="text-muted small">ویژگی‌ها:</label>
-                            <div class="d-flex flex-wrap gap-1 mt-2">
-                                ${property.features.map(f => `<span class="badge bg-primary">${f}</span>`).join('')}
-                            </div>
-                        ` : ''}
-                    </div>
-                </div>
 
                 <!-- Description -->
                 <div class="card mb-3">
