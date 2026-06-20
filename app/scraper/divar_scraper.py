@@ -283,9 +283,15 @@ class DivarScraper:
         # ── Approach 1: intercept the API responses the React app loads ──────
         captured_api_responses: list = []
 
+        expected_path = f'/s/{city}/{category}'
+
         async def _on_response(response):
             try:
-                if 'api.divar.ir' in response.url and response.status == 200:
+                # Only capture API responses that belong to this city/category search
+                if ('api.divar.ir' in response.url
+                        and city in response.url
+                        and category in response.url
+                        and response.status == 200):
                     ct = response.headers.get('content-type', '')
                     if 'json' in ct:
                         data = await response.json()
@@ -318,6 +324,11 @@ class DivarScraper:
             actual_url = self.page.url
             if actual_url != url:
                 logger.warning(f"Redirected: {url} → {actual_url}")
+                # If redirected away from the target category (e.g. CAPTCHA page, home page)
+                # stop scraping this page to avoid collecting unrelated listings
+                if expected_path not in actual_url:
+                    logger.warning(f"Redirected away from target category — skipping page {page_num}")
+                    return []
 
             # Try intercepted API data first
             for api_data in captured_api_responses:
