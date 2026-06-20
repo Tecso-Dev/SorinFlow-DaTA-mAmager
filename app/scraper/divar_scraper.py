@@ -546,6 +546,13 @@ class DivarScraper:
             
             await self._check_rate_limit()
             await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+            # If Divar redirected to a CAPTCHA or home page, skip this property
+            actual_url = self.page.url
+            if '/v/' not in actual_url:
+                logger.warning(f"Detail page redirected away from property: {url} → {actual_url}, skipping")
+                return None
+
             await asyncio.sleep(1.5)
             # Wait for property specs to be rendered by React
             try:
