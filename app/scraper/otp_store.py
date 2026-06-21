@@ -29,7 +29,7 @@ def get_pending() -> list:
     return [
         {"key": k, "phone_hint": v["phone_hint"]}
         for k, v in list(_store.items())
-        if not v["event"].is_set() and now - v["ts"] < 90
+        if not v["event"].is_set() and now - v["ts"] < 300
     ]
 
 

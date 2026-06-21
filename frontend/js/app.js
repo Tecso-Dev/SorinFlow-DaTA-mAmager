@@ -1732,12 +1732,17 @@ async function submitDivarOtp() {
     const key  = document.getElementById('divar-otp-key').value;
     const code = document.getElementById('divar-otp-input').value.trim();
     if (!code || code.length < 4) { showToast('خطا', 'کد را وارد کنید', 'warning'); return; }
+    const btn = document.querySelector('#divarOtpModal .btn-primary');
+    if (btn) { btn.disabled = true; btn.textContent = 'در حال ارسال...'; }
     try {
-        await apiCall(`/scraper/otp/${key}`, { method: 'POST', body: JSON.stringify({ code }) });
+        await apiCall(`/scraper/otp/${encodeURIComponent(key)}`, { method: 'POST', body: JSON.stringify({ code }) });
         bootstrap.Modal.getInstance(document.getElementById('divarOtpModal'))?.hide();
         showToast('تأیید', 'کد ارسال شد', 'success');
     } catch(e) {
-        showToast('خطا', 'ارسال کد ناموفق بود', 'danger');
+        const msg = (e?.message || '').includes('No pending OTP') ? 'درخواست OTP منقضی شده — لطفاً صبر کنید تا scraper دوباره درخواست دهد' : 'ارسال کد ناموفق بود';
+        showToast('خطا', msg, 'danger');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'تأیید'; }
     }
 }
 
