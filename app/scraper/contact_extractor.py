@@ -264,12 +264,12 @@ class ContactExtractor:
 
             from app.scraper import otp_store
             event = otp_store.request(self.otp_key)
-            logger.info(f"SMS-OTP required — waiting up to 90s for user input (key={self.otp_key})")
+            logger.info(f"SMS-OTP required — waiting up to 300s for user input (key={self.otp_key})")
 
             try:
-                await asyncio.wait_for(event.wait(), timeout=90)
+                await asyncio.wait_for(event.wait(), timeout=300)
             except asyncio.TimeoutError:
-                logger.warning("SMS-OTP timeout — user did not submit code in 90s")
+                logger.warning("SMS-OTP timeout — user did not submit code in 300s")
                 otp_store.clear(self.otp_key)
                 return
 
