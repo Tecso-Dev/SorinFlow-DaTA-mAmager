@@ -65,13 +65,13 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
-          k3s ctr images pull --user "${{ github.actor }}:${GHCR_TOKEN}" "${IMAGE}"
+          sudo k3s ctr images pull --user "${{ github.actor }}:${GHCR_TOKEN}" "${IMAGE}"
 
       - name: Deploy new image
         run: |
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
-          kubectl set image deployment/backend backend="${IMAGE}" -n sorinflow
-          kubectl rollout status deployment/backend -n sorinflow --timeout=120s
+          sudo kubectl set image deployment/backend backend="${IMAGE}" -n sorinflow
+          sudo kubectl rollout status deployment/backend -n sorinflow --timeout=120s
 
       - name: Verify
-        run: kubectl get pods -n sorinflow
+        run: sudo kubectl get pods -n sorinflow
