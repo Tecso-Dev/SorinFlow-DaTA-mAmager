@@ -560,7 +560,12 @@ class DivarScraper:
             from urllib.parse import unquote
             decoded_url = unquote(actual_url)
             REAL_ESTATE_URL_KEYWORDS = [
+                # Transaction types
                 'خرید', 'اجاره', 'رهن', 'فروش', 'مسکن', 'ملک',
+                # Property types (most Divar real-estate URLs use these)
+                'آپارتمان', 'اپارتمان', 'خانه', 'زمین', 'ساختمان',
+                'ویلا', 'سوئیت', 'واحد', 'باغ', 'دفتر', 'مغازه',
+                # English fallbacks
                 'buy', 'rent', 'residential', 'apartment', 'villa',
             ]
             if not any(kw in decoded_url for kw in REAL_ESTATE_URL_KEYWORDS):
