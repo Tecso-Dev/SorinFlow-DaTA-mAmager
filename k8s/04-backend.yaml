@@ -55,7 +55,7 @@ spec:
             - name: ENVIRONMENT
               value: "production"
             - name: SERVER_IP
-              value: "94.184.6.67"
+              value: "109.122.254.204"
             - name: DOMAIN
               value: "sorinflow.com"
           volumeMounts:
@@ -85,8 +85,10 @@ metadata:
   name: backend
   namespace: sorinflow
 spec:
+  type: NodePort
   selector:
     app: backend
   ports:
     - port: 8000
       targetPort: 8000
+      nodePort: 30080
