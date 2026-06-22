@@ -553,6 +553,17 @@ class DivarScraper:
                 logger.warning(f"Detail page redirected away from property: {url} → {actual_url}, skipping")
                 return None
 
+            # Reject non-real-estate listings: Divar redirects to the full category URL
+            # e.g. real estate → /v/خرید-آپارتمان/... or /v/اجاره-آپارتمان/...
+            # non-real-estate → /v/خدمات/... or /v/الکترونیک/... etc.
+            REAL_ESTATE_URL_KEYWORDS = [
+                'خرید', 'اجاره', 'رهن', 'فروش', 'مسکن', 'ملک',
+                'buy', 'rent', 'residential', 'apartment', 'villa',
+            ]
+            if not any(kw in actual_url for kw in REAL_ESTATE_URL_KEYWORDS):
+                logger.info(f"Skipping non-real-estate listing (URL: {actual_url})")
+                return None
+
             await asyncio.sleep(1.5)
             # Wait for property specs to be rendered by React
             try:
