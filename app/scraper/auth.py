@@ -252,6 +252,13 @@ class DivarAuth:
             await self.page.goto(settings.divar_login_url, wait_until="domcontentloaded", timeout=60000)
             await asyncio.sleep(3)
 
+            # Check for error page and recover
+            content = await self.page.content()
+            if 'مشکلی پیش آمد' in content or 'خطایی رخ داد' in content:
+                logger.warning("Got error page on first load — navigating directly to /login")
+                await self.page.goto("https://divar.ir/login", wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(3)
+
             # Save screenshot to understand current page state
             try:
                 debug_path = Path(settings.images_path).parent / "debug" / "debug_login_page.png"
@@ -261,7 +268,7 @@ class DivarAuth:
             except Exception:
                 pass
 
-            # Click on login button
+            # Click on login button (look for ورود links/buttons)
             logger.info("Looking for login button...")
             login_button = None
             try:
@@ -274,14 +281,15 @@ class DivarAuth:
                             break
                     except Exception:
                         continue
-                if not login_button:
-                    login_button = await self.page.query_selector('button[type="button"]')
             except Exception as e:
                 logger.warning(f"Error finding initial login button: {e}")
 
             if login_button:
                 await login_button.click()
-                await asyncio.sleep(2)
+                logger.info("Login button clicked, waiting for phone input form...")
+                await asyncio.sleep(3)
+            else:
+                logger.info("No login button found — assuming phone input is directly visible")
 
             # Screenshot after clicking login button
             try:
@@ -294,17 +302,48 @@ class DivarAuth:
             # Enter phone number — try multiple selectors
             logger.info(f"Entering phone number: {phone_number}")
             phone_input = None
-            for sel in ['input[name="mobile"]', 'input[type="tel"]', 'input[autocomplete="tel"]',
-                        'input[placeholder*="موبایل"]', 'input[placeholder*="تلفن"]',
-                        'input[placeholder*="09"]', 'form input[type="text"]']:
+            PHONE_SELECTORS = [
+                'input[name="mobile"]',
+                'input[type="tel"]',
+                'input[type="number"]',
+                'input[inputmode="numeric"]',
+                'input[inputmode="tel"]',
+                'input[autocomplete="tel"]',
+                'input[placeholder*="موبایل"]',
+                'input[placeholder*="تلفن"]',
+                'input[placeholder*="شماره"]',
+                'input[placeholder*="09"]',
+                'form input[type="text"]',
+                'input:not([type="hidden"]):not([type="submit"]):not([type="checkbox"])',
+            ]
+            for sel in PHONE_SELECTORS:
                 try:
-                    phone_input = await self.page.wait_for_selector(sel, timeout=4000)
+                    phone_input = await self.page.wait_for_selector(sel, timeout=5000)
                     if phone_input:
                         logger.info(f"Found phone input with selector: {sel}")
                         break
                 except Exception:
                     continue
+
             if not phone_input:
+                # JS fallback: log all inputs for debugging
+                try:
+                    inputs = await self.page.evaluate("""
+                        () => Array.from(document.querySelectorAll('input')).map(el => ({
+                            type: el.type, name: el.name, placeholder: el.placeholder,
+                            inputmode: el.getAttribute('inputmode'), id: el.id
+                        }))
+                    """)
+                    logger.error(f"Inputs found on page: {inputs}")
+                    current_url = self.page.url
+                    logger.error(f"Current URL: {current_url}")
+                    try:
+                        snap = Path(settings.images_path).parent / "debug" / "debug_no_input_found.png"
+                        await self.page.screenshot(path=str(snap))
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
                 raise Exception("Could not find phone number input field on login page")
             await phone_input.fill("")
             
