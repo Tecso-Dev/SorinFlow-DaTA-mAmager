@@ -556,12 +556,15 @@ class DivarScraper:
             # Reject non-real-estate listings: Divar redirects to the full category URL
             # e.g. real estate → /v/خرید-آپارتمان/... or /v/اجاره-آپارتمان/...
             # non-real-estate → /v/خدمات/... or /v/الکترونیک/... etc.
+            # NOTE: page.url returns percent-encoded URLs, so we must decode first.
+            from urllib.parse import unquote
+            decoded_url = unquote(actual_url)
             REAL_ESTATE_URL_KEYWORDS = [
                 'خرید', 'اجاره', 'رهن', 'فروش', 'مسکن', 'ملک',
                 'buy', 'rent', 'residential', 'apartment', 'villa',
             ]
-            if not any(kw in actual_url for kw in REAL_ESTATE_URL_KEYWORDS):
-                logger.info(f"Skipping non-real-estate listing (URL: {actual_url})")
+            if not any(kw in decoded_url for kw in REAL_ESTATE_URL_KEYWORDS):
+                logger.info(f"Skipping non-real-estate listing (URL: {decoded_url})")
                 return None
 
             await asyncio.sleep(1.5)
