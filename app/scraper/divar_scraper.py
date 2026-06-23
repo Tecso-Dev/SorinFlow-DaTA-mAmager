@@ -393,6 +393,8 @@ class DivarScraper:
             # Try intercepted API data first
             logger.info(f"Captured {len(captured_api_responses)} API responses on page {page_num}")
             for api_data in captured_api_responses:
+                if isinstance(api_data, dict):
+                    logger.info(f"Captured response top keys: {list(api_data.keys())[:8]}")
                 parsed, lpd = self._parse_api_response(api_data)
                 if parsed:
                     listings.extend(parsed)
