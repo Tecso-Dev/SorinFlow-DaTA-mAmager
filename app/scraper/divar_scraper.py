@@ -392,14 +392,37 @@ class DivarScraper:
 
             # Try intercepted API data first
             logger.info(f"Captured {len(captured_api_responses)} API responses on page {page_num}")
-            for api_data in captured_api_responses:
+            for idx, api_data in enumerate(captured_api_responses):
                 if isinstance(api_data, dict):
-                    logger.info(f"Captured response top keys: {list(api_data.keys())[:8]}")
+                    import json as _json
+                    logger.info(f"[API#{idx}] keys={list(api_data.keys())[:12]}")
+                    # Dump first 1500 chars so we can see the exact response shape
+                    logger.info(f"[API#{idx}] body={_json.dumps(api_data, ensure_ascii=False)[:1500]}")
                 parsed, lpd = self._parse_api_response(api_data)
+                logger.info(f"[API#{idx}] parsed={len(parsed)} lpd={lpd}")
                 if parsed:
                     listings.extend(parsed)
                 if lpd and lpd > 0 and not next_last_post_date:
                     next_last_post_date = lpd
+
+            # Fallback: extract last_post_date from the page's JS state
+            if not next_last_post_date:
+                try:
+                    lpd_js = await self.page.evaluate("""
+                        (() => {
+                            const nd = window.__NEXT_DATA__;
+                            if (nd) {
+                                const m = JSON.stringify(nd).match(/"last_post_date"\s*:\s*(-?\d+)/);
+                                if (m) return parseInt(m[1]);
+                            }
+                            return null;
+                        })()
+                    """)
+                    if lpd_js and lpd_js > 0:
+                        next_last_post_date = lpd_js
+                        logger.info(f"Got last_post_date={lpd_js} from page JS state")
+                except Exception as e:
+                    logger.debug(f"JS last_post_date extraction failed: {e}")
 
             if listings:
                 # Remove duplicates by divar_id
@@ -575,7 +598,13 @@ class DivarScraper:
             except (TypeError, ValueError):
                 pass
 
-        widget_list = data.get('widget_list') or data.get('items') or []
+        widget_list = (
+            data.get('widget_list')
+            or data.get('items')
+            or data.get('action_list')
+            or data.get('listing_list')
+            or []
+        )
         if not widget_list:
             # Flat structure with direct token list
             if data.get('token'):
