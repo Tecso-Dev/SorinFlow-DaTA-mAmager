@@ -143,15 +143,20 @@ def extract_price_info(soup) -> Dict[str, Any]:
         def _set_price(key: str, raw: str) -> None:
             if price_info.get(key) is not None:
                 return
-            # Full number format: "500,000,000 تومان"
-            parsed = parse_persian_number(raw)
-            if parsed is not None and parsed > 1000:
-                price_info[key] = parsed
+            normalized_raw = normalize_persian_digits(raw)
+            has_unit = any(w in normalized_raw for w in ['میلیارد', 'میلیون', 'هزار', 'رایگان', 'مجانی'])
+            if has_unit:
+                # Compact format: "500 میلیون" or "6 میلیارد" or "رایگان"
+                parsed_unit = parse_price_with_unit(raw)
+                if parsed_unit is not None:
+                    price_info[key] = parsed_unit
                 return
-            # Compact format: "500 میلیون" or "6 میلیارد"
-            parsed_unit = parse_price_with_unit(raw)
-            if parsed_unit is not None:
-                price_info[key] = parsed_unit
+            # Full number format: "500,000,000 تومان"
+            # Reject implausibly small values (< 100,000 Tomans) — these are
+            # mis-parsed short numbers without unit (e.g. "۱٬۸۰۰" → 1800 Tomans).
+            parsed = parse_persian_number(raw)
+            if parsed is not None and parsed >= 100_000:
+                price_info[key] = parsed
 
         def _apply_price_pair(title_raw: str, value_text: str) -> None:
             t = title_raw.strip()
