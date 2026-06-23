@@ -344,12 +344,17 @@ class DivarScraper:
                 if 'api.divar.ir' in response.url and response.status == 200:
                     ct = response.headers.get('content-type', '')
                     if 'json' in ct:
-                        if city in response.url and category in response.url:
+                        url = response.url
+                        # Capture both the classic web-search URL and the
+                        # newer postlist/w/search endpoint the browser actually uses
+                        is_search = (
+                            (city in url and category in url)
+                            or '/postlist/w/search' in url
+                        )
+                        if is_search:
                             data = await response.json()
                             captured_api_responses.append(data)
-                            logger.debug(f"Intercepted API response: {response.url}")
-                        else:
-                            logger.info(f"Browser API call (non-matching): {response.url}")
+                            logger.info(f"Intercepted API: {url}")
             except Exception:
                 pass
 
@@ -386,11 +391,12 @@ class DivarScraper:
                     return [], None
 
             # Try intercepted API data first
+            logger.info(f"Captured {len(captured_api_responses)} API responses on page {page_num}")
             for api_data in captured_api_responses:
                 parsed, lpd = self._parse_api_response(api_data)
                 if parsed:
                     listings.extend(parsed)
-                if lpd and not next_last_post_date:
+                if lpd and lpd > 0 and not next_last_post_date:
                     next_last_post_date = lpd
 
             if listings:
@@ -1855,6 +1861,7 @@ class DivarScraper:
                     if await self.property_exists(listing['divar_id']):
                         logger.info(f"Property already exists: {listing['divar_id']}")
                         job.updated_items += 1
+                        await self.db_session.commit()
                         continue
                     
                     # Scrape detail page
