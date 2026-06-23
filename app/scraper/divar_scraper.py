@@ -498,6 +498,9 @@ class DivarScraper:
                             if parsed:
                                 logger.info(f"Got {len(parsed)} listings via direct API")
                                 return parsed, lpd
+                            else:
+                                top_keys = list(data.keys())[:6] if isinstance(data, dict) else type(data).__name__
+                                logger.info(f"Direct API returned 200 but 0 parsed — top keys: {top_keys}")
                     except Exception as e:
                         logger.debug(f"Direct API attempt failed ({api_url}): {e}")
 
@@ -1779,6 +1782,7 @@ class DivarScraper:
             
             # Scrape listing pages — use cursor-based pagination (last_post_date)
             all_listings = []
+            seen_ids: set = set()
             last_post_date: Optional[int] = None
             for page_num in range(1, max_pages + 1):
                 # Check if job was cancelled
@@ -1795,7 +1799,13 @@ class DivarScraper:
                     logger.info(f"No more listings found at page {page_num}")
                     break
 
-                all_listings.extend(listings)
+                new_count = 0
+                for lst in listings:
+                    if lst['divar_id'] not in seen_ids:
+                        seen_ids.add(lst['divar_id'])
+                        all_listings.append(lst)
+                        new_count += 1
+                logger.info(f"Page {page_num}: {len(listings)} found, {new_count} unique (total unique: {len(all_listings)})")
                 job.scraped_pages = page_num
                 job.total_items = len(all_listings)
                 await self.db_session.commit()
