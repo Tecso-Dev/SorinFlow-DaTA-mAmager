@@ -53,25 +53,27 @@ jobs:
           cache-to: type=inline
 
   deploy:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: build
     permissions:
       contents: read
       packages: read
 
     steps:
-      - name: Pull image into server cache
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Configure kubeconfig
         run: |
-          IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
-          sudo k3s ctr images pull --user "${{ github.actor }}:${GHCR_TOKEN}" "${IMAGE}"
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
 
       - name: Deploy new image
         run: |
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
-          sudo kubectl set image deployment/backend backend="${IMAGE}" -n sorinflow
-          sudo kubectl rollout status deployment/backend -n sorinflow --timeout=120s
+          kubectl set image deployment/backend backend="${IMAGE}" -n sorinflow
+          kubectl rollout status deployment/backend -n sorinflow --timeout=120s
 
       - name: Verify
-        run: sudo kubectl get pods -n sorinflow
+        run: kubectl get pods -n sorinflow
