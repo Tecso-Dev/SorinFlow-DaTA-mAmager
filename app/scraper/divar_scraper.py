@@ -34,8 +34,29 @@ settings = get_settings()
 
 class DivarScraper:
     """Main scraper class for Divar.ir real estate listings"""
-    
+
     BASE_URL = "https://divar.ir"
+
+    # Maps our category slug → substrings expected in the Divar detail-page URL.
+    # Used to reject listings that slipped in from unrelated categories.
+    CATEGORY_URL_PATTERNS: Dict[str, List[str]] = {
+        'rent-apartment':                    ['اجاره-آپارتمان', 'اجاره-اپارتمان', 'کرایه-آپارتمان'],
+        'buy-apartment':                     ['خرید-آپارتمان', 'فروش-آپارتمان'],
+        'rent-residential':                  ['اجاره-مسکونی', 'اجاره-خانه'],
+        'rent-villa':                        ['اجاره-ویلا', 'اجاره-باغ-ویلا'],
+        'buy-residential':                   ['خرید-مسکونی', 'خرید-خانه', 'فروش-خانه'],
+        'buy-villa':                         ['خرید-ویلا', 'فروش-ویلا'],
+        'buy-old-house':                     ['خرید-کلنگی', 'خرید-خانه-کلنگی'],
+        'rent-commercial-property':          ['اجاره-اداری', 'اجاره-تجاری'],
+        'rent-office':                       ['اجاره-دفتر'],
+        'rent-store':                        ['اجاره-مغازه'],
+        'buy-commercial-property':           ['خرید-اداری', 'خرید-تجاری', 'فروش-تجاری'],
+        'buy-office':                        ['خرید-دفتر', 'فروش-دفتر'],
+        'buy-store':                         ['خرید-مغازه', 'فروش-مغازه'],
+        'buy-industrial-agricultural-property': ['خرید-صنعتی', 'خرید-کشاورزی'],
+        'rent-industrial-agricultural-property': ['اجاره-صنعتی', 'اجاره-کشاورزی'],
+        'rent-temporary':                    ['اجاره-کوتاه', 'اجاره-روزانه', 'اجاره-موقت'],
+    }
     
     def __init__(
         self,
@@ -275,10 +296,16 @@ class DivarScraper:
         self,
         city: str,
         category: str,
-        page_num: int = 1
-    ) -> List[Dict[str, Any]]:
-        """Scrape a listing page to get property cards"""
+        page_num: int = 1,
+        last_post_date: Optional[int] = None,
+    ) -> tuple:
+        """Scrape a listing page to get property cards.
+
+        Returns (listings, last_post_date) where last_post_date is the cursor
+        for Divar's cursor-based pagination (None if unavailable).
+        """
         listings = []
+        next_last_post_date: Optional[int] = None
 
         # ── Approach 1: intercept the API responses the React app loads ──────
         captured_api_responses: list = []
@@ -304,7 +331,9 @@ class DivarScraper:
 
         try:
             url = f"{self.BASE_URL}/s/{city}/{category}"
-            if page_num > 1:
+            if last_post_date:
+                url += f"?last_post_date={last_post_date}"
+            elif page_num > 1:
                 url += f"?page={page_num}"
 
             logger.info(f"Scraping listing page: {url}")
@@ -328,20 +357,22 @@ class DivarScraper:
                 # stop scraping this page to avoid collecting unrelated listings
                 if expected_path not in actual_url:
                     logger.warning(f"Redirected away from target category — skipping page {page_num}")
-                    return []
+                    return [], None
 
             # Try intercepted API data first
             for api_data in captured_api_responses:
-                parsed = self._parse_api_response(api_data)
+                parsed, lpd = self._parse_api_response(api_data)
                 if parsed:
                     listings.extend(parsed)
+                if lpd and not next_last_post_date:
+                    next_last_post_date = lpd
 
             if listings:
                 # Remove duplicates by divar_id
                 seen = set()
                 listings = [l for l in listings if not (l['divar_id'] in seen or seen.add(l['divar_id']))]
                 logger.info(f"Got {len(listings)} listings via API interception on page {page_num}")
-                return listings
+                return listings, next_last_post_date
 
             # ── Approach 2: parse rendered HTML ──────────────────────────────
             content = await self.page.content()
@@ -365,7 +396,7 @@ class DivarScraper:
 
             if listings:
                 logger.info(f"Got {len(listings)} listings via HTML parsing on page {page_num}")
-                return listings
+                return listings, next_last_post_date
 
             # Log diagnostics and save screenshot when both approaches fail
             page_title = soup.title.get_text(strip=True) if soup.title else "(no title)"
@@ -390,16 +421,23 @@ class DivarScraper:
 
         # ── Approach 3: direct httpx call to Divar JSON API ──────────────────
         if not listings:
-            listings = await self._fetch_listings_direct_api(city, category, page_num)
+            listings, next_last_post_date = await self._fetch_listings_direct_api(
+                city, category, page_num, last_post_date
+            )
 
         logger.info(f"Found {len(listings)} listings on page {page_num}")
-        return listings
+        return listings, next_last_post_date
 
     async def _fetch_listings_direct_api(
-        self, city: str, category: str, page_num: int
-    ) -> List[Dict[str, Any]]:
-        """Fetch listings by calling Divar's internal JSON API directly via httpx."""
+        self, city: str, category: str, page_num: int,
+        last_post_date: Optional[int] = None,
+    ) -> tuple:
+        """Fetch listings by calling Divar's internal JSON API directly via httpx.
+
+        Returns (listings, last_post_date).
+        """
         listings: List[Dict[str, Any]] = []
+        next_last_post_date: Optional[int] = None
         headers = {
             "User-Agent": self.stealth_config.get_random_user_agent(),
             "Accept": "application/json, text/plain, */*",
@@ -409,9 +447,17 @@ class DivarScraper:
             "x-render-type": "CSR",
             "x-standard-divar-error": "true",
         }
+
+        base_url = f"https://api.divar.ir/v8/web-search/{city}/{category}"
+        params: dict = {}
+        if last_post_date:
+            params['last_post_date'] = last_post_date
+        elif page_num > 1:
+            params['page'] = page_num
+
         endpoints = [
-            f"https://api.divar.ir/v8/web-search/{city}/{category}",
-            f"https://api.divar.ir/v8/web-search/{city}/{category}?page={page_num}",
+            base_url + (f"?{'&'.join(f'{k}={v}' for k, v in params.items())}" if params else ""),
+            base_url,  # fallback without params
         ]
         try:
             async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
@@ -421,38 +467,61 @@ class DivarScraper:
                         logger.info(f"Direct API GET {api_url} → {resp.status_code}")
                         if resp.status_code == 200:
                             data = resp.json()
-                            listings = self._parse_api_response(data)
-                            if listings:
-                                logger.info(f"Got {len(listings)} listings via direct API")
-                                return listings
+                            parsed, lpd = self._parse_api_response(data)
+                            if parsed:
+                                logger.info(f"Got {len(parsed)} listings via direct API")
+                                return parsed, lpd
                     except Exception as e:
                         logger.debug(f"Direct API attempt failed ({api_url}): {e}")
 
                 # POST variant – some Divar endpoints accept JSON body
-                post_url = f"https://api.divar.ir/v8/web-search/{city}/{category}"
                 try:
+                    post_body: dict = {"city_ids": [city]}
+                    if last_post_date:
+                        post_body['last_post_date'] = last_post_date
+                    elif page_num > 1:
+                        post_body['page'] = page_num
                     resp = await client.post(
-                        post_url,
+                        base_url,
                         headers={**headers, "Content-Type": "application/json"},
-                        json={"page": page_num, "city_ids": [city]},
+                        json=post_body,
                     )
-                    logger.info(f"Direct API POST {post_url} → {resp.status_code}")
+                    logger.info(f"Direct API POST {base_url} → {resp.status_code}")
                     if resp.status_code == 200:
                         data = resp.json()
-                        listings = self._parse_api_response(data)
-                        if listings:
-                            logger.info(f"Got {len(listings)} listings via direct API (POST)")
+                        parsed, lpd = self._parse_api_response(data)
+                        if parsed:
+                            logger.info(f"Got {len(parsed)} listings via direct API (POST)")
+                            return parsed, lpd
                 except Exception as e:
                     logger.debug(f"Direct API POST failed: {e}")
         except Exception as e:
             logger.warning(f"Direct API fetch failed: {e}")
-        return listings
+        return listings, next_last_post_date
 
-    def _parse_api_response(self, data: dict) -> List[Dict[str, Any]]:
-        """Parse Divar API JSON response (handles multiple known response shapes)."""
+    def _parse_api_response(self, data: dict) -> tuple:
+        """Parse Divar API JSON response (handles multiple known response shapes).
+
+        Returns (listings, last_post_date) where last_post_date is an int Unix
+        timestamp used as the cursor for the next page, or None if unavailable.
+        """
         listings: List[Dict[str, Any]] = []
+        last_post_date: Optional[int] = None
+
         if not isinstance(data, dict):
-            return listings
+            return listings, last_post_date
+
+        # Extract pagination cursor — Divar uses last_post_date as cursor
+        raw_lpd = (
+            data.get('last_post_date')
+            or data.get('pagination', {}).get('last_post_date')
+            or data.get('meta', {}).get('last_post_date')
+        )
+        if raw_lpd:
+            try:
+                last_post_date = int(raw_lpd)
+            except (TypeError, ValueError):
+                pass
 
         widget_list = data.get('widget_list') or data.get('items') or []
         if not widget_list:
@@ -465,7 +534,7 @@ class DivarScraper:
                     'title': data.get('title'),
                     'descriptions': [data.get('description', '')],
                 })
-            return listings
+            return listings, last_post_date
 
         for widget in widget_list:
             try:
@@ -483,6 +552,18 @@ class DivarScraper:
                 if not token:
                     continue
 
+                # Track the sort/post date of this widget to use as last_post_date cursor
+                sort_date = (
+                    widget_data.get('sort_date')
+                    or widget_data.get('date')
+                    or widget_data.get('created_at')
+                )
+                if sort_date:
+                    try:
+                        last_post_date = int(sort_date)
+                    except (TypeError, ValueError):
+                        pass
+
                 listing_url = f"https://divar.ir/v/{token}"
                 listings.append({
                     'url': listing_url,
@@ -498,7 +579,7 @@ class DivarScraper:
             except Exception as e:
                 logger.debug(f"Failed to parse API widget: {e}")
 
-        return listings
+        return listings, last_post_date
     
     def _parse_listing_card(self, card) -> Optional[Dict[str, Any]]:
         """Parse a listing card element"""
@@ -539,11 +620,17 @@ class DivarScraper:
             logger.warning(f"Failed to parse card: {e}")
             return None
     
-    async def scrape_property_detail(self, url: str) -> Optional[Dict[str, Any]]:
-        """Scrape detailed information from a property page"""
+    async def scrape_property_detail(
+        self, url: str, target_category: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Scrape detailed information from a property page.
+
+        target_category: if provided, the final URL must match the expected
+        patterns for that category (prevents off-category listings from being saved).
+        """
         try:
             logger.info(f"Scraping property detail: {url}")
-            
+
             await self._check_rate_limit()
             await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
@@ -553,24 +640,33 @@ class DivarScraper:
                 logger.warning(f"Detail page redirected away from property: {url} → {actual_url}, skipping")
                 return None
 
-            # Reject non-real-estate listings: Divar redirects to the full category URL
-            # e.g. real estate → /v/خرید-آپارتمان/... or /v/اجاره-آپارتمان/...
-            # non-real-estate → /v/خدمات/... or /v/الکترونیک/... etc.
-            # NOTE: page.url returns percent-encoded URLs, so we must decode first.
             from urllib.parse import unquote
             decoded_url = unquote(actual_url)
-            REAL_ESTATE_URL_KEYWORDS = [
-                # Transaction types
-                'خرید', 'اجاره', 'رهن', 'فروش', 'مسکن', 'ملک',
-                # Property types (most Divar real-estate URLs use these)
-                'آپارتمان', 'اپارتمان', 'خانه', 'زمین', 'ساختمان',
-                'ویلا', 'سوئیت', 'واحد', 'باغ', 'دفتر', 'مغازه',
-                # English fallbacks
-                'buy', 'rent', 'residential', 'apartment', 'villa',
-            ]
-            if not any(kw in decoded_url for kw in REAL_ESTATE_URL_KEYWORDS):
-                logger.info(f"Skipping non-real-estate listing (URL: {decoded_url})")
-                return None
+
+            # ── Category-specific URL check (tight) ──────────────────────────
+            # When a target category is known, we require the redirected URL to
+            # contain at least one of the expected substrings for that category.
+            # This blocks job ads, factory listings, etc. that share keywords
+            # with real-estate (e.g. "دفتری" matching "دفتر").
+            if target_category and target_category in self.CATEGORY_URL_PATTERNS:
+                patterns = self.CATEGORY_URL_PATTERNS[target_category]
+                if not any(p in decoded_url for p in patterns):
+                    logger.info(
+                        f"Skipping off-category listing for '{target_category}' "
+                        f"(URL: {decoded_url})"
+                    )
+                    return None
+            else:
+                # Fallback broad check when no category is known
+                REAL_ESTATE_URL_KEYWORDS = [
+                    'خرید', 'اجاره', 'رهن', 'فروش', 'مسکن', 'ملک',
+                    'آپارتمان', 'اپارتمان', 'خانه', 'ساختمان',
+                    'ویلا', 'سوئیت', 'واحد', 'مغازه',
+                    'buy', 'rent', 'residential', 'apartment', 'villa',
+                ]
+                if not any(kw in decoded_url for kw in REAL_ESTATE_URL_KEYWORDS):
+                    logger.info(f"Skipping non-real-estate listing (URL: {decoded_url})")
+                    return None
 
             await asyncio.sleep(1.5)
             # Wait for property specs to be rendered by React
@@ -1654,26 +1750,29 @@ class DivarScraper:
             }.items() if v is not None}
             logger.info(f"Starting scraping job for {city}/{category} | filters={active_filters}")
             
-            # Scrape listing pages
+            # Scrape listing pages — use cursor-based pagination (last_post_date)
             all_listings = []
+            last_post_date: Optional[int] = None
             for page_num in range(1, max_pages + 1):
                 # Check if job was cancelled
                 await self.db_session.refresh(job)
                 if job.status == "cancelled":
                     logger.info(f"Job {job.job_id} was cancelled, stopping scraping")
                     return job
-                
-                listings = await self.scrape_listing_page(city, category, page_num)
-                
+
+                listings, last_post_date = await self.scrape_listing_page(
+                    city, category, page_num, last_post_date
+                )
+
                 if not listings:
                     logger.info(f"No more listings found at page {page_num}")
                     break
-                
+
                 all_listings.extend(listings)
                 job.scraped_pages = page_num
                 job.total_items = len(all_listings)
                 await self.db_session.commit()
-                
+
                 await self._human_like_delay()
             
             logger.info(f"Found {len(all_listings)} total listings")
@@ -1694,7 +1793,7 @@ class DivarScraper:
                         continue
                     
                     # Scrape detail page
-                    detail = await self.scrape_property_detail(listing['url'])
+                    detail = await self.scrape_property_detail(listing['url'], target_category=category)
                     
                     if detail:
                         # Merge with listing data
