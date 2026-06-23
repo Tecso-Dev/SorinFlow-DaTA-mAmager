@@ -341,16 +341,15 @@ class DivarScraper:
 
         async def _on_response(response):
             try:
-                # Only capture API responses that belong to this city/category search
-                if ('api.divar.ir' in response.url
-                        and city in response.url
-                        and category in response.url
-                        and response.status == 200):
+                if 'api.divar.ir' in response.url and response.status == 200:
                     ct = response.headers.get('content-type', '')
                     if 'json' in ct:
-                        data = await response.json()
-                        captured_api_responses.append(data)
-                        logger.debug(f"Intercepted API response: {response.url}")
+                        if city in response.url and category in response.url:
+                            data = await response.json()
+                            captured_api_responses.append(data)
+                            logger.debug(f"Intercepted API response: {response.url}")
+                        else:
+                            logger.info(f"Browser API call (non-matching): {response.url}")
             except Exception:
                 pass
 
@@ -465,6 +464,19 @@ class DivarScraper:
         """
         listings: List[Dict[str, Any]] = []
         next_last_post_date: Optional[int] = None
+
+        # Pass the browser's session cookies so the API returns real listings
+        cookie_header = ""
+        try:
+            if self.context:
+                browser_cookies = await self.context.cookies()
+                cookie_header = "; ".join(
+                    f"{c['name']}={c['value']}" for c in browser_cookies
+                    if 'divar.ir' in c.get('domain', '')
+                )
+        except Exception:
+            pass
+
         headers = {
             "User-Agent": self.stealth_config.get_random_user_agent(),
             "Accept": "application/json, text/plain, */*",
@@ -474,6 +486,8 @@ class DivarScraper:
             "x-render-type": "CSR",
             "x-standard-divar-error": "true",
         }
+        if cookie_header:
+            headers["Cookie"] = cookie_header
 
         base_url = f"https://api.divar.ir/v8/web-search/{city}/{category}"
         params: dict = {}
@@ -566,16 +580,30 @@ class DivarScraper:
                 })
             return listings, last_post_date
 
+        if widget_list:
+            w0 = widget_list[0] if isinstance(widget_list[0], dict) else {}
+            wd0 = w0.get('data', {})
+            logger.info(
+                f"widget_list[0] type={w0.get('widget_type')} "
+                f"data_keys={list(wd0.keys())[:8]}"
+            )
+
         for widget in widget_list:
             try:
                 if not isinstance(widget, dict):
                     continue
                 widget_data = widget.get('data', widget)
 
-                # Extract token through multiple known paths
+                # Divar API v8: token lives inside action.payload.token
+                action = widget_data.get('action') or {}
+                if isinstance(action, dict):
+                    payload = action.get('payload') or {}
+                else:
+                    payload = {}
+
                 token = (
                     widget_data.get('token')
-                    or widget_data.get('action', {}).get('payload', {}).get('token')
+                    or payload.get('token')
                     or widget_data.get('header_action', {}).get('payload', {}).get('token')
                     or widget_data.get('action_log', {}).get('token')
                 )
