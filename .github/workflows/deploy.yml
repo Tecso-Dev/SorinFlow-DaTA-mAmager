@@ -60,20 +60,19 @@ jobs:
       packages: read
 
     steps:
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v3
-
-      - name: Configure kubeconfig
+      - name: Deploy via SSH
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
-          chmod 600 ~/.kube/config
-
-      - name: Deploy new image
-        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
-          kubectl set image deployment/backend backend="${IMAGE}" -n sorinflow
-          kubectl rollout status deployment/backend -n sorinflow --timeout=120s
-
-      - name: Verify
-        run: kubectl get pods -n sorinflow
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=15 \
+              admin@sorinflow.com "
+            IMAGE='${IMAGE}'
+            echo \"Deploying \$IMAGE\"
+            sudo kubectl set image deployment/backend backend=\"\$IMAGE\" -n sorinflow
+            sudo kubectl rollout status deployment/backend -n sorinflow --timeout=120s
+            sudo kubectl get pods -n sorinflow
+          "
