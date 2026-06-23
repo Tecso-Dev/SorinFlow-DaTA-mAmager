@@ -42,13 +42,14 @@ class DivarScraper:
     # use property-type nouns (آپارتمان، خانه …) rather than action-prefix combos
     # (خرید-خانه) which almost never appear in real listing URLs.
     CATEGORY_URL_PATTERNS: Dict[str, List[str]] = {
-        # Apartment: title usually starts with اجاره/خرید آپارتمان OR is just آپارتمان
+        # Apartment: title may use آپارتمان, واحد (unit), or مسکن (housing)
+        # e.g. اجاره-واحد-۱۲۵-متر / واحد-۱۱۰-متری / اجاره-مسکن / اجاره-تک-واحدی
         'rent-apartment': ['اجاره-آپارتمان', 'اجاره-اپارتمان', 'کرایه-آپارتمان',
-                           'آپارتمان', 'اپارتمان'],
-        'buy-apartment':  ['آپارتمان', 'اپارتمان'],
+                           'آپارتمان', 'اپارتمان', 'واحد', 'اجاره-مسکن'],
+        'buy-apartment':  ['آپارتمان', 'اپارتمان', 'واحد'],
 
         # Residential (broad): title is the property type alone — no buy/rent prefix
-        'rent-residential': ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت'],
+        'rent-residential': ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'اجاره-مسکن'],
         'buy-residential':  ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'کلنگی'],
 
         # Villa
@@ -322,6 +323,16 @@ class DivarScraper:
         """
         listings = []
         next_last_post_date: Optional[int] = None
+
+        # ── Pages 2+ without a cursor: use direct API first so results stay
+        #    within the requested category (browser ?page=N returns all-city mix)
+        if page_num > 1 and last_post_date is None:
+            direct_listings, direct_lpd = await self._fetch_listings_direct_api(
+                city, category, page_num, None
+            )
+            if direct_listings:
+                logger.info(f"Got {len(direct_listings)} listings via direct API on page {page_num}")
+                return direct_listings, direct_lpd
 
         # ── Approach 1: intercept the API responses the React app loads ──────
         captured_api_responses: list = []
@@ -671,7 +682,7 @@ class DivarScraper:
                         f"Skipping off-category listing for '{target_category}' "
                         f"(URL: {decoded_url})"
                     )
-                    return None
+                    return False  # sentinel: category skip — not a scrape error
             else:
                 # Fallback broad check when no category is known
                 REAL_ESTATE_URL_KEYWORDS = [
@@ -1917,8 +1928,10 @@ class DivarScraper:
                             # save_property rolled back the session; refresh job to avoid lazy-load errors
                             await self.db_session.refresh(job)
                             job.failed_items += 1
-                    else:
+                    elif detail is None:
+                        # None = real scrape error (network failure, parse error, etc.)
                         job.failed_items += 1
+                    # detail is False = off-category skip; don't count as failure
 
                     job.scraped_items = i + 1
                     await self.db_session.commit()
