@@ -38,24 +38,40 @@ class DivarScraper:
     BASE_URL = "https://divar.ir"
 
     # Maps our category slug → substrings expected in the Divar detail-page URL.
-    # Used to reject listings that slipped in from unrelated categories.
+    # Divar builds URLs from the listing *title*, not the category name, so we
+    # use property-type nouns (آپارتمان، خانه …) rather than action-prefix combos
+    # (خرید-خانه) which almost never appear in real listing URLs.
     CATEGORY_URL_PATTERNS: Dict[str, List[str]] = {
-        'rent-apartment':                    ['اجاره-آپارتمان', 'اجاره-اپارتمان', 'کرایه-آپارتمان'],
-        'buy-apartment':                     ['خرید-آپارتمان', 'فروش-آپارتمان'],
-        'rent-residential':                  ['اجاره-مسکونی', 'اجاره-خانه'],
-        'rent-villa':                        ['اجاره-ویلا', 'اجاره-باغ-ویلا'],
-        'buy-residential':                   ['خرید-مسکونی', 'خرید-خانه', 'فروش-خانه'],
-        'buy-villa':                         ['خرید-ویلا', 'فروش-ویلا'],
-        'buy-old-house':                     ['خرید-کلنگی', 'خرید-خانه-کلنگی'],
-        'rent-commercial-property':          ['اجاره-اداری', 'اجاره-تجاری'],
-        'rent-office':                       ['اجاره-دفتر'],
-        'rent-store':                        ['اجاره-مغازه'],
-        'buy-commercial-property':           ['خرید-اداری', 'خرید-تجاری', 'فروش-تجاری'],
-        'buy-office':                        ['خرید-دفتر', 'فروش-دفتر'],
-        'buy-store':                         ['خرید-مغازه', 'فروش-مغازه'],
-        'buy-industrial-agricultural-property': ['خرید-صنعتی', 'خرید-کشاورزی'],
-        'rent-industrial-agricultural-property': ['اجاره-صنعتی', 'اجاره-کشاورزی'],
-        'rent-temporary':                    ['اجاره-کوتاه', 'اجاره-روزانه', 'اجاره-موقت'],
+        # Apartment: title usually starts with اجاره/خرید آپارتمان OR is just آپارتمان
+        'rent-apartment': ['اجاره-آپارتمان', 'اجاره-اپارتمان', 'کرایه-آپارتمان',
+                           'آپارتمان', 'اپارتمان'],
+        'buy-apartment':  ['آپارتمان', 'اپارتمان'],
+
+        # Residential (broad): title is the property type alone — no buy/rent prefix
+        'rent-residential': ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت'],
+        'buy-residential':  ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'کلنگی'],
+
+        # Villa
+        'rent-villa': ['ویلا', 'باغ-ویلا'],
+        'buy-villa':  ['ویلا', 'باغ-ویلا'],
+
+        # Old house
+        'buy-old-house': ['کلنگی', 'خانه-کلنگی'],
+
+        # Commercial
+        'rent-commercial-property': ['اجاره-اداری', 'اجاره-تجاری', 'مغازه', 'اداری', 'تجاری'],
+        'rent-office':  ['دفتر', 'اداری'],
+        'rent-store':   ['مغازه', 'فروشگاه'],
+        'buy-commercial-property':  ['مغازه', 'اداری', 'تجاری'],
+        'buy-office':   ['دفتر', 'اداری'],
+        'buy-store':    ['مغازه', 'فروشگاه'],
+
+        # Industrial / Agricultural
+        'buy-industrial-agricultural-property':  ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین'],
+        'rent-industrial-agricultural-property': ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین'],
+
+        # Temporary rental
+        'rent-temporary': ['اجاره-کوتاه', 'اجاره-روزانه', 'اجاره-موقت', 'روزانه', 'کوتاه-مدت'],
     }
     
     def __init__(
