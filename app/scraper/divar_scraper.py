@@ -735,8 +735,18 @@ class DivarScraper:
             # After closing map, wait for the full list view to render
             await asyncio.sleep(4 if switched else 2)
 
+            # Verify listing cards appeared; log how many /v/ links exist now
+            try:
+                await self.page.wait_for_selector('a[href*="/v/"]', timeout=8000)
+            except Exception:
+                logger.warning("[dom] No /v/ links visible after view switch")
+
             vp = self.page.viewport_size or {"width": 1280, "height": 720}
-            await self.page.mouse.move(vp["width"] // 2, vp["height"] // 2)
+            # In map+sidebar layout the listing sidebar is on the RIGHT (~70-100% width).
+            # Move mouse there so wheel events scroll the sidebar, not the map.
+            sidebar_x = int(vp["width"] * 0.80)
+            center_y = vp["height"] // 2
+            await self.page.mouse.move(sidebar_x, center_y)
 
             no_new_streak = 0
             max_scrolls = max(40, target_count // 3)
@@ -798,28 +808,28 @@ class DivarScraper:
                 else:
                     no_new_streak = 0
 
-                # Scroll the page to bottom AND any separate sidebar/result container
+                # Scroll the RIGHT-SIDE sidebar (listing panel) AND the main page.
+                # In Divar's map+sidebar layout the sidebar is a separate scroll container.
                 await self.page.evaluate("""() => {
-                    // Scroll main page to bottom
+                    // Scroll any scrollable container on the right 40% of the screen
+                    const rw = window.innerWidth;
+                    const rh = window.innerHeight;
+                    const rightElements = document.elementsFromPoint(rw * 0.8, rh * 0.5);
+                    for (const el of rightElements) {
+                        if (el.scrollHeight > el.clientHeight + 100) {
+                            el.scrollTop = el.scrollHeight;
+                            break;
+                        }
+                    }
+                    // Also scroll main page to bottom (for full list-view after map close)
                     window.scrollTo(0, document.body.scrollHeight);
-
-                    // Also scroll any sidebar result container (right-side panel in map+list view)
-                    const candidates = [...document.querySelectorAll('*')].filter(el => {
-                        const r = el.getBoundingClientRect();
-                        return (
-                            el.scrollHeight > el.clientHeight + 200 &&
-                            r.height > 300 &&
-                            r.width > 100
-                        );
-                    });
-                    candidates.forEach(el => { el.scrollTop = el.scrollHeight; });
                 }""")
-                await asyncio.sleep(0.5)
-                # Also send real wheel events so IntersectionObserver fires
-                for _ in range(10):
-                    await self.page.mouse.wheel(0, 500)
-                    await asyncio.sleep(0.08)
-                await asyncio.sleep(3)
+                await asyncio.sleep(0.3)
+                # Real wheel events on the sidebar area so IntersectionObserver fires
+                for _ in range(12):
+                    await self.page.mouse.wheel(0, 600)
+                    await asyncio.sleep(0.1)
+                await asyncio.sleep(3.5)
 
             if not all_listings:
                 try:
