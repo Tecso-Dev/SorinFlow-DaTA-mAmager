@@ -763,13 +763,48 @@ class DivarScraper:
                             seen_ids.add(lst['divar_id'])
                             all_listings.append(lst)
 
-                # Extract /v/ links directly from live rendered DOM
+                # Extract tokens from:
+                # 1. window.__NEXT_DATA__ (pre-loaded SSR listing data)
+                # 2. a[href*="/v/"] rendered DOM links
                 dom_items = await self.page.evaluate("""() => {
-                    return [...document.querySelectorAll('a[href*="/v/"]')]
-                        .map(a => ({
-                            href: a.href,
-                            title: (a.innerText || '').trim().substring(0, 120)
-                        }));
+                    const TOKEN_RE = /^[A-Za-z0-9]{4,20}$/;
+                    const seen = new Set();
+                    const results = [];
+
+                    const addToken = (tok, title) => {
+                        if (tok && TOKEN_RE.test(tok) && !seen.has(tok)) {
+                            seen.add(tok);
+                            results.push({ href: 'https://divar.ir/v/' + tok, title: title || '' });
+                        }
+                    };
+
+                    const extractFromUrl = (url) => {
+                        if (!url || !url.includes('/v/')) return null;
+                        const parts = url.split('/v/')[1].split('?')[0].split('/');
+                        return parts[parts.length - 1];
+                    };
+
+                    // Method 1: Walk __NEXT_DATA__ for all token fields
+                    if (window.__NEXT_DATA__) {
+                        const walk = (obj, depth) => {
+                            if (depth > 25 || !obj || typeof obj !== 'object') return;
+                            if (typeof obj.token === 'string') addToken(obj.token, obj.title || '');
+                            if (obj.action && obj.action.payload)
+                                addToken(obj.action.payload.token, obj.title || '');
+                            if (typeof obj.web_url === 'string')
+                                addToken(extractFromUrl(obj.web_url), obj.title || '');
+                            for (const v of Object.values(obj)) walk(v, depth + 1);
+                        };
+                        try { walk(window.__NEXT_DATA__, 0); } catch(e) {}
+                    }
+
+                    // Method 2: rendered <a href="/v/..."> links
+                    for (const a of document.querySelectorAll('a[href*="/v/"]')) {
+                        const tok = extractFromUrl(a.href);
+                        addToken(tok, (a.innerText || '').trim().substring(0, 120));
+                    }
+
+                    return results;
                 }""")
                 for item in (dom_items or []):
                     href = item.get('href', '')
@@ -1140,6 +1175,14 @@ class DivarScraper:
                     or widget_data.get('header_action', {}).get('payload', {}).get('token')
                     or widget_data.get('action_log', {}).get('token')
                 )
+                # Fallback: extract token from web_url in action payload
+                if not token:
+                    web_url = payload.get('web_url', '') or widget_data.get('web_url', '')
+                    if web_url and '/v/' in web_url:
+                        parts = web_url.split('/v/', 1)[1].split('?')[0].rstrip('/').split('/')
+                        candidate = parts[-1]
+                        if re.match(r'^[A-Za-z0-9]{4,20}$', candidate):
+                            token = candidate
                 if not token:
                     continue
 
