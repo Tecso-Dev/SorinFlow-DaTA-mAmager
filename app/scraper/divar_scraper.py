@@ -647,10 +647,12 @@ class DivarScraper:
 
     async def _switch_to_list_view(self) -> bool:
         """Attempt to switch Divar from map view to list view. Returns True if switched."""
+        # CSS selector attempts — includes "بستن نقشه" (Close Map) button visible on screenshot
         for sel in [
             'button[data-testid="list-tab"]',
             'button[data-testid="LIST"]',
             '[aria-label="لیست"]',
+            'button:has-text("بستن نقشه")',   # "Close Map" — shows full list view
             'button:has-text("لیست")',
             '.kt-action-header__button--active + button',
         ]:
@@ -666,17 +668,17 @@ class DivarScraper:
 
         try:
             clicked = await self.page.evaluate("""() => {
-                const keywords = ['لیست', 'list', 'LIST', 'فهرست'];
+                const keywords = ['بستن نقشه', 'لیست', 'list', 'LIST', 'فهرست'];
                 const elems = [...document.querySelectorAll('button, [role=tab], a')];
                 for (const kw of keywords) {
-                    const el = elems.find(e => (e.innerText || '').includes(kw) || e.getAttribute('aria-label') === kw);
-                    if (el) { el.click(); return true; }
+                    const el = elems.find(e => (e.innerText || '').trim().includes(kw) || e.getAttribute('aria-label') === kw);
+                    if (el) { el.click(); return kw; }
                 }
-                return false;
+                return null;
             }""")
             if clicked:
                 await asyncio.sleep(2)
-                logger.info("[view] switched to list view via JS keyword search")
+                logger.info(f"[view] switched via JS: clicked '{clicked}'")
                 return True
         except Exception as e:
             logger.debug(f"[view] JS switch failed: {e}")
@@ -729,8 +731,9 @@ class DivarScraper:
                 logger.info("[dom] networkidle timeout — continuing with loaded content")
             await asyncio.sleep(3)
 
-            await self._switch_to_list_view()
-            await asyncio.sleep(3)
+            switched = await self._switch_to_list_view()
+            # After closing map, wait for the full list view to render
+            await asyncio.sleep(4 if switched else 2)
 
             vp = self.page.viewport_size or {"width": 1280, "height": 720}
             await self.page.mouse.move(vp["width"] // 2, vp["height"] // 2)
@@ -762,13 +765,19 @@ class DivarScraper:
                     href = item.get('href', '')
                     if '/v/' not in href:
                         continue
-                    raw = href.split('/v/', 1)[1].split('?')[0].split('/')[0]
-                    if not raw or len(raw) < 4 or raw in seen_ids:
+                    # Divar URL format: /v/TITLE-SLUG/TOKEN  or  /v/TOKEN
+                    # Token is always the LAST alphanumeric segment before query params
+                    path = href.split('/v/', 1)[1].split('?')[0].rstrip('/')
+                    token = path.split('/')[-1]
+                    # Divar tokens: 4-20 chars, strictly alphanumeric (no hyphens/Persian)
+                    if not token or not re.match(r'^[A-Za-z0-9]{4,20}$', token):
                         continue
-                    seen_ids.add(raw)
+                    if token in seen_ids:
+                        continue
+                    seen_ids.add(token)
                     all_listings.append({
-                        'divar_id': raw,
-                        'url': f"https://divar.ir/v/{raw}",
+                        'divar_id': token,
+                        'url': f"https://divar.ir/v/{token}",
                         'title': item.get('title') or None,
                         'descriptions': [],
                     })
