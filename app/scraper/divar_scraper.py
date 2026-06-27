@@ -324,15 +324,18 @@ class DivarScraper:
         listings = []
         next_last_post_date: Optional[int] = None
 
-        # ── Pages 2+ without a cursor: use direct API first so results stay
-        #    within the requested category (browser ?page=N returns all-city mix)
-        if page_num > 1 and last_post_date is None:
+        # ── Pages 2+: use direct API as primary method.
+        #    Browser re-navigation for subsequent pages is unreliable (often
+        #    intercepts 0 API responses). Direct httpx with the cursor is faster
+        #    and more consistent.
+        if page_num > 1:
             direct_listings, direct_lpd = await self._fetch_listings_direct_api(
-                city, category, page_num, None
+                city, category, page_num, last_post_date
             )
             if direct_listings:
-                logger.info(f"Got {len(direct_listings)} listings via direct API on page {page_num}")
+                logger.info(f"Page {page_num}: {len(direct_listings)} listings via direct API (cursor={last_post_date})")
                 return direct_listings, direct_lpd
+            logger.warning(f"Page {page_num}: direct API returned 0, falling back to browser")
 
         # ── Approach 1: intercept the API responses the React app loads ──────
         captured_api_responses: list = []
@@ -574,6 +577,233 @@ class DivarScraper:
             logger.warning(f"Direct API fetch failed: {e}")
         return listings, next_last_post_date
 
+    async def _collect_listings_api(
+        self, city: str, category: str, target_count: int
+    ) -> List[Dict[str, Any]]:
+        """Collect listings via direct API calls with cursor-based pagination.
+
+        More reliable than scroll-based collection because it doesn't depend
+        on Divar's infinite-scroll UI (which often defaults to map view).
+        Falls back to scroll if the direct API yields nothing.
+        """
+        all_listings: List[Dict[str, Any]] = []
+        seen_ids: set = set()
+        last_post_date: Optional[int] = None
+        page_num = 1
+        consecutive_empty = 0
+        max_pages = max(10, (target_count // 20) + 3)
+
+        for _ in range(max_pages):
+            batch, lpd = await self._fetch_listings_direct_api(
+                city, category, page_num, last_post_date
+            )
+
+            new_count = 0
+            for lst in batch:
+                if lst['divar_id'] not in seen_ids:
+                    seen_ids.add(lst['divar_id'])
+                    all_listings.append(lst)
+                    new_count += 1
+
+            logger.info(
+                f"[API collect] page={page_num} got={len(batch)} "
+                f"new={new_count} total={len(all_listings)}/{target_count}"
+            )
+
+            if lpd:
+                last_post_date = lpd
+
+            if len(all_listings) >= target_count:
+                break
+
+            if not batch:
+                consecutive_empty += 1
+                if consecutive_empty >= 2:
+                    logger.info("[API collect] 2 empty pages — stopping")
+                    break
+            else:
+                consecutive_empty = 0
+
+            page_num += 1
+            await asyncio.sleep(random.uniform(0.8, 1.5))
+
+        if not all_listings:
+            logger.warning("[API collect] Direct API yielded nothing — falling back to scroll")
+            all_listings = await self._collect_listings_scroll(city, category, target_count)
+        elif len(all_listings) < target_count:
+            logger.info(
+                f"[API collect] Got {len(all_listings)}/{target_count} from direct API; "
+                f"supplementing with scroll"
+            )
+            extra = await self._collect_listings_scroll(
+                city, category, target_count - len(all_listings)
+            )
+            for lst in extra:
+                if lst['divar_id'] not in seen_ids:
+                    seen_ids.add(lst['divar_id'])
+                    all_listings.append(lst)
+
+        return all_listings[:target_count]
+
+    async def _collect_listings_scroll(
+        self, city: str, category: str, target_count: int
+    ) -> List[Dict[str, Any]]:
+        """Collect listings by scrolling Divar's infinite-scroll listing page.
+
+        Divar loads more items as the user scrolls down (IntersectionObserver /
+        infinite scroll), NOT via page URL changes.  Each scroll-to-bottom
+        triggers a /postlist/w/search API call that returns the next batch.
+
+        Returns up to target_count unique listings.
+        """
+        all_listings: List[Dict[str, Any]] = []
+        seen_ids: set = set()
+        pending: list = []
+
+        async def _on_resp(response):
+            try:
+                if 'api.divar.ir' not in response.url or response.status != 200:
+                    return
+                if 'json' not in response.headers.get('content-type', ''):
+                    return
+                is_search = (
+                    (city in response.url and category in response.url)
+                    or '/postlist/w/search' in response.url
+                    or '/v8/web-search' in response.url
+                )
+                if is_search:
+                    data = await response.json()
+                    pending.append(data)
+                    top_keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
+                    logger.info(f"[scroll] captured: {response.url} | top_keys={top_keys}")
+            except Exception as e:
+                logger.debug(f"[scroll] _on_resp error: {e}")
+
+        self.page.on("response", _on_resp)
+        try:
+            url = f"{self.BASE_URL}/s/{city}/{category}"
+            logger.info(f"Scroll-collect {url} | target={target_count}")
+            await self._check_rate_limit()
+            await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(3)
+
+            # ── Switch to list view if Divar loaded map view ──────────────────
+            # Divar's new default UI shows a map.  Try clicking the list-view
+            # toggle so we get a scrollable card list instead.
+            switched = False
+            for sel in [
+                'button[data-testid="list-tab"]',
+                'button:has-text("لیست")',
+                '[aria-label="لیست"]',
+                'button:has-text("list")',
+                '.kt-action-header__button:has-text("لیست")',
+            ]:
+                try:
+                    btn = await self.page.query_selector(sel)
+                    if btn and await btn.is_visible():
+                        await btn.click()
+                        await asyncio.sleep(2)
+                        logger.info(f"[scroll] switched to list view via '{sel}'")
+                        switched = True
+                        break
+                except Exception:
+                    pass
+
+            if not switched:
+                # Try JS-based search for any button containing "لیست"
+                try:
+                    clicked = await self.page.evaluate("""() => {
+                        const btns = [...document.querySelectorAll('button')];
+                        const t = btns.find(b => b.innerText.trim().includes('لیست'));
+                        if (t) { t.click(); return true; }
+                        return false;
+                    }""")
+                    if clicked:
+                        await asyncio.sleep(2)
+                        logger.info("[scroll] switched to list view via JS button search")
+                except Exception:
+                    pass
+
+            try:
+                await self.page.wait_for_selector('a[href*="/v/"]', timeout=15000)
+            except Exception:
+                logger.warning("[scroll] listing cards not found after list-view switch")
+
+            # Move mouse to page centre so wheel events are received by the page
+            vp = self.page.viewport_size or {"width": 1280, "height": 720}
+            await self.page.mouse.move(vp["width"] // 2, vp["height"] // 2)
+
+            no_new_streak = 0
+            max_scrolls = max(30, target_count // 5)
+
+            for scroll_n in range(max_scrolls):
+                # Drain any newly captured API responses
+                prev = len(all_listings)
+                for data in list(pending):
+                    pending.remove(data)
+                    parsed, _ = self._parse_api_response(data)
+                    for lst in parsed:
+                        if lst['divar_id'] not in seen_ids:
+                            seen_ids.add(lst['divar_id'])
+                            all_listings.append(lst)
+
+                gained = len(all_listings) - prev
+                logger.info(
+                    f"[scroll #{scroll_n}] +{gained} items | total {len(all_listings)}/{target_count}"
+                )
+
+                if len(all_listings) >= target_count:
+                    break
+
+                if gained == 0:
+                    no_new_streak += 1
+                    if no_new_streak >= 4:
+                        logger.info("[scroll] 4 scrolls with no new items — stopping")
+                        break
+                else:
+                    no_new_streak = 0
+
+                # ── Scroll down using real mouse-wheel events ─────────────────
+                # window.scrollTo() does NOT fire scroll/wheel events that
+                # IntersectionObserver relies on.  page.mouse.wheel() sends
+                # actual WheelEvent + scroll events, triggering Divar's loader.
+                for _ in range(20):
+                    await self.page.mouse.wheel(0, 400)
+                    await asyncio.sleep(0.08)
+                # Wait for the network request to be made and responded
+                await asyncio.sleep(3)
+
+            # Final drain
+            for data in list(pending):
+                parsed, _ = self._parse_api_response(data)
+                for lst in parsed:
+                    if lst['divar_id'] not in seen_ids:
+                        seen_ids.add(lst['divar_id'])
+                        all_listings.append(lst)
+
+            # HTML fallback if API capture yielded nothing
+            if not all_listings:
+                logger.warning("[scroll] API capture empty — falling back to HTML")
+                content = await self.page.content()
+                soup = BeautifulSoup(content, 'lxml')
+                for card in (
+                    soup.select('a.kt-post-card__action')
+                    or soup.select('a[href*="/v/"]')
+                ):
+                    lst = self._parse_listing_card(card)
+                    if lst and lst['divar_id'] not in seen_ids:
+                        seen_ids.add(lst['divar_id'])
+                        all_listings.append(lst)
+
+        except Exception as e:
+            logger.error(f"_collect_listings_scroll failed: {e}")
+        finally:
+            self.page.remove_listener("response", _on_resp)
+
+        logger.info(f"[scroll] collected {len(all_listings)} listings (target was {target_count})")
+        return all_listings[:target_count]
+
+
     def _parse_api_response(self, data: dict) -> tuple:
         """Parse Divar API JSON response (handles multiple known response shapes).
 
@@ -599,13 +829,15 @@ class DivarScraper:
                 pass
 
         widget_list = (
-            data.get('widget_list')
+            data.get('list_widgets')
+            or data.get('widget_list')
             or data.get('items')
             or data.get('action_list')
             or data.get('listing_list')
             or []
         )
         if not widget_list:
+            logger.warning(f"[parse_api] no widget_list — top_keys={list(data.keys())[:12]}")
             # Flat structure with direct token list
             if data.get('token'):
                 token = data['token']
@@ -1768,7 +2000,7 @@ class DivarScraper:
         self,
         city: str,
         category: str,
-        max_pages: int = 10,
+        max_items: int = 100,
         download_images: bool = True,
         job_id: Optional[str] = None,
         min_price: Optional[int] = None,
@@ -1844,40 +2076,17 @@ class DivarScraper:
                 'max_age_hours': max_age_hours,
             }.items() if v is not None}
             logger.info(f"Starting scraping job for {city}/{category} | filters={active_filters}")
-            
-            # Scrape listing pages — use cursor-based pagination (last_post_date)
-            all_listings = []
-            seen_ids: set = set()
-            last_post_date: Optional[int] = None
-            for page_num in range(1, max_pages + 1):
-                # Check if job was cancelled
-                await self.db_session.refresh(job)
-                if job.status == "cancelled":
-                    logger.info(f"Job {job.job_id} was cancelled, stopping scraping")
-                    return job
 
-                listings, last_post_date = await self.scrape_listing_page(
-                    city, category, page_num, last_post_date
-                )
+            # ── Collect listings ────────────────────────────────────────────────
+            logger.info(f"Target: {max_items} listings")
 
-                if not listings:
-                    logger.info(f"No more listings found at page {page_num}")
-                    break
+            all_listings = await self._collect_listings_api(city, category, max_items)
+            seen_ids: set = {lst['divar_id'] for lst in all_listings}
 
-                new_count = 0
-                for lst in listings:
-                    if lst['divar_id'] not in seen_ids:
-                        seen_ids.add(lst['divar_id'])
-                        all_listings.append(lst)
-                        new_count += 1
-                logger.info(f"Page {page_num}: {len(listings)} found, {new_count} unique (total unique: {len(all_listings)})")
-                job.scraped_pages = page_num
-                job.total_items = len(all_listings)
-                await self.db_session.commit()
+            job.total_items = len(all_listings)
+            await self.db_session.commit()
 
-                await self._human_like_delay()
-            
-            logger.info(f"Found {len(all_listings)} total listings")
+            logger.info(f"Found {len(all_listings)} total listings (target was {max_items})")
             
             # Scrape each property detail
             for i, listing in enumerate(all_listings):
