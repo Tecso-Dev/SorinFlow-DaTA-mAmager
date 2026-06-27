@@ -798,10 +798,28 @@ class DivarScraper:
                 else:
                     no_new_streak = 0
 
-                for _ in range(15):
-                    await self.page.mouse.wheel(0, 400)
-                    await asyncio.sleep(0.1)
-                await asyncio.sleep(2.5)
+                # Scroll the page to bottom AND any separate sidebar/result container
+                await self.page.evaluate("""() => {
+                    // Scroll main page to bottom
+                    window.scrollTo(0, document.body.scrollHeight);
+
+                    // Also scroll any sidebar result container (right-side panel in map+list view)
+                    const candidates = [...document.querySelectorAll('*')].filter(el => {
+                        const r = el.getBoundingClientRect();
+                        return (
+                            el.scrollHeight > el.clientHeight + 200 &&
+                            r.height > 300 &&
+                            r.width > 100
+                        );
+                    });
+                    candidates.forEach(el => { el.scrollTop = el.scrollHeight; });
+                }""")
+                await asyncio.sleep(0.5)
+                # Also send real wheel events so IntersectionObserver fires
+                for _ in range(10):
+                    await self.page.mouse.wheel(0, 500)
+                    await asyncio.sleep(0.08)
+                await asyncio.sleep(3)
 
             if not all_listings:
                 try:
