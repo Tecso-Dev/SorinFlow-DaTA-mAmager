@@ -645,6 +645,233 @@ class DivarScraper:
 
         return all_listings[:target_count]
 
+    async def _switch_to_list_view(self) -> bool:
+        """Attempt to switch Divar from map view to list view. Returns True if switched."""
+        for sel in [
+            'button[data-testid="list-tab"]',
+            'button[data-testid="LIST"]',
+            '[aria-label="لیست"]',
+            'button:has-text("لیست")',
+            '.kt-action-header__button--active + button',
+        ]:
+            try:
+                btn = await self.page.query_selector(sel)
+                if btn and await btn.is_visible():
+                    await btn.click()
+                    await asyncio.sleep(2)
+                    logger.info(f"[view] switched to list view via '{sel}'")
+                    return True
+            except Exception:
+                pass
+
+        try:
+            clicked = await self.page.evaluate("""() => {
+                const keywords = ['لیست', 'list', 'LIST', 'فهرست'];
+                const elems = [...document.querySelectorAll('button, [role=tab], a')];
+                for (const kw of keywords) {
+                    const el = elems.find(e => (e.innerText || '').includes(kw) || e.getAttribute('aria-label') === kw);
+                    if (el) { el.click(); return true; }
+                }
+                return false;
+            }""")
+            if clicked:
+                await asyncio.sleep(2)
+                logger.info("[view] switched to list view via JS keyword search")
+                return True
+        except Exception as e:
+            logger.debug(f"[view] JS switch failed: {e}")
+
+        logger.warning("[view] Could not switch to list view — proceeding in current view")
+        return False
+
+    async def _collect_from_browser_dom(
+        self, city: str, category: str, target_count: int
+    ) -> List[Dict[str, Any]]:
+        """Collect listings by extracting /v/ token links from the live rendered DOM.
+
+        Works regardless of API response format changes — reads what Divar has
+        already rendered via JS, including cards that appear after scrolling.
+        Also intercepts API responses as a bonus to get richer metadata.
+        """
+        all_listings: List[Dict[str, Any]] = []
+        seen_ids: set = set()
+        pending_api: list = []
+
+        async def _on_resp(response):
+            try:
+                if 'api.divar.ir' not in response.url or response.status != 200:
+                    return
+                if 'json' not in response.headers.get('content-type', ''):
+                    return
+                if (
+                    '/postlist/w/search' in response.url
+                    or '/v8/web-search' in response.url
+                    or (city in response.url and category in response.url)
+                ):
+                    data = await response.json()
+                    pending_api.append(data)
+                    logger.info(
+                        f"[dom] captured {response.url.split('?')[0]} "
+                        f"top_keys={list(data.keys())[:8] if isinstance(data, dict) else type(data).__name__}"
+                    )
+            except Exception as e:
+                logger.debug(f"[dom] _on_resp error: {e}")
+
+        self.page.on("response", _on_resp)
+        try:
+            url = f"{self.BASE_URL}/s/{city}/{category}"
+            logger.info(f"[dom] Loading {url} | target={target_count}")
+            await self._check_rate_limit()
+            try:
+                await self.page.goto(url, wait_until="networkidle", timeout=45000)
+            except Exception:
+                # networkidle timeout is OK — page is still usable
+                logger.info("[dom] networkidle timeout — continuing with loaded content")
+            await asyncio.sleep(3)
+
+            await self._switch_to_list_view()
+            await asyncio.sleep(3)
+
+            vp = self.page.viewport_size or {"width": 1280, "height": 720}
+            await self.page.mouse.move(vp["width"] // 2, vp["height"] // 2)
+
+            no_new_streak = 0
+            max_scrolls = max(40, target_count // 3)
+
+            for scroll_n in range(max_scrolls):
+                prev = len(all_listings)
+
+                # Drain any captured API responses for richer metadata
+                for data in list(pending_api):
+                    pending_api.remove(data)
+                    parsed, _ = self._parse_api_response(data)
+                    for lst in parsed:
+                        if lst['divar_id'] not in seen_ids:
+                            seen_ids.add(lst['divar_id'])
+                            all_listings.append(lst)
+
+                # Extract /v/ links directly from live rendered DOM
+                dom_items = await self.page.evaluate("""() => {
+                    return [...document.querySelectorAll('a[href*="/v/"]')]
+                        .map(a => ({
+                            href: a.href,
+                            title: (a.innerText || '').trim().substring(0, 120)
+                        }));
+                }""")
+                for item in (dom_items or []):
+                    href = item.get('href', '')
+                    if '/v/' not in href:
+                        continue
+                    raw = href.split('/v/', 1)[1].split('?')[0].split('/')[0]
+                    if not raw or len(raw) < 4 or raw in seen_ids:
+                        continue
+                    seen_ids.add(raw)
+                    all_listings.append({
+                        'divar_id': raw,
+                        'url': f"https://divar.ir/v/{raw}",
+                        'title': item.get('title') or None,
+                        'descriptions': [],
+                    })
+
+                gained = len(all_listings) - prev
+                logger.info(
+                    f"[dom scroll #{scroll_n}] +{gained} items | total {len(all_listings)}/{target_count}"
+                )
+
+                if len(all_listings) >= target_count:
+                    break
+
+                if gained == 0:
+                    no_new_streak += 1
+                    if no_new_streak >= 5:
+                        logger.info("[dom] 5 scrolls with no new items — stopping")
+                        break
+                else:
+                    no_new_streak = 0
+
+                for _ in range(15):
+                    await self.page.mouse.wheel(0, 400)
+                    await asyncio.sleep(0.1)
+                await asyncio.sleep(2.5)
+
+            if not all_listings:
+                try:
+                    ss_path = self.images_dir / "debug_collect_zero.png"
+                    await self.page.screenshot(path=str(ss_path))
+                    logger.warning(f"[dom] Zero results — saved debug screenshot to {ss_path}")
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.error(f"[dom] _collect_from_browser_dom failed: {e}")
+        finally:
+            self.page.remove_listener("response", _on_resp)
+
+        logger.info(f"[dom] collected {len(all_listings)} listings (target={target_count})")
+        return all_listings[:target_count]
+
+    async def _collect_listings_robust(
+        self, city: str, category: str, target_count: int
+    ) -> List[Dict[str, Any]]:
+        """Primary collection method: browser DOM extraction with direct API supplement.
+
+        Strategy 1 — browser DOM: navigate the listing page, switch to list view,
+        scroll while reading live DOM links + intercepting API responses.
+        Strategy 2 — direct API: httpx GET to api.divar.ir with cursor pagination.
+        """
+        all_listings: List[Dict[str, Any]] = []
+        seen_ids: set = set()
+
+        # Strategy 1: live DOM extraction (independent of API response format)
+        try:
+            dom_listings = await self._collect_from_browser_dom(city, category, target_count)
+            for lst in dom_listings:
+                if lst['divar_id'] not in seen_ids:
+                    seen_ids.add(lst['divar_id'])
+                    all_listings.append(lst)
+            logger.info(f"[robust] DOM strategy: {len(all_listings)}/{target_count}")
+        except Exception as e:
+            logger.error(f"[robust] DOM strategy failed: {e}")
+
+        if len(all_listings) >= target_count:
+            return all_listings[:target_count]
+
+        # Strategy 2: direct API with cursor pagination
+        remaining = target_count - len(all_listings)
+        last_post_date: Optional[int] = None
+        consecutive_empty = 0
+        for page_num in range(1, max(8, (remaining // 20) + 3) + 1):
+            try:
+                batch, lpd = await self._fetch_listings_direct_api(
+                    city, category, page_num, last_post_date
+                )
+                new_count = 0
+                for lst in batch:
+                    if lst['divar_id'] not in seen_ids:
+                        seen_ids.add(lst['divar_id'])
+                        all_listings.append(lst)
+                        new_count += 1
+                logger.info(
+                    f"[robust] API page={page_num} got={len(batch)} "
+                    f"new={new_count} total={len(all_listings)}/{target_count}"
+                )
+                if lpd:
+                    last_post_date = lpd
+                if len(all_listings) >= target_count:
+                    break
+                if not batch:
+                    consecutive_empty += 1
+                    if consecutive_empty >= 2:
+                        break
+                else:
+                    consecutive_empty = 0
+                await asyncio.sleep(random.uniform(0.8, 1.5))
+            except Exception as e:
+                logger.error(f"[robust] API page={page_num} failed: {e}")
+                break
+
+        return all_listings[:target_count]
+
     async def _collect_listings_scroll(
         self, city: str, category: str, target_count: int
     ) -> List[Dict[str, Any]]:
@@ -2080,7 +2307,7 @@ class DivarScraper:
             # ── Collect listings ────────────────────────────────────────────────
             logger.info(f"Target: {max_items} listings")
 
-            all_listings = await self._collect_listings_api(city, category, max_items)
+            all_listings = await self._collect_listings_robust(city, category, max_items)
             seen_ids: set = {lst['divar_id'] for lst in all_listings}
 
             job.total_items = len(all_listings)
