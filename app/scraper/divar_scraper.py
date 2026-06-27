@@ -758,14 +758,19 @@ class DivarScraper:
                 for data in list(pending_api):
                     pending_api.remove(data)
                     parsed, _ = self._parse_api_response(data)
+                    logger.info(
+                        f"[dom] API parse: {len(parsed)} tokens from "
+                        f"top_keys={list(data.keys())[:8] if isinstance(data, dict) else type(data).__name__}"
+                    )
                     for lst in parsed:
                         if lst['divar_id'] not in seen_ids:
                             seen_ids.add(lst['divar_id'])
                             all_listings.append(lst)
 
                 # Extract tokens from:
-                # 1. window.__NEXT_DATA__ (pre-loaded SSR listing data)
+                # 1. Regex scan of window.__NEXT_DATA__ JSON (fastest, gets all pre-loaded data)
                 # 2. a[href*="/v/"] rendered DOM links
+                # 3. Any element with data-token attribute
                 dom_items = await self.page.evaluate("""() => {
                     const TOKEN_RE = /^[A-Za-z0-9]{4,20}$/;
                     const seen = new Set();
@@ -774,34 +779,38 @@ class DivarScraper:
                     const addToken = (tok, title) => {
                         if (tok && TOKEN_RE.test(tok) && !seen.has(tok)) {
                             seen.add(tok);
-                            results.push({ href: 'https://divar.ir/v/' + tok, title: title || '' });
+                            results.push({ href: 'https://divar.ir/v/' + tok, title: (title || '').substring(0, 120) });
                         }
                     };
 
-                    const extractFromUrl = (url) => {
+                    const tokFromUrl = (url) => {
                         if (!url || !url.includes('/v/')) return null;
-                        const parts = url.split('/v/')[1].split('?')[0].split('/');
-                        return parts[parts.length - 1];
+                        const segs = url.split('/v/')[1].split('?')[0].split('/');
+                        return segs[segs.length - 1];
                     };
 
-                    // Method 1: Walk __NEXT_DATA__ for all token fields
+                    // Method 1: regex scan of __NEXT_DATA__ JSON string (very fast)
                     if (window.__NEXT_DATA__) {
-                        const walk = (obj, depth) => {
-                            if (depth > 25 || !obj || typeof obj !== 'object') return;
-                            if (typeof obj.token === 'string') addToken(obj.token, obj.title || '');
-                            if (obj.action && obj.action.payload)
-                                addToken(obj.action.payload.token, obj.title || '');
-                            if (typeof obj.web_url === 'string')
-                                addToken(extractFromUrl(obj.web_url), obj.title || '');
-                            for (const v of Object.values(obj)) walk(v, depth + 1);
-                        };
-                        try { walk(window.__NEXT_DATA__, 0); } catch(e) {}
+                        try {
+                            const json = JSON.stringify(window.__NEXT_DATA__);
+                            // Match "token":"VALUE" patterns
+                            const re1 = /"token":"([A-Za-z0-9]{4,20})"/g;
+                            let m;
+                            while ((m = re1.exec(json)) !== null) addToken(m[1], '');
+                            // Match /v/SLUG/TOKEN patterns inside strings
+                            const re2 = /\/v\/[^"]*\/([A-Za-z0-9]{6,20})(?=["?])/g;
+                            while ((m = re2.exec(json)) !== null) addToken(m[1], '');
+                        } catch(e) {}
                     }
 
                     // Method 2: rendered <a href="/v/..."> links
                     for (const a of document.querySelectorAll('a[href*="/v/"]')) {
-                        const tok = extractFromUrl(a.href);
-                        addToken(tok, (a.innerText || '').trim().substring(0, 120));
+                        addToken(tokFromUrl(a.href), (a.innerText || '').trim());
+                    }
+
+                    // Method 3: data-token attributes anywhere on the page
+                    for (const el of document.querySelectorAll('[data-token]')) {
+                        addToken(el.dataset.token, (el.innerText || '').trim());
                     }
 
                     return results;
@@ -837,8 +846,8 @@ class DivarScraper:
 
                 if gained == 0:
                     no_new_streak += 1
-                    if no_new_streak >= 5:
-                        logger.info("[dom] 5 scrolls with no new items — stopping")
+                    if no_new_streak >= 8:
+                        logger.info("[dom] 8 scrolls with no new items — stopping")
                         break
                 else:
                     no_new_streak = 0
