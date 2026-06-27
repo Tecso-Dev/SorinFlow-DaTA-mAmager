@@ -411,7 +411,7 @@ class DivarScraper:
             # Fallback: extract last_post_date from the page's JS state
             if not next_last_post_date:
                 try:
-                    lpd_js = await self.page.evaluate("""
+                    lpd_js = await self.page.evaluate(r"""
                         (() => {
                             const nd = window.__NEXT_DATA__;
                             if (nd) {
@@ -686,6 +686,39 @@ class DivarScraper:
         logger.warning("[view] Could not switch to list view — proceeding in current view")
         return False
 
+    async def _click_load_more(self) -> bool:
+        """Click the 'آگهی‌های بیشتر' (Load More) button in Divar's list view.
+
+        Divar's new list view (shown after closing the map) paginates via an
+        explicit button click — NOT pure infinite scroll.  Each click loads the
+        next batch of ~24 listings.  Returns True if a button was clicked.
+        """
+        try:
+            result = await self.page.evaluate("""() => {
+                const candidates = [...document.querySelectorAll('button, a[role=button], a')];
+                for (const b of candidates) {
+                    const t = (b.innerText || '').replace(/\\s+/g, ' ').trim();
+                    // Match the load-more button specifically — it contains both
+                    // 'آگهی' and 'بیشتر'. Avoid 'نمایش نقشه' (show map) and the
+                    // detail-page description 'بیشتر' button.
+                    if (t && t.includes('آگهی') && t.includes('بیشتر') && t.length < 30) {
+                        const r = b.getBoundingClientRect();
+                        if (r.width > 0 && r.height > 0) {
+                            b.scrollIntoView({block: 'center'});
+                            b.click();
+                            return t;
+                        }
+                    }
+                }
+                return null;
+            }""")
+            if result:
+                logger.info(f"[dom] clicked load-more button: '{result}'")
+                return True
+        except Exception as e:
+            logger.debug(f"[dom] load-more click failed: {e}")
+        return False
+
     async def _collect_from_browser_dom(
         self, city: str, category: str, target_count: int
     ) -> List[Dict[str, Any]]:
@@ -742,14 +775,11 @@ class DivarScraper:
                 logger.warning("[dom] No /v/ links visible after view switch")
 
             vp = self.page.viewport_size or {"width": 1280, "height": 720}
-            # In map+sidebar layout the listing sidebar is on the RIGHT (~70-100% width).
-            # Move mouse there so wheel events scroll the sidebar, not the map.
-            sidebar_x = int(vp["width"] * 0.80)
-            center_y = vp["height"] // 2
-            await self.page.mouse.move(sidebar_x, center_y)
+            await self.page.mouse.move(vp["width"] // 2, vp["height"] // 2)
 
             no_new_streak = 0
-            max_scrolls = max(40, target_count // 3)
+            no_button_streak = 0
+            max_scrolls = max(50, target_count // 2)
 
             for scroll_n in range(max_scrolls):
                 prev = len(all_listings)
@@ -771,7 +801,7 @@ class DivarScraper:
                 # 1. Regex scan of window.__NEXT_DATA__ JSON (fastest, gets all pre-loaded data)
                 # 2. a[href*="/v/"] rendered DOM links
                 # 3. Any element with data-token attribute
-                dom_items = await self.page.evaluate("""() => {
+                dom_items = await self.page.evaluate(r"""() => {
                     const TOKEN_RE = /^[A-Za-z0-9]{4,20}$/;
                     const seen = new Set();
                     const results = [];
@@ -844,36 +874,32 @@ class DivarScraper:
                 if len(all_listings) >= target_count:
                     break
 
+                # ── Scroll to bottom to reveal the 'آگهی‌های بیشتر' (Load More) button ──
+                # Divar's new list view (after closing the map) paginates via an
+                # explicit button click, NOT pure infinite scroll.
+                await self.page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+                await asyncio.sleep(1.2)
+
+                clicked_more = await self._click_load_more()
+                if clicked_more:
+                    no_button_streak = 0
+                    await asyncio.sleep(3.5)  # wait for the next batch to render
+                else:
+                    no_button_streak += 1
+                    # No button found — fall back to wheel events (infinite-scroll variant)
+                    for _ in range(12):
+                        await self.page.mouse.wheel(0, 700)
+                        await asyncio.sleep(0.1)
+                    await asyncio.sleep(2.5)
+
                 if gained == 0:
                     no_new_streak += 1
-                    if no_new_streak >= 8:
-                        logger.info("[dom] 8 scrolls with no new items — stopping")
+                    # Stop only when no new items AND no load-more button for a while
+                    if no_new_streak >= 6 and no_button_streak >= 3:
+                        logger.info("[dom] no new items & no load-more button — stopping")
                         break
                 else:
                     no_new_streak = 0
-
-                # Scroll the RIGHT-SIDE sidebar (listing panel) AND the main page.
-                # In Divar's map+sidebar layout the sidebar is a separate scroll container.
-                await self.page.evaluate("""() => {
-                    // Scroll any scrollable container on the right 40% of the screen
-                    const rw = window.innerWidth;
-                    const rh = window.innerHeight;
-                    const rightElements = document.elementsFromPoint(rw * 0.8, rh * 0.5);
-                    for (const el of rightElements) {
-                        if (el.scrollHeight > el.clientHeight + 100) {
-                            el.scrollTop = el.scrollHeight;
-                            break;
-                        }
-                    }
-                    // Also scroll main page to bottom (for full list-view after map close)
-                    window.scrollTo(0, document.body.scrollHeight);
-                }""")
-                await asyncio.sleep(0.3)
-                # Real wheel events on the sidebar area so IntersectionObserver fires
-                for _ in range(12):
-                    await self.page.mouse.wheel(0, 600)
-                    await asyncio.sleep(0.1)
-                await asyncio.sleep(3.5)
 
             if not all_listings:
                 try:
