@@ -101,7 +101,7 @@ class ScrapingJobCreate(BaseModel):
     """Schema for creating a scraping job"""
     city: str
     category: str
-    max_pages: int = 10
+    max_items: int = 100
     download_images: bool = True
     divar_phone: Optional[str] = None
     # Price filters

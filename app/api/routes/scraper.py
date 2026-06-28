@@ -31,7 +31,7 @@ async def run_scraping_job(
     job_id: str,
     city: str,
     category: str,
-    max_pages: int,
+    max_items: int,
     download_images: bool,
     db_url: str,
     divar_phone: str = None,
@@ -112,7 +112,7 @@ async def run_scraping_job(
                 job_id=job_id,
                 city=city,
                 category=category,
-                max_pages=max_pages,
+                max_items=max_items,
                 download_images=download_images,
                 min_price=min_price,
                 max_price=max_price,
@@ -199,8 +199,8 @@ async def start_scraping_job(
 ):
     """Start a new scraping job"""
     
-    active = {k: v for k, v in job_config.model_dump().items() if v is not None and k not in ('city', 'category', 'max_pages', 'download_images', 'divar_phone')}
-    logger.info(f"Scraping job request — city={job_config.city} category={job_config.category} pages={job_config.max_pages} images={job_config.download_images} filters={active}")
+    active = {k: v for k, v in job_config.model_dump().items() if v is not None and k not in ('city', 'category', 'max_items', 'download_images', 'divar_phone')}
+    logger.info(f"Scraping job request — city={job_config.city} category={job_config.category} max_items={job_config.max_items} images={job_config.download_images} filters={active}")
     
     # Validate city and category
     if job_config.city not in CITIES:
@@ -246,7 +246,7 @@ async def start_scraping_job(
         job_id,
         job_config.city,
         job_config.category,
-        job_config.max_pages,
+        job_config.max_items,
         job_config.download_images,
         settings.database_url,
         job_config.divar_phone or None,
