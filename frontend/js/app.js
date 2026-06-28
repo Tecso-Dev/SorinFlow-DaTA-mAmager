@@ -1349,7 +1349,7 @@ async function startScraping(e) {
 
     const city     = document.getElementById('scraper-city').value;
     const category = document.getElementById('scraper-category').value;
-    const maxPages = parseInt(document.getElementById('scraper-pages').value);
+    const maxItems = parseInt(document.getElementById('scraper-pages').value);
     const downloadImages = document.getElementById('scraper-images').checked;
 
     const _chk = id => document.getElementById(id)?.checked ? true : null;
@@ -1384,15 +1384,15 @@ async function startScraping(e) {
 
     // Check cookie status before scraping
     if (!cookieStatus.is_valid) {
-        pendingScrapingAction = { type: 'bulk', city, category, maxPages, downloadImages, filters };
+        pendingScrapingAction = { type: 'bulk', city, category, maxItems, downloadImages, filters };
         showCookieWarning();
         return;
     }
 
-    await executeBulkScraping(city, category, maxPages, downloadImages, filters);
+    await executeBulkScraping(city, category, maxItems, downloadImages, filters);
 }
 
-async function executeBulkScraping(city, category, maxPages, downloadImages, filters = {}) {
+async function executeBulkScraping(city, category, maxItems, downloadImages, filters = {}) {
     try {
         // Auto-use the active Divar session — no manual phone selection needed
         const session = await _getActiveSession();
@@ -1403,7 +1403,7 @@ async function executeBulkScraping(city, category, maxPages, downloadImages, fil
         const body = {
             city,
             category,
-            max_pages: maxPages,
+            max_items: maxItems,
             download_images: downloadImages,
             ...cleanFilters,
         };
@@ -1506,8 +1506,8 @@ function continueScraping() {
     if (!pendingScrapingAction) return;
     
     if (pendingScrapingAction.type === 'bulk') {
-        const { city, category, maxPages, downloadImages, filters } = pendingScrapingAction;
-        executeBulkScraping(city, category, maxPages, downloadImages, filters);
+        const { city, category, maxItems, downloadImages, filters } = pendingScrapingAction;
+        executeBulkScraping(city, category, maxItems, downloadImages, filters);
     } else if (pendingScrapingAction.type === 'single') {
         executeSingleScraping(pendingScrapingAction.url);
     }
