@@ -92,135 +92,81 @@ class ContactExtractor:
             except Exception as click_err:
                 logger.warning(f"All click methods failed: {click_err}")
 
-            try:
-                await self._handle_captcha_if_present()
-            except Exception as captcha_err:
-                logger.warning(f"Captcha handler raised exception, continuing: {captcha_err}")
+            # Solve the captcha and look for the phone, retrying with a fresh
+            # puzzle on failure. ARCaptcha serves a new puzzle each attempt, so
+            # multiple tries multiply the odds of a correct slide.
+            MAX_ATTEMPTS = 3
+            for attempt_num in range(1, MAX_ATTEMPTS + 1):
+                try:
+                    await self._handle_captcha_if_present()
+                except Exception as captcha_err:
+                    logger.warning(f"Captcha handler raised exception, continuing: {captcha_err}")
 
-            # Wait for network to settle
-            try:
-                await self.page.wait_for_selector(
-                    "#challenge, #voiceChallenge, [data-arcaptcha-site-key]", timeout=3000
-                )
-            except Exception:
-                pass
+                # Wait for network to settle
+                try:
+                    await self.page.wait_for_selector(
+                        "#challenge, #voiceChallenge, [data-arcaptcha-site-key]", timeout=3000
+                    )
+                except Exception:
+                    pass
 
-            await asyncio.sleep(random.uniform(1.0, 2.0))
+                await asyncio.sleep(random.uniform(1.0, 2.0))
 
-            # Handle Divar SMS-OTP for contact-info verification
-            await self._handle_sms_otp_if_present()
+                # Handle Divar SMS-OTP for contact-info verification
+                await self._handle_sms_otp_if_present()
 
-            # Dismiss PWA info modal if present
-            try:
-                for btn in await self.page.query_selector_all('.kt-new-modal__footer button.kt-button--primary'):
-                    try:
-                        text = (await btn.inner_text() or '').strip()
-                    except Exception:
-                        continue
-                    if 'متوجه شدم' in text:
-                        logger.info("Dismissing PWA info modal")
+                # Dismiss PWA info modal if present
+                try:
+                    for btn in await self.page.query_selector_all('.kt-new-modal__footer button.kt-button--primary'):
                         try:
-                            await btn.click(force=True, timeout=3000)
+                            text = (await btn.inner_text() or '').strip()
                         except Exception:
+                            continue
+                        if 'متوجه شدم' in text:
+                            logger.info("Dismissing PWA info modal")
                             try:
-                                await btn.click()
+                                await btn.click(force=True, timeout=3000)
                             except Exception:
-                                pass
-                        await asyncio.sleep(1.0)
-                        break
-            except Exception:
-                pass
+                                try:
+                                    await btn.click()
+                                except Exception:
+                                    pass
+                            await asyncio.sleep(1.0)
+                            break
+                except Exception:
+                    pass
 
-            # Debug screenshot
-            try:
-                debug_path = self.images_dir.parent / "debug" / "debug_after_click.png"
-                debug_path.parent.mkdir(parents=True, exist_ok=True)
-                await self.page.screenshot(path=str(debug_path))
-            except Exception:
-                pass
+                # Debug screenshot
+                try:
+                    debug_path = self.images_dir.parent / "debug" / "debug_after_click.png"
+                    debug_path.parent.mkdir(parents=True, exist_ok=True)
+                    await self.page.screenshot(path=str(debug_path))
+                except Exception:
+                    pass
 
-            # Log page state for debugging
-            try:
-                content = await self.page.content()
-                if 'tel:' in content:
-                    logger.info("Phone number link found in page content")
-                else:
-                    logger.info("No tel: link found in page content after click")
-                    if 'kt-new-modal' in content or 'kt-modal' in content:
-                        logger.info("Modal detected on page")
-                    phone_patterns = re.findall(r'[۰-۹0-9]{10,11}', content)
-                    if phone_patterns:
-                        logger.info(f"Found phone-like patterns: {phone_patterns[:5]}")
-            except Exception:
-                pass
+                phone = await self._scan_for_phone(_is_login_phone)
+                if phone:
+                    return phone
 
-            phone_selectors = [
-                'a[href^="tel:"]',
-                '.kt-unexpandable-row__action a[href^="tel:"]',
-                '.kt-base-row a[href^="tel:"]',
-                '.kt-new-modal a[href^="tel:"]',
-                '.kt-modal a[href^="tel:"]',
-                '.kt-dimmer a[href^="tel:"]',
-                '[role="dialog"] a[href^="tel:"]',
-                '[data-testid="phone-number"]',
-                '[data-phone-action="true"]',
-                '.post-contact a',
-                '.post-actions__phone a',
-                'a[class*="phone"]',
-                'button[data-action="call"]',
-            ]
-
-            for attempt in range(3):
-                for selector in phone_selectors:
-                    try:
-                        phone_elem = await self.page.wait_for_selector(selector, timeout=800)
-                        if not phone_elem:
-                            continue
-                        try:
-                            is_visible = await phone_elem.is_visible()
-                        except Exception:
-                            is_visible = True
-                        if not is_visible:
-                            continue
-
-                        logger.info(f"Found phone element with selector: {selector}")
-                        href = await phone_elem.get_attribute('href')
-                        phone_text = (
-                            href.replace('tel:', '').strip()
-                            if href and href.startswith('tel:')
-                            else await phone_elem.inner_text()
-                        )
-                        logger.info(f"Raw phone text: {phone_text}")
-
-                        phone = parse_persian_number(phone_text)
-                        if phone:
-                            phone_str = str(phone)
-                            if _is_login_phone(phone_str):
-                                logger.info("Skipping — matches login phone")
-                                continue
-                            if len(phone_str) == 10 and not phone_str.startswith('0'):
-                                return f"0{phone_str}"
-                            if len(phone_str) >= 10:
-                                return phone_str
-                    except Exception:
-                        continue
-                await asyncio.sleep(1.5)
-
-            # Regex fallback: only valid Iranian mobile numbers (09xxxxxxxxx)
-            try:
-                content = await self.page.content()
-                # Normalize Persian digits first, then match 09xxxxxxxxx
-                norm = content
-                for p, e in zip('۰۱۲۳۴۵۶۷۸۹', '0123456789'):
-                    norm = norm.replace(p, e)
-                m = re.search(r'(?<![0-9])(09[0-9]{9})(?![0-9])', norm)
-                if m:
-                    phone = m.group(1)
-                    if not _is_login_phone(phone):
-                        logger.info(f"Extracted phone via regex fallback: {phone}")
-                        return phone
-            except Exception:
-                pass
+                # No phone yet. If the captcha challenge is gone, retrying the
+                # puzzle won't help; stop. Otherwise refresh and try again.
+                challenge = None
+                try:
+                    challenge = await self.page.query_selector(
+                        "#challenge, #voiceChallenge, [data-arcaptcha-site-key]"
+                    )
+                except Exception:
+                    pass
+                if not challenge:
+                    logger.info("No captcha challenge remaining; stopping phone retries")
+                    break
+                if attempt_num < MAX_ATTEMPTS:
+                    logger.info(
+                        f"Captcha attempt {attempt_num}/{MAX_ATTEMPTS} did not reveal "
+                        f"phone — retrying with a fresh puzzle"
+                    )
+                    await self._refresh_captcha()
+                    await asyncio.sleep(random.uniform(1.0, 1.8))
 
             logger.warning("No phone element found after clicking contact button")
             return None
@@ -228,6 +174,113 @@ class ContactExtractor:
         except Exception as e:
             logger.warning(f"Failed to get phone number: {e}")
             return None
+
+    async def _scan_for_phone(self, is_login_phone) -> Optional[str]:
+        """Search the current page/modal for a revealed phone number."""
+        try:
+            content = await self.page.content()
+            if 'tel:' in content:
+                logger.info("Phone number link found in page content")
+            else:
+                logger.info("No tel: link found in page content after click")
+                if 'kt-new-modal' in content or 'kt-modal' in content:
+                    logger.info("Modal detected on page")
+        except Exception:
+            pass
+
+        phone_selectors = [
+            'a[href^="tel:"]',
+            '.kt-unexpandable-row__action a[href^="tel:"]',
+            '.kt-base-row a[href^="tel:"]',
+            '.kt-new-modal a[href^="tel:"]',
+            '.kt-modal a[href^="tel:"]',
+            '.kt-dimmer a[href^="tel:"]',
+            '[role="dialog"] a[href^="tel:"]',
+            '[data-testid="phone-number"]',
+            '[data-phone-action="true"]',
+            '.post-contact a',
+            '.post-actions__phone a',
+            'a[class*="phone"]',
+            'button[data-action="call"]',
+        ]
+
+        for attempt in range(3):
+            for selector in phone_selectors:
+                try:
+                    phone_elem = await self.page.wait_for_selector(selector, timeout=800)
+                    if not phone_elem:
+                        continue
+                    try:
+                        is_visible = await phone_elem.is_visible()
+                    except Exception:
+                        is_visible = True
+                    if not is_visible:
+                        continue
+
+                    logger.info(f"Found phone element with selector: {selector}")
+                    href = await phone_elem.get_attribute('href')
+                    phone_text = (
+                        href.replace('tel:', '').strip()
+                        if href and href.startswith('tel:')
+                        else await phone_elem.inner_text()
+                    )
+                    logger.info(f"Raw phone text: {phone_text}")
+
+                    phone = parse_persian_number(phone_text)
+                    if phone:
+                        phone_str = str(phone)
+                        if is_login_phone(phone_str):
+                            logger.info("Skipping — matches login phone")
+                            continue
+                        if len(phone_str) == 10 and not phone_str.startswith('0'):
+                            return f"0{phone_str}"
+                        if len(phone_str) >= 10:
+                            return phone_str
+                except Exception:
+                    continue
+            await asyncio.sleep(1.5)
+
+        # Regex fallback: only valid Iranian mobile numbers (09xxxxxxxxx)
+        try:
+            content = await self.page.content()
+            norm = content
+            for p, e in zip('۰۱۲۳۴۵۶۷۸۹', '0123456789'):
+                norm = norm.replace(p, e)
+            m = re.search(r'(?<![0-9])(09[0-9]{9})(?![0-9])', norm)
+            if m:
+                phone = m.group(1)
+                if not is_login_phone(phone):
+                    logger.info(f"Extracted phone via regex fallback: {phone}")
+                    return phone
+        except Exception:
+            pass
+
+        return None
+
+    async def _refresh_captcha(self) -> None:
+        """Ask ARCaptcha for a fresh puzzle after a failed slide.
+
+        Most ARCaptcha widgets auto-load a new puzzle after a wrong attempt, so
+        a refresh button isn't always present — in that case the next
+        `_handle_captcha_if_present` simply picks up the new images.
+        """
+        refresh_selectors = [
+            "#challenge [class*='refresh']",
+            "#challenge button[aria-label*='refresh']",
+            "#challenge [aria-label*='تازه']",
+            "#voiceChallenge [class*='refresh']",
+            "[class*='captcha'] [class*='refresh']",
+        ]
+        for sel in refresh_selectors:
+            try:
+                el = await self.page.query_selector(sel)
+                if el and await el.is_visible():
+                    await el.click(force=True, timeout=2000)
+                    logger.info(f"Clicked captcha refresh button: {sel}")
+                    return
+            except Exception:
+                continue
+        logger.info("No captcha refresh button found; relying on auto-refresh")
 
     async def _handle_sms_otp_if_present(self) -> None:
         """Detect Divar's SMS OTP verification for contact info, wait for user code."""
