@@ -1467,19 +1467,32 @@ async function scrapeSingle() {
 }
 
 async function executeSingleScraping(url) {
+    const btn = document.getElementById('single-scrape-btn');
+    const originalHtml = btn ? btn.innerHTML : null;
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال اسکرپ...';
+    }
+    showToast('در حال اسکرپ', 'اسکرپ این ملک شروع شد، چند لحظه صبر کنید...', 'info');
+
     try {
         const result = await apiCall('/scraper/scrape-single', {
             method: 'POST',
             body: JSON.stringify({ url })
         });
-        
+
         if (result.success) {
             showToast('موفق', 'ملک با موفقیت اسکرپ شد', 'success');
         } else {
-            showToast('خطا', result.message, 'danger');
+            showToast('خطا', result.message || 'اسکرپ ناموفق بود', 'danger');
         }
     } catch (error) {
         showToast('خطا', error.message, 'danger');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
     }
 }
 
