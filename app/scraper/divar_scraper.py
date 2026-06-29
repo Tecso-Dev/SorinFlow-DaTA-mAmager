@@ -1183,8 +1183,31 @@ class DivarScraper:
             if posted_at:
                 property_data["posted_at"] = posted_at
 
-            # Infer listing_type (buy/rent) from the parsed price fields when it
-            # isn't supplied by a job category (e.g. single-property scrape).
+            # Category / property_type / listing_type from the breadcrumb trail
+            # (e.g. املاک › فروش مسکونی › فروش آپارتمان). The leaf crumb gives the
+            # category; stripping its leading transaction word gives the property
+            # type, and the transaction word itself is the authoritative
+            # buy/rent signal.
+            try:
+                import re as _re
+                crumbs = [a.get_text(strip=True) for a in soup.select('a.kt-breadcrumbs__action')]
+                crumbs = [c for c in crumbs if c and c != 'املاک']
+                if crumbs:
+                    leaf = crumbs[-1]
+                    property_data.setdefault('category_name', leaf)
+                    ptype = _re.sub(r'^(پیش[‌ ]?فروش|فروش|اجارهٔ|اجاره|رهن|خرید)\s+', '', leaf).strip()
+                    if ptype and ptype != leaf:
+                        property_data.setdefault('property_type', ptype)
+                    joined = ' '.join(crumbs)
+                    if 'اجاره' in joined or 'رهن' in joined:
+                        property_data['listing_type'] = 'rent'
+                    elif 'فروش' in joined or 'خرید' in joined:
+                        property_data['listing_type'] = 'buy'
+            except Exception:
+                pass
+
+            # Infer listing_type (buy/rent) from the parsed price fields when the
+            # breadcrumb didn't supply it (e.g. job category missing).
             # The frontend treats any non-'buy' value as اجاره, so leaving this
             # unset mislabels sale listings as rent.
             if not property_data.get("listing_type"):
@@ -1392,26 +1415,32 @@ class DivarScraper:
                 if len(locations) >= 3:
                     location['neighborhood'] = locations[2]
 
-            # Fallback: Divar usually renders the location as plain text in the
-            # subtitle (not as <a> links), formatted like
-            # "۵ ساعت پیش در تهران، امیرآباد". Split off the relative-time prefix
-            # and parse the comma-separated city/district/neighborhood.
+            # Fallback: Divar renders the location inside the first info row's
+            # title (value is empty), formatted like
+            # "۱ ساعت پیش در ارومیه، کنارگذر آزادگان". Match the relative-time +
+            # "در" prefix, then split the comma-separated city/district.
             if not location.get('city_name'):
-                subtitle = soup.select_one('.kt-page-title__subtitle')
-                if subtitle:
-                    text = subtitle.get_text(strip=True)
-                    if ' در ' in text:
-                        text = text.split(' در ', 1)[1]
-                    _TIME_WORDS = ('پیش', 'ساعت', 'دقیقه', 'لحظه', 'روز', 'هفته', 'ماه')
-                    parts = [p.strip() for p in text.split('،') if p.strip()]
-                    # Guard: never store a relative-time phrase as a location.
-                    parts = [p for p in parts if not any(w in p for w in _TIME_WORDS)]
+                import re as _re
+                for row in soup.select('.kt-base-row, .kt-unexpandable-row, .kt-group-row-item'):
+                    title_el = row.select_one(
+                        '.kt-info-row__title, [class*="row__title"], .kt-group-row-item__title'
+                    )
+                    if not title_el:
+                        continue
+                    ttext = title_el.get_text(strip=True)
+                    m = _re.search(r'(?:پیش|دیروز|امروز|لحظاتی|الان)\s*در\s+(.+)$', ttext)
+                    if not m and ' در ' in ttext and '،' in ttext:
+                        m = _re.search(r'\bدر\s+(.+)$', ttext)
+                    if not m:
+                        continue
+                    parts = [p.strip() for p in m.group(1).split('،') if p.strip()]
                     if parts:
                         location['city_name'] = parts[0]
                     if len(parts) >= 2:
                         location['district'] = parts[1]
                     if len(parts) >= 3:
                         location['neighborhood'] = parts[2]
+                    break
 
             # Look for map coordinates
             map_elem = soup.select_one('[data-lat][data-lng]')
