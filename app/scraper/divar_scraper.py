@@ -1183,6 +1183,18 @@ class DivarScraper:
             if posted_at:
                 property_data["posted_at"] = posted_at
 
+            # Infer listing_type (buy/rent) from the parsed price fields when it
+            # isn't supplied by a job category (e.g. single-property scrape).
+            # The frontend treats any non-'buy' value as اجاره, so leaving this
+            # unset mislabels sale listings as rent.
+            if not property_data.get("listing_type"):
+                if property_data.get("rent_price") or property_data.get("deposit"):
+                    property_data["listing_type"] = "rent"
+                elif (property_data.get("total_price")
+                      or property_data.get("price_per_meter")
+                      or property_data.get("price")):
+                    property_data["listing_type"] = "buy"
+
             # Get phone number (requires login)
             _otp_key = f"{self.current_job.job_id}:{property_data.get('divar_id','')}" if self.current_job else None
             contact_extractor = ContactExtractor(self.page, self.images_dir, otp_key=_otp_key)
@@ -1379,7 +1391,28 @@ class DivarScraper:
                     location['district'] = locations[1]
                 if len(locations) >= 3:
                     location['neighborhood'] = locations[2]
-            
+
+            # Fallback: Divar usually renders the location as plain text in the
+            # subtitle (not as <a> links), formatted like
+            # "۵ ساعت پیش در تهران، امیرآباد". Split off the relative-time prefix
+            # and parse the comma-separated city/district/neighborhood.
+            if not location.get('city_name'):
+                subtitle = soup.select_one('.kt-page-title__subtitle')
+                if subtitle:
+                    text = subtitle.get_text(strip=True)
+                    if ' در ' in text:
+                        text = text.split(' در ', 1)[1]
+                    _TIME_WORDS = ('پیش', 'ساعت', 'دقیقه', 'لحظه', 'روز', 'هفته', 'ماه')
+                    parts = [p.strip() for p in text.split('،') if p.strip()]
+                    # Guard: never store a relative-time phrase as a location.
+                    parts = [p for p in parts if not any(w in p for w in _TIME_WORDS)]
+                    if parts:
+                        location['city_name'] = parts[0]
+                    if len(parts) >= 2:
+                        location['district'] = parts[1]
+                    if len(parts) >= 3:
+                        location['neighborhood'] = parts[2]
+
             # Look for map coordinates
             map_elem = soup.select_one('[data-lat][data-lng]')
             if map_elem:
