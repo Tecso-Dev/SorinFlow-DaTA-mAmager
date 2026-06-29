@@ -2130,19 +2130,34 @@ class DivarScraper:
             logger.info(f"Starting scraping job for {city}/{category} | filters={active_filters}")
 
             # ── Collect listings ────────────────────────────────────────────────
-            logger.info(f"Target: {max_items} listings")
+            # max_items is the number of *kept* (post-filter) listings the user
+            # asked for. Off-category (زمین/باغ) and filter drops mean we must
+            # collect a larger candidate pool and keep scraping until max_items
+            # are actually saved, then stop.
+            logger.info(f"Target: {max_items} saved listings")
 
-            all_listings = await self._collect_listings_robust(city, category, max_items)
+            collect_target = min(max(max_items * 4, max_items + 50), 200)
+            all_listings = await self._collect_listings_robust(city, category, collect_target)
             seen_ids: set = {lst['divar_id'] for lst in all_listings}
 
-            job.total_items = len(all_listings)
+            # Progress is measured against the requested target, not the raw pool,
+            # so the dashboard reaches 100% exactly when max_items are saved.
+            job.total_items = max_items
             await self.db_session.commit()
 
-            logger.info(f"Found {len(all_listings)} total listings (target was {max_items})")
+            logger.info(
+                f"Collected {len(all_listings)} candidate listings; "
+                f"will keep scraping until {max_items} are saved"
+            )
             
             # Scrape each property detail
             for i, listing in enumerate(all_listings):
                 try:
+                    # Stop as soon as the requested number of listings are saved.
+                    if job.new_items >= max_items:
+                        logger.info(f"Reached target of {max_items} saved listings — stopping")
+                        break
+
                     # Check if job was cancelled
                     await self.db_session.refresh(job)
                     if job.status == "cancelled":
@@ -2247,7 +2262,7 @@ class DivarScraper:
                                 skip = _skip(f"posted_at {posted} older than {max_age_hours}h")
 
                         if skip:
-                            job.scraped_items = i + 1
+                            job.scraped_items = min(job.new_items, max_items)
                             await self.db_session.commit()
                             continue
 
@@ -2273,9 +2288,9 @@ class DivarScraper:
                         job.failed_items += 1
                     # detail is False = off-category skip; don't count as failure
 
-                    job.scraped_items = i + 1
+                    job.scraped_items = min(job.new_items, max_items)
                     await self.db_session.commit()
-                    
+
                     await self._human_like_delay()
                     
                 except Exception as e:
