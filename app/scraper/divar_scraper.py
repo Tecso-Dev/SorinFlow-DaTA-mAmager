@@ -49,8 +49,11 @@ class DivarScraper:
         'buy-apartment':  ['آپارتمان', 'اپارتمان', 'واحد'],
 
         # Residential (broad): title is the property type alone — no buy/rent prefix
-        'rent-residential': ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'اجاره-مسکن', 'ساختمان', 'دوبلکس', 'منزل'],
-        'buy-residential':  ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'کلنگی', 'ساختمان', 'دوبلکس', 'منزل'],
+        # Strong residential signals (سرویس/سویس/خوابه/طبقه/نوساز) accept units
+        # whose title omits the property type, while land/گاردن listings — which
+        # never carry these — still fall through and get dropped.
+        'rent-residential': ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'اجاره-مسکن', 'ساختمان', 'دوبلکس', 'منزل', 'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
+        'buy-residential':  ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'کلنگی', 'ساختمان', 'دوبلکس', 'منزل', 'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
 
         # Villa
         'rent-villa': ['ویلا', 'باغ-ویلا'],
