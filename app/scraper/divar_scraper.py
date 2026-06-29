@@ -1218,8 +1218,14 @@ class DivarScraper:
                       or property_data.get("price")):
                     property_data["listing_type"] = "buy"
 
-            # Get phone number (requires login)
-            _otp_key = f"{self.current_job.job_id}:{property_data.get('divar_id','')}" if self.current_job else None
+            # Get phone number (requires login). Always register an OTP key —
+            # even for single-property scrapes (no job) — so Divar's SMS-OTP
+            # prompt surfaces in the dashboard and the user can submit the code.
+            _divar_id = property_data.get('divar_id', '')
+            _otp_key = (
+                f"{self.current_job.job_id}:{_divar_id}" if self.current_job
+                else f"single:{_divar_id}"
+            )
             contact_extractor = ContactExtractor(self.page, self.images_dir, otp_key=_otp_key)
             phone_number = await contact_extractor.get_phone_number()
             if phone_number:
