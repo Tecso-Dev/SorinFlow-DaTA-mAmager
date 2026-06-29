@@ -49,8 +49,8 @@ class DivarScraper:
         'buy-apartment':  ['آپارتمان', 'اپارتمان', 'واحد'],
 
         # Residential (broad): title is the property type alone — no buy/rent prefix
-        'rent-residential': ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'اجاره-مسکن'],
-        'buy-residential':  ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'کلنگی'],
+        'rent-residential': ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'اجاره-مسکن', 'ساختمان', 'دوبلکس', 'منزل'],
+        'buy-residential':  ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'کلنگی', 'ساختمان', 'دوبلکس', 'منزل'],
 
         # Villa
         'rent-villa': ['ویلا', 'باغ-ویلا'],
@@ -986,12 +986,17 @@ class DivarScraper:
             return None
     
     async def scrape_property_detail(
-        self, url: str, target_category: Optional[str] = None
+        self, url: str, target_category: Optional[str] = None,
+        source_title: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Scrape detailed information from a property page.
 
-        target_category: if provided, the final URL must match the expected
-        patterns for that category (prevents off-category listings from being saved).
+        target_category: if provided, the final URL (or the search-result title)
+        must match the expected patterns for that category (prevents off-category
+        listings from being saved).
+        source_title: the listing title captured from the category-filtered
+        search results, used as a fallback category signal when Divar serves a
+        bare /v/<token> URL with no descriptive slug.
         """
         try:
             logger.info(f"Scraping property detail: {url}")
@@ -1015,10 +1020,16 @@ class DivarScraper:
             # with real-estate (e.g. "دفتری" matching "دفتر").
             if target_category and target_category in self.CATEGORY_URL_PATTERNS:
                 patterns = self.CATEGORY_URL_PATTERNS[target_category]
-                if not any(p in decoded_url for p in patterns):
+                # Listing URLs are built as bare /v/<token>; Divar only adds a
+                # descriptive slug for some of them on redirect, so the URL alone
+                # carries no category signal for the rest. Fall back to the title
+                # from the (already category-filtered) search result so bare-token
+                # listings aren't all dropped — reject only when NEITHER matches.
+                haystack = f"{decoded_url} {source_title or ''}"
+                if not any(p in haystack for p in patterns):
                     logger.info(
                         f"Skipping off-category listing for '{target_category}' "
-                        f"(URL: {decoded_url})"
+                        f"(URL: {decoded_url}, title: {source_title!r})"
                     )
                     return False  # sentinel: category skip — not a scrape error
             else:
@@ -2143,7 +2154,10 @@ class DivarScraper:
                         continue
                     
                     # Scrape detail page
-                    detail = await self.scrape_property_detail(listing['url'], target_category=category)
+                    detail = await self.scrape_property_detail(
+                        listing['url'], target_category=category,
+                        source_title=listing.get('title'),
+                    )
                     
                     if detail:
                         # Merge with listing data
