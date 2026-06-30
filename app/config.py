@@ -39,7 +39,7 @@ class Settings(BaseSettings):
         env="SECRET_KEY"
     )
     api_key: str = Field(default="", env="API_KEY")
-    access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
+    access_token_expire_minutes: int = 60 * 24  # 24 hours — re-login daily
 
     # CORS
     cors_origins: str = Field(default="*", env="CORS_ORIGINS")
