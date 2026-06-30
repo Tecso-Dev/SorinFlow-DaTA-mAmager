@@ -14,6 +14,7 @@ from app.schemas import ProxyCreate, ProxyResponse, ProxyList
 router = APIRouter()
 
 
+@router.get("", response_model=ProxyList)
 @router.get("/", response_model=ProxyList)
 async def get_proxies(
     active_only: bool = False,
@@ -36,6 +37,7 @@ async def get_proxies(
     )
 
 
+@router.post("", response_model=ProxyResponse)
 @router.post("/", response_model=ProxyResponse)
 async def create_proxy(
     proxy_data: ProxyCreate,
