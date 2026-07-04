@@ -422,7 +422,30 @@ class DivarAuth:
             await asyncio.sleep(2)
             current_url = self.page.url
             logger.info(f"Current URL when looking for OTP input: {current_url}")
-            
+
+            # Divar sometimes auto-completes the login (trusted session / no OTP
+            # required) and lands directly on an authenticated page with the `token`
+            # cookie already set — the OTP form no longer exists. If we blindly search
+            # for it, we grab the wrong input and the bogus "login" click hangs for the
+            # default 30s ("Timeout 30000ms exceeded"). Detect the already-logged-in
+            # state up front and finalize immediately from the cookies we already have.
+            pre_cookies = await self.get_current_cookies()
+            token_cookie = next((c for c in pre_cookies if c.get("name") == "token"), None)
+            if token_cookie:
+                logger.info(f"Already authenticated (url={current_url}) — token cookie present, skipping OTP form entry")
+                result["success"] = True
+                result["message"] = "Login successful!"
+                result["cookies"] = pre_cookies
+                save_phone = phone_number or settings.divar_phone_number
+                if save_phone:
+                    await self.save_cookies_to_file(save_phone, pre_cookies)
+                    if self.db_session:
+                        await self.save_cookies_to_db(save_phone, pre_cookies, token_cookie.get("value"))
+                    logger.info(f"Login successful, cookies saved for {save_phone}!")
+                else:
+                    logger.warning("No phone number provided, cookies not saved")
+                return result
+
             # Try to find the code input with multiple strategies
             code_input = None
             
@@ -449,9 +472,14 @@ class DivarAuth:
                 
                 for selector in selectors_to_try:
                     try:
-                        code_input = await self.page.query_selector(selector)
-                        if code_input:
-                            logger.info(f"Found code input with selector: {selector}")
+                        candidate = await self.page.query_selector(selector)
+                        # Only accept a *visible* input. query_selector returns the
+                        # first DOM match even if it's hidden/off-screen; filling a
+                        # non-actionable element hangs for the default 30s
+                        # ("Timeout 30000ms exceeded").
+                        if candidate and await candidate.is_visible():
+                            code_input = candidate
+                            logger.info(f"Found visible code input with selector: {selector}")
                             break
                     except Exception as e:
                         logger.debug(f"Selector {selector} failed: {e}")
@@ -487,13 +515,23 @@ class DivarAuth:
                 
                 raise Exception(f"Could not find code input field. Page URL: {current_url}")
             
-            await code_input.fill("")
-            
+            # Use an explicit short timeout so a non-actionable / wrong element
+            # fails fast instead of hanging for the default 30s
+            # ("Timeout 30000ms exceeded"). If it isn't editable, the element we
+            # matched is not the real OTP field — report clearly rather than stall.
+            try:
+                await code_input.fill("", timeout=8000)
+            except Exception as e:
+                raise Exception(
+                    f"OTP input field not editable (matched wrong/hidden element). "
+                    f"Page URL: {current_url}. Original error: {e}"
+                )
+
             # Type code with delays
             for char in code:
-                await code_input.type(char, delay=self.stealth_config.typing_delay * 1000)
+                await code_input.type(char, delay=self.stealth_config.typing_delay * 1000, timeout=8000)
                 await asyncio.sleep(0.05)
-            
+
             await asyncio.sleep(1)
             
             # Click login button
@@ -529,8 +567,14 @@ class DivarAuth:
                 logger.warning(f"Error finding login button: {e}")
             
             if login_button:
-                await login_button.click()
-                logger.info("Login button clicked")
+                # Use an explicit short timeout: if the button isn't actionable
+                # (e.g. we matched the wrong element) don't hang for the default 30s —
+                # continue to the cookie check, which is the real success signal.
+                try:
+                    await login_button.click(timeout=8000)
+                    logger.info("Login button clicked")
+                except Exception as e:
+                    logger.warning(f"Login button not clickable ({e}); continuing to cookie check")
                 await asyncio.sleep(5)
                 
                 # Debug: Take screenshot after clicking login
