@@ -25,10 +25,12 @@ spec:
       labels:
         app: backend
     spec:
+      imagePullSecrets:
+        - name: ghcr-secret
       containers:
         - name: backend
           image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
           env:
@@ -55,7 +57,7 @@ spec:
             - name: ENVIRONMENT
               value: "production"
             - name: SERVER_IP
-              value: "109.122.254.204"
+              value: "5.160.252.187"
             - name: DOMAIN
               value: "sorinflow.com"
           volumeMounts:

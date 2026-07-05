@@ -69,3 +69,6 @@ docker-compose.override.yml
 
 # Kubernetes secrets (never commit)
 k8s/01-secrets.yaml
+
+# Deploy SSH keys (never commit)
+scripts/.deploy_keys/
