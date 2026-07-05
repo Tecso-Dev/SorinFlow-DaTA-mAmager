@@ -26,6 +26,10 @@
   --border:      rgba(255,255,255,.06);
   --border-soft: rgba(255,255,255,.03);
 
+  --glass:       rgba(14,18,37,.85);
+  --glass2:      rgba(14,18,37,.8);
+  --overlay:     rgba(0,0,0,.65);
+
   --sidebar-w:   252px;
   --topbar-h:    60px;
   --r:           14px;
@@ -112,7 +116,7 @@ a:hover { color: var(--accent); }
 .login-card {
   position: relative; z-index: 1;
   width: 380px;
-  background: rgba(14,18,37,.85);
+  background: var(--glass);
   backdrop-filter: blur(24px);
   border: 1px solid rgba(99,102,241,.25);
   border-radius: var(--r-lg);
@@ -435,7 +439,7 @@ a:hover { color: var(--accent); }
 /* ── Topbar ────────────────────────────────────────── */
 .topbar {
   height: var(--topbar-h);
-  background: rgba(14,18,37,.8);
+  background: var(--glass2);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 50;
@@ -1011,7 +1015,7 @@ textarea.form-control { resize: vertical; }
 .sidebar-overlay {
   display: none;
   position: fixed; inset: 0;
-  background: rgba(0,0,0,.65);
+  background: var(--overlay);
   z-index: 98;
   backdrop-filter: blur(2px);
 }
@@ -1179,3 +1183,102 @@ textarea.form-control { resize: vertical; }
 .stat-card.s-teal::before  { background: linear-gradient(90deg, #0f766e, #14b8a6); }
 .s-blue .stat-icon { background: rgba(59,130,246,.15); color: #3b82f6; }
 .s-teal .stat-icon { background: rgba(20,184,166,.15); color: #14b8a6; }
+
+/* ════════════════════════════════════════════════════
+   LIGHT THEME
+   Toggled via <html data-theme="light"> (see toggleTheme
+   in app.js; persisted in localStorage "sf-theme").
+   ════════════════════════════════════════════════════ */
+:root { color-scheme: dark; }
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg:          #eef1f8;
+  --surface:     #ffffff;
+  --surface2:    #f4f6fb;
+  --surface3:    #e6eaf4;
+
+  --accent-glow: rgba(99,102,241,.16);
+
+  --text:        #1e2740;
+  --text-dim:    #414f66;
+  --text-muted:  #67788f;
+  --border:      rgba(15,23,42,.10);
+  --border-soft: rgba(15,23,42,.05);
+
+  --glass:       rgba(255,255,255,.88);
+  --glass2:      rgba(255,255,255,.82);
+  --overlay:     rgba(15,23,42,.45);
+
+  --shadow:      0 8px 32px rgba(30,41,80,.10);
+  --shadow-sm:   0 2px 12px rgba(30,41,80,.07);
+}
+
+/* Smooth switch */
+body, #sidebar, .topbar, .card, .login-card {
+  transition: background-color .25s ease, color .25s ease, border-color .25s ease;
+}
+
+/* ── Semantic pastels → darker tones readable on light bg ── */
+[data-theme="light"] .bg-primary   { color: #4338ca !important; }
+[data-theme="light"] .bg-success,
+[data-theme="light"] .status-completed,
+[data-theme="light"] .alert-success,
+[data-theme="light"] .text-success { color: #047857 !important; }
+[data-theme="light"] .bg-info,
+[data-theme="light"] .status-running,
+[data-theme="light"] .alert-info,
+[data-theme="light"] .text-info    { color: #0e7490 !important; }
+[data-theme="light"] .bg-warning,
+[data-theme="light"] .status-pending,
+[data-theme="light"] .alert-warning,
+[data-theme="light"] .text-warning { color: #b45309 !important; }
+[data-theme="light"] .bg-danger,
+[data-theme="light"] .status-failed,
+[data-theme="light"] .alert-danger,
+[data-theme="light"] .text-danger  { color: #b91c1c !important; }
+[data-theme="light"] .bg-secondary,
+[data-theme="light"] .status-cancelled { color: #475569 !important; }
+[data-theme="light"] .bg-orange    { color: #c2410c !important; }
+[data-theme="light"] .bg-purple    { color: #6d28d9 !important; }
+
+[data-theme="light"] .btn-success          { color: #047857; }
+[data-theme="light"] .btn-success:hover:not(:disabled)  { color: #065f46; }
+[data-theme="light"] .btn-outline-primary  { color: #4f46e5; }
+[data-theme="light"] .btn-outline-primary:hover:not(:disabled) { color: #4338ca; }
+[data-theme="light"] .btn-outline-success  { color: #047857; }
+[data-theme="light"] .btn-outline-danger   { color: #b91c1c; }
+[data-theme="light"] .btn-outline-warning  { color: #b45309; }
+[data-theme="light"] .btn-outline-info     { color: #0e7490; }
+[data-theme="light"] .btn-logout           { color: #dc2626; }
+[data-theme="light"] .btn-2fa              { color: #4f46e5; }
+[data-theme="light"] #login-error          { color: #b91c1c; }
+
+/* Bootstrap close button: undo the dark-theme invert */
+[data-theme="light"] .btn-close { filter: none; opacity: .5; }
+
+/* Login background glows — softer on light */
+[data-theme="light"] .login-bg { opacity: .5; }
+[data-theme="light"] .login-orb { opacity: .55; }
+
+/* ── Theme toggle buttons ── */
+.theme-toggle-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: .95rem;
+  transition: var(--trans);
+}
+.theme-toggle-btn:hover {
+  color: var(--accent);
+  border-color: rgba(99,102,241,.4);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.login-theme-toggle {
+  position: fixed; top: 1rem; left: 1rem; z-index: 10;
+}

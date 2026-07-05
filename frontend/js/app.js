@@ -21,6 +21,63 @@ function getToken() { return localStorage.getItem('sf_token'); }
 function setToken(t) { localStorage.setItem('sf_token', t); _authToken = t; }
 function clearToken() { localStorage.removeItem('sf_token'); _authToken = null; _currentUser = null; _totpSession = null; }
 
+// ═══ Theme (dark / light) ═════════════════════════════════════
+// data-theme is set on <html> before first paint by an inline
+// script in index.html; persisted in localStorage "sf-theme".
+function currentTheme() { return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'; }
+
+function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('sf-theme', theme);
+    // sun shown in dark mode (click → light), moon in light mode
+    document.querySelectorAll('.theme-icon').forEach(el => {
+        el.className = 'bi theme-icon ' + (theme === 'light' ? 'bi-moon-stars' : 'bi-sun');
+    });
+    refreshChartTheme();
+}
+
+function toggleTheme() { applyTheme(currentTheme() === 'light' ? 'dark' : 'light'); }
+
+// Chart.js colors depend on the active theme
+function chartColors() {
+    const light = currentTheme() === 'light';
+    return {
+        text:    light ? '#475569' : '#94a3b8',
+        tick:    light ? '#64748b' : '#64748b',
+        grid:    light ? 'rgba(15,23,42,.08)'  : 'rgba(255,255,255,0.04)',
+        surface: light ? '#ffffff' : '#0e1225',
+    };
+}
+
+// Re-color already-rendered charts after a theme switch
+function refreshChartTheme() {
+    const c = chartColors();
+    if (cityChart) {
+        cityChart.options.plugins.legend.labels.color = c.text;
+        cityChart.data.datasets[0].borderColor = c.surface;
+        cityChart.update();
+    }
+    if (trendChart) {
+        trendChart.options.scales.x.grid.color = c.grid;
+        trendChart.options.scales.y.grid.color = c.grid;
+        trendChart.options.scales.x.ticks.color = c.tick;
+        trendChart.options.scales.y.ticks.color = c.tick;
+        trendChart.data.datasets[0].pointBorderColor = c.surface;
+        trendChart.update();
+    }
+    if (window._crmDealsChart) {
+        window._crmDealsChart.options.plugins.legend.labels.color = c.text;
+        window._crmDealsChart.update();
+    }
+    if (window._crmContactsChart) {
+        window._crmContactsChart.options.scales.x.ticks.color = c.text;
+        window._crmContactsChart.options.scales.y.ticks.color = c.text;
+        window._crmContactsChart.update();
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => applyTheme(currentTheme()));
+
 // ═══ Login / Logout ═══════════════════════════════════════════
 async function doLogin() {
     const username = document.getElementById('login-username').value.trim();
@@ -600,6 +657,7 @@ function updateCityChart(data) {
         cityChart.destroy();
     }
     
+    const themeC = chartColors();
     cityChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
@@ -610,7 +668,7 @@ function updateCityChart(data) {
                     '#6366f1','#06b6d4','#10b981','#f59e0b','#f97316',
                     '#ef4444','#8b5cf6','#14b8a6','#ec4899','#64748b'
                 ],
-                borderColor: '#0e1225',
+                borderColor: themeC.surface,
                 borderWidth: 3,
             }]
         },
@@ -620,7 +678,7 @@ function updateCityChart(data) {
             plugins: {
                 legend: {
                     position: 'right',
-                    labels: { color: '#94a3b8', font: { family: 'Vazirmatn' }, boxWidth: 12 }
+                    labels: { color: themeC.text, font: { family: 'Vazirmatn' }, boxWidth: 12 }
                 }
             }
         }
@@ -634,6 +692,7 @@ function updateTrendChart(data) {
         trendChart.destroy();
     }
     
+    const themeC = chartColors();
     trendChart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -644,7 +703,7 @@ function updateTrendChart(data) {
                 borderColor: '#6366f1',
                 backgroundColor: 'rgba(99,102,241,0.12)',
                 pointBackgroundColor: '#6366f1',
-                pointBorderColor: '#0e1225',
+                pointBorderColor: themeC.surface,
                 pointRadius: 4,
                 fill: true,
                 tension: 0.4,
@@ -656,13 +715,13 @@ function updateTrendChart(data) {
             plugins: { legend: { display: false } },
             scales: {
                 x: {
-                    grid: { color: 'rgba(255,255,255,0.04)' },
-                    ticks: { color: '#64748b', font: { family: 'Vazirmatn' } }
+                    grid: { color: themeC.grid },
+                    ticks: { color: themeC.tick, font: { family: 'Vazirmatn' } }
                 },
                 y: {
                     beginAtZero: true,
-                    grid: { color: 'rgba(255,255,255,0.05)' },
-                    ticks: { color: '#64748b', font: { family: 'Vazirmatn' } }
+                    grid: { color: themeC.grid },
+                    ticks: { color: themeC.tick, font: { family: 'Vazirmatn' } }
                 }
             }
         }
@@ -2247,15 +2306,16 @@ function _renderCrmCharts(data) {
     if (window._crmDealsChart) window._crmDealsChart.destroy();
     if (window._crmContactsChart) window._crmContactsChart.destroy();
 
+    const themeC = chartColors();
     window._crmDealsChart = new Chart(dealsCtx, {
         type: 'doughnut',
         data: { labels: dealLabels, datasets: [{ data: dealValues, backgroundColor: ['#f59e0b','#3b82f6','#8b5cf6','#10b981','#ef4444'] }] },
-        options: { plugins: { legend: { labels: { color: '#ccc' } } } }
+        options: { plugins: { legend: { labels: { color: themeC.text } } } }
     });
     window._crmContactsChart = new Chart(contactsCtx, {
         type: 'bar',
         data: { labels: contactLabels, datasets: [{ data: contactValues, backgroundColor: '#6366f1' }] },
-        options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#ccc' } }, y: { ticks: { color: '#ccc' } } } }
+        options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: themeC.text } }, y: { ticks: { color: themeC.text } } } }
     });
 }
 
