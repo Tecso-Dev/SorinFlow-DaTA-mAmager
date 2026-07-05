@@ -25,12 +25,12 @@ spec:
       labels:
         app: backend
     spec:
-      imagePullSecrets:
-        - name: ghcr-secret
+      # Image is imported directly into the node's containerd by CI over SSH,
+      # so the kubelet must not try to pull it from the registry.
       containers:
         - name: backend
           image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
           env:

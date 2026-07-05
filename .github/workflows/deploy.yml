@@ -61,20 +61,40 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      contents: read
+      packages: read
 
     steps:
-      - name: Deploy to k3s via SSH
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          echo "SSH_OPTS=-i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o ConnectTimeout=20" >> $GITHUB_ENV
+
+      - name: Import image into the server's containerd (no registry pull on server)
+        run: |
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
-          echo "Deploying $IMAGE to ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}"
-          ssh -i ~/.ssh/deploy_key \
-              -o StrictHostKeyChecking=no \
-              -o ConnectTimeout=20 \
-              ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} \
-              "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && \
-               kubectl set image deployment/backend backend=$IMAGE -n sorinflow && \
-               kubectl rollout status deployment/backend -n sorinflow --timeout=300s && \
-               kubectl get pods -n sorinflow"
+          echo "Pulling $IMAGE on the runner..."
+          docker pull "$IMAGE"
+          echo "Streaming image to ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} and importing into k3s..."
+          docker save "$IMAGE" | gzip -1 | \
+            ssh $SSH_OPTS ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} \
+            "gunzip | /usr/local/bin/k3s ctr -n k8s.io images import -"
+
+      - name: Roll out new image
+        run: |
+          IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
+          ssh $SSH_OPTS ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} \
+            "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && \
+             kubectl set image deployment/backend backend=$IMAGE -n sorinflow && \
+             kubectl rollout status deployment/backend -n sorinflow --timeout=300s && \
+             kubectl get pods -n sorinflow"
