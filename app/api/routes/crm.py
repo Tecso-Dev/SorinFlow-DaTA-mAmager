@@ -125,6 +125,17 @@ async def notify_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     return {"success": lead.notified, "channel": channel}
 
 
+@router.delete("/leads/{lead_id}")
+async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Lead).where(Lead.id == lead_id))
+    lead = result.scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    await db.delete(lead)
+    await db.commit()
+    return {"success": True}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CONTACTS
 # ─────────────────────────────────────────────────────────────────────────────
