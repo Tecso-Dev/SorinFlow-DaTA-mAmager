@@ -446,115 +446,74 @@ class DivarAuth:
                     logger.warning("No phone number provided, cookies not saved")
                 return result
 
-            # Try to find the code input with multiple strategies
-            code_input = None
-            code_entered = False
-
-            # Strategy 0: Divar's current login modal renders the OTP as
-            # several single-digit boxes (maxlength=1) whose JS auto-advances
-            # focus after each digit. Element-wise .type() re-focuses the same
-            # box for every character, so all digits after the first get
-            # dropped — click the first box and type through the shared
-            # keyboard instead, letting Divar's own JS move the focus.
+            # Divar's current login modal renders the OTP as several separate
+            # single-digit boxes whose JS auto-advances focus after each digit.
+            # Typing per-element with ElementHandle.type() re-focuses the same
+            # box for every character, so digits after the first get dropped.
+            # Unified approach: collect the visible digit/code input(s), click
+            # the first one, and type the whole code through the shared keyboard —
+            # letting Divar's own JS move focus box-to-box. This also works for a
+            # legacy single 6-char field (all digits land in the one field).
+            #
+            # Give the modal a moment to render the boxes first.
             try:
-                await self.page.wait_for_selector('input[maxlength="1"]', timeout=8000)
-                otp_boxes = [
-                    box for box in await self.page.query_selector_all('input[maxlength="1"]')
-                    if await box.is_visible()
-                ]
-                if len(otp_boxes) >= 4:
-                    logger.info(f"Detected {len(otp_boxes)} single-digit OTP boxes — typing via keyboard")
-                    await otp_boxes[0].click(timeout=8000)
-                    await self.page.keyboard.type(code, delay=120)
-                    code_entered = True
+                await self.page.wait_for_selector(
+                    'input[maxlength], input[inputmode="numeric"], input[type="tel"], input[type="text"], input[type="number"]',
+                    timeout=15000,
+                )
             except Exception as e:
-                logger.info(f"Single-digit OTP boxes not found, falling back to single input: {e}")
+                logger.warning(f"No OTP input appeared within 15s: {e}")
 
-            if not code_entered:
-                # Strategy 1: Wait for the standard selector
+            # Gather every visible, enabled, text-like input (the OTP boxes).
+            otp_inputs = []
+            for inp in await self.page.query_selector_all('input'):
                 try:
-                    logger.info("Trying to find input[name='code']...")
-                    code_input = await self.page.wait_for_selector('input[name="code"]', timeout=20000)
-                    logger.info("Found input[name='code']")
-                except Exception as e:
-                    logger.warning(f"input[name='code'] not found: {e}")
+                    if not await inp.is_visible():
+                        continue
+                    itype = (await inp.get_attribute('type') or 'text').lower()
+                    if itype in ('hidden', 'checkbox', 'radio', 'submit', 'button', 'file', 'password'):
+                        continue
+                    if not await inp.is_editable():
+                        continue
+                    otp_inputs.append(inp)
+                except Exception:
+                    continue
 
-                    # Strategy 2: Try alternative selectors
-                    logger.info("Trying alternative selectors...")
-                    selectors_to_try = [
-                        'input[type="text"]',
-                        'input[type="number"]',
-                        'input[placeholder*="کد"]',
-                        'input[placeholder*="code"]',
-                        'input[placeholder*="تأیید"]',
-                        'input[placeholder*="verify"]',
-                        'input[maxlength="6"]',
-                        'input[inputmode="numeric"]'
-                    ]
+            logger.info(f"Found {len(otp_inputs)} visible editable input(s) for OTP entry")
 
-                    for selector in selectors_to_try:
-                        try:
-                            candidate = await self.page.query_selector(selector)
-                            # Only accept a *visible* input. query_selector returns the
-                            # first DOM match even if it's hidden/off-screen; filling a
-                            # non-actionable element hangs for the default 30s
-                            # ("Timeout 30000ms exceeded").
-                            if candidate and await candidate.is_visible():
-                                code_input = candidate
-                                logger.info(f"Found visible code input with selector: {selector}")
-                                break
-                        except Exception as e:
-                            logger.debug(f"Selector {selector} failed: {e}")
-                            continue
-
-                if not code_input:
-                    # Strategy 3: Debug page content
-                    logger.error("No code input field found. Debugging page content...")
-                    try:
-                        page_content = await self.page.content()
-                        # Look for input elements in the page
-                        inputs = await self.page.query_selector_all('input')
-                        logger.info(f"Found {len(inputs)} input elements on page")
-
-                        for i, inp in enumerate(inputs[:10]):  # Check first 10 inputs
-                            try:
-                                input_type = await inp.get_attribute('type') or 'text'
-                                name = await inp.get_attribute('name') or ''
-                                placeholder = await inp.get_attribute('placeholder') or ''
-                                maxlength = await inp.get_attribute('maxlength') or ''
-                                logger.info(f"Input {i}: type={input_type}, name={name}, placeholder={placeholder}, maxlength={maxlength}")
-                            except Exception as e:
-                                logger.debug(f"Could not get attributes for input {i}: {e}")
-
-                        # Save debug content
-                        debug_file = "/app/debug_otp_page.html"
-                        with open(debug_file, 'w', encoding='utf-8') as f:
-                            f.write(page_content)
-                        logger.info(f"Saved debug page content to {debug_file}")
-
-                    except Exception as e:
-                        logger.error(f"Failed to debug page content: {e}")
-
-                    raise Exception(f"Could not find code input field. Page URL: {current_url}")
-
-                # Use an explicit short timeout so a non-actionable / wrong element
-                # fails fast instead of hanging for the default 30s
-                # ("Timeout 30000ms exceeded"). If it isn't editable, the element we
-                # matched is not the real OTP field — report clearly rather than stall.
+            if not otp_inputs:
+                # Debug: dump inputs + page for diagnosis
                 try:
-                    await code_input.fill("", timeout=8000)
+                    all_inputs = await self.page.query_selector_all('input')
+                    logger.error(f"No editable OTP input found. Total <input> on page: {len(all_inputs)}")
+                    for i, inp in enumerate(all_inputs[:12]):
+                        itype = await inp.get_attribute('type') or 'text'
+                        name = await inp.get_attribute('name') or ''
+                        maxlength = await inp.get_attribute('maxlength') or ''
+                        vis = await inp.is_visible()
+                        logger.error(f"Input {i}: type={itype}, name={name}, maxlength={maxlength}, visible={vis}")
+                    with open("/app/debug_otp_page.html", 'w', encoding='utf-8') as f:
+                        f.write(await self.page.content())
                 except Exception as e:
-                    raise Exception(
-                        f"OTP input field not editable (matched wrong/hidden element). "
-                        f"Page URL: {current_url}. Original error: {e}"
-                    )
+                    logger.error(f"Failed to debug page content: {e}")
+                raise Exception(f"Could not find code input field. Page URL: {current_url}")
 
-                # Type code with delays
-                for char in code:
-                    await code_input.type(char, delay=self.stealth_config.typing_delay * 1000, timeout=8000)
-                    await asyncio.sleep(0.05)
+            # Click the first box and type the full code via the keyboard.
+            try:
+                await otp_inputs[0].click(timeout=8000)
+            except Exception as e:
+                raise Exception(
+                    f"OTP input not clickable (matched wrong/hidden element). "
+                    f"Page URL: {current_url}. Original error: {e}"
+                )
+            # Clear any residue, then type all digits with a human-ish delay so
+            # Divar's per-box auto-advance keeps up.
+            await self.page.keyboard.press("Control+A")
+            await self.page.keyboard.press("Delete")
+            await self.page.keyboard.type(code, delay=140)
+            logger.info(f"Typed {len(code)}-digit code into OTP field(s) via keyboard")
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(1.5)
             
             # Click login button
             logger.info("Clicking login button...")
