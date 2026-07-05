@@ -59,6 +59,20 @@ body {
 a { color: var(--accent2); text-decoration: none; }
 a:hover { color: var(--accent); }
 
+/* ── Form-element safety net ───────────────────────────
+   Bare <input>/<textarea>/<select> without a styled class
+   fall back to browser (UA) colors, which clash with the
+   theme on some systems (Windows dark mode, forced dark).
+   Give every text field explicit theme colors; class rules
+   (.form-control, .otp-box, …) still override as usual. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+textarea, select {
+  background-color: var(--surface2);
+  color: var(--text);
+  caret-color: var(--text);
+}
+option { background: var(--surface); color: var(--text); }
+
 /* ── Scrollbar ─────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -607,6 +621,26 @@ a:hover { color: var(--accent); }
 .text-dark    { color: var(--text) !important; }
 .text-white   { color: #fff !important; }
 
+/* Neutralize Bootstrap fixed-color utilities that clash with theming
+   (e.g. .text-dark / .text-muted inside the property-details modal) */
+.text-muted   { color: var(--text-muted) !important; }
+.text-dark,
+.text-body    { color: var(--text) !important; }
+.bg-dark      { background: var(--surface3) !important; color: var(--text) !important; }
+.bg-light,
+.bg-white     { background: var(--surface2) !important; color: var(--text) !important; }
+
+/* Property description is rendered in a <pre>; Bootstrap RTL forces
+   direction:ltr on pre which scrambles Persian text, and UA styles
+   can give it the wrong color. Make it theme-safe. */
+pre {
+  color: var(--text);
+  background: transparent;
+  direction: rtl;
+  text-align: right;
+  unicode-bidi: normal;
+}
+
 /* status badges for scraper jobs */
 .status-pending   { background: rgba(245,158,11,.15); color: #fcd34d; border:1px solid rgba(245,158,11,.3); border-radius:20px; padding:.25rem .65rem; font-size:.72rem; font-weight:600; }
 .status-running   { background: rgba(6,182,212,.15);  color: #67e8f9; border:1px solid rgba(6,182,212,.3);  border-radius:20px; padding:.25rem .65rem; font-size:.72rem; font-weight:600; animation: pulse-run 1.5s ease-in-out infinite; }
@@ -726,6 +760,13 @@ input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
   -webkit-text-fill-color: var(--text) !important;
   -webkit-box-shadow: 0 0 0 1000px var(--surface2) inset !important;
+  caret-color: var(--text);
+}
+/* Same fix for Firefox & standards-based autofill (separate rule:
+   an unsupported selector would invalidate the whole group above) */
+input:autofill, textarea:autofill {
+  -webkit-text-fill-color: var(--text) !important;
+  box-shadow: 0 0 0 1000px var(--surface2) inset !important;
   caret-color: var(--text);
 }
 /* ── OTP Boxes ──────────────────────────────────── */
