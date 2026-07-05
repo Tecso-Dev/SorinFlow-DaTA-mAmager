@@ -9,10 +9,9 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: tecso-dev/sorinflow-data-manager
-  DEPLOY_HOST: 5.160.252.187
-  DEPLOY_USER: root
 
 jobs:
+  # Build on a GitHub-hosted runner (plenty of RAM, outbound to ghcr works).
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -58,43 +57,31 @@ jobs:
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: type=inline
 
+  # Deploy on the self-hosted runner ON the server. The datacenter blocks
+  # inbound SSH from foreign IPs, so a GitHub-hosted runner cannot reach the
+  # box. The self-hosted runner connects outbound to GitHub, pulls the image
+  # (server outbound to ghcr works) straight into k3s containerd, and rolls out.
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, sorinflow]
     needs: build
     permissions:
       contents: read
       packages: read
 
     steps:
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          echo "SSH_OPTS=-i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o ConnectTimeout=20" >> $GITHUB_ENV
-
-      - name: Import image into the server's containerd (no registry pull on server)
+      - name: Pull image into k3s containerd
         run: |
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
-          echo "Pulling $IMAGE on the runner..."
-          docker pull "$IMAGE"
-          echo "Streaming image to ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} and importing into k3s..."
-          docker save "$IMAGE" | gzip -1 | \
-            ssh $SSH_OPTS ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} \
-            "gunzip | /usr/local/bin/k3s ctr -n k8s.io images import -"
+          echo "Pulling $IMAGE into containerd (k8s.io namespace)..."
+          k3s ctr -n k8s.io images pull \
+            --user "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+            "$IMAGE"
 
       - name: Roll out new image
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
-          ssh $SSH_OPTS ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} \
-            "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && \
-             kubectl set image deployment/backend backend=$IMAGE -n sorinflow && \
-             kubectl rollout status deployment/backend -n sorinflow --timeout=300s && \
-             kubectl get pods -n sorinflow"
+          kubectl set image deployment/backend backend="$IMAGE" -n sorinflow
+          kubectl rollout status deployment/backend -n sorinflow --timeout=300s
+          kubectl get pods -n sorinflow
