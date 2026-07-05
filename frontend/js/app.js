@@ -2474,6 +2474,9 @@ async function loadLeads() {
                     <a href="${lead.property_url}" target="_blank" class="btn btn-sm btn-outline-secondary" title="باز کردن آگهی">
                         <i class="bi bi-box-arrow-up-left"></i>
                     </a>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteLead(${lead.id})" title="حذف لید">
+                        <i class="bi bi-trash"></i>
+                    </button>
                 </td>
             `;
             tbody.appendChild(row);
@@ -2596,6 +2599,18 @@ async function notifyLead(id) {
         } else {
             showToast('هشدار', 'کانال اطلاع‌رسانی تنظیم نشده', 'warning');
         }
+        loadLeads();
+        loadCrmStats();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function deleteLead(id) {
+    if (!confirm('این لید حذف شود؟ این عمل قابل بازگشت نیست.')) return;
+    try {
+        await apiCall(`/crm/leads/${id}`, { method: 'DELETE' });
+        showToast('موفق', 'لید حذف شد', 'success');
         loadLeads();
         loadCrmStats();
     } catch (error) {
