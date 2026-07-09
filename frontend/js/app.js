@@ -437,6 +437,9 @@ function initApp() {
     document.getElementById('scraper-form').addEventListener('submit', startScraping);
     document.getElementById('proxy-form').addEventListener('submit', addProxy);
     document.getElementById('user-create-form')?.addEventListener('submit', createUser);
+    document.getElementById('crm-filter-search')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') loadLeads();
+    });
 
     setInterval(loadDashboard, 60000);
     setInterval(checkCookieStatus, 300000);
@@ -744,6 +747,7 @@ async function loadProperties() {
     const search = document.getElementById('search-properties').value;
     const city   = document.getElementById('filter-city-hidden')?.value || '';
     const type = document.getElementById('filter-type').value;
+    const category = document.getElementById('filter-category')?.value || '';
     const minDeposit = document.getElementById('filter-min-deposit').value;
     const maxDeposit = document.getElementById('filter-max-deposit').value;
     const minRent = document.getElementById('filter-min-rent').value;
@@ -754,6 +758,7 @@ async function loadProperties() {
         if (search) url += `&search=${encodeURIComponent(search)}`;
         if (city) url += `&city=${encodeURIComponent(city)}`;
         if (type) url += `&listing_type=${type}`;
+        if (category) url += `&category=${encodeURIComponent(category)}`;
         if (minDeposit) url += `&min_deposit=${minDeposit}`;
         if (maxDeposit) url += `&max_deposit=${maxDeposit}`;
         if (minRent) url += `&min_rent_price=${minRent}`;
@@ -1383,6 +1388,16 @@ async function loadCategories() {
             select.innerHTML += `<option value="${cat.slug}">${cat.name}</option>`;
         });
         onScraperCategoryChange();
+
+        // Same categories drive the properties-list and CRM-leads filters;
+        // those filter by category_name, so the option value is the name
+        ['filter-category', 'crm-filter-category'].forEach(id => {
+            const sel = document.getElementById(id);
+            if (!sel) return;
+            categories.forEach(cat => {
+                sel.innerHTML += `<option value="${cat.name}">${cat.name}</option>`;
+            });
+        });
     } catch (error) {
         console.error('Failed to load categories:', error);
     }
@@ -2408,16 +2423,24 @@ function clearLeadsDateFilter() {
 function clearLeadsFilter() {
     document.getElementById('crm-filter-status').value   = '';
     document.getElementById('crm-filter-notified').value = '';
+    const searchEl = document.getElementById('crm-filter-search');
+    if (searchEl) searchEl.value = '';
+    const catEl = document.getElementById('crm-filter-category');
+    if (catEl) catEl.value = '';
     clearLeadsDateFilter();
 }
 
 async function loadLeads() {
     const status   = document.getElementById('crm-filter-status').value;
     const notified = document.getElementById('crm-filter-notified').value;
+    const search   = document.getElementById('crm-filter-search')?.value.trim() || '';
+    const category = document.getElementById('crm-filter-category')?.value || '';
 
     let url = '/crm/leads?limit=100';
     if (status)          url += `&status=${status}`;
     if (notified !== '') url += `&notified=${notified}`;
+    if (search)          url += `&search=${encodeURIComponent(search)}`;
+    if (category)        url += `&category=${encodeURIComponent(category)}`;
     if (_leadsDateFrom)  url += `&date_from=${_leadsDateFrom}`;
     if (_leadsDateTo)    url += `&date_to=${_leadsDateTo}`;
 
