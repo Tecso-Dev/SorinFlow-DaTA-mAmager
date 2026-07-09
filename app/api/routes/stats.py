@@ -27,11 +27,11 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get dashboard statistics (cached 60s in Redis, isolated per user's divar_phone)."""
+    """Get dashboard statistics (cached 60s in Redis; all users see the same totals)."""
     redis = await get_redis()
 
-    # Filter by user's linked Divar phone; None = show all (super_admin without phone set)
-    phone_filter = current_user.divar_phone or None
+    # All roles see stats over every scraped property
+    phone_filter = None
     cache_key = f"stats:dashboard:{phone_filter or 'all'}"
     cached = await redis.get(cache_key)
     if cached:

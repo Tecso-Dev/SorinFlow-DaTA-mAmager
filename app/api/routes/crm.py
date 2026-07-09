@@ -162,7 +162,11 @@ async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     lead = result.scalar_one_or_none()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    return lead
+    resp = LeadResponse.model_validate(lead)
+    resp.district = (await db.execute(
+        select(Property.district).where(Property.id == lead.property_id)
+    )).scalar_one_or_none()
+    return resp
 
 
 @router.patch("/leads/{lead_id}", response_model=LeadResponse)
@@ -179,9 +183,20 @@ async def update_lead(lead_id: int, data: LeadUpdate, db: AsyncSession = Depends
         lead.notes = data.notes
     if data.assigned_to is not None:
         lead.assigned_to = data.assigned_to
+    if data.district is not None:
+        # District belongs to the linked property (street search reads it there)
+        prop = (await db.execute(
+            select(Property).where(Property.id == lead.property_id)
+        )).scalar_one_or_none()
+        if prop:
+            prop.district = data.district.strip() or None
     await db.commit()
     await db.refresh(lead)
-    return lead
+    resp = LeadResponse.model_validate(lead)
+    resp.district = (await db.execute(
+        select(Property.district).where(Property.id == lead.property_id)
+    )).scalar_one_or_none()
+    return resp
 
 
 @router.post("/leads/{lead_id}/notify")

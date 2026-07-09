@@ -526,7 +526,7 @@ function showSection(sectionName) {
     switch (sectionName) {
         case 'dashboard':  loadDashboard(); break;
         case 'properties': loadProperties(); break;
-        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); break;
+        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); _initScraperDatePicker(); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
@@ -858,7 +858,9 @@ async function viewProperty(id) {
                             <div class="carousel-inner">
                                 ${property.images.map((img, idx) => `
                                     <div class="carousel-item ${idx === 0 ? 'active' : ''}">
-                                        <img src="${img}" class="d-block w-100 rounded" alt="تصویر ${idx + 1}" style="max-height: 400px; object-fit: cover;">
+                                        <img src="${img}" class="d-block w-100 rounded" alt="تصویر ${idx + 1}"
+                                             style="max-height: 400px; object-fit: cover;"
+                                             onclick="openImageLightbox(this.src)" title="کلیک برای بزرگ‌نمایی">
                                     </div>
                                 `).join('')}
                             </div>
@@ -1120,6 +1122,70 @@ async function viewProperty(id) {
         showToast('خطا', 'بارگیری جزئیات ملک ناموفق بود', 'danger');
     }
 }
+
+// ═══ Image lightbox (zoom / pan) ═══════════════════════════════
+const _lb = { scale: 1, x: 0, y: 0, dragging: false, sx: 0, sy: 0 };
+
+function _lbApply() {
+    document.getElementById('img-lightbox-img').style.transform =
+        `translate(${_lb.x}px, ${_lb.y}px) scale(${_lb.scale})`;
+}
+
+function openImageLightbox(src) {
+    const box = document.getElementById('img-lightbox');
+    const img = document.getElementById('img-lightbox-img');
+    _lb.scale = 1; _lb.x = 0; _lb.y = 0;
+    img.src = src;
+    _lbApply();
+    box.classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeImageLightbox() {
+    document.getElementById('img-lightbox').classList.remove('open');
+    document.getElementById('img-lightbox-img').src = '';
+    document.body.style.overflow = '';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const box = document.getElementById('img-lightbox');
+    const img = document.getElementById('img-lightbox-img');
+    if (!box || !img) return;
+
+    box.addEventListener('wheel', e => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+        _lb.scale = Math.min(8, Math.max(1, _lb.scale * factor));
+        if (_lb.scale === 1) { _lb.x = 0; _lb.y = 0; }
+        _lbApply();
+    }, { passive: false });
+
+    img.addEventListener('dblclick', () => {
+        _lb.scale = _lb.scale > 1 ? 1 : 2.5;
+        if (_lb.scale === 1) { _lb.x = 0; _lb.y = 0; }
+        _lbApply();
+    });
+
+    img.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        _lb.dragging = true; _lb.sx = e.clientX - _lb.x; _lb.sy = e.clientY - _lb.y;
+        img.classList.add('dragging');
+        img.setPointerCapture(e.pointerId);
+    });
+    img.addEventListener('pointermove', e => {
+        if (!_lb.dragging) return;
+        _lb.x = e.clientX - _lb.sx; _lb.y = e.clientY - _lb.sy;
+        _lbApply();
+    });
+    img.addEventListener('pointerup', () => {
+        _lb.dragging = false;
+        img.classList.remove('dragging');
+    });
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && box.classList.contains('open')) closeImageLightbox();
+    });
+});
 
 async function deleteProperty(id) {
     if (!confirm('آیا از حذف این ملک اطمینان دارید؟')) return;
@@ -1415,6 +1481,35 @@ function onScraperCategoryChange() {
     document.getElementById('scraper-common-filters').classList.toggle('d-none', !isBuy && !isRent);
 }
 
+// ═══ Scraper publish-date (Jalali) ════════════════════════════
+let _scraperDatePickerInit = false;
+
+function _initScraperDatePicker() {
+    if (_scraperDatePickerInit) return;
+    _scraperDatePickerInit = true;
+    try {
+        $('#scraper-posted-date').persianDatepicker({
+            format: 'YYYY/MM/DD',
+            autoClose: true,
+            observer: true,
+            calendar: { persian: { locale: 'fa' } },
+            onSelect: _onScraperDateChange,
+        });
+    } catch (e) { console.warn('scraper datepicker init failed:', e); }
+}
+
+function _onScraperDateChange() {
+    const hasDate = !!document.getElementById('scraper-posted-date').value.trim();
+    // In date mode the whole day is scraped — the count is irrelevant
+    document.getElementById('scraper-pages-wrap').classList.toggle('d-none', hasDate);
+    document.getElementById('scraper-max-age').disabled = hasDate;
+}
+
+function clearScraperDate() {
+    document.getElementById('scraper-posted-date').value = '';
+    _onScraperDateChange();
+}
+
 function _intOrNull(id) {
     const v = parseInt(document.getElementById(id)?.value);
     return isNaN(v) || v <= 0 ? null : v;
@@ -1458,6 +1553,16 @@ async function startScraping(e) {
         // زمان انتشار
         max_age_hours:         _intOrNull('scraper-max-age'),
     };
+
+    // Date mode: scrape everything posted on the selected Jalali day
+    const postedJalali = document.getElementById('scraper-posted-date')?.value.trim() || '';
+    if (postedJalali) {
+        const g = jalaliToGregorian(postedJalali);
+        if (g) {
+            filters.posted_date = g;
+            filters.max_age_hours = null;
+        }
+    }
 
     // Check cookie status before scraping
     if (!cookieStatus.is_valid) {
@@ -2581,6 +2686,11 @@ async function viewLead(id) {
                     <input type="text" id="lead-edit-assigned" class="form-control"
                            value="${lead.assigned_to || ''}" placeholder="نام مسئول...">
                 </div>
+                <div class="col-md-6">
+                    <label class="form-label">منطقه</label>
+                    <input type="text" id="lead-edit-district" class="form-control"
+                           value="${lead.district || ''}" placeholder="مثلاً: خیابان کاشانی">
+                </div>
                 <div class="col-12">
                     <label class="form-label">یادداشت</label>
                     <textarea id="lead-edit-notes" class="form-control" rows="3"
@@ -2601,11 +2711,12 @@ async function saveLead(id) {
     const status = document.getElementById('lead-edit-status').value;
     const notes = document.getElementById('lead-edit-notes').value;
     const assigned_to = document.getElementById('lead-edit-assigned').value;
+    const district = document.getElementById('lead-edit-district')?.value ?? '';
 
     try {
         await apiCall(`/crm/leads/${id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ status, notes, assigned_to })
+            body: JSON.stringify({ status, notes, assigned_to, district })
         });
         showToast('موفق', 'لید بروزرسانی شد', 'success');
         bootstrap.Modal.getInstance(document.getElementById('leadModal')).hide();

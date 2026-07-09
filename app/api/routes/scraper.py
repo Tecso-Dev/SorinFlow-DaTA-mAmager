@@ -54,6 +54,7 @@ async def run_scraping_job(
     has_balcony: bool = None,
     advertiser_type: str = None,
     max_age_hours: int = None,
+    posted_date: str = None,
 ):
     """Background task to run scraping job"""
     # Import here to avoid circular imports and ensure fresh event loop
@@ -133,6 +134,7 @@ async def run_scraping_job(
                 has_balcony=has_balcony,
                 advertiser_type=advertiser_type,
                 max_age_hours=max_age_hours,
+                posted_date=posted_date,
             )
             
             logger.info(f"[{job_id}] Job completed: {result.new_items} new, {result.failed_items} failed, Status={result.status}")
@@ -269,6 +271,7 @@ async def start_scraping_job(
         job_config.has_balcony,
         job_config.advertiser_type,
         job_config.max_age_hours,
+        job_config.posted_date,
     )
     
     logger.info(f"Started background task for job {job_id}")

@@ -128,6 +128,9 @@ class ScrapingJobCreate(BaseModel):
     advertiser_type: Optional[str] = None
     # Only include listings posted within the last N hours
     max_age_hours: Optional[int] = None
+    # Scrape ALL listings posted on this exact date (Gregorian "YYYY-MM-DD");
+    # when set, max_items and max_age_hours are ignored
+    posted_date: Optional[str] = None
 
 
 class ScrapingJobResponse(BaseModel):
@@ -271,6 +274,8 @@ class LeadResponse(BaseModel):
     notification_channel: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # District lives on the linked property (not a Lead column)
+    district: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -280,6 +285,7 @@ class LeadUpdate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
+    district: Optional[str] = None
 
 
 class LeadCreate(BaseModel):
