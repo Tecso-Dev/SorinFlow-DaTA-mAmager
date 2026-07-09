@@ -70,7 +70,7 @@ async def list_leads(
                 Property.neighborhood.ilike(term),
                 Property.description.ilike(term),
             ),
-        ).exists()
+        ).correlate(Lead).exists()
         query = query.where(or_(
             Lead.property_title.ilike(term),
             Lead.notes.ilike(term),
