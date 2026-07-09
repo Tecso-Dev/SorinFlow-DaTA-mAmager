@@ -729,6 +729,7 @@
                 <!-- CRM Tab Nav -->
                 <ul class="nav nav-tabs mb-3 flex-wrap" id="crm-main-tabs" role="tablist">
                     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#crm-tab-tasks" type="button"><i class="bi bi-check2-square"></i> وظایف</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-customers" type="button"><i class="bi bi-person-vcard"></i> مشتریان</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-contacts" type="button"><i class="bi bi-person-lines-fill"></i> دفترچه تلفن</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-deals" type="button"><i class="bi bi-handshake"></i> معاملات</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-notes" type="button"><i class="bi bi-journal-text"></i> یادداشت‌ها</button></li>
@@ -910,6 +911,45 @@
                                         </table>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── CUSTOMERS (فرم مشتری) ── -->
+                    <div class="tab-pane fade" id="crm-tab-customers" role="tabpanel">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <span><i class="bi bi-person-vcard"></i> مشتریان
+                                    <span id="customers-count-badge" class="badge bg-secondary ms-1" style="font-size:.7rem"></span>
+                                </span>
+                                <div class="d-flex gap-2 flex-wrap align-items-center">
+                                    <button class="btn btn-success btn-sm" onclick="openCustomerModal()">
+                                        <i class="bi bi-plus-lg"></i> مشتری جدید
+                                    </button>
+                                    <input type="text" id="customer-search" class="form-control form-control-sm" style="width:180px;"
+                                           placeholder="جستجو: نام، موبایل، منطقه...">
+                                    <select id="customer-filter-temp" class="form-select form-select-sm" style="width:150px;" onchange="loadCustomers()">
+                                        <option value="">همه حرارت‌ها</option>
+                                        <option value="hot">🔥 داغ (خرید فوری)</option>
+                                        <option value="warm">🌤 گرم (جستجو)</option>
+                                        <option value="cold">❄️ سرد (تماشاچی)</option>
+                                    </select>
+                                    <select id="customer-filter-source" class="form-select form-select-sm" style="width:130px;" onchange="loadCustomers()">
+                                        <option value="">همه منابع</option>
+                                        <option value="in_person">حضوری</option>
+                                        <option value="divar">دیوار</option>
+                                        <option value="referral">معرف</option>
+                                    </select>
+                                    <button class="btn btn-primary btn-sm" onclick="loadCustomers()">
+                                        <i class="bi bi-search"></i> جستجو
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead><tr><th>#</th><th>نام</th><th>موبایل</th><th>حرارت</th><th>منبع</th><th>سقف بودجه</th><th>منطقه درخواستی</th><th>مشاور</th><th>پیگیری بعدی</th><th>عملیات</th></tr></thead>
+                                    <tbody id="crm-customers-table"></tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -1251,6 +1291,142 @@
     </div>
 </div>
 
+<!-- Customer Modal (فرم پروفایل مشتری) -->
+<div class="modal fade" id="customerModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="customer-modal-title"><i class="bi bi-person-vcard"></i> مشتری جدید</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- پروفایل مشتری -->
+                <div class="card mb-3">
+                    <div class="card-header"><i class="bi bi-person-badge"></i> پروفایل مشتری (Lead Profile)</div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">نام و نام خانوادگی *</label>
+                                <input type="text" id="cust-full-name" class="form-control">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">موبایل ۱</label>
+                                <input type="text" id="cust-mobile1" class="form-control" placeholder="09xxxxxxxxx">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">موبایل ۲ (همسر/شریک)</label>
+                                <input type="text" id="cust-mobile2" class="form-control" placeholder="09xxxxxxxxx">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">منبع</label>
+                                <select id="cust-source" class="form-select">
+                                    <option value="in_person">حضوری</option>
+                                    <option value="divar">دیوار</option>
+                                    <option value="referral">معرف</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">حرارت مشتری</label>
+                                <select id="cust-temperature" class="form-select">
+                                    <option value="hot">🔥 داغ (خرید فوری)</option>
+                                    <option value="warm" selected>🌤 گرم (جستجو)</option>
+                                    <option value="cold">❄️ سرد (تماشاچی)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">نام مشاور</label>
+                                <input type="text" id="cust-consultant" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- آنالیز بودجه و نیاز -->
+                <div class="card mb-3">
+                    <div class="card-header"><i class="bi bi-wallet2"></i> آنالیز بودجه و نیاز (BANT Analysis)</div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">سقف بودجه (تومان)</label>
+                                <input type="number" id="cust-budget" class="form-control" placeholder="مثلاً 5000000000">
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">نحوه پرداخت</label>
+                                <div class="d-flex flex-wrap gap-3 pt-1">
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="cust-pay-cash"><label class="form-check-label" for="cust-pay-cash">نقد</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="cust-pay-loan"><label class="form-check-label" for="cust-pay-loan">وام‌دار</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="cust-pay-property"><label class="form-check-label" for="cust-pay-property">ملک برای فروش دارد</label></div>
+                                    <div class="form-check"><input class="form-check-input" type="checkbox" id="cust-pay-barter"><label class="form-check-label" for="cust-pay-barter">تهاتر / معاوضه</label></div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">متراژ / تعداد خواب</label>
+                                <input type="text" id="cust-specs" class="form-control" placeholder="مثلاً ۱۰۰ متر / ۲ خواب">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">منطقه درخواستی</label>
+                                <input type="text" id="cust-district" class="form-control" placeholder="مثلاً خیابان کاشانی، مدرس">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label text-danger">خط قرمزها (نمی‌خواهد)</label>
+                                <textarea id="cust-redlines" class="form-control" rows="2" placeholder="مثلاً: طبقه اول، بدون آسانسور، ..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- خط تولید بازدید -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-house-check"></i> خط تولید بازدید (Showing Pipeline)</span>
+                        <button type="button" class="btn btn-sm btn-outline-success" onclick="addShowingRow()">
+                            <i class="bi bi-plus-lg"></i> بازدید جدید
+                        </button>
+                    </div>
+                    <div class="card-body p-2">
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead><tr><th style="width:14%">کد / نام فایل</th><th style="width:30%">شرح مختصر ملک</th><th style="width:30%">بازخورد مشتری (چرا پسندید/رد کرد؟)</th><th style="width:20%">وضعیت (Next Step)</th><th></th></tr></thead>
+                                <tbody id="cust-showings-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- تسک بعدی -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-telephone-outbound"></i> تسک بعدی (Follow-Up Loop)</span>
+                        <button type="button" class="btn btn-sm btn-outline-success" onclick="addFollowupRow()">
+                            <i class="bi bi-plus-lg"></i> پیگیری جدید
+                        </button>
+                    </div>
+                    <div class="card-body p-2">
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead><tr><th style="width:20%">تاریخ تماس بعدی</th><th style="width:15%">ساعت</th><th>اقدام (چه چیزی باید پیگیری یا ارائه شود؟)</th><th></th></tr></thead>
+                                <tbody id="cust-followups-body"></tbody>
+                            </table>
+                        </div>
+                        <div class="text-center small text-warning mt-1">⚠ No Follow-up = No Commission ⚠</div>
+                    </div>
+                </div>
+
+                <div class="mb-2">
+                    <label class="form-label">یادداشت</label>
+                    <textarea id="cust-notes" class="form-control" rows="2"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">انصراف</button>
+                <button type="button" class="btn btn-success" id="customer-save-btn" onclick="saveCustomer()">
+                    <i class="bi bi-save"></i> ذخیره مشتری
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Image Lightbox (zoom / pan) -->
 <div id="img-lightbox" class="img-lightbox" onclick="if (event.target === this) closeImageLightbox()">
     <button type="button" class="img-lightbox__close" onclick="closeImageLightbox()">✕</button>
@@ -1524,6 +1700,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260709b"></script>
+<script src="js/app.js?v=20260709c"></script>
 </body>
 </html>

@@ -13,7 +13,7 @@ import io
 from app.database import get_db
 from app.models.lead import Lead
 from app.models.property import Property
-from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog
+from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog, Customer
 from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
@@ -372,6 +372,124 @@ async def delete_contact(contact_id: int, db: AsyncSession = Depends(get_db)):
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     await db.delete(contact)
+    await db.commit()
+    return {"success": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CUSTOMERS (فرم پروفایل مشتری: BANT + بازدیدها + پیگیری)
+# ─────────────────────────────────────────────────────────────────────────────
+
+VALID_CUSTOMER_SOURCES = {"in_person", "divar", "referral"}
+VALID_CUSTOMER_TEMPS = {"hot", "warm", "cold"}
+CUSTOMER_TEXT_FIELDS = (
+    "full_name", "mobile1", "mobile2", "consultant_name",
+    "payment_methods", "desired_specs", "desired_district", "red_lines", "notes",
+)
+
+
+def _clean_customer_rows(rows, keys) -> list:
+    """Keep only known keys per row; drop rows that are entirely empty."""
+    out = []
+    for row in (rows or []):
+        if not isinstance(row, dict):
+            continue
+        cleaned = {k: (str(row.get(k) or "").strip() or None) for k in keys}
+        if any(cleaned.values()):
+            out.append(cleaned)
+    return out
+
+
+def _apply_customer_payload(customer: Customer, data: dict) -> None:
+    for field in CUSTOMER_TEXT_FIELDS:
+        if field in data:
+            setattr(customer, field, (str(data[field]).strip() or None) if data[field] is not None else None)
+    if "source" in data and data["source"] in VALID_CUSTOMER_SOURCES:
+        customer.source = data["source"]
+    if "temperature" in data and data["temperature"] in VALID_CUSTOMER_TEMPS:
+        customer.temperature = data["temperature"]
+    if "budget_max" in data:
+        try:
+            customer.budget_max = int(data["budget_max"]) if data["budget_max"] else None
+        except (TypeError, ValueError):
+            pass
+    if "showings" in data:
+        customer.showings = _clean_customer_rows(
+            data["showings"], ("file_code", "description", "feedback", "next_step"))
+    if "followups" in data:
+        customer.followups = _clean_customer_rows(
+            data["followups"], ("date", "time", "action"))
+
+
+@router.get("/customers")
+async def list_customers(
+    search: Optional[str] = None,
+    temperature: Optional[str] = None,
+    source: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Customer).order_by(Customer.created_at.desc())
+    if search:
+        term = f"%{search.strip()}%"
+        query = query.where(or_(
+            Customer.full_name.ilike(term),
+            Customer.mobile1.ilike(term),
+            Customer.mobile2.ilike(term),
+            Customer.desired_district.ilike(term),
+            Customer.consultant_name.ilike(term),
+        ))
+    if temperature:
+        query = query.where(Customer.temperature == temperature)
+    if source:
+        query = query.where(Customer.source == source)
+    count = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
+    items = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
+    return {"items": [c.to_dict() for c in items], "total": count}
+
+
+@router.post("/customers")
+async def create_customer(data: dict, db: AsyncSession = Depends(get_db)):
+    if not str(data.get("full_name") or "").strip():
+        raise HTTPException(status_code=400, detail="full_name is required")
+    customer = Customer(full_name=str(data["full_name"]).strip())
+    _apply_customer_payload(customer, data)
+    db.add(customer)
+    await db.commit()
+    await db.refresh(customer)
+    return customer.to_dict()
+
+
+@router.get("/customers/{customer_id}")
+async def get_customer(customer_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Customer).where(Customer.id == customer_id))
+    customer = result.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return customer.to_dict()
+
+
+@router.put("/customers/{customer_id}")
+async def update_customer(customer_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Customer).where(Customer.id == customer_id))
+    customer = result.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    _apply_customer_payload(customer, data)
+    customer.updated_at = datetime.now()
+    await db.commit()
+    await db.refresh(customer)
+    return customer.to_dict()
+
+
+@router.delete("/customers/{customer_id}")
+async def delete_customer(customer_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Customer).where(Customer.id == customer_id))
+    customer = result.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    await db.delete(customer)
     await db.commit()
     return {"success": True}
 

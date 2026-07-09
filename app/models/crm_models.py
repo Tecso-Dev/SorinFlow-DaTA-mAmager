@@ -1,8 +1,8 @@
 """
 SorinFlow CRM — database models
-Contact, Deal, Note, Task, Reminder, SmsLog
+Contact, Deal, Note, Task, Reminder, SmsLog, Customer
 """
-from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Text, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Text, ForeignKey, DateTime, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -206,4 +206,63 @@ class SmsLog(Base):
             "response": self.response,
             "contact_id": self.contact_id,
             "sent_at": self.sent_at.isoformat() if self.sent_at else None,
+        }
+
+
+class Customer(Base):
+    """Customer intake form (پروفایل مشتری + BANT + بازدیدها + پیگیری)
+
+    Mirrors the paper form: lead profile, budget/need analysis,
+    showing pipeline and follow-up loop.
+    """
+    __tablename__ = "crm_customers"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # ── پروفایل مشتری (Lead Profile) ──
+    full_name = Column(String(200), nullable=False, index=True)
+    mobile1 = Column(String(20), index=True)
+    mobile2 = Column(String(20))                       # همسر / شریک
+    source = Column(String(30), default="in_person")   # in_person|divar|referral
+    temperature = Column(String(20), default="warm", index=True)  # hot|warm|cold
+    consultant_name = Column(String(200))              # نام مشاور
+
+    # ── آنالیز بودجه و نیاز (BANT) ──
+    budget_max = Column(BigInteger)                    # سقف بودجه (تومان)
+    payment_methods = Column(String(200))              # cash,loan,has_property,barter (comma-separated)
+    desired_specs = Column(String(300))                # متراژ / تعداد خواب
+    desired_district = Column(String(300))             # منطقه درخواستی
+    red_lines = Column(Text)                           # خط قرمزها (نمی‌خواهد)
+
+    # ── خط تولید بازدید (Showing Pipeline) ──
+    # [{file_code, description, feedback, next_step}]  next_step: meeting|archive|second_visit
+    showings = Column(JSON, default=list)
+
+    # ── تسک بعدی (Follow-Up Loop) ──
+    # [{date, time, action}]
+    followups = Column(JSON, default=list)
+
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "full_name": self.full_name,
+            "mobile1": self.mobile1,
+            "mobile2": self.mobile2,
+            "source": self.source,
+            "temperature": self.temperature,
+            "consultant_name": self.consultant_name,
+            "budget_max": self.budget_max,
+            "payment_methods": self.payment_methods,
+            "desired_specs": self.desired_specs,
+            "desired_district": self.desired_district,
+            "red_lines": self.red_lines,
+            "showings": self.showings or [],
+            "followups": self.followups or [],
+            "notes": self.notes,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
