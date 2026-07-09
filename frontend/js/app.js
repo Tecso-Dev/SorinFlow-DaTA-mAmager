@@ -443,6 +443,9 @@ function initApp() {
     document.getElementById('customer-search')?.addEventListener('keydown', e => {
         if (e.key === 'Enter') loadCustomers();
     });
+    document.getElementById('dpa-search')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') loadDpa();
+    });
 
     setInterval(loadDashboard, 60000);
     setInterval(checkCookieStatus, 300000);
@@ -2766,6 +2769,187 @@ async function deleteLead(id) {
     }
 }
 
+// ==================== DPA (فرم ارزیابی عملکرد روزانه) ====================
+
+let _dpaEditId = null;
+const DPA_ROLE_LABELS = { hunter: 'Hunter 🏹', closer: 'Closer 🤝' };
+
+function _dpaScoreParts() {
+    let base = 0;
+    document.querySelectorAll('.dpa-task:checked').forEach(el => { base += Number(el.dataset.weight); });
+    const n = id => Math.max(Number(document.getElementById(id).value) || 0, 0);
+    const bonus = n('dpa-bonus-exclusive') * 30 + n('dpa-bonus-offer') * 20 + n('dpa-bonus-close') * 50;
+    const penalty = n('dpa-pen-crm') * 10 + n('dpa-pen-cancel') * 15 + n('dpa-pen-hotlead') * 20;
+    return { base, bonus, penalty, total: base + bonus - penalty };
+}
+
+function updateDpaScore() {
+    const s = _dpaScoreParts();
+    document.getElementById('dpa-score-base').textContent = s.base;
+    document.getElementById('dpa-score-bonus').textContent = `+${s.bonus}`;
+    document.getElementById('dpa-score-penalty').textContent = `-${s.penalty}`;
+    const totalEl = document.getElementById('dpa-score-total');
+    totalEl.textContent = s.total;
+    const target = Number(document.getElementById('dpa-target').value) || 100;
+    totalEl.className = 'h3 mb-0 ' + (s.total >= target ? 'text-success' : 'text-primary');
+}
+
+async function loadDpa() {
+    const search = document.getElementById('dpa-search')?.value.trim() || '';
+    let url = '/crm/dpa?limit=100';
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+
+    try {
+        const data = await apiCall(url);
+        const tbody = document.getElementById('crm-dpa-table');
+        tbody.innerHTML = '';
+
+        const badge = document.getElementById('dpa-count-badge');
+        if (badge) badge.textContent = data.total ?? data.items.length;
+
+        if (data.items.length === 0) {
+            tbody.innerHTML = `
+                <tr><td colspan="10" class="text-center text-muted py-4">
+                    <i class="bi bi-clipboard-data" style="font-size:2rem;"></i>
+                    <p class="mt-2">هنوز فرمی ثبت نشده</p>
+                </td></tr>`;
+            return;
+        }
+
+        data.items.forEach(d => {
+            const hitTarget = d.total_score >= (d.target_points || 100);
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${d.id}</td>
+                <td>${d.date_jalali || '---'}</td>
+                <td class="fw-bold">${d.agent_name}</td>
+                <td>${DPA_ROLE_LABELS[d.role] || d.role || '---'}</td>
+                <td>${d.base_score}</td>
+                <td class="text-success">+${d.bonus_score}</td>
+                <td class="text-danger">-${d.penalty_score}</td>
+                <td><span class="badge ${hitTarget ? 'bg-success' : 'bg-warning'}">${d.total_score}</span></td>
+                <td>${d.target_points || 100}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="openDpaModal(${d.id})" title="ویرایش">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteDpa(${d.id})" title="حذف">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>`;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        showToast('خطا', 'بارگیری فرم‌های ارزیابی ناموفق بود', 'danger');
+    }
+}
+
+function _resetDpaForm() {
+    document.getElementById('dpa-agent').value = _currentUser?.full_name || _currentUser?.username || '';
+    document.getElementById('dpa-role').value = 'hunter';
+    document.getElementById('dpa-date').value = gregorianToJalali(new Date());
+    document.getElementById('dpa-target').value = 100;
+    ['dpa-new-files', 'dpa-showings', 'dpa-offers', 'dpa-closed',
+     'dpa-bonus-exclusive', 'dpa-bonus-offer', 'dpa-bonus-close',
+     'dpa-pen-crm', 'dpa-pen-cancel', 'dpa-pen-hotlead']
+        .forEach(id => { document.getElementById(id).value = 0; });
+    document.querySelectorAll('.dpa-task').forEach(el => { el.checked = false; });
+    document.getElementById('dpa-rca').value = '';
+    document.getElementById('dpa-mentor').value = '';
+}
+
+async function openDpaModal(id = null) {
+    _dpaEditId = id;
+    _resetDpaForm();
+
+    if (id) {
+        try {
+            const d = await apiCall(`/crm/dpa/${id}`);
+            document.getElementById('dpa-agent').value = d.agent_name || '';
+            document.getElementById('dpa-role').value = d.role || 'hunter';
+            document.getElementById('dpa-date').value = d.date_jalali || '';
+            document.getElementById('dpa-target').value = d.target_points ?? 100;
+            document.getElementById('dpa-new-files').value = d.new_files ?? 0;
+            document.getElementById('dpa-showings').value = d.showings_count ?? 0;
+            document.getElementById('dpa-offers').value = d.offers_count ?? 0;
+            document.getElementById('dpa-closed').value = d.closed_count ?? 0;
+            document.getElementById('dpa-bonus-exclusive').value = d.bonus_exclusive ?? 0;
+            document.getElementById('dpa-bonus-offer').value = d.bonus_offer ?? 0;
+            document.getElementById('dpa-bonus-close').value = d.bonus_close ?? 0;
+            document.getElementById('dpa-pen-crm').value = d.pen_crm_delay ?? 0;
+            document.getElementById('dpa-pen-cancel').value = d.pen_cancel ?? 0;
+            document.getElementById('dpa-pen-hotlead').value = d.pen_hot_lead ?? 0;
+            document.querySelectorAll('.dpa-task').forEach(el => {
+                el.checked = !!(d.base_tasks || {})[el.dataset.task];
+            });
+            document.getElementById('dpa-rca').value = d.rca || '';
+            document.getElementById('dpa-mentor').value = d.mentor_feedback || '';
+        } catch (e) {
+            showToast('خطا', 'بارگیری فرم ناموفق بود', 'danger');
+            return;
+        }
+    }
+    updateDpaScore();
+    new bootstrap.Modal(document.getElementById('dpaModal')).show();
+}
+
+async function saveDpa() {
+    const agent_name = document.getElementById('dpa-agent').value.trim();
+    if (!agent_name) { showToast('خطا', 'نام مشاور الزامی است', 'warning'); return; }
+
+    const base_tasks = {};
+    document.querySelectorAll('.dpa-task').forEach(el => { base_tasks[el.dataset.task] = el.checked; });
+    const n = id => Math.max(Number(document.getElementById(id).value) || 0, 0);
+
+    const payload = {
+        agent_name,
+        role: document.getElementById('dpa-role').value,
+        date_jalali: document.getElementById('dpa-date').value.trim() || null,
+        target_points: n('dpa-target') || 100,
+        new_files: n('dpa-new-files'),
+        showings_count: n('dpa-showings'),
+        offers_count: n('dpa-offers'),
+        closed_count: n('dpa-closed'),
+        base_tasks,
+        bonus_exclusive: n('dpa-bonus-exclusive'),
+        bonus_offer: n('dpa-bonus-offer'),
+        bonus_close: n('dpa-bonus-close'),
+        pen_crm_delay: n('dpa-pen-crm'),
+        pen_cancel: n('dpa-pen-cancel'),
+        pen_hot_lead: n('dpa-pen-hotlead'),
+        rca: document.getElementById('dpa-rca').value.trim() || null,
+        mentor_feedback: document.getElementById('dpa-mentor').value.trim() || null,
+    };
+
+    const btn = document.getElementById('dpa-save-btn');
+    btn.disabled = true;
+    try {
+        if (_dpaEditId) {
+            await apiCall(`/crm/dpa/${_dpaEditId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        } else {
+            await apiCall('/crm/dpa', { method: 'POST', body: JSON.stringify(payload) });
+        }
+        showToast('موفق', 'فرم ارزیابی ذخیره شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('dpaModal')).hide();
+        loadDpa();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function deleteDpa(id) {
+    if (!confirm('این فرم ارزیابی حذف شود؟')) return;
+    try {
+        await apiCall(`/crm/dpa/${id}`, { method: 'DELETE' });
+        showToast('موفق', 'فرم حذف شد', 'success');
+        loadDpa();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
 // ==================== Customers (فرم پروفایل مشتری) ====================
 
 const CUSTOMER_TEMP_LABELS = {
@@ -3714,6 +3898,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const target = e.target.getAttribute('data-bs-target');
             if (target === '#crm-tab-tasks')     loadTasks();
             if (target === '#crm-tab-customers') loadCustomers();
+            if (target === '#crm-tab-dpa')       loadDpa();
             if (target === '#crm-tab-contacts')  loadContacts();
             if (target === '#crm-tab-deals')     loadDeals();
             if (target === '#crm-tab-notes')     loadNotes();

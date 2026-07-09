@@ -736,6 +736,7 @@
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-reminders" type="button"><i class="bi bi-alarm"></i> یادآورها</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-sms" type="button"><i class="bi bi-chat-dots"></i> پیامک</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-leads" type="button"><i class="bi bi-people"></i> لیدها</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-dpa" type="button"><i class="bi bi-clipboard-data"></i> ارزیابی روزانه</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-report" type="button"><i class="bi bi-bar-chart"></i> گزارش</button></li>
                 </ul>
 
@@ -1035,6 +1036,33 @@
                         </div>
                     </div>
 
+                    <!-- ── DPA (ارزیابی عملکرد روزانه) ── -->
+                    <div class="tab-pane fade" id="crm-tab-dpa" role="tabpanel">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <span><i class="bi bi-clipboard-data"></i> ارزیابی عملکرد روزانه (DPA)
+                                    <span id="dpa-count-badge" class="badge bg-secondary ms-1" style="font-size:.7rem"></span>
+                                </span>
+                                <div class="d-flex gap-2 flex-wrap align-items-center">
+                                    <button class="btn btn-success btn-sm" onclick="openDpaModal()">
+                                        <i class="bi bi-plus-lg"></i> فرم جدید
+                                    </button>
+                                    <input type="text" id="dpa-search" class="form-control form-control-sm" style="width:170px;"
+                                           placeholder="جستجوی نام مشاور...">
+                                    <button class="btn btn-primary btn-sm" onclick="loadDpa()">
+                                        <i class="bi bi-search"></i> جستجو
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead><tr><th>#</th><th>تاریخ</th><th>مشاور</th><th>نقش</th><th>پایه</th><th>بونوس</th><th>جریمه</th><th>امتیاز کل</th><th>هدف</th><th>عملیات</th></tr></thead>
+                                    <tbody id="crm-dpa-table"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- ── REPORT ── -->
                     <div class="tab-pane fade" id="crm-tab-report" role="tabpanel">
                         <div class="row g-3 mb-3" id="crm-report-stats"></div>
@@ -1287,6 +1315,159 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal">✕</button>
             </div>
             <div class="modal-body" id="property-detail"></div>
+        </div>
+    </div>
+</div>
+
+<!-- DPA Modal (فرم ارزیابی عملکرد روزانه) -->
+<div class="modal fade" id="dpaModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="dpa-modal-title"><i class="bi bi-clipboard-data"></i> فرم ارزیابی عملکرد روزانه (DPA)</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- سربرگ -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">نام مشاور (Agent) *</label>
+                                <input type="text" id="dpa-agent" class="form-control">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">تخصص اصلی (Role)</label>
+                                <select id="dpa-role" class="form-select">
+                                    <option value="hunter">Hunter 🏹</option>
+                                    <option value="closer">Closer 🤝</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">تاریخ (شمسی)</label>
+                                <input type="text" id="dpa-date" class="form-control" placeholder="۱۴۰۵/۰۴/۱۸">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">هدف امتیازی</label>
+                                <input type="number" id="dpa-target" class="form-control" value="100">
+                            </div>
+                        </div>
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-3">
+                                <label class="form-label small text-muted">فایل‌های جدید ثبت‌شده</label>
+                                <input type="number" id="dpa-new-files" class="form-control form-control-sm" value="0" min="0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small text-muted">تعداد بازدید (Showing)</label>
+                                <input type="number" id="dpa-showings" class="form-control form-control-sm" value="0" min="0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small text-muted">آفرهای دریافتی</label>
+                                <input type="number" id="dpa-offers" class="form-control form-control-sm" value="0" min="0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small text-muted">قرارداد نهایی (Closed)</label>
+                                <input type="number" id="dpa-closed" class="form-control form-control-sm" value="0" min="0">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- گام‌های عملیاتی پایه -->
+                <div class="card mb-3">
+                    <div class="card-header"><i class="bi bi-list-check"></i> گام‌های عملیاتی پایه (Base Operations)</div>
+                    <div class="card-body p-2">
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead><tr><th>Time Block</th><th>Task Description</th><th style="width:80px">Weight</th><th style="width:70px">Done</th></tr></thead>
+                                <tbody>
+                                    <tr><td dir="ltr">09:00 – 10:30</td><td>شکار فایل (Prospecting) — تماس سرد و ثبت لید جدید</td><td>25</td>
+                                        <td><input class="form-check-input dpa-task" type="checkbox" data-task="prospecting" data-weight="25" onchange="updateDpaScore()"></td></tr>
+                                    <tr><td dir="ltr">10:30 – 12:00</td><td>هک الگوریتم دیوار — بازتولید آگهی‌ها و سئو محلی</td><td>15</td>
+                                        <td><input class="form-check-input dpa-task" type="checkbox" data-task="divar_seo" data-weight="15" onchange="updateDpaScore()"></td></tr>
+                                    <tr><td dir="ltr">12:00 – 14:00</td><td>حلقه پیگیری (Follow-up) — تماس با مشتریان در حال مذاکره</td><td>20</td>
+                                        <td><input class="form-check-input dpa-task" type="checkbox" data-task="followup" data-weight="20" onchange="updateDpaScore()"></td></tr>
+                                    <tr class="text-muted"><td dir="ltr">14:00 – 16:00</td><td>استراحت (System Reboot) — بازیابی انرژی</td><td>0</td><td>—</td></tr>
+                                    <tr><td dir="ltr">16:00 – 19:00</td><td>بازدید حضوری (Showings) — پرزنت ملک و مدیریت اعتراضات</td><td>30</td>
+                                        <td><input class="form-check-input dpa-task" type="checkbox" data-task="showings" data-weight="30" onchange="updateDpaScore()"></td></tr>
+                                    <tr><td dir="ltr">19:00 – 20:00</td><td>گزارش CRM — ثبت دقیق نتایج</td><td>10</td>
+                                        <td><input class="form-check-input dpa-task" type="checkbox" data-task="crm_report" data-weight="10" onchange="updateDpaScore()"></td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <!-- بونوس -->
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-header text-success"><i class="bi bi-stars"></i> امتیاز انفجار (Bonus Points)</div>
+                            <div class="card-body">
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <input type="number" id="dpa-bonus-exclusive" class="form-control form-control-sm" style="width:80px" value="0" min="0" onchange="updateDpaScore()" oninput="updateDpaScore()">
+                                    <span class="small">× ثبت فایل انحصاری (Exclusive) <b class="text-success">+30</b></span>
+                                </div>
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <input type="number" id="dpa-bonus-offer" class="form-control form-control-sm" style="width:80px" value="0" min="0" onchange="updateDpaScore()" oninput="updateDpaScore()">
+                                    <span class="small">× دریافت آفر کتبی و بیعانه <b class="text-success">+20</b></span>
+                                </div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="number" id="dpa-bonus-close" class="form-control form-control-sm" style="width:80px" value="0" min="0" onchange="updateDpaScore()" oninput="updateDpaScore()">
+                                    <span class="small">× بستن قرارداد نهایی <b class="text-success">+50</b></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- جریمه -->
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-header text-danger"><i class="bi bi-exclamation-triangle"></i> اخطار سیستم (Penalties)</div>
+                            <div class="card-body">
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <input type="number" id="dpa-pen-crm" class="form-control form-control-sm" style="width:80px" value="0" min="0" onchange="updateDpaScore()" oninput="updateDpaScore()">
+                                    <span class="small">× تاخیر در ثبت CRM <b class="text-danger">-10</b></span>
+                                </div>
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <input type="number" id="dpa-pen-cancel" class="form-control form-control-sm" style="width:80px" value="0" min="0" onchange="updateDpaScore()" oninput="updateDpaScore()">
+                                    <span class="small">× کنسل شدن بازدید مقصر مشاور <b class="text-danger">-15</b></span>
+                                </div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="number" id="dpa-pen-hotlead" class="form-control form-control-sm" style="width:80px" value="0" min="0" onchange="updateDpaScore()" oninput="updateDpaScore()">
+                                    <span class="small">× عدم پیگیری لید داغ <b class="text-danger">-20</b></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- امتیاز نهایی -->
+                <div class="card mb-3">
+                    <div class="card-body d-flex flex-wrap justify-content-around text-center gap-2">
+                        <div><div class="small text-muted">پایه (Base)</div><div class="h4 mb-0" id="dpa-score-base">0</div></div>
+                        <div><div class="small text-muted">بونوس (Bonus)</div><div class="h4 mb-0 text-success" id="dpa-score-bonus">+0</div></div>
+                        <div><div class="small text-muted">جریمه (Penalty)</div><div class="h4 mb-0 text-danger" id="dpa-score-penalty">-0</div></div>
+                        <div><div class="small text-muted">امتیاز نهایی امروز (Total Daily)</div><div class="h3 mb-0 text-primary" id="dpa-score-total">0</div></div>
+                    </div>
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">تحلیل موانع (RCA) — چرا بازدیدها به قرارداد منجر نشد؟</label>
+                        <textarea id="dpa-rca" class="form-control" rows="3"></textarea>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">بازخورد روزانه منتور / توصیه استراتژیک فردا</label>
+                        <textarea id="dpa-mentor" class="form-control" rows="3"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">انصراف</button>
+                <button type="button" class="btn btn-success" id="dpa-save-btn" onclick="saveDpa()">
+                    <i class="bi bi-save"></i> ذخیره فرم
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -1700,6 +1881,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260709c"></script>
+<script src="js/app.js?v=20260709d"></script>
 </body>
 </html>
