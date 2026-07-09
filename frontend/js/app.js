@@ -440,6 +440,9 @@ function initApp() {
     document.getElementById('crm-filter-search')?.addEventListener('keydown', e => {
         if (e.key === 'Enter') loadLeads();
     });
+    document.getElementById('customer-search')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') loadCustomers();
+    });
 
     setInterval(loadDashboard, 60000);
     setInterval(checkCookieStatus, 300000);
@@ -2763,6 +2766,221 @@ async function deleteLead(id) {
     }
 }
 
+// ==================== Customers (فرم پروفایل مشتری) ====================
+
+const CUSTOMER_TEMP_LABELS = {
+    hot:  { label: '🔥 داغ',  cls: 'bg-danger' },
+    warm: { label: '🌤 گرم',  cls: 'bg-warning' },
+    cold: { label: '❄️ سرد', cls: 'bg-info' },
+};
+const CUSTOMER_SOURCE_LABELS = { in_person: 'حضوری', divar: 'دیوار', referral: 'معرف' };
+const SHOWING_STEP_LABELS = { meeting: 'نشست', archive: 'بایگانی', second_visit: 'بازدید دوم' };
+let _customerEditId = null;
+
+async function loadCustomers() {
+    const search = document.getElementById('customer-search')?.value.trim() || '';
+    const temp   = document.getElementById('customer-filter-temp')?.value || '';
+    const source = document.getElementById('customer-filter-source')?.value || '';
+
+    let url = '/crm/customers?limit=100';
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (temp)   url += `&temperature=${temp}`;
+    if (source) url += `&source=${source}`;
+
+    try {
+        const data = await apiCall(url);
+        const tbody = document.getElementById('crm-customers-table');
+        tbody.innerHTML = '';
+
+        const badge = document.getElementById('customers-count-badge');
+        if (badge) badge.textContent = data.total ?? data.items.length;
+
+        if (data.items.length === 0) {
+            tbody.innerHTML = `
+                <tr><td colspan="10" class="text-center text-muted py-4">
+                    <i class="bi bi-person-vcard" style="font-size:2rem;"></i>
+                    <p class="mt-2">هیچ مشتری‌ای ثبت نشده</p>
+                </td></tr>`;
+            return;
+        }
+
+        data.items.forEach(c => {
+            const t = CUSTOMER_TEMP_LABELS[c.temperature] || { label: c.temperature || '---', cls: 'bg-secondary' };
+            const nextFollowup = (c.followups && c.followups.length)
+                ? `${c.followups[0].date || ''} ${c.followups[0].time || ''}`.trim() || '---'
+                : '---';
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${c.id}</td>
+                <td class="fw-bold">${c.full_name}</td>
+                <td>${c.mobile1 ? `<a href="tel:${c.mobile1}" class="text-success">${c.mobile1}</a>` : '---'}</td>
+                <td><span class="badge ${t.cls}">${t.label}</span></td>
+                <td>${CUSTOMER_SOURCE_LABELS[c.source] || '---'}</td>
+                <td>${c.budget_max ? formatPrice(c.budget_max) : '---'}</td>
+                <td>${c.desired_district || '---'}</td>
+                <td>${c.consultant_name || '---'}</td>
+                <td>${nextFollowup}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="openCustomerModal(${c.id})" title="ویرایش">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCustomer(${c.id})" title="حذف">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>`;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        showToast('خطا', 'بارگیری مشتریان ناموفق بود', 'danger');
+    }
+}
+
+function _custRemoveRow(btn) { btn.closest('tr').remove(); }
+
+function addShowingRow(data = {}) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td><input type="text" class="form-control form-control-sm cust-sh-code" value="${data.file_code || ''}" placeholder="SF-..."></td>
+        <td><input type="text" class="form-control form-control-sm cust-sh-desc" value="${data.description || ''}" placeholder="شرح ملک"></td>
+        <td><input type="text" class="form-control form-control-sm cust-sh-feedback" value="${data.feedback || ''}" placeholder="بازخورد"></td>
+        <td>
+            <select class="form-select form-select-sm cust-sh-step">
+                <option value="">---</option>
+                ${Object.entries(SHOWING_STEP_LABELS).map(([v, l]) =>
+                    `<option value="${v}" ${data.next_step === v ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+        </td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="_custRemoveRow(this)"><i class="bi bi-x"></i></button></td>`;
+    document.getElementById('cust-showings-body').appendChild(tr);
+}
+
+function addFollowupRow(data = {}) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td><input type="text" class="form-control form-control-sm cust-fu-date" value="${data.date || ''}" placeholder="۱۴۰۵/۰۵/۰۱"></td>
+        <td><input type="text" class="form-control form-control-sm cust-fu-time" value="${data.time || ''}" placeholder="۱۴:۳۰"></td>
+        <td><input type="text" class="form-control form-control-sm cust-fu-action" value="${data.action || ''}" placeholder="چه چیزی باید پیگیری یا ارائه شود؟"></td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="_custRemoveRow(this)"><i class="bi bi-x"></i></button></td>`;
+    document.getElementById('cust-followups-body').appendChild(tr);
+}
+
+const _CUST_PAY_MAP = { cash: 'cust-pay-cash', loan: 'cust-pay-loan', has_property: 'cust-pay-property', barter: 'cust-pay-barter' };
+
+function _resetCustomerForm() {
+    ['cust-full-name', 'cust-mobile1', 'cust-mobile2', 'cust-consultant',
+     'cust-budget', 'cust-specs', 'cust-district', 'cust-redlines', 'cust-notes']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    document.getElementById('cust-source').value = 'in_person';
+    document.getElementById('cust-temperature').value = 'warm';
+    Object.values(_CUST_PAY_MAP).forEach(id => { document.getElementById(id).checked = false; });
+    document.getElementById('cust-showings-body').innerHTML = '';
+    document.getElementById('cust-followups-body').innerHTML = '';
+}
+
+async function openCustomerModal(id = null) {
+    _customerEditId = id;
+    _resetCustomerForm();
+    document.getElementById('customer-modal-title').innerHTML =
+        `<i class="bi bi-person-vcard"></i> ${id ? 'ویرایش مشتری' : 'مشتری جدید'}`;
+
+    if (id) {
+        try {
+            const c = await apiCall(`/crm/customers/${id}`);
+            document.getElementById('cust-full-name').value = c.full_name || '';
+            document.getElementById('cust-mobile1').value = c.mobile1 || '';
+            document.getElementById('cust-mobile2').value = c.mobile2 || '';
+            document.getElementById('cust-consultant').value = c.consultant_name || '';
+            document.getElementById('cust-source').value = c.source || 'in_person';
+            document.getElementById('cust-temperature').value = c.temperature || 'warm';
+            document.getElementById('cust-budget').value = c.budget_max || '';
+            document.getElementById('cust-specs').value = c.desired_specs || '';
+            document.getElementById('cust-district').value = c.desired_district || '';
+            document.getElementById('cust-redlines').value = c.red_lines || '';
+            document.getElementById('cust-notes').value = c.notes || '';
+            const methods = (c.payment_methods || '').split(',').map(s => s.trim());
+            Object.entries(_CUST_PAY_MAP).forEach(([key, elId]) => {
+                document.getElementById(elId).checked = methods.includes(key);
+            });
+            (c.showings || []).forEach(s => addShowingRow(s));
+            (c.followups || []).forEach(f => addFollowupRow(f));
+        } catch (e) {
+            showToast('خطا', 'بارگیری مشتری ناموفق بود', 'danger');
+            return;
+        }
+    } else {
+        addShowingRow();
+        addFollowupRow();
+    }
+    new bootstrap.Modal(document.getElementById('customerModal')).show();
+}
+
+function _collectCustomerPayload() {
+    const showings = [...document.querySelectorAll('#cust-showings-body tr')].map(tr => ({
+        file_code:   tr.querySelector('.cust-sh-code').value.trim(),
+        description: tr.querySelector('.cust-sh-desc').value.trim(),
+        feedback:    tr.querySelector('.cust-sh-feedback').value.trim(),
+        next_step:   tr.querySelector('.cust-sh-step').value,
+    }));
+    const followups = [...document.querySelectorAll('#cust-followups-body tr')].map(tr => ({
+        date:   tr.querySelector('.cust-fu-date').value.trim(),
+        time:   tr.querySelector('.cust-fu-time').value.trim(),
+        action: tr.querySelector('.cust-fu-action').value.trim(),
+    }));
+    const payment_methods = Object.entries(_CUST_PAY_MAP)
+        .filter(([, elId]) => document.getElementById(elId).checked)
+        .map(([key]) => key).join(',');
+
+    return {
+        full_name: document.getElementById('cust-full-name').value.trim(),
+        mobile1: document.getElementById('cust-mobile1').value.trim() || null,
+        mobile2: document.getElementById('cust-mobile2').value.trim() || null,
+        source: document.getElementById('cust-source').value,
+        temperature: document.getElementById('cust-temperature').value,
+        consultant_name: document.getElementById('cust-consultant').value.trim() || null,
+        budget_max: document.getElementById('cust-budget').value ? Number(document.getElementById('cust-budget').value) : null,
+        payment_methods: payment_methods || null,
+        desired_specs: document.getElementById('cust-specs').value.trim() || null,
+        desired_district: document.getElementById('cust-district').value.trim() || null,
+        red_lines: document.getElementById('cust-redlines').value.trim() || null,
+        notes: document.getElementById('cust-notes').value.trim() || null,
+        showings,
+        followups,
+    };
+}
+
+async function saveCustomer() {
+    const payload = _collectCustomerPayload();
+    if (!payload.full_name) { showToast('خطا', 'نام و نام خانوادگی الزامی است', 'warning'); return; }
+
+    const btn = document.getElementById('customer-save-btn');
+    btn.disabled = true;
+    try {
+        if (_customerEditId) {
+            await apiCall(`/crm/customers/${_customerEditId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        } else {
+            await apiCall('/crm/customers', { method: 'POST', body: JSON.stringify(payload) });
+        }
+        showToast('موفق', 'مشتری ذخیره شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('customerModal')).hide();
+        loadCustomers();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function deleteCustomer(id) {
+    if (!confirm('این مشتری حذف شود؟ این عمل قابل بازگشت نیست.')) return;
+    try {
+        await apiCall(`/crm/customers/${id}`, { method: 'DELETE' });
+        showToast('موفق', 'مشتری حذف شد', 'success');
+        loadCustomers();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
 function openAddLeadModal() {
     ['title', 'city', 'category', 'price', 'area', 'phone', 'seller', 'url', 'notes'].forEach(f => {
         const el = document.getElementById(`add-lead-${f}`);
@@ -3495,6 +3713,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tab.addEventListener('shown.bs.tab', e => {
             const target = e.target.getAttribute('data-bs-target');
             if (target === '#crm-tab-tasks')     loadTasks();
+            if (target === '#crm-tab-customers') loadCustomers();
             if (target === '#crm-tab-contacts')  loadContacts();
             if (target === '#crm-tab-deals')     loadDeals();
             if (target === '#crm-tab-notes')     loadNotes();
