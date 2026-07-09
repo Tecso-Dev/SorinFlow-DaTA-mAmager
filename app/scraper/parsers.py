@@ -314,7 +314,9 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
         # Table-layout: headers in <thead>, values in <tbody>
         try:
             for table in soup.select('table.kt-group-row'):
-                header_cells = table.select('thead th .kt-group-row-item__title')
+                # The title class may sit on the <th> itself or on a child
+                header_cells = (table.select('thead th .kt-group-row-item__title')
+                                or table.select('thead th'))
                 data_row = table.select_one('tbody tr')
                 if not header_cells or not data_row:
                     continue
@@ -445,6 +447,32 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
                 details['building_age'] = vt
             elif 'نوع ملک' in tt:
                 details['property_type'] = vt
+
+        # Amenity chips: Divar renders امکانات as title-only chips (present)
+        # or short "آسانسور ندارد" texts (absent). The title+value loop above
+        # skips valueless rows entirely, so handle them here.
+        AMENITY_CHIP_MAP = {
+            'آسانسور': 'has_elevator',
+            'پارکینگ': 'has_parking',
+            'انباری': 'has_storage',
+            'بالکن': 'has_balcony',
+            'تراس': 'has_balcony',
+        }
+        try:
+            for elem in soup.select(
+                '.kt-group-row-item, .kt-icon-row-item, .kt-amenity-feat-cell, '
+                '[class*="feat-cell"], [class*="amenity"], [class*="feature-item"]'
+            ):
+                text = elem.get_text(strip=True)
+                # Chips are short; long texts are other rows/descriptions
+                if not text or len(text) > 40:
+                    continue
+                for keyword, field in AMENITY_CHIP_MAP.items():
+                    if keyword in text and field not in details:
+                        negated = any(n in text for n in ('ندارد', 'فاقد', 'بدون'))
+                        details[field] = not negated
+        except Exception:
+            pass
 
         # Fallback: infer area from title
         if not details.get('area') and title:
