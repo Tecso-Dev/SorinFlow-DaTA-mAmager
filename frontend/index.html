@@ -336,6 +336,9 @@
                                 <option value="buy">خرید</option>
                                 <option value="rent">اجاره</option>
                             </select>
+                            <select id="filter-category" class="form-select form-select-sm" style="width:170px;">
+                                <option value="">همه دسته‌بندی‌ها</option>
+                            </select>
                             <button class="btn btn-primary btn-sm" onclick="loadProperties()">
                                 <i class="bi bi-search"></i> جستجو
                             </button>
@@ -921,6 +924,11 @@
                                     <button class="btn btn-success btn-sm" onclick="openAddLeadModal()">
                                         <i class="bi bi-plus-lg"></i> لید جدید
                                     </button>
+                                    <input type="text" id="crm-filter-search" class="form-control form-control-sm" style="width:190px;"
+                                           placeholder="جستجو: خیابان، عنوان، شماره...">
+                                    <select id="crm-filter-category" class="form-select form-select-sm" style="width:170px;">
+                                        <option value="">همه دسته‌بندی‌ها</option>
+                                    </select>
                                     <select id="crm-filter-status" class="form-select form-select-sm" style="width:140px;">
                                         <option value="">همه وضعیت‌ها</option>
                                         <option value="new">جدید</option>
@@ -1507,6 +1515,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260708b"></script>
+<script src="js/app.js?v=20260708c"></script>
 </body>
 </html>

@@ -33,6 +33,8 @@ VALID_LEAD_STATUSES = {"new", "contacted", "visit", "contract_meeting", "qualifi
 async def list_leads(
     status: Optional[str] = None,
     city: Optional[str] = None,
+    category: Optional[str] = None,
+    search: Optional[str] = None,
     notified: Optional[bool] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
@@ -54,6 +56,28 @@ async def list_leads(
         query = query.where(Lead.status == status)
     if city:
         query = query.where(Lead.city_name == city)
+    if category:
+        query = query.where(Lead.category_name.ilike(f"%{category}%"))
+    if search:
+        term = f"%{search.strip()}%"
+        # Street/neighborhood names usually live in the linked property's
+        # address or description, not in the lead's own columns
+        prop_match = select(Property.id).where(
+            Property.id == Lead.property_id,
+            or_(
+                Property.address.ilike(term),
+                Property.district.ilike(term),
+                Property.neighborhood.ilike(term),
+                Property.description.ilike(term),
+            ),
+        ).exists()
+        query = query.where(or_(
+            Lead.property_title.ilike(term),
+            Lead.notes.ilike(term),
+            Lead.phone_number.ilike(term),
+            Lead.seller_name.ilike(term),
+            prop_match,
+        ))
     if notified is not None:
         query = query.where(Lead.notified == notified)
     if date_from:
