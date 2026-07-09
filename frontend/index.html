@@ -466,16 +466,6 @@
                                             </select>
                                         </div>
                                         <div class="mb-2">
-                                            <label class="form-label small text-muted">زمان انتشار</label>
-                                            <select id="scraper-max-age" class="form-select form-select-sm">
-                                                <option value="">همه</option>
-                                                <option value="12">۱۲ ساعت اخیر</option>
-                                                <option value="24">۲۴ ساعت اخیر</option>
-                                                <option value="72">۳ روز اخیر</option>
-                                                <option value="168">۷ روز اخیر</option>
-                                            </select>
-                                        </div>
-                                        <div class="mb-2">
                                             <label class="form-label small text-muted">ویژگی‌ها</label>
                                             <div class="d-flex flex-wrap gap-2">
                                                 <div class="form-check">
@@ -513,12 +503,15 @@
                                             </button>
                                         </div>
                                         <small class="text-muted d-block mt-1">
-                                            با انتخاب تاریخ، <b>همه</b> آگهی‌های منتشرشده در آن روز بدون محدودیت تعداد اسکرپ می‌شوند
+                                            با انتخاب تاریخ، فقط آگهی‌های منتشرشده در همان روز اسکرپ می‌شوند
                                         </small>
                                     </div>
                                     <div class="mb-3" id="scraper-pages-wrap">
                                         <label class="form-label">تعداد آگهی برای اسکرپ</label>
                                         <input type="number" id="scraper-pages" class="form-control" value="50" min="1" max="500">
+                                        <small class="text-muted d-block mt-1 d-none" id="scraper-pages-hint">
+                                            خالی بگذارید تا <b>همه</b> آگهی‌های آن تاریخ اسکرپ شوند؛ برای محدود کردن، عدد وارد کنید
+                                        </small>
                                     </div>
                                     <div class="mb-3 form-check">
                                         <input type="checkbox" id="scraper-images" class="form-check-input" checked>
@@ -1531,6 +1524,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260709a"></script>
+<script src="js/app.js?v=20260709b"></script>
 </body>
 </html>
