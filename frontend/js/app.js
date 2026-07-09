@@ -45,7 +45,7 @@ function chartColors() {
         text:    light ? '#475569' : '#94a3b8',
         tick:    light ? '#64748b' : '#64748b',
         grid:    light ? 'rgba(15,23,42,.08)'  : 'rgba(255,255,255,0.04)',
-        surface: light ? '#ffffff' : '#0e1225',
+        surface: light ? '#ffffff' : '#0a0a0c',
     };
 }
 
