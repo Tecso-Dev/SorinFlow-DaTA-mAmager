@@ -331,12 +331,7 @@
                                    placeholder="جستجو..." style="width:180px;">
                             <div id="filter-city-picker" class="city-picker city-picker--sm" style="width:160px;"></div>
                             <input type="hidden" id="filter-city-hidden">
-                            <select id="filter-type" class="form-select form-select-sm" style="width:130px;" onchange="onFilterTypeChange()">
-                                <option value="">همه انواع</option>
-                                <option value="buy">خرید</option>
-                                <option value="rent">اجاره</option>
-                            </select>
-                            <select id="filter-category" class="form-select form-select-sm" style="width:170px;">
+                            <select id="filter-category" class="form-select form-select-sm" style="width:170px;" onchange="onFilterCategoryChange()">
                                 <option value="">همه دسته‌بندی‌ها</option>
                             </select>
                             <button class="btn btn-primary btn-sm" onclick="loadProperties()">
@@ -1515,6 +1510,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260708c"></script>
+<script src="js/app.js?v=20260708d"></script>
 </body>
 </html>

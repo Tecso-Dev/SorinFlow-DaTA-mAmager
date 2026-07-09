@@ -733,21 +733,23 @@ function updateTrendChart(data) {
 
 // ==================== Properties ====================
 
-function onFilterTypeChange() {
-    const type = document.getElementById('filter-type').value;
+// Type (buy/rent) is implied by the selected category
+function _selectedCategoryType() {
+    const sel = document.getElementById('filter-category');
+    if (!sel || !sel.value) return '';
+    return sel.selectedOptions[0]?.dataset.type || '';
+}
+
+function onFilterCategoryChange() {
     const rentFilters = document.getElementById('rent-filters');
-    if (type === 'rent') {
-        rentFilters.classList.remove('d-none');
-    } else {
-        rentFilters.classList.add('d-none');
-    }
+    rentFilters.classList.toggle('d-none', _selectedCategoryType() !== 'rent');
 }
 
 async function loadProperties() {
     const search = document.getElementById('search-properties').value;
     const city   = document.getElementById('filter-city-hidden')?.value || '';
-    const type = document.getElementById('filter-type').value;
     const category = document.getElementById('filter-category')?.value || '';
+    const type = _selectedCategoryType();
     const minDeposit = document.getElementById('filter-min-deposit').value;
     const maxDeposit = document.getElementById('filter-max-deposit').value;
     const minRent = document.getElementById('filter-min-rent').value;
@@ -757,7 +759,7 @@ async function loadProperties() {
         let url = `/properties?page=${currentPage}&size=20`;
         if (search) url += `&search=${encodeURIComponent(search)}`;
         if (city) url += `&city=${encodeURIComponent(city)}`;
-        if (type) url += `&listing_type=${type}`;
+        if (type === 'buy' || type === 'rent') url += `&listing_type=${type}`;
         if (category) url += `&category=${encodeURIComponent(category)}`;
         if (minDeposit) url += `&min_deposit=${minDeposit}`;
         if (maxDeposit) url += `&max_deposit=${maxDeposit}`;
@@ -1134,11 +1136,11 @@ async function deleteProperty(id) {
 async function exportProperties() {
     try {
         const city = document.getElementById('filter-city-hidden')?.value || '';
-        const type = document.getElementById('filter-type').value;
+        const type = _selectedCategoryType();
 
         const data = await apiCall('/properties/export', {
             method: 'POST',
-            body: JSON.stringify({ city, listing_type: type })
+            body: JSON.stringify({ city, listing_type: (type === 'buy' || type === 'rent') ? type : '' })
         });
         
         // Download as JSON
@@ -1390,12 +1392,13 @@ async function loadCategories() {
         onScraperCategoryChange();
 
         // Same categories drive the properties-list and CRM-leads filters;
-        // those filter by category_name, so the option value is the name
+        // those filter by category_name, so the option value is the name.
+        // data-type (buy/rent) drives the rent-only inputs' visibility.
         ['filter-category', 'crm-filter-category'].forEach(id => {
             const sel = document.getElementById(id);
             if (!sel) return;
             categories.forEach(cat => {
-                sel.innerHTML += `<option value="${cat.name}">${cat.name}</option>`;
+                sel.innerHTML += `<option value="${cat.name}" data-type="${cat.type}">${cat.name}</option>`;
             });
         });
     } catch (error) {
