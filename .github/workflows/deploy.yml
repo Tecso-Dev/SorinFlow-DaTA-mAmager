@@ -69,6 +69,9 @@ jobs:
       packages: read
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Pull image into k3s containerd
         run: |
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
@@ -76,6 +79,11 @@ jobs:
           k3s ctr -n k8s.io images pull \
             --user "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
             "$IMAGE"
+
+      - name: Apply ingress manifests
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: kubectl apply -f k8s/05-ingress.yaml
 
       - name: Roll out new image
         env:
