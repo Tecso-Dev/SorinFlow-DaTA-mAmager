@@ -7,10 +7,10 @@
 
 /* ── Variables ─────────────────────────────────────── */
 :root {
-  --bg:          #080b18;
-  --surface:     #0e1225;
-  --surface2:    #141829;
-  --surface3:    #1c2240;
+  --bg:          #000000;
+  --surface:     #0a0a0c;
+  --surface2:    #131316;
+  --surface3:    #1c1c21;
 
   --accent:      #6366f1;
   --accent-glow: rgba(99,102,241,.35);
@@ -26,8 +26,8 @@
   --border:      rgba(255,255,255,.06);
   --border-soft: rgba(255,255,255,.03);
 
-  --glass:       rgba(14,18,37,.85);
-  --glass2:      rgba(14,18,37,.8);
+  --glass:       rgba(10,10,12,.85);
+  --glass2:      rgba(10,10,12,.8);
   --overlay:     rgba(0,0,0,.65);
 
   --sidebar-w:   252px;
@@ -572,8 +572,19 @@ option { background: var(--surface); color: var(--text); }
 .table {
   width: 100%; border-collapse: collapse; margin: 0;
   color: var(--text); font-size: .84rem;
+  --bs-table-bg: transparent;
+  --bs-table-color: var(--text);
+  --bs-table-striped-bg: transparent;
+  --bs-table-hover-bg: rgba(99,102,241,.04);
 }
-.table thead th {
+/* Bootstrap 5.3 paints every cell with --bs-table-bg (white by default);
+   the card behind the table provides the background instead */
+.table > :not(caption) > * > * {
+  background-color: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+.table > thead > tr > th {
   background: var(--surface2);
   color: var(--text-muted);
   font-size: .72rem; font-weight: 600; letter-spacing: .06em;
@@ -582,7 +593,7 @@ option { background: var(--surface); color: var(--text); }
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
-.table tbody td {
+.table > tbody > tr > td {
   padding: .7rem 1rem;
   border-bottom: 1px solid var(--border-soft);
   vertical-align: middle;
@@ -1096,7 +1107,7 @@ textarea.form-control { resize: vertical; }
 
   /* Tables */
   .table { font-size: .78rem; }
-  .table thead th, .table tbody td { padding: .5rem .55rem; }
+  .table > thead > tr > th, .table > tbody > tr > td { padding: .5rem .55rem; }
 
   /* Fix property filter inline widths */
   #section-properties .card-header input[style],
