@@ -918,6 +918,9 @@
                                     <span id="leads-count-badge" class="badge bg-secondary ms-1" style="font-size:.7rem"></span>
                                 </span>
                                 <div class="d-flex gap-2 flex-wrap align-items-center">
+                                    <button class="btn btn-success btn-sm" onclick="openAddLeadModal()">
+                                        <i class="bi bi-plus-lg"></i> لید جدید
+                                    </button>
                                     <select id="crm-filter-status" class="form-select form-select-sm" style="width:140px;">
                                         <option value="">همه وضعیت‌ها</option>
                                         <option value="new">جدید</option>
@@ -1257,6 +1260,84 @@
     </div>
 </div>
 
+<!-- Add Lead Modal -->
+<div class="modal fade" id="addLeadModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-lg"></i> افزودن لید جدید</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label">عنوان ملک *</label>
+                        <input type="text" id="add-lead-title" class="form-control" placeholder="مثلاً: واحد ۷۰ متر/۲خواب/سند/پارکینگ">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">شهر</label>
+                        <input type="text" id="add-lead-city" class="form-control" placeholder="شهر">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">دسته‌بندی</label>
+                        <input type="text" id="add-lead-category" class="form-control" placeholder="آپارتمان، ویلا، ...">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">نوع آگهی</label>
+                        <select id="add-lead-listing-type" class="form-select">
+                            <option value="">---</option>
+                            <option value="buy">خرید/فروش</option>
+                            <option value="rent">اجاره/رهن</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">قیمت (تومان)</label>
+                        <input type="number" id="add-lead-price" class="form-control" placeholder="قیمت">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">متراژ</label>
+                        <input type="number" id="add-lead-area" class="form-control" placeholder="متراژ">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">شماره تماس</label>
+                        <input type="text" id="add-lead-phone" class="form-control" placeholder="09xxxxxxxxx">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">فروشنده</label>
+                        <input type="text" id="add-lead-seller" class="form-control" placeholder="نام فروشنده">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">لینک آگهی</label>
+                        <input type="text" id="add-lead-url" class="form-control" placeholder="https://...">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">وضعیت CRM</label>
+                        <select id="add-lead-status" class="form-select">
+                            <option value="new">جدید</option>
+                            <option value="contacted">تماس گرفته</option>
+                            <option value="visit">بازدید از فایل</option>
+                            <option value="contract_meeting">نشست و تنظیم قرارداد</option>
+                            <option value="qualified">واجد شرایط</option>
+                            <option value="closed">بسته شده</option>
+                            <option value="rejected">رد شده</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">یادداشت</label>
+                        <textarea id="add-lead-notes" class="form-control" rows="3" placeholder="یادداشت..."></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">انصراف</button>
+                <button type="button" class="btn btn-success" id="add-lead-save-btn" onclick="submitAddLead()">
+                    <i class="bi bi-save"></i> ذخیره لید
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Cookie Warning Modal -->
 <div class="modal fade" id="cookieWarningModal" tabindex="-1">
     <div class="modal-dialog">
@@ -1426,6 +1507,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260705c"></script>
+<script src="js/app.js?v=20260708a"></script>
 </body>
 </html>
