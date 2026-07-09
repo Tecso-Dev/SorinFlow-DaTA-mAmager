@@ -14,7 +14,7 @@ from app.database import get_db
 from app.models.lead import Lead
 from app.models.property import Property
 from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog
-from app.schemas import LeadResponse, LeadUpdate, LeadList
+from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
 from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
@@ -77,6 +77,59 @@ async def list_leads(
     result = await db.execute(query.limit(limit).offset(offset))
     leads = result.scalars().all()
     return LeadList(items=leads, total=total)
+
+
+@router.post("/leads", response_model=LeadResponse)
+async def create_lead(
+    data: LeadCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    if data.status and data.status not in VALID_LEAD_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    import uuid
+    manual_id = f"manual-{uuid.uuid4().hex[:12]}"
+
+    # Manually-added leads aren't scraped from Divar, so we create a minimal
+    # Property row to satisfy Lead.property_id's NOT NULL FK.
+    prop = Property(
+        tag_number=manual_id,
+        divar_id=manual_id,
+        title=data.property_title,
+        city_name=data.city_name,
+        category_name=data.category_name,
+        listing_type=data.listing_type,
+        price=data.price,
+        total_price=data.price,
+        area=data.area,
+        phone_number=data.phone_number,
+        seller_name=data.seller_name,
+        url=data.property_url or "",
+        owner_phone=current_user.divar_phone if current_user else None,
+    )
+    db.add(prop)
+    await db.flush()
+
+    lead = Lead(
+        property_id=prop.id,
+        phone_number=data.phone_number,
+        seller_name=data.seller_name,
+        city_name=data.city_name,
+        category_name=data.category_name,
+        listing_type=data.listing_type,
+        price=data.price,
+        area=data.area,
+        property_url=data.property_url or "",
+        property_title=data.property_title,
+        status=data.status or "new",
+        notes=data.notes,
+        assigned_to=data.assigned_to,
+    )
+    db.add(lead)
+    await db.commit()
+    await db.refresh(lead)
+    return lead
 
 
 @router.get("/leads/{lead_id}", response_model=LeadResponse)

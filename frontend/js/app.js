@@ -2618,6 +2618,49 @@ async function deleteLead(id) {
     }
 }
 
+function openAddLeadModal() {
+    ['title', 'city', 'category', 'price', 'area', 'phone', 'seller', 'url', 'notes'].forEach(f => {
+        const el = document.getElementById(`add-lead-${f}`);
+        if (el) el.value = '';
+    });
+    document.getElementById('add-lead-listing-type').value = '';
+    document.getElementById('add-lead-status').value = 'new';
+    new bootstrap.Modal(document.getElementById('addLeadModal')).show();
+}
+
+async function submitAddLead() {
+    const property_title = document.getElementById('add-lead-title').value.trim();
+    if (!property_title) { showToast('خطا', 'عنوان ملک الزامی است', 'warning'); return; }
+
+    const payload = {
+        property_title,
+        city_name: document.getElementById('add-lead-city').value.trim() || null,
+        category_name: document.getElementById('add-lead-category').value.trim() || null,
+        listing_type: document.getElementById('add-lead-listing-type').value || null,
+        price: document.getElementById('add-lead-price').value ? Number(document.getElementById('add-lead-price').value) : null,
+        area: document.getElementById('add-lead-area').value ? Number(document.getElementById('add-lead-area').value) : null,
+        phone_number: document.getElementById('add-lead-phone').value.trim() || null,
+        seller_name: document.getElementById('add-lead-seller').value.trim() || null,
+        property_url: document.getElementById('add-lead-url').value.trim() || null,
+        status: document.getElementById('add-lead-status').value || 'new',
+        notes: document.getElementById('add-lead-notes').value.trim() || null,
+    };
+
+    const btn = document.getElementById('add-lead-save-btn');
+    btn.disabled = true;
+    try {
+        await apiCall('/crm/leads', { method: 'POST', body: JSON.stringify(payload) });
+        showToast('موفق', 'لید جدید ثبت شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('addLeadModal')).hide();
+        loadLeads();
+        loadCrmStats();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 // ==================== Users (super_admin) ====================
 
 const ROLE_LABELS = {

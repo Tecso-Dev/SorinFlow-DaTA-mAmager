@@ -282,6 +282,21 @@ class LeadUpdate(BaseModel):
     assigned_to: Optional[str] = None
 
 
+class LeadCreate(BaseModel):
+    property_title: str
+    phone_number: Optional[str] = None
+    seller_name: Optional[str] = None
+    city_name: Optional[str] = None
+    category_name: Optional[str] = None
+    listing_type: Optional[str] = None
+    price: Optional[int] = None
+    area: Optional[int] = None
+    property_url: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+
+
 class LeadList(BaseModel):
     items: List[LeadResponse]
     total: int
