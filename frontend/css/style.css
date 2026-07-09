@@ -1314,6 +1314,39 @@ body, #sidebar, .topbar, .card, .login-card {
 [data-theme="light"] .login-bg { opacity: .5; }
 [data-theme="light"] .login-orb { opacity: .55; }
 
+/* ── Image lightbox (zoom / pan) ── */
+.img-lightbox {
+  position: fixed; inset: 0; z-index: 11000;
+  display: none;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,.92);
+  overflow: hidden;
+  touch-action: none;
+}
+.img-lightbox.open { display: flex; }
+.img-lightbox img {
+  max-width: 92vw; max-height: 92vh;
+  user-select: none;
+  cursor: grab;
+  transition: transform .08s linear;
+}
+.img-lightbox img.dragging { cursor: grabbing; transition: none; }
+.img-lightbox__close {
+  position: absolute; top: 14px; left: 18px; z-index: 2;
+  width: 40px; height: 40px;
+  border: 1px solid rgba(255,255,255,.25); border-radius: 50%;
+  background: rgba(0,0,0,.5); color: #fff;
+  font-size: 1.1rem; cursor: pointer;
+}
+.img-lightbox__close:hover { background: rgba(239,68,68,.7); }
+.img-lightbox__hint {
+  position: absolute; bottom: 14px; right: 50%; transform: translateX(50%);
+  color: rgba(255,255,255,.55); font-size: .75rem;
+  background: rgba(0,0,0,.45); border-radius: 20px;
+  padding: .3rem .9rem; pointer-events: none;
+}
+.carousel-item img { cursor: zoom-in; }
+
 /* ── Theme toggle buttons ── */
 .theme-toggle-btn {
   display: inline-flex; align-items: center; justify-content: center;

@@ -53,13 +53,10 @@ async def get_properties(
     # Build query
     query = select(Property).where(Property.is_active == True)
 
-    # Server-enforced isolation: admins bypass, regular users are filtered by their divar_phone
-    is_privileged = current_user and current_user.role in ("super_admin", "admin")
-    effective_phone = None if is_privileged else (
-        (current_user.divar_phone if current_user else None) or owner_phone or None
-    )
-    if effective_phone:
-        query = query.where(Property.owner_phone == effective_phone)
+    # All roles see every scraped property; owner_phone remains available
+    # as an explicit opt-in filter only
+    if owner_phone:
+        query = query.where(Property.owner_phone == owner_phone)
 
     # Apply filters
     if city:

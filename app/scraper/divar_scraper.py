@@ -2142,8 +2142,19 @@ class DivarScraper:
         has_balcony: Optional[bool] = None,
         advertiser_type: Optional[str] = None,
         max_age_hours: Optional[int] = None,
+        posted_date: Optional[str] = None,
     ) -> ScrapingJob:
         """Start a complete scraping job for a city and category"""
+
+        # Date mode: scrape ALL listings published on this exact day,
+        # ignoring max_items and max_age_hours
+        target_day = None
+        if posted_date:
+            try:
+                target_day = datetime.fromisoformat(posted_date).date()
+            except ValueError:
+                logger.warning(f"Invalid posted_date {posted_date!r} — ignoring")
+        date_mode = target_day is not None
         
         # Get or create job record
         if job_id:
@@ -2193,7 +2204,7 @@ class DivarScraper:
                 'has_images': has_images, 'has_elevator': has_elevator,
                 'has_parking': has_parking, 'has_storage': has_storage,
                 'has_balcony': has_balcony, 'advertiser_type': advertiser_type,
-                'max_age_hours': max_age_hours,
+                'max_age_hours': max_age_hours, 'posted_date': posted_date,
             }.items() if v is not None}
             logger.info(f"Starting scraping job for {city}/{category} | filters={active_filters}")
 
@@ -2202,27 +2213,37 @@ class DivarScraper:
             # asked for. Off-category (زمین/باغ) and filter drops mean we must
             # collect a larger candidate pool and keep scraping until max_items
             # are actually saved, then stop.
-            logger.info(f"Target: {max_items} saved listings")
+            if date_mode:
+                # Listings feeds are newest-first; grab a deep pool and keep
+                # everything posted on the target day, however many there are
+                logger.info(f"Target: ALL listings posted on {target_day}")
+                collect_target = 400
+            else:
+                logger.info(f"Target: {max_items} saved listings")
+                collect_target = min(max(max_items * 4, max_items + 50), 200)
 
-            collect_target = min(max(max_items * 4, max_items + 50), 200)
             all_listings = await self._collect_listings_robust(city, category, collect_target)
             seen_ids: set = {lst['divar_id'] for lst in all_listings}
 
             # Progress is measured against the requested target, not the raw pool,
             # so the dashboard reaches 100% exactly when max_items are saved.
-            job.total_items = max_items
+            # In date mode the target is unknown, so progress tracks the pool.
+            job.total_items = len(all_listings) if date_mode else max_items
             await self.db_session.commit()
 
             logger.info(
                 f"Collected {len(all_listings)} candidate listings; "
-                f"will keep scraping until {max_items} are saved"
+                + (f"keeping all from {target_day}" if date_mode
+                   else f"will keep scraping until {max_items} are saved")
             )
+            older_streak = 0  # consecutive listings older than target_day
             
             # Scrape each property detail
             for i, listing in enumerate(all_listings):
                 try:
-                    # Stop as soon as the requested number of listings are saved.
-                    if job.new_items >= max_items:
+                    # Stop as soon as the requested number of listings are saved
+                    # (no cap in date mode — the whole day is wanted).
+                    if not date_mode and job.new_items >= max_items:
                         logger.info(f"Reached target of {max_items} saved listings — stopping")
                         break
 
@@ -2324,13 +2345,38 @@ class DivarScraper:
                                 skip = _skip(f"advertiser_type {actual_type} != {advertiser_type}")
 
                         # ── Age filter ─────────────────────────────────────────────
-                        if not skip and max_age_hours:
+                        if not skip and max_age_hours and not date_mode:
                             posted = detail.get('posted_at')
                             if posted and posted < datetime.now() - timedelta(hours=max_age_hours):
                                 skip = _skip(f"posted_at {posted} older than {max_age_hours}h")
 
+                        # ── Exact publish-date filter (date mode) ─────────────────
+                        if not skip and date_mode:
+                            posted = detail.get('posted_at')
+                            if not posted:
+                                skip = _skip("posted_at unknown; date filter active")
+                            elif posted.date() > target_day:
+                                skip = _skip(f"posted {posted.date()} is after {target_day}")
+                            elif posted.date() < target_day:
+                                older_streak += 1
+                                skip = _skip(
+                                    f"posted {posted.date()} is before {target_day} "
+                                    f"(older streak {older_streak})"
+                                )
+                            else:
+                                older_streak = 0
+
+                        # Feeds are newest-first (with some promoted posts mixed in);
+                        # a long run of older posts means the target day is exhausted
+                        if date_mode and older_streak >= 15:
+                            logger.info(
+                                f"{older_streak} consecutive listings older than "
+                                f"{target_day} — day exhausted, stopping"
+                            )
+                            break
+
                         if skip:
-                            job.scraped_items = min(job.new_items, max_items)
+                            job.scraped_items = (i + 1) if date_mode else min(job.new_items, max_items)
                             await self.db_session.commit()
                             continue
 
@@ -2356,7 +2402,7 @@ class DivarScraper:
                         job.failed_items += 1
                     # detail is False = off-category skip; don't count as failure
 
-                    job.scraped_items = min(job.new_items, max_items)
+                    job.scraped_items = (i + 1) if date_mode else min(job.new_items, max_items)
                     await self.db_session.commit()
 
                     await self._human_like_delay()
