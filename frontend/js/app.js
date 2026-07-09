@@ -1500,9 +1500,18 @@ function _initScraperDatePicker() {
 
 function _onScraperDateChange() {
     const hasDate = !!document.getElementById('scraper-posted-date').value.trim();
-    // In date mode the whole day is scraped — the count is irrelevant
-    document.getElementById('scraper-pages-wrap').classList.toggle('d-none', hasDate);
-    document.getElementById('scraper-max-age').disabled = hasDate;
+    const pages = document.getElementById('scraper-pages');
+    // In date mode the count is an optional cap: empty = the whole day
+    document.getElementById('scraper-pages-hint').classList.toggle('d-none', !hasDate);
+    if (hasDate) {
+        pages.value = '';
+        pages.placeholder = 'خالی = همه آگهی‌های آن روز';
+        pages.removeAttribute('min');
+    } else {
+        pages.placeholder = '';
+        pages.setAttribute('min', '1');
+        if (!pages.value) pages.value = '50';
+    }
 }
 
 function clearScraperDate() {
@@ -1521,8 +1530,12 @@ async function startScraping(e) {
 
     const city     = document.getElementById('scraper-city').value;
     const category = document.getElementById('scraper-category').value;
-    const maxItems = parseInt(document.getElementById('scraper-pages').value);
+    let maxItems   = parseInt(document.getElementById('scraper-pages').value);
     const downloadImages = document.getElementById('scraper-images').checked;
+    const hasPostedDate = !!document.getElementById('scraper-posted-date')?.value.trim();
+    // Empty count: in date mode it means "the whole day" (send nothing);
+    // in normal mode fall back to the default of 50
+    if (isNaN(maxItems) && !hasPostedDate) maxItems = 50;
 
     const _chk = id => document.getElementById(id)?.checked ? true : null;
 
@@ -1550,18 +1563,13 @@ async function startScraping(e) {
         has_balcony:           _chk('scraper-has-balcony'),
         // آگهی‌دهنده
         advertiser_type:       document.getElementById('scraper-advertiser-type')?.value || null,
-        // زمان انتشار
-        max_age_hours:         _intOrNull('scraper-max-age'),
     };
 
-    // Date mode: scrape everything posted on the selected Jalali day
+    // Date mode: scrape the selected Jalali day (count becomes an optional cap)
     const postedJalali = document.getElementById('scraper-posted-date')?.value.trim() || '';
     if (postedJalali) {
         const g = jalaliToGregorian(postedJalali);
-        if (g) {
-            filters.posted_date = g;
-            filters.max_age_hours = null;
-        }
+        if (g) filters.posted_date = g;
     }
 
     // Check cookie status before scraping
@@ -1585,10 +1593,10 @@ async function executeBulkScraping(city, category, maxItems, downloadImages, fil
         const body = {
             city,
             category,
-            max_items: maxItems,
             download_images: downloadImages,
             ...cleanFilters,
         };
+        if (Number.isFinite(maxItems) && maxItems > 0) body.max_items = maxItems;
         if (session) body.divar_phone = session.phone_number;
 
         const result = await apiCall('/scraper/start', {

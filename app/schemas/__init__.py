@@ -101,7 +101,9 @@ class ScrapingJobCreate(BaseModel):
     """Schema for creating a scraping job"""
     city: str
     category: str
-    max_items: int = 100
+    # Optional in date mode (posted_date set): empty = the whole day,
+    # a number = cap. In normal mode the backend falls back to 100.
+    max_items: Optional[int] = None
     download_images: bool = True
     divar_phone: Optional[str] = None
     # Price filters

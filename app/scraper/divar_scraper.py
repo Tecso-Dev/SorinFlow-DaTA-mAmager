@@ -2146,8 +2146,9 @@ class DivarScraper:
     ) -> ScrapingJob:
         """Start a complete scraping job for a city and category"""
 
-        # Date mode: scrape ALL listings published on this exact day,
-        # ignoring max_items and max_age_hours
+        # Date mode: scrape listings published on this exact day. There,
+        # max_items is an optional cap (None = the whole day); in normal
+        # mode it falls back to 100.
         target_day = None
         if posted_date:
             try:
@@ -2155,6 +2156,10 @@ class DivarScraper:
             except ValueError:
                 logger.warning(f"Invalid posted_date {posted_date!r} — ignoring")
         date_mode = target_day is not None
+        if not date_mode:
+            max_items = max_items or 100
+        # Progress is pool-based only when there is no numeric target at all
+        pool_progress = date_mode and not max_items
         
         # Get or create job record
         if job_id:
@@ -2215,8 +2220,9 @@ class DivarScraper:
             # are actually saved, then stop.
             if date_mode:
                 # Listings feeds are newest-first; grab a deep pool and keep
-                # everything posted on the target day, however many there are
-                logger.info(f"Target: ALL listings posted on {target_day}")
+                # what was posted on the target day (optionally capped)
+                cap_label = f"up to {max_items}" if max_items else "ALL"
+                logger.info(f"Target: {cap_label} listings posted on {target_day}")
                 collect_target = 400
             else:
                 logger.info(f"Target: {max_items} saved listings")
@@ -2227,13 +2233,13 @@ class DivarScraper:
 
             # Progress is measured against the requested target, not the raw pool,
             # so the dashboard reaches 100% exactly when max_items are saved.
-            # In date mode the target is unknown, so progress tracks the pool.
-            job.total_items = len(all_listings) if date_mode else max_items
+            # With no numeric target (whole-day mode), progress tracks the pool.
+            job.total_items = len(all_listings) if pool_progress else max_items
             await self.db_session.commit()
 
             logger.info(
                 f"Collected {len(all_listings)} candidate listings; "
-                + (f"keeping all from {target_day}" if date_mode
+                + (f"keeping {cap_label} from {target_day}" if date_mode
                    else f"will keep scraping until {max_items} are saved")
             )
             older_streak = 0  # consecutive listings older than target_day
@@ -2241,9 +2247,9 @@ class DivarScraper:
             # Scrape each property detail
             for i, listing in enumerate(all_listings):
                 try:
-                    # Stop as soon as the requested number of listings are saved
-                    # (no cap in date mode — the whole day is wanted).
-                    if not date_mode and job.new_items >= max_items:
+                    # Stop as soon as the numeric target is reached
+                    # (in whole-day mode max_items is None — no cap).
+                    if max_items and job.new_items >= max_items:
                         logger.info(f"Reached target of {max_items} saved listings — stopping")
                         break
 
@@ -2376,7 +2382,7 @@ class DivarScraper:
                             break
 
                         if skip:
-                            job.scraped_items = (i + 1) if date_mode else min(job.new_items, max_items)
+                            job.scraped_items = (i + 1) if pool_progress else min(job.new_items, max_items)
                             await self.db_session.commit()
                             continue
 
@@ -2402,7 +2408,7 @@ class DivarScraper:
                         job.failed_items += 1
                     # detail is False = off-category skip; don't count as failure
 
-                    job.scraped_items = (i + 1) if date_mode else min(job.new_items, max_items)
+                    job.scraped_items = (i + 1) if pool_progress else min(job.new_items, max_items)
                     await self.db_session.commit()
 
                     await self._human_like_delay()

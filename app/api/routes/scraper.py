@@ -31,7 +31,7 @@ async def run_scraping_job(
     job_id: str,
     city: str,
     category: str,
-    max_items: int,
+    max_items: Optional[int],
     download_images: bool,
     db_url: str,
     divar_phone: str = None,
