@@ -13,7 +13,7 @@ import io
 from app.database import get_db
 from app.models.lead import Lead
 from app.models.property import Property
-from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog, Customer
+from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance
 from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
@@ -490,6 +490,98 @@ async def delete_customer(customer_id: int, db: AsyncSession = Depends(get_db)):
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     await db.delete(customer)
+    await db.commit()
+    return {"success": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DAILY PERFORMANCE (فرم ارزیابی عملکرد روزانه — DPA)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DPA_INT_FIELDS = (
+    "target_points", "new_files", "showings_count", "offers_count", "closed_count",
+    "bonus_exclusive", "bonus_offer", "bonus_close",
+    "pen_crm_delay", "pen_cancel", "pen_hot_lead",
+)
+_DPA_TEXT_FIELDS = ("agent_name", "date_jalali", "mentor_feedback", "rca")
+_DPA_TASK_KEYS = {key for key, _ in DailyPerformance.BASE_TASKS}
+
+
+def _apply_dpa_payload(dpa: DailyPerformance, data: dict) -> None:
+    for field in _DPA_TEXT_FIELDS:
+        if field in data:
+            setattr(dpa, field, (str(data[field]).strip() or None) if data[field] is not None else None)
+    if data.get("role") in ("hunter", "closer"):
+        dpa.role = data["role"]
+    for field in _DPA_INT_FIELDS:
+        if field in data:
+            try:
+                setattr(dpa, field, max(int(data[field] or 0), 0))
+            except (TypeError, ValueError):
+                pass
+    if isinstance(data.get("base_tasks"), dict):
+        dpa.base_tasks = {k: bool(v) for k, v in data["base_tasks"].items() if k in _DPA_TASK_KEYS}
+
+
+@router.get("/dpa")
+async def list_dpa(
+    search: Optional[str] = None,
+    date_jalali: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(DailyPerformance).order_by(DailyPerformance.created_at.desc())
+    if search:
+        query = query.where(DailyPerformance.agent_name.ilike(f"%{search.strip()}%"))
+    if date_jalali:
+        query = query.where(DailyPerformance.date_jalali == date_jalali.strip())
+    count = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
+    items = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
+    return {"items": [d.to_dict() for d in items], "total": count}
+
+
+@router.post("/dpa")
+async def create_dpa(data: dict, db: AsyncSession = Depends(get_db)):
+    if not str(data.get("agent_name") or "").strip():
+        raise HTTPException(status_code=400, detail="agent_name is required")
+    dpa = DailyPerformance(agent_name=str(data["agent_name"]).strip())
+    _apply_dpa_payload(dpa, data)
+    db.add(dpa)
+    await db.commit()
+    await db.refresh(dpa)
+    return dpa.to_dict()
+
+
+@router.get("/dpa/{dpa_id}")
+async def get_dpa(dpa_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DailyPerformance).where(DailyPerformance.id == dpa_id))
+    dpa = result.scalar_one_or_none()
+    if not dpa:
+        raise HTTPException(status_code=404, detail="DPA record not found")
+    return dpa.to_dict()
+
+
+@router.put("/dpa/{dpa_id}")
+async def update_dpa(dpa_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DailyPerformance).where(DailyPerformance.id == dpa_id))
+    dpa = result.scalar_one_or_none()
+    if not dpa:
+        raise HTTPException(status_code=404, detail="DPA record not found")
+    _apply_dpa_payload(dpa, data)
+    dpa.updated_at = datetime.now()
+    await db.commit()
+    await db.refresh(dpa)
+    return dpa.to_dict()
+
+
+@router.delete("/dpa/{dpa_id}")
+async def delete_dpa(dpa_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(DailyPerformance).where(DailyPerformance.id == dpa_id))
+    dpa = result.scalar_one_or_none()
+    if not dpa:
+        raise HTTPException(status_code=404, detail="DPA record not found")
+    await db.delete(dpa)
     await db.commit()
     return {"success": True}
 

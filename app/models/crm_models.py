@@ -266,3 +266,99 @@ class Customer(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class DailyPerformance(Base):
+    """فرم ارزیابی عملکرد روزانه (DPA) — Data-Driven Management
+
+    Mirrors the Arad daily scoring sheet: base operations checklist,
+    daily stats, bonus points, penalties and mentor feedback.
+    Score = base (sum of done task weights, max 100) + bonus - penalty.
+    """
+    __tablename__ = "crm_daily_performance"
+
+    # (task key, weight) — the rest slot (استراحت) has weight 0 and no checkbox
+    BASE_TASKS = (
+        ("prospecting", 25),   # شکار فایل — تماس سرد و ثبت لید جدید (۰۹:۰۰-۱۰:۳۰)
+        ("divar_seo", 15),     # هک الگوریتم دیوار — بازتولید آگهی و سئو محلی (۱۰:۳۰-۱۲:۰۰)
+        ("followup", 20),      # حلقه پیگیری — تماس با مشتریان در حال مذاکره (۱۲:۰۰-۱۴:۰۰)
+        ("showings", 30),      # بازدید حضوری — پرزنت ملک و مدیریت اعتراضات (۱۶:۰۰-۱۹:۰۰)
+        ("crm_report", 10),    # گزارش CRM — ثبت دقیق نتایج (۱۹:۰۰-۲۰:۰۰)
+    )
+    BONUS_POINTS = {"exclusive": 30, "offer": 20, "close": 50}
+    PENALTY_POINTS = {"crm_delay": 10, "cancel": 15, "hot_lead": 20}
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # ── سربرگ ──
+    agent_name = Column(String(200), nullable=False, index=True)   # نام مشاور
+    role = Column(String(20), default="hunter")                    # hunter|closer
+    date_jalali = Column(String(20), index=True)                   # ۱۴۰۵/۰۴/۱۸
+    target_points = Column(Integer, default=100)
+
+    # ── آمار روز ──
+    new_files = Column(Integer, default=0)        # فایل‌های جدید ثبت‌شده
+    showings_count = Column(Integer, default=0)   # تعداد بازدید
+    offers_count = Column(Integer, default=0)     # آفرهای دریافتی
+    closed_count = Column(Integer, default=0)     # قرارداد نهایی
+
+    # ── گام‌های عملیاتی پایه: {"prospecting": true, ...} ──
+    base_tasks = Column(JSON, default=dict)
+
+    # ── امتیاز انفجار (تعداد هر مورد) ──
+    bonus_exclusive = Column(Integer, default=0)  # ثبت فایل انحصاری +۳۰
+    bonus_offer = Column(Integer, default=0)      # دریافت آفر کتبی و بیعانه +۲۰
+    bonus_close = Column(Integer, default=0)      # بستن قرارداد نهایی +۵۰
+
+    # ── اخطار سیستم (تعداد هر مورد) ──
+    pen_crm_delay = Column(Integer, default=0)    # تاخیر در ثبت CRM -۱۰
+    pen_cancel = Column(Integer, default=0)       # کنسل شدن بازدید مقصر مشاور -۱۵
+    pen_hot_lead = Column(Integer, default=0)     # عدم پیگیری لید داغ -۲۰
+
+    # ── بازخورد ──
+    mentor_feedback = Column(Text)                # بازخورد روزانه منتور / توصیه فردا
+    rca = Column(Text)                            # تحلیل موانع: چرا بازدید به قرارداد نرسید؟
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def scores(self):
+        tasks = self.base_tasks or {}
+        base = sum(w for key, w in self.BASE_TASKS if tasks.get(key))
+        bonus = (
+            (self.bonus_exclusive or 0) * self.BONUS_POINTS["exclusive"]
+            + (self.bonus_offer or 0) * self.BONUS_POINTS["offer"]
+            + (self.bonus_close or 0) * self.BONUS_POINTS["close"]
+        )
+        penalty = (
+            (self.pen_crm_delay or 0) * self.PENALTY_POINTS["crm_delay"]
+            + (self.pen_cancel or 0) * self.PENALTY_POINTS["cancel"]
+            + (self.pen_hot_lead or 0) * self.PENALTY_POINTS["hot_lead"]
+        )
+        return {"base_score": base, "bonus_score": bonus,
+                "penalty_score": penalty, "total_score": base + bonus - penalty}
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "agent_name": self.agent_name,
+            "role": self.role,
+            "date_jalali": self.date_jalali,
+            "target_points": self.target_points,
+            "new_files": self.new_files,
+            "showings_count": self.showings_count,
+            "offers_count": self.offers_count,
+            "closed_count": self.closed_count,
+            "base_tasks": self.base_tasks or {},
+            "bonus_exclusive": self.bonus_exclusive,
+            "bonus_offer": self.bonus_offer,
+            "bonus_close": self.bonus_close,
+            "pen_crm_delay": self.pen_crm_delay,
+            "pen_cancel": self.pen_cancel,
+            "pen_hot_lead": self.pen_hot_lead,
+            "mentor_feedback": self.mentor_feedback,
+            "rca": self.rca,
+            **self.scores(),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
