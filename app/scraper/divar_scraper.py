@@ -6,7 +6,7 @@ import asyncio
 import random
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional, Dict, List, Any
 from pathlib import Path
 from urllib.parse import urljoin
@@ -747,14 +747,34 @@ class DivarScraper:
         logger.info(f"[dom] collected {len(all_listings)} listings (target={target_count})")
         return all_listings[:target_count]
 
+    @staticmethod
+    def _cursor_to_datetime(lpd: Optional[int]) -> Optional[datetime]:
+        """Convert the API's last_post_date cursor (epoch in s/ms/µs/ns) to a datetime."""
+        if not lpd:
+            return None
+        v = float(lpd)
+        for div in (1, 1e3, 1e6, 1e9):
+            ts = v / div
+            if 1e9 <= ts < 4e9:  # plausible epoch-seconds range (2001..2096)
+                try:
+                    return datetime.fromtimestamp(ts)
+                except (OverflowError, OSError, ValueError):
+                    return None
+        return None
+
     async def _collect_listings_robust(
-        self, city: str, category: str, target_count: int
+        self, city: str, category: str, target_count: int,
+        until_day: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
         """Primary collection method: browser DOM extraction with direct API supplement.
 
         Strategy 1 — browser DOM: navigate the listing page, switch to list view,
         scroll while reading live DOM links + intercepting API responses.
         Strategy 2 — direct API: httpx GET to api.divar.ir with cursor pagination.
+
+        With until_day set (exact-date scraping), target_count is ignored as a
+        stop condition: pagination continues until the feed cursor moves past
+        that day, so the pool covers every post of the day (safety cap 1500).
         """
         all_listings: List[Dict[str, Any]] = []
         seen_ids: set = set()
@@ -770,14 +790,15 @@ class DivarScraper:
         except Exception as e:
             logger.error(f"[robust] DOM strategy failed: {e}")
 
-        if len(all_listings) >= target_count:
+        if until_day is None and len(all_listings) >= target_count:
             return all_listings[:target_count]
 
         # Strategy 2: direct API with cursor pagination
-        remaining = target_count - len(all_listings)
+        remaining = max(target_count - len(all_listings), 0)
         last_post_date: Optional[int] = None
         consecutive_empty = 0
-        for page_num in range(1, max(8, (remaining // 20) + 3) + 1):
+        max_pages = 75 if until_day else max(8, (remaining // 20) + 3)
+        for page_num in range(1, max_pages + 1):
             try:
                 batch, lpd = await self._fetch_listings_direct_api(
                     city, category, page_num, last_post_date
@@ -790,11 +811,23 @@ class DivarScraper:
                         new_count += 1
                 logger.info(
                     f"[robust] API page={page_num} got={len(batch)} "
-                    f"new={new_count} total={len(all_listings)}/{target_count}"
+                    f"new={new_count} total={len(all_listings)}"
+                    + ("" if until_day else f"/{target_count}")
                 )
                 if lpd:
                     last_post_date = lpd
-                if len(all_listings) >= target_count:
+                if until_day:
+                    if len(all_listings) >= 1500:
+                        logger.info("[robust] date-mode safety cap (1500) reached")
+                        break
+                    cursor_dt = self._cursor_to_datetime(last_post_date)
+                    if cursor_dt and cursor_dt.date() < until_day:
+                        logger.info(
+                            f"[robust] feed cursor {cursor_dt} moved past "
+                            f"{until_day} — day fully covered"
+                        )
+                        break
+                elif len(all_listings) >= target_count:
                     break
                 if not batch:
                     consecutive_empty += 1
@@ -807,7 +840,7 @@ class DivarScraper:
                 logger.error(f"[robust] API page={page_num} failed: {e}")
                 break
 
-        return all_listings[:target_count]
+        return all_listings if until_day else all_listings[:target_count]
 
     def _parse_api_response(self, data: dict) -> tuple:
         """Parse Divar API JSON response (handles multiple known response shapes).
@@ -2219,16 +2252,20 @@ class DivarScraper:
             # collect a larger candidate pool and keep scraping until max_items
             # are actually saved, then stop.
             if date_mode:
-                # Listings feeds are newest-first; grab a deep pool and keep
-                # what was posted on the target day (optionally capped)
+                # Listings feeds are newest-first; the collector paginates
+                # until the feed cursor moves past the target day, so the pool
+                # covers every post of that day (however many there are)
                 cap_label = f"up to {max_items}" if max_items else "ALL"
                 logger.info(f"Target: {cap_label} listings posted on {target_day}")
-                collect_target = 400
+                collect_target = 400  # DOM-phase batch; API phase is date-driven
             else:
                 logger.info(f"Target: {max_items} saved listings")
                 collect_target = min(max(max_items * 4, max_items + 50), 200)
 
-            all_listings = await self._collect_listings_robust(city, category, collect_target)
+            all_listings = await self._collect_listings_robust(
+                city, category, collect_target,
+                until_day=target_day if date_mode else None,
+            )
             seen_ids: set = {lst['divar_id'] for lst in all_listings}
 
             # Progress is measured against the requested target, not the raw pool,
