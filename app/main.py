@@ -6,6 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi import FastAPI, Request
+from app.auth.dependencies import require_super_admin as _require_super_admin
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -54,10 +55,15 @@ async def lifespan(app: FastAPI):
     # Start reminder background checker
     reminder_task = asyncio.create_task(_reminder_checker())
 
+    # Start nightly backup scheduler (local snapshot + Telegram offsite copy)
+    from app.services.backup_service import backup_scheduler
+    backup_task = asyncio.create_task(backup_scheduler())
+
     yield
 
     # Cleanup
     reminder_task.cancel()
+    backup_task.cancel()
     logger.info("Shutting down...")
     await close_db()
     await close_redis()
@@ -214,6 +220,13 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "version": settings.app_version
     }
+
+
+# Manual backup trigger (super admin) — nightly run is automatic
+@app.post("/api/backup/run")
+async def run_backup_now(current_user=_require_super_admin):
+    from app.services.backup_service import run_backup
+    return await run_backup()
 
 
 # Public landing-page stats (no auth; cached 60s in Redis)
