@@ -82,12 +82,15 @@ main{position:relative;z-index:2}
 }
 @keyframes rise{from{opacity:0;transform:translateY(60px)}to{opacity:1;transform:none}}
 .hero-ring{
-  position:absolute;top:44%;right:34%;transform:translate(50%,-50%);
-  width:clamp(300px,44vw,640px);aspect-ratio:2/1;z-index:1;
+  position:absolute;top:30%;left:3vw;right:auto;transform:translateY(-50%);
+  width:clamp(240px,30vw,460px);aspect-ratio:2/1;z-index:1;
   pointer-events:none;filter:drop-shadow(0 0 46px rgba(240,166,255,.55));
   animation:ringFloat 7s ease-in-out infinite;
 }
-@keyframes ringFloat{0%,100%{transform:translate(50%,-50%) rotate(-3deg)}50%{transform:translate(50%,-53%) rotate(4deg)}}
+@keyframes ringFloat{0%,100%{transform:translateY(-50%) rotate(-3deg)}50%{transform:translateY(-56%) rotate(4deg)}}
+/* keep the mark off the headline on narrower screens */
+@media (max-width:1150px){.hero-ring{opacity:.28;top:22%}}
+@media (max-width:640px){.hero-ring{display:none}}
 .hero-side{
   position:absolute;left:6vw;bottom:18vh;max-width:300px;z-index:3;
   font-size:.82rem;color:var(--dim);line-height:2;text-align:left;direction:rtl;
