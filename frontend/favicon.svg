@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="wall" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#6d70f5"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4338ca"/>
+      <stop offset="100%" stop-color="#312e81"/>
+    </linearGradient>
+    <linearGradient id="roof" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="inf" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="#07070b"/>
+
+  <!-- ground shadow -->
+  <ellipse cx="32" cy="51.5" rx="19" ry="3.4" fill="#000" opacity="0.55"/>
+
+  <!-- 3D extrusion: right side face -->
+  <polygon points="44,28 50,24.5 50,44.5 44,48" fill="url(#side)"/>
+  <!-- 3D extrusion: roof top face -->
+  <polygon points="30,15 36,11.5 50,24.5 44,28" fill="url(#roof)"/>
+
+  <!-- front gable wall -->
+  <polygon points="30,15 44,28 44,48 16,48 16,28" fill="url(#wall)"/>
+  <!-- roof edge highlight -->
+  <polyline points="16,28 30,15 44,28" fill="none" stroke="#c4b5fd" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- infinity on the wall -->
+  <path d="M 21.5 39 C 21.5 34.8, 27 34.8, 30 39 C 33 43.2, 38.5 43.2, 38.5 39 C 38.5 34.8, 33 34.8, 30 39 C 27 43.2, 21.5 43.2, 21.5 39 Z"
+        fill="none" stroke="url(#inf)" stroke-width="3.1" stroke-linecap="round"/>
+</svg>
