@@ -1395,7 +1395,8 @@ html:not([data-theme="light"]) body::after {
   width: 460px; height: 460px; bottom: -160px; right: -120px;
   background: radial-gradient(circle, rgba(103,232,249,.10), transparent 65%);
 }
-#main-app, #login-page { position: relative; z-index: 1; }
+/* keep content above the orbs — #login-page is fixed already, don't touch its position */
+#main-app { position: relative; z-index: 1; }
 
 /* ── glass cards with top highlight ── */
 html:not([data-theme="light"]) .card,
