@@ -1401,7 +1401,7 @@ body, #sidebar, .topbar, .card, .login-card {
 html:not([data-theme="light"]) body::before,
 html:not([data-theme="light"]) body::after {
   content: '';
-  position: fixed; z-index: 0; pointer-events: none;
+  position: fixed; z-index: -1; pointer-events: none;
   border-radius: 50%; filter: blur(110px);
 }
 html:not([data-theme="light"]) body::before {
@@ -1412,8 +1412,9 @@ html:not([data-theme="light"]) body::after {
   width: 460px; height: 460px; bottom: -160px; right: -120px;
   background: radial-gradient(circle, rgba(103,232,249,.10), transparent 65%);
 }
-/* keep content above the orbs — #login-page is fixed already, don't touch its position */
-#main-app { position: relative; z-index: 1; }
+/* orbs sit on z-index:-1, so content needs no stacking tricks —
+   never give #main-app its own z-index: Bootstrap modals living inside it
+   would get trapped under the body-level .modal-backdrop */
 
 /* ── glass cards with top highlight ── */
 html:not([data-theme="light"]) .card,
