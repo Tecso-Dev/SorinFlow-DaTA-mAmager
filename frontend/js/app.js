@@ -58,7 +58,7 @@ function refreshChartTheme() {
         cityChart.update();
     }
     if (trendChart) {
-        trendChart.options.scales.x.grid.color = c.grid;
+        trendChart.options.scales.x.grid.color = 'transparent';
         trendChart.options.scales.y.grid.color = c.grid;
         trendChart.options.scales.x.ticks.color = c.tick;
         trendChart.options.scales.y.ticks.color = c.tick;
@@ -734,14 +734,51 @@ function updateHealthStatus(elementId, status) {
     element.textContent = text;
 }
 
+// ── Chart plugins: neon glow + doughnut center text ──
+const _sfGlow = {
+    id: 'sfGlow',
+    beforeDatasetsDraw(chart, args, opts) {
+        chart.ctx.save();
+        chart.ctx.shadowColor = (opts && opts.color) || 'rgba(167,139,250,.55)';
+        chart.ctx.shadowBlur = (opts && opts.blur) || 18;
+    },
+    afterDatasetsDraw(chart) { chart.ctx.restore(); }
+};
+const _sfCenter = {
+    id: 'sfCenter',
+    afterDraw(chart, args, opts) {
+        if (!opts || !opts.big) return;
+        const meta = chart.getDatasetMeta(0);
+        if (!meta || !meta.data || !meta.data.length) return;
+        const { x, y } = meta.data[0];
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = "800 26px Vazirmatn";
+        ctx.fillStyle = opts.color || '#fff';
+        ctx.fillText(opts.big, x, y - 9);
+        ctx.font = "500 12px Vazirmatn";
+        ctx.fillStyle = opts.subColor || '#8f96a8';
+        ctx.fillText(opts.sub || '', x, y + 17);
+        ctx.restore();
+    }
+};
+const _sfTooltip = themeC => ({
+    rtl: true, textDirection: 'rtl',
+    backgroundColor: 'rgba(12,12,20,.92)',
+    borderColor: 'rgba(167,139,250,.35)', borderWidth: 1,
+    titleFont: { family: 'Vazirmatn', weight: '700' },
+    bodyFont: { family: 'Vazirmatn' },
+    padding: 12, cornerRadius: 12, displayColors: false,
+});
+
 function updateCityChart(data) {
     const ctx = document.getElementById('cityChart').getContext('2d');
-    
-    if (cityChart) {
-        cityChart.destroy();
-    }
-    
+    if (cityChart) cityChart.destroy();
+
     const themeC = chartColors();
+    const total = data.reduce((s, d) => s + d.count, 0);
+
     cityChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
@@ -749,20 +786,41 @@ function updateCityChart(data) {
             datasets: [{
                 data: data.map(d => d.count),
                 backgroundColor: [
-                    '#a78bfa','#f0a6ff','#67e8f9','#6366f1','#f59e0b',
-                    '#ef4444','#8b5cf6','#14b8a6','#ec4899','#64748b'
+                    '#a78bfa','#f0a6ff','#67e8f9','#6366f1','#fcd34d',
+                    '#fb7185','#8b5cf6','#2dd4bf','#ec4899','#64748b'
                 ],
                 borderColor: themeC.surface,
-                borderWidth: 3,
+                borderWidth: 0,
+                borderRadius: 10,
+                spacing: 4,
+                hoverOffset: 16,
             }]
         },
+        plugins: [_sfGlow, _sfCenter],
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            cutout: '74%',
+            animation: { duration: 1100, easing: 'easeOutQuart', animateRotate: true },
             plugins: {
+                sfGlow: { color: 'rgba(167,139,250,.4)', blur: 22 },
+                sfCenter: {
+                    big: formatNumber(total), sub: 'ملک ثبت‌شده',
+                    color: themeC.text === '#475569' ? '#1e2740' : '#f2f3f8',
+                    subColor: themeC.text,
+                },
                 legend: {
                     position: 'right',
-                    labels: { color: themeC.text, font: { family: 'Vazirmatn' }, boxWidth: 12 }
+                    labels: {
+                        color: themeC.text, font: { family: 'Vazirmatn', size: 12 },
+                        usePointStyle: true, pointStyle: 'circle', boxWidth: 8, padding: 14,
+                    }
+                },
+                tooltip: {
+                    ..._sfTooltip(themeC),
+                    callbacks: {
+                        label: c => ` ${formatNumber(c.parsed)} ملک (${formatNumber(Math.round(c.parsed * 100 / total))}٪)`
+                    }
                 }
             }
         }
@@ -770,42 +828,72 @@ function updateCityChart(data) {
 }
 
 function updateTrendChart(data) {
-    const ctx = document.getElementById('trendChart').getContext('2d');
-    
-    if (trendChart) {
-        trendChart.destroy();
-    }
-    
+    const canvas = document.getElementById('trendChart');
+    const ctx = canvas.getContext('2d');
+    if (trendChart) trendChart.destroy();
+
     const themeC = chartColors();
+
+    // holographic vertical gradient under the line
+    const h = canvas.parentElement?.clientHeight || 260;
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, 'rgba(240,166,255,.34)');
+    grad.addColorStop(.5, 'rgba(167,139,250,.14)');
+    grad.addColorStop(1, 'rgba(103,232,249,.02)');
+
+    const labels = data.map(d => {
+        const dt = new Date(d.date);
+        return isNaN(dt) ? d.date
+            : dt.toLocaleDateString('fa-IR', { day: 'numeric', month: 'long' });
+    });
+
     trendChart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: data.map(d => d.date),
+            labels,
             datasets: [{
                 label: 'تعداد اسکرپ',
                 data: data.map(d => d.count),
-                borderColor: '#a78bfa',
-                backgroundColor: 'rgba(167,139,250,0.12)',
+                borderColor: '#c4a5fc',
+                backgroundColor: grad,
                 pointBackgroundColor: '#f0a6ff',
                 pointBorderColor: themeC.surface,
-                pointRadius: 4,
+                pointRadius: 0,
+                pointHoverRadius: 7,
+                pointHoverBorderWidth: 3,
+                borderWidth: 3.5,
                 fill: true,
-                tension: 0.4,
+                tension: 0.45,
             }]
         },
+        plugins: [_sfGlow],
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            interaction: { mode: 'index', intersect: false },
+            animation: { duration: 1300, easing: 'easeOutQuart' },
+            plugins: {
+                sfGlow: { color: 'rgba(196,165,252,.5)', blur: 14 },
+                legend: { display: false },
+                tooltip: {
+                    ..._sfTooltip(themeC),
+                    callbacks: { label: c => ` ${formatNumber(c.parsed.y)} آگهی اسکرپ شد` }
+                }
+            },
             scales: {
                 x: {
-                    grid: { color: themeC.grid },
-                    ticks: { color: themeC.tick, font: { family: 'Vazirmatn' } }
+                    grid: { color: 'transparent' },
+                    border: { display: false },
+                    ticks: { color: themeC.tick, font: { family: 'Vazirmatn', size: 11 }, maxRotation: 0 }
                 },
                 y: {
                     beginAtZero: true,
-                    grid: { color: themeC.grid },
-                    ticks: { color: themeC.tick, font: { family: 'Vazirmatn' } }
+                    grid: { color: themeC.grid, tickBorderDash: [4, 5] },
+                    border: { display: false, dash: [4, 5] },
+                    ticks: {
+                        color: themeC.tick, font: { family: 'Vazirmatn', size: 11 },
+                        callback: v => formatNumber(v), maxTicksLimit: 6, padding: 8,
+                    }
                 }
             }
         }
