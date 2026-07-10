@@ -965,8 +965,11 @@ textarea.form-control { resize: vertical; }
 /* ════════════════════════════════════════════════════
    MISC UTILITIES
    ════════════════════════════════════════════════════ */
-.d-none { display: none !important; }
 .d-flex { display: flex !important; }
+/* d-none must come AFTER d-flex so elements carrying both classes
+   (e.g. #rent-filters toggled via d-none) actually hide — matches
+   Bootstrap's own utility ordering */
+.d-none { display: none !important; }
 .align-items-center { align-items: center !important; }
 .justify-content-between { justify-content: space-between !important; }
 .justify-content-center { justify-content: center !important; }
