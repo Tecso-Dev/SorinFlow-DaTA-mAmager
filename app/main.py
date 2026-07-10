@@ -8,7 +8,8 @@ from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from pathlib import Path
 from loguru import logger
 import sys
 
@@ -115,7 +116,7 @@ app.add_middleware(
 # API Key authentication middleware
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    public_paths = {"/health", "/", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info", "/api/config",
+    public_paths = {"/health", "/", "/favicon.svg", "/favicon.ico", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info", "/api/config",
                     "/api/users/token", "/api/users/token/verify-totp", "/api/users/me",
                     "/api/users/register"}
     is_dashboard = request.url.path.startswith("/dashboard")
@@ -212,22 +213,25 @@ async def health_check():
     }
 
 
-# Root redirect to dashboard
+# Root: public landing page (dashboard lives at /dashboard)
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """Redirect to admin dashboard"""
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>SorinFlow Divar Scraper</title>
-        <meta http-equiv="refresh" content="0; url=/dashboard" />
-    </head>
-    <body>
-        <p>Redirecting to <a href="/dashboard">Dashboard</a>...</p>
-    </body>
-    </html>
-    """
+    """Serve the marketing landing page"""
+    landing = Path("frontend/landing.html")
+    if landing.exists():
+        return HTMLResponse(landing.read_text(encoding="utf-8"))
+    return HTMLResponse('<meta http-equiv="refresh" content="0; url=/dashboard" />')
+
+
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon_svg():
+    return FileResponse("frontend/favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico():
+    # Browsers that blindly request .ico get the SVG (all modern ones accept it)
+    return FileResponse("frontend/favicon.svg", media_type="image/svg+xml")
 
 
 # Error handlers
