@@ -353,9 +353,9 @@ footer{
       <div class="ph">
         <div class="ph-bar"><i></i><i></i><i></i><span class="ph-url">sorinflow.com/dashboard</span></div>
         <div class="ph-stats">
-          <div class="ph-stat"><b>۱۲,۵۴۰</b><span>آگهی اسکرپ‌شده</span></div>
-          <div class="ph-stat"><b>۳,۴۰۸</b><span>لید فعال</span></div>
-          <div class="ph-stat"><b>۱۶۰</b><span>امتیاز DPA امروز</span></div>
+          <div class="ph-stat"><b id="mock-props">—</b><span>آگهی اسکرپ‌شده</span></div>
+          <div class="ph-stat"><b id="mock-leads">—</b><span>لید فعال</span></div>
+          <div class="ph-stat"><b id="mock-dpa">—</b><span>امتیاز DPA امروز</span></div>
         </div>
         <div class="ph-main">
           <div class="ph-chart"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
@@ -370,9 +370,9 @@ footer{
   </div>
 
   <div class="stats">
-    <div class="stat rv"><b data-count="12500">۰</b><span>آگهی اسکرپ‌شده</span></div>
-    <div class="stat rv rv-d1"><b data-count="3400">۰</b><span>لید ثبت‌شده</span></div>
-    <div class="stat rv rv-d2"><b data-count="98">۰</b><span>٪ دقت استخراج</span></div>
+    <div class="stat rv"><b data-count="0" id="st-props">۰</b><span>آگهی اسکرپ‌شده</span></div>
+    <div class="stat rv rv-d1"><b data-count="0" id="st-leads">۰</b><span>لید ثبت‌شده</span></div>
+    <div class="stat rv rv-d2"><b data-count="0" id="st-rate">۰</b><span>٪ دقت استخراج</span></div>
     <div class="stat rv rv-d3"><b data-count="24">۰</b><span>ساعته اسکرپ خودکار</span></div>
   </div>
 </section>
@@ -408,7 +408,7 @@ footer{
   <p class="lead rv rv-d2">برای دمو، پشتیبانی یا همکاری از هر کانالی که راحت‌ترید پیام بدهید.</p>
   <div class="contact-row">
     <div class="ccard rv"><div class="ic">✉️</div><h4>ایمیل</h4><p>info@sorinflow.com</p></div>
-    <div class="ccard rv rv-d1"><div class="ic">📱</div><h4>تلفن</h4><p>+98 905 383 3026</p></div>
+    <div class="ccard rv rv-d1"><div class="ic">📱</div><h4>تلفن</h4><p><a href="tel:09125005495">0912 500 5495</a></p></div>
     <div class="ccard rv rv-d2"><div class="ic">💬</div><h4>تلگرام</h4><p>@sorinflow</p></div>
   </div>
 </section>
@@ -435,7 +435,7 @@ const io = new IntersectionObserver(es => es.forEach(e => {
 }), { threshold: .15 });
 document.querySelectorAll('.rv').forEach(el => io.observe(el));
 
-/* ═══ counters ═══ */
+/* ═══ counters — fed by live stats ═══ */
 const fa = n => Number(n).toLocaleString('fa-IR');
 const cio = new IntersectionObserver(es => es.forEach(e => {
   if (!e.isIntersecting) return; cio.unobserve(e.target);
@@ -446,7 +446,25 @@ const cio = new IntersectionObserver(es => es.forEach(e => {
     if (p < 1) requestAnimationFrame(tick);
   })(t0);
 }), { threshold: .6 });
-document.querySelectorAll('[data-count]').forEach(el => cio.observe(el));
+
+/* real numbers from the platform (refreshed on every visit, cached 60s server-side) */
+(async () => {
+  try {
+    const s = await (await fetch('/api/public/stats')).json();
+    document.getElementById('st-props').dataset.count = s.total_properties;
+    document.getElementById('st-leads').dataset.count = s.total_leads;
+    document.getElementById('st-rate').dataset.count = s.phone_rate;
+    document.getElementById('mock-props').textContent = fa(s.total_properties);
+    document.getElementById('mock-leads').textContent = fa(s.total_leads);
+    document.getElementById('mock-dpa').textContent = s.dpa_today_top ? fa(s.dpa_today_top) : '—';
+  } catch (e) {
+    /* backend unreachable → leave graceful placeholders */
+    ['mock-props', 'mock-leads', 'mock-dpa'].forEach(id => {
+      document.getElementById(id).textContent = '—';
+    });
+  }
+  document.querySelectorAll('[data-count]').forEach(el => cio.observe(el));
+})();
 
 /* ═══ product list interactivity ═══ */
 document.querySelectorAll('#svc li').forEach(li => {

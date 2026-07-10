@@ -116,7 +116,7 @@ app.add_middleware(
 # API Key authentication middleware
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    public_paths = {"/health", "/", "/favicon.svg", "/favicon.ico", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info", "/api/config",
+    public_paths = {"/health", "/", "/favicon.svg", "/favicon.ico", "/api/public/stats", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info", "/api/config",
                     "/api/users/token", "/api/users/token/verify-totp", "/api/users/me",
                     "/api/users/register"}
     is_dashboard = request.url.path.startswith("/dashboard")
@@ -211,6 +211,47 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "version": settings.app_version
     }
+
+
+# Public landing-page stats (no auth; cached 60s in Redis)
+@app.get("/api/public/stats")
+async def public_stats():
+    import json as _json
+    from app.database import get_redis, async_session_maker
+    from sqlalchemy import select, func
+    from app.models.property import Property
+    from app.models.lead import Lead
+    from app.models.crm_models import DailyPerformance
+
+    redis = await get_redis()
+    cached = await redis.get("stats:public")
+    if cached:
+        return _json.loads(cached)
+
+    async with async_session_maker() as db:
+        total_properties = (await db.execute(
+            select(func.count(Property.id)).where(Property.is_active == True)
+        )).scalar() or 0
+        with_phone = (await db.execute(
+            select(func.count(Property.id)).where(
+                Property.is_active == True, Property.phone_number.isnot(None))
+        )).scalar() or 0
+        total_leads = (await db.execute(select(func.count(Lead.id)))).scalar() or 0
+
+        today = datetime.now().date()
+        dpa_rows = (await db.execute(
+            select(DailyPerformance).where(func.date(DailyPerformance.created_at) == today)
+        )).scalars().all()
+        dpa_top = max((d.scores()["total_score"] for d in dpa_rows), default=0)
+
+    data = {
+        "total_properties": total_properties,
+        "total_leads": total_leads,
+        "phone_rate": round(with_phone * 100 / total_properties) if total_properties else 0,
+        "dpa_today_top": dpa_top,
+    }
+    await redis.set("stats:public", _json.dumps(data), ex=60)
+    return data
 
 
 # Root: public landing page (dashboard lives at /dashboard)
