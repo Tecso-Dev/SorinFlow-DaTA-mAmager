@@ -310,7 +310,7 @@ footer{
 <!-- ═══ Hero ═══ -->
 <header class="hero" id="hero">
   <div id="hero-scene" style="transform-style:preserve-3d;will-change:transform">
-    <div id="hero3d-wrap" style="position:relative;width:min(560px,92vw);height:280px;margin:0 auto -10px;display:none"></div>
+    <div id="hero3d-wrap" style="position:relative;width:min(640px,94vw);height:340px;margin:0 auto -6px;display:none;filter:drop-shadow(0 30px 60px rgba(99,102,241,.25))"></div>
     <svg class="hero-inf" id="hero-inf-svg" viewBox="0 0 200 100">
       <defs>
         <linearGradient id="hg" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -521,76 +521,158 @@ document.querySelectorAll('.card3d').forEach(card => {
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script>
 (function init3D() {
-  if (typeof THREE === 'undefined') return;   // CDN blocked → keep SVG
+  if (typeof THREE === 'undefined') return;   // CDN blocked -> keep SVG
   const wrap = document.getElementById('hero3d-wrap');
   try {
+    const W = wrap.clientWidth || 560, H = 340;
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    renderer.setSize(wrap.clientWidth || 560, 280);
+    renderer.setSize(W, H);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
     wrap.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(38, (wrap.clientWidth || 560) / 280, .1, 100);
-    camera.position.set(0, 0, 7.2);
+    const camera = new THREE.PerspectiveCamera(40, W / H, .1, 100);
+    camera.position.set(0, 1.7, 8.4);
+    camera.lookAt(0, 0.25, 0);
 
-    // ── infinity (lemniscate) tube ──
+    /* ── palette ── */
+    const COL = {
+      wall:  '#efeaff', wall2: '#dcd6ff',
+      roof:  '#7c6cf6', roof2: '#5b8df7',
+      glow:  '#67e8f9', door: '#0ea5b7',
+      slab:  '#232447', slabTop: '#2c2e5c', rim: '#6366f1',
+    };
+
+    /* ── low-poly house factory ── */
+    function makeHouse({ w = 1.5, d = 1.15, h = 1.0, roofH = .8, wall = COL.wall, roof = COL.roof }) {
+      const g = new THREE.Group();
+      const mWall = new THREE.MeshStandardMaterial({ color: wall, flatShading: true, roughness: .85 });
+      const mRoof = new THREE.MeshStandardMaterial({ color: roof, flatShading: true, roughness: .55, metalness: .12 });
+      const mGlow = new THREE.MeshStandardMaterial({ color: COL.glow, emissive: COL.glow, emissiveIntensity: 1.6 });
+      const mDoor = new THREE.MeshStandardMaterial({ color: COL.door, roughness: .5 });
+
+      const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mWall);
+      body.position.y = h / 2; body.castShadow = true; g.add(body);
+
+      const roofMesh = new THREE.Mesh(
+        new THREE.ConeGeometry(Math.sqrt(w * w + d * d) / 2 + .07, roofH, 4), mRoof);
+      roofMesh.position.y = h + roofH / 2 - .01;
+      roofMesh.rotation.y = Math.PI / 4;
+      roofMesh.castShadow = true; g.add(roofMesh);
+
+      const door = new THREE.Mesh(new THREE.BoxGeometry(w * .22, h * .48, .05), mDoor);
+      door.position.set(0, h * .24, d / 2 + .026); g.add(door);
+
+      [-1, 1].forEach(sx => {
+        const win = new THREE.Mesh(new THREE.BoxGeometry(w * .2, h * .22, .04), mGlow);
+        win.position.set(sx * w * .3, h * .62, d / 2 + .022); g.add(win);
+      });
+
+      const chimney = new THREE.Mesh(new THREE.BoxGeometry(.14, .42, .14), mWall);
+      chimney.position.set(-w * .28, h + roofH * .55, -d * .18);
+      chimney.castShadow = true; g.add(chimney);
+      return g;
+    }
+
+    /* ── floating island ── */
+    const island = new THREE.Group();
+    scene.add(island);
+
+    const slab = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.05, 1.55, .5, 44),
+      new THREE.MeshStandardMaterial({ color: COL.slab, flatShading: false, roughness: .9 }));
+    slab.position.y = -.25; slab.receiveShadow = true; island.add(slab);
+
+    const top = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.05, 2.05, .08, 44),
+      new THREE.MeshStandardMaterial({ color: COL.slabTop, roughness: .95 }));
+    top.position.y = .04; top.receiveShadow = true; island.add(top);
+
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(2.06, .022, 12, 90),
+      new THREE.MeshStandardMaterial({ color: COL.rim, emissive: COL.rim, emissiveIntensity: 2.2 }));
+    rim.rotation.x = Math.PI / 2; rim.position.y = .085; island.add(rim);
+
+    const mainHouse = makeHouse({});
+    mainHouse.position.y = .08; island.add(mainHouse);
+
+    // little trees
+    [[1.15, .5], [-1.2, .35], [.6, -1.05]].forEach(([x, z]) => {
+      const tree = new THREE.Group();
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.045, .06, .3, 6),
+        new THREE.MeshStandardMaterial({ color: '#7c5a3c', roughness: 1 }));
+      trunk.position.y = .15;
+      const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(.24, 0),
+        new THREE.MeshStandardMaterial({ color: '#34d399', flatShading: true, roughness: .8 }));
+      crown.position.y = .44; crown.castShadow = true;
+      tree.add(trunk, crown);
+      tree.position.set(x, .08, z);
+      island.add(tree);
+    });
+
+    /* ── infinity halo behind the island ── */
     class Lemniscate extends THREE.Curve {
       getPoint(t) {
         const a = t * Math.PI * 2;
-        const s = 2.5 / (1 + Math.sin(a) * Math.sin(a));
-        return new THREE.Vector3(
-          s * Math.cos(a),
-          s * Math.sin(a) * Math.cos(a) * 0.9,
-          Math.sin(a * 2) * 0.35            // depth wobble → truly 3D
-        );
+        const s = 2.9 / (1 + Math.sin(a) * Math.sin(a));
+        return new THREE.Vector3(s * Math.cos(a), s * Math.sin(a) * Math.cos(a) * .85, 0);
       }
     }
-    const geo = new THREE.TubeGeometry(new Lemniscate(), 360, .3, 40, true);
-
-    // vertex colors: indigo → violet → cyan along the loop
+    const haloGeo = new THREE.TubeGeometry(new Lemniscate(), 300, .05, 20, true);
     const cA = new THREE.Color('#6366f1'), cB = new THREE.Color('#8b5cf6'), cC = new THREE.Color('#06b6d4');
-    const pos = geo.attributes.position, count = pos.count, colors = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      const u = (i / count);
+    const hp = haloGeo.attributes.position, hc = new Float32Array(hp.count * 3);
+    for (let i = 0; i < hp.count; i++) {
+      const u = i / hp.count;
       const c = u < .5 ? cA.clone().lerp(cB, u * 2) : cB.clone().lerp(cC, (u - .5) * 2);
-      colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+      hc[i*3] = c.r; hc[i*3+1] = c.g; hc[i*3+2] = c.b;
     }
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    haloGeo.setAttribute('color', new THREE.BufferAttribute(hc, 3));
+    const halo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, opacity: .9,
+      blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.position.set(0, 1.15, -2.3);
+    scene.add(halo);
 
-    const mat = new THREE.MeshPhysicalMaterial({
-      vertexColors: true, metalness: .55, roughness: .22,
-      clearcoat: .8, clearcoatRoughness: .25,
-      emissive: new THREE.Color('#1b1650'), emissiveIntensity: .55,
-    });
-    const knot = new THREE.Mesh(geo, mat);
-    scene.add(knot);
+    /* ── orbiting mini houses (this-way-and-that) ── */
+    const minis = [
+      { g: makeHouse({ w: .8, d: .6, h: .5, roofH: .42, roof: COL.roof2 }), phase: 0,   r: 3.3, y: 1.3, spin: .8 },
+      { g: makeHouse({ w: .65, d: .5, h: .42, roofH: .36 }),                 phase: 2.2, r: 3.7, y: .2,  spin: -.6 },
+      { g: makeHouse({ w: .55, d: .45, h: .38, roofH: .3, roof: COL.roof2 }), phase: 4.3, r: 3.1, y: 2.1, spin: .5 },
+    ];
+    minis.forEach(m => scene.add(m.g));
 
-    // ── lights ──
-    scene.add(new THREE.AmbientLight('#28244d', 1.6));
-    const l1 = new THREE.PointLight('#6366f1', 260); l1.position.set(5, 4, 6); scene.add(l1);
-    const l2 = new THREE.PointLight('#06b6d4', 220); l2.position.set(-5, -3, 5); scene.add(l2);
-    const l3 = new THREE.PointLight('#ffffff', 120); l3.position.set(0, 6, 3); scene.add(l3);
+    /* ── lights ── */
+    scene.add(new THREE.AmbientLight('#4a4a74', 1.5));
+    const sun = new THREE.DirectionalLight('#ffffff', 2.6);
+    sun.position.set(4.5, 8, 5); sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    scene.add(sun);
+    const pCyan = new THREE.PointLight('#06b6d4', 90); pCyan.position.set(-5, 2, 4); scene.add(pCyan);
+    const pViolet = new THREE.PointLight('#8b5cf6', 70); pViolet.position.set(5, -1, -3); scene.add(pViolet);
 
-    // ── floating particles ──
+    /* ── particles ── */
     const pGeo = new THREE.BufferGeometry();
-    const pN = 240, pPos = new Float32Array(pN * 3);
+    const pN = 260, pPos = new Float32Array(pN * 3);
     for (let i = 0; i < pN; i++) {
-      pPos[i*3] = (Math.random() - .5) * 14;
-      pPos[i*3+1] = (Math.random() - .5) * 8;
-      pPos[i*3+2] = (Math.random() - .5) * 6 - 1;
+      pPos[i*3] = (Math.random() - .5) * 16;
+      pPos[i*3+1] = (Math.random() - .5) * 9;
+      pPos[i*3+2] = (Math.random() - .5) * 7 - 1.5;
     }
     pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
     const points = new THREE.Points(pGeo, new THREE.PointsMaterial({
-      color: '#8b8cf5', size: .045, transparent: true, opacity: .7,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    }));
+      color: '#8b8cf5', size: .05, transparent: true, opacity: .65,
+      blending: THREE.AdditiveBlending, depthWrite: false }));
     scene.add(points);
 
-    // swap SVG → canvas
+    /* swap SVG -> canvas */
     document.getElementById('hero-inf-svg').style.display = 'none';
     wrap.style.display = 'block';
+    wrap.style.height = H + 'px';
 
-    // ── animate (mouse-reactive) ──
+    /* ── animate ── */
     let mx = 0, my = 0, smx = 0, smy = 0;
     addEventListener('pointermove', e => {
       mx = (e.clientX / innerWidth - .5) * 2;
@@ -602,17 +684,31 @@ document.querySelectorAll('.card3d').forEach(card => {
       requestAnimationFrame(loop);
       const t = clock.getElapsedTime();
       smx += (mx - smx) * .05; smy += (my - smy) * .05;
-      knot.rotation.y = t * .35 + smx * .55;
-      knot.rotation.x = Math.sin(t * .4) * .18 + smy * .4;
-      knot.position.y = Math.sin(t * .8) * .12;
+
+      island.rotation.y = t * .28 + smx * .6;
+      island.position.y = Math.sin(t * .85) * .14 - .1;
+      island.rotation.x = smy * .12;
+
+      halo.rotation.y = Math.sin(t * .3) * .25 + smx * .3;
+      halo.position.y = 1.15 + Math.sin(t * .6) * .1;
+
+      minis.forEach(m => {
+        const a = t * .32 + m.phase;
+        m.g.position.set(Math.cos(a) * m.r, m.y + Math.sin(t * .9 + m.phase) * .28 - .3, Math.sin(a) * 1.7 - .4);
+        m.g.rotation.y = t * m.spin;
+      });
+
       points.rotation.y = t * .04;
+      camera.position.x = smx * .5;
+      camera.position.y = 1.7 + smy * .3;
+      camera.lookAt(0, .25, 0);
       renderer.render(scene, camera);
     })();
 
     addEventListener('resize', () => {
-      const w = wrap.clientWidth || 560;
-      camera.aspect = w / 280; camera.updateProjectionMatrix();
-      renderer.setSize(w, 280);
+      const w2 = wrap.clientWidth || 560;
+      camera.aspect = w2 / H; camera.updateProjectionMatrix();
+      renderer.setSize(w2, H);
     });
   } catch (err) {
     console.warn('3D hero disabled:', err);
