@@ -555,9 +555,9 @@ function showToast(title, message, type = 'info') {
     bsToast.show();
 }
 
-// Format Numbers (Persian)
+// Format Numbers (Persian) — 0 is a real value, only null/undefined mean "no data"
 function formatNumber(num) {
-    if (!num) return '---';
+    if (num === null || num === undefined || isNaN(num)) return '---';
     return new Intl.NumberFormat('fa-IR').format(num);
 }
 
@@ -615,19 +615,48 @@ async function apiCall(endpoint, options = {}) {
 
 // ==================== Dashboard ====================
 
+// Animated count-up for stat tiles (first paint only; refreshes just set text)
+let _dashCounted = false;
+function _setStat(id, val) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (val === null || val === undefined || isNaN(val)) { el.textContent = '۰'; return; }
+    if (_dashCounted) { el.textContent = formatNumber(val); return; }
+    const t0 = performance.now(), dur = 900;
+    (function tick(t) {
+        const p = Math.min((t - t0) / dur, 1), k = 1 - Math.pow(1 - p, 3);
+        el.textContent = formatNumber(Math.round(val * k));
+        if (p < 1) requestAnimationFrame(tick);
+    })(t0);
+}
+
+function _updateWelcomeBanner() {
+    const g = document.getElementById('wb-greeting');
+    if (g && _currentUser) {
+        g.textContent = `سلام، ${_currentUser.full_name || _currentUser.username} 👋`;
+    }
+    const d = document.getElementById('wb-date');
+    if (d) {
+        d.textContent = new Date().toLocaleDateString('fa-IR',
+            { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    }
+}
+
 async function loadDashboard() {
+    _updateWelcomeBanner();
     try {
         // Isolation is enforced server-side — no need to pass owner_phone manually
         const [stats, health] = await Promise.all([
             apiCall('/stats/dashboard'),
             apiCall('/stats/health')
         ]);
-        
+
         // Update stats
-        document.getElementById('stat-total-properties').textContent = formatNumber(stats.total_properties);
-        document.getElementById('stat-with-phone').textContent = formatNumber(stats.properties_with_phone);
-        document.getElementById('stat-today').textContent = formatNumber(stats.properties_today);
-        document.getElementById('stat-active-jobs').textContent = formatNumber(stats.active_jobs);
+        _setStat('stat-total-properties', stats.total_properties);
+        _setStat('stat-with-phone', stats.properties_with_phone);
+        _setStat('stat-today', stats.properties_today);
+        _setStat('stat-active-jobs', stats.active_jobs);
+        _dashCounted = true;
         
         // Update health
         updateHealthStatus('health-db', health.database);
@@ -638,9 +667,55 @@ async function loadDashboard() {
         // Update charts
         updateCityChart(stats.city_distribution);
         updateTrendChart(stats.daily_scraping);
-        
+
     } catch (error) {
         showToast('خطا', 'بارگیری داشبورد ناموفق بود', 'danger');
+    }
+
+    _loadDashboardWidgets();
+}
+
+// ── Latest-activity widgets (recent properties & leads) ──
+async function _loadDashboardWidgets() {
+    const propsEl = document.getElementById('dash-latest-props');
+    if (propsEl) {
+        try {
+            const data = await apiCall('/properties?page=1&size=5');
+            propsEl.innerHTML = data.items.length ? data.items.map(p => `
+                <div class="mini-item" onclick="viewProperty(${p.id})">
+                    <div class="mi-ico"><i class="bi bi-house-door"></i></div>
+                    <div class="mi-body">
+                        <div class="mi-title">${p.title || '---'}</div>
+                        <div class="mi-sub">${p.city_name || '---'}${p.area ? ' · ' + formatNumber(p.area) + ' متر' : ''}${p.rooms != null ? ' · ' + formatNumber(p.rooms) + ' خواب' : ''}</div>
+                    </div>
+                    <span class="mi-tag">${formatPrice(p.total_price || p.price || p.rent_price)}</span>
+                </div>`).join('')
+                : '<div class="mini-empty">هنوز ملکی اسکرپ نشده — از بخش اسکرپر شروع کنید</div>';
+        } catch (e) {
+            propsEl.innerHTML = '<div class="mini-empty">بارگیری ناموفق بود</div>';
+        }
+    }
+
+    const leadsEl = document.getElementById('dash-latest-leads');
+    if (leadsEl) {
+        try {
+            const data = await apiCall('/crm/leads?limit=5');
+            leadsEl.innerHTML = data.items.length ? data.items.map(l => {
+                const st = CRM_STATUS_LABELS[l.status] || { label: l.status, cls: 'bg-secondary' };
+                return `
+                <div class="mini-item" onclick="viewLead(${l.id})">
+                    <div class="mi-ico"><i class="bi bi-person"></i></div>
+                    <div class="mi-body">
+                        <div class="mi-title">${l.property_title || '---'}</div>
+                        <div class="mi-sub">${l.city_name || '---'}${l.phone_number ? ' · ' + l.phone_number : ''}</div>
+                    </div>
+                    <span class="badge ${st.cls}">${st.label}</span>
+                </div>`;
+            }).join('')
+                : '<div class="mini-empty">هنوز لیدی ثبت نشده</div>';
+        } catch (e) {
+            leadsEl.innerHTML = '<div class="mini-empty">بارگیری ناموفق بود</div>';
+        }
     }
 }
 
