@@ -20,11 +20,19 @@
   --warning:     #f59e0b;
   --warning2:    #fb923c;
 
-  --text:        #e2e8f0;
-  --text-dim:    #b0bfcf;
-  --text-muted:  #7890a8;
+  --text:        #eef2f8;
+  --text-dim:    #c2cbd9;
+  --text-muted:  #8f9fb6;
   --border:      rgba(255,255,255,.06);
   --border-soft: rgba(255,255,255,.03);
+
+  /* Bootstrap 5.3 fallbacks: without these, components like .card paint
+     their own near-black text (#212529) on our dark surfaces */
+  --bs-body-color: #eef2f8;
+  --bs-body-bg: #000000;
+  --bs-border-color: rgba(255,255,255,.08);
+  --bs-emphasis-color: #ffffff;
+  --bs-secondary-color: #8f9fb6;
 
   --glass:       rgba(10,10,12,.85);
   --glass2:      rgba(10,10,12,.8);
@@ -509,6 +517,7 @@ option { background: var(--surface); color: var(--text); }
   box-shadow: var(--shadow-sm);
   overflow: hidden;
   margin-bottom: 1.2rem;
+  color: var(--text);
 }
 .card-header {
   background: var(--surface2);
@@ -948,6 +957,8 @@ textarea.form-control { resize: vertical; }
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   font-size: .82rem;
+  color: var(--text);
+  font-weight: 600;
 }
 .health-item i { color: var(--accent2); font-size: 1.1rem; }
 
@@ -1245,6 +1256,12 @@ textarea.form-control { resize: vertical; }
 
 :root[data-theme="light"] {
   color-scheme: light;
+
+  --bs-body-color: #1e2740;
+  --bs-body-bg: #eef1f8;
+  --bs-border-color: rgba(15,23,42,.12);
+  --bs-emphasis-color: #0b1220;
+  --bs-secondary-color: #67788f;
 
   --bg:          #eef1f8;
   --surface:     #ffffff;
