@@ -447,7 +447,10 @@ function initApp() {
         if (e.key === 'Enter') loadDpa();
     });
 
-    setInterval(loadDashboard, 60000);
+    setInterval(() => {
+        const dash = document.getElementById('section-dashboard');
+        if (dash && dash.style.display !== 'none') loadDashboard();
+    }, 60000);
     setInterval(checkCookieStatus, 300000);
 }
 
@@ -561,13 +564,20 @@ function formatNumber(num) {
     return new Intl.NumberFormat('fa-IR').format(num);
 }
 
-// Format Price
+// Escape user/scraped content before injecting into innerHTML templates
+function esc(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, m =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+// Format Price — keeps one decimal so ۳٫۵ میلیارد doesn't round to ۴
 function formatPrice(price) {
-    if (!price) return '---';
+    if (price === null || price === undefined || isNaN(price) || price === 0) return '---';
     if (price >= 1000000000) {
-        return formatNumber(Math.round(price / 1000000000)) + ' میلیارد';
+        return formatNumber(Math.round(price / 100000000) / 10) + ' میلیارد';
     } else if (price >= 1000000) {
-        return formatNumber(Math.round(price / 1000000)) + ' میلیون';
+        return formatNumber(Math.round(price / 100000) / 10) + ' میلیون';
     }
     return formatNumber(price) + ' تومان';
 }
@@ -685,7 +695,7 @@ async function _loadDashboardWidgets() {
                 <div class="mini-item" onclick="viewProperty(${p.id})">
                     <div class="mi-ico"><i class="bi bi-house-door"></i></div>
                     <div class="mi-body">
-                        <div class="mi-title">${p.title || '---'}</div>
+                        <div class="mi-title">${esc(p.title) || '---'}</div>
                         <div class="mi-sub">${p.city_name || '---'}${p.area ? ' · ' + formatNumber(p.area) + ' متر' : ''}${p.rooms != null ? ' · ' + formatNumber(p.rooms) + ' خواب' : ''}</div>
                     </div>
                     <span class="mi-tag">${formatPrice(p.total_price || p.price || p.rent_price)}</span>
@@ -706,7 +716,7 @@ async function _loadDashboardWidgets() {
                 <div class="mini-item" onclick="viewLead(${l.id})">
                     <div class="mi-ico"><i class="bi bi-person"></i></div>
                     <div class="mi-body">
-                        <div class="mi-title">${l.property_title || '---'}</div>
+                        <div class="mi-title">${esc(l.property_title) || '---'}</div>
                         <div class="mi-sub">${l.city_name || '---'}${l.phone_number ? ' · ' + l.phone_number : ''}</div>
                     </div>
                     <span class="badge ${st.cls}">${st.label}</span>
@@ -958,7 +968,7 @@ async function loadProperties() {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td><code>${property.tag_number}</code></td>
-                <td title="${property.title}">${property.title.substring(0, 40)}...</td>
+                <td title="${esc(property.title)}">${esc(property.title.substring(0, 40))}...</td>
                 <td>${property.city_name || '---'}</td>
                 <td>${formatNumber(property.area)} متر</td>
                 <td>${property.rooms != null ? property.rooms : '---'}</td>
@@ -1000,13 +1010,28 @@ async function loadProperties() {
 function updatePagination(current, total) {
     const pagination = document.getElementById('properties-pagination');
     pagination.innerHTML = '';
-    
-    for (let i = 1; i <= total; i++) {
+    if (total <= 1) return;
+
+    const add = (label, page, opts = {}) => {
         const li = document.createElement('li');
-        li.className = `page-item ${i === current ? 'active' : ''}`;
-        li.innerHTML = `<a class="page-link" href="#" onclick="goToPage(${i})">${formatNumber(i)}</a>`;
+        li.className = `page-item ${opts.active ? 'active' : ''} ${opts.disabled ? 'disabled' : ''}`;
+        li.innerHTML = opts.gap
+            ? `<span class="page-link">…</span>`
+            : `<a class="page-link" href="#" onclick="goToPage(${page}); return false;">${label}</a>`;
         pagination.appendChild(li);
+    };
+
+    add('‹', Math.max(current - 1, 1), { disabled: current === 1 });
+    const win = 2;
+    let last = 0;
+    for (let i = 1; i <= total; i++) {
+        if (i === 1 || i === total || Math.abs(i - current) <= win) {
+            if (i - last > 1) add('', 0, { gap: true });
+            add(formatNumber(i), i, { active: i === current });
+            last = i;
+        }
     }
+    add('›', Math.min(current + 1, total), { disabled: current === total });
 }
 
 function goToPage(page) {
@@ -1048,7 +1073,7 @@ async function viewProperty(id) {
                     </div>
                 ` : '<div class="alert alert-secondary text-center mb-3"><i class="bi bi-image"></i> بدون تصویر</div>'}
                 
-                <h5 class="mb-3">${property.title}</h5>
+                <h5 class="mb-3">${esc(property.title)}</h5>
                 
                 <!-- Basic Info -->
                 <div class="card mb-3">
@@ -1196,16 +1221,16 @@ async function viewProperty(id) {
                             </div>
                             <div class="col-md-4">
                                 <label class="text-muted small">منطقه</label>
-                                <div>${property.district || '---'}</div>
+                                <div>${esc(property.district) || '---'}</div>
                             </div>
                             <div class="col-md-4">
                                 <label class="text-muted small">محله</label>
-                                <div>${property.neighborhood || '---'}</div>
+                                <div>${esc(property.neighborhood) || '---'}</div>
                             </div>
                             ${property.address ? `
                                 <div class="col-12">
                                     <label class="text-muted small">آدرس</label>
-                                    <div>${property.address}</div>
+                                    <div>${esc(property.address)}</div>
                                 </div>
                             ` : ''}
                             ${property.latitude && property.longitude ? `
@@ -1230,7 +1255,7 @@ async function viewProperty(id) {
                     </div>
                     <div class="card-body">
                         ${property.description
-                            ? `<pre style="white-space:pre-wrap;font-family:inherit;font-size:0.92rem;margin:0;line-height:1.7">${property.description}</pre>`
+                            ? `<pre style="white-space:pre-wrap;font-family:inherit;font-size:0.92rem;margin:0;line-height:1.7">${esc(property.description)}</pre>`
                             : '<span class="text-muted">---</span>'}
                     </div>
                 </div>
@@ -1252,7 +1277,7 @@ async function viewProperty(id) {
                             </div>
                             <div class="col-md-6">
                                 <label class="text-muted small">فروشنده</label>
-                                <div>${property.seller_name || '---'}</div>
+                                <div>${esc(property.seller_name) || '---'}</div>
                             </div>
                         </div>
                     </div>
@@ -2899,7 +2924,7 @@ async function loadLeads() {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${lead.id}</td>
-                <td title="${lead.property_title || ''}">${(lead.property_title || '---').substring(0, 35)}...</td>
+                <td title="${esc(lead.property_title)}">${esc((lead.property_title || '---').substring(0, 35))}...</td>
                 <td>${lead.city_name || '---'}</td>
                 <td>${formatPrice(lead.price)}</td>
                 <td>
@@ -2942,7 +2967,7 @@ async function viewLead(id) {
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="text-muted small">عنوان ملک</label>
-                    <div class="fw-bold">${lead.property_title || '---'}</div>
+                    <div class="fw-bold">${esc(lead.property_title) || '---'}</div>
                 </div>
                 <div class="col-md-6">
                     <label class="text-muted small">لینک</label>
@@ -2962,7 +2987,7 @@ async function viewLead(id) {
                 </div>
                 <div class="col-md-4">
                     <label class="text-muted small">فروشنده</label>
-                    <div>${lead.seller_name || '---'}</div>
+                    <div>${esc(lead.seller_name) || '---'}</div>
                 </div>
                 <div class="col-md-4">
                     <label class="text-muted small">شهر</label>
@@ -3000,7 +3025,7 @@ async function viewLead(id) {
                 <div class="col-md-6">
                     <label class="form-label">مسئول پیگیری</label>
                     <input type="text" id="lead-edit-assigned" class="form-control"
-                           value="${lead.assigned_to || ''}" placeholder="نام مسئول...">
+                           value="${esc(lead.assigned_to)}" placeholder="نام مسئول...">
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">منطقه</label>
@@ -3010,7 +3035,7 @@ async function viewLead(id) {
                 <div class="col-12">
                     <label class="form-label">یادداشت</label>
                     <textarea id="lead-edit-notes" class="form-control" rows="3"
-                              placeholder="یادداشت...">${lead.notes || ''}</textarea>
+                              placeholder="یادداشت...">${esc(lead.notes)}</textarea>
                 </div>
             </div>
         `;
@@ -3124,7 +3149,7 @@ async function loadDpa() {
             row.innerHTML = `
                 <td>${d.id}</td>
                 <td>${d.date_jalali || '---'}</td>
-                <td class="fw-bold">${d.agent_name}</td>
+                <td class="fw-bold">${esc(d.agent_name)}</td>
                 <td>${DPA_ROLE_LABELS[d.role] || d.role || '---'}</td>
                 <td>${d.base_score}</td>
                 <td class="text-success">+${d.bonus_score}</td>
@@ -3298,7 +3323,7 @@ async function loadCustomers() {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${c.id}</td>
-                <td class="fw-bold">${c.full_name}</td>
+                <td class="fw-bold">${esc(c.full_name)}</td>
                 <td>${c.mobile1 ? `<a href="tel:${c.mobile1}" class="text-success">${c.mobile1}</a>` : '---'}</td>
                 <td><span class="badge ${t.cls}">${t.label}</span></td>
                 <td>${CUSTOMER_SOURCE_LABELS[c.source] || '---'}</td>
@@ -3691,7 +3716,7 @@ async function loadTasks() {
             const s = TASK_STATUS_LABELS[t.status] || { label: t.status, cls: 'bg-secondary' };
             const due = t.due_date ? new Date(t.due_date).toLocaleDateString('fa-IR') : '—';
             return `<tr>
-                <td>${t.title}</td>
+                <td>${esc(t.title)}</td>
                 <td><span class="badge ${p.cls}">${p.label}</span></td>
                 <td><span class="badge ${s.cls}">${s.label}</span></td>
                 <td>${due}</td>
@@ -3885,7 +3910,7 @@ async function loadDeals() {
             const amount = d.amount ? formatNumber(d.amount) + ' ت' : '—';
             const date = d.contract_date ? new Date(d.contract_date).toLocaleDateString('fa-IR') : '—';
             return `<tr>
-                <td>${d.title}</td>
+                <td>${esc(d.title)}</td>
                 <td>${dealTypeLabel}</td>
                 <td><span class="badge ${s.cls}">${s.label}</span></td>
                 <td>${amount}</td>
@@ -4033,7 +4058,7 @@ async function loadReminders() {
             const repeatLabel = { none: 'بدون تکرار', daily: 'روزانه', weekly: 'هفتگی', monthly: 'ماهانه' }[r.repeat] || r.repeat;
             const statusBadge = r.is_sent ? '<span class="badge bg-success">ارسال شده</span>' : '<span class="badge bg-warning text-dark">فعال</span>';
             return `<tr>
-                <td>${r.title}</td>
+                <td>${esc(r.title)}</td>
                 <td>${dt}</td>
                 <td>${channelLabel}</td>
                 <td>${repeatLabel}</td>

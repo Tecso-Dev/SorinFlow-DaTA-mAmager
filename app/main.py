@@ -135,13 +135,16 @@ async def api_key_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# Request logging middleware
+# Request logging + basic security headers
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = datetime.now()
     response = await call_next(request)
     process_time = (datetime.now() - start_time).total_seconds()
     logger.debug(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.3f}s")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     return response
 
 
@@ -255,12 +258,19 @@ async def public_stats():
 
 
 # Root: public landing page (dashboard lives at /dashboard)
+_landing_cache = {"mtime": 0.0, "html": ""}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """Serve the marketing landing page"""
+    """Serve the marketing landing page (cached; re-read only when the file changes)"""
     landing = Path("frontend/landing.html")
     if landing.exists():
-        return HTMLResponse(landing.read_text(encoding="utf-8"))
+        mtime = landing.stat().st_mtime
+        if mtime != _landing_cache["mtime"]:
+            _landing_cache["html"] = landing.read_text(encoding="utf-8")
+            _landing_cache["mtime"] = mtime
+        return HTMLResponse(_landing_cache["html"])
     return HTMLResponse('<meta http-equiv="refresh" content="0; url=/dashboard" />')
 
 
