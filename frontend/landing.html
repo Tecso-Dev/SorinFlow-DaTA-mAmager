@@ -7,7 +7,9 @@
 <meta name="description" content="سورین‌فلو: اسکرپر هوشمند دیوار، CRM مدیریت لید و ارزیابی عملکرد مشاوران املاک — همه در یک پلتفرم.">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;800;900&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -71,15 +73,17 @@ main{position:relative;z-index:2}
   font-size:clamp(3.2rem,11.5vw,9.5rem);
   text-transform:uppercase;position:relative;z-index:2;
 }
-.hero-title .l1{display:block;opacity:0;animation:rise 1s cubic-bezier(.22,1,.36,1) .15s forwards}
+.hero-title .l1{display:block;animation:riseT .8s cubic-bezier(.22,1,.36,1) backwards}
 .hero-title .l2{
-  display:block;opacity:0;animation:rise 1s cubic-bezier(.22,1,.36,1) .3s forwards;
+  display:block;animation:riseT .8s cubic-bezier(.22,1,.36,1) .12s backwards;
   background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
 }
 .hero-title .l3{
-  display:block;opacity:0;animation:rise 1s cubic-bezier(.22,1,.36,1) .45s forwards;
+  display:block;animation:riseT .8s cubic-bezier(.22,1,.36,1) .24s backwards;
   -webkit-text-stroke:2px rgba(242,243,248,.85);color:transparent;
 }
+/* transform-only so the headline (LCP element) paints instantly */
+@keyframes riseT{from{transform:translateY(60px)}to{transform:none}}
 @keyframes rise{from{opacity:0;transform:translateY(60px)}to{opacity:1;transform:none}}
 .hero-ring{
   position:absolute;top:30%;left:3vw;right:auto;transform:translateY(-50%);
@@ -427,7 +431,6 @@ footer{
   <div class="copy">© ۲۰۲۶ سورین‌فلو — تمامی حقوق محفوظ است. | SorinFlow ∞ Data-Driven Real Estate</div>
 </footer>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script>
 /* ═══ scroll reveal ═══ */
 const io = new IntersectionObserver(es => es.forEach(e => {
@@ -478,7 +481,7 @@ document.querySelectorAll('#svc li').forEach(li => {
    HOLOGRAPHIC PARTICLE NEBULA — morphs between formations on scroll
    hero: nebula bloom · product: twin blooms · about: 3D HOUSE · contact: infinity
    ═══════════════════════════════════════════════════════════════ */
-(function nebula() {
+function __nebula() {
   if (typeof THREE === 'undefined') return;
   const canvas = document.getElementById('gl');
   let renderer;
@@ -689,6 +692,23 @@ document.querySelectorAll('#svc li').forEach(li => {
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
   });
+}
+
+/* Load three.js only when the browser is idle so it never competes with
+   the headline/fonts for bandwidth (LCP), then boot the nebula. */
+(function lazyThree() {
+  const boot = () => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js';
+    s.onload = __nebula;
+    document.body.appendChild(s);
+  };
+  if (document.readyState === 'complete') {
+    ('requestIdleCallback' in window) ? requestIdleCallback(boot, { timeout: 2000 }) : setTimeout(boot, 300);
+  } else {
+    addEventListener('load', () =>
+      ('requestIdleCallback' in window) ? requestIdleCallback(boot, { timeout: 2000 }) : setTimeout(boot, 300));
+  }
 })();
 </script>
 </body>

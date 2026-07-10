@@ -283,19 +283,25 @@ async def root():
         if mtime != _landing_cache["mtime"]:
             _landing_cache["html"] = landing.read_text(encoding="utf-8")
             _landing_cache["mtime"] = mtime
-        return HTMLResponse(_landing_cache["html"])
+        return HTMLResponse(
+            _landing_cache["html"],
+            headers={"Cache-Control": "public, max-age=300"},
+        )
     return HTMLResponse('<meta http-equiv="refresh" content="0; url=/dashboard" />')
+
+
+_FAVICON_HEADERS = {"Cache-Control": "public, max-age=86400"}
 
 
 @app.get("/favicon.svg", include_in_schema=False)
 async def favicon_svg():
-    return FileResponse("frontend/favicon.svg", media_type="image/svg+xml")
+    return FileResponse("frontend/favicon.svg", media_type="image/svg+xml", headers=_FAVICON_HEADERS)
 
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon_ico():
     # Browsers that blindly request .ico get the SVG (all modern ones accept it)
-    return FileResponse("frontend/favicon.svg", media_type="image/svg+xml")
+    return FileResponse("frontend/favicon.svg", media_type="image/svg+xml", headers=_FAVICON_HEADERS)
 
 
 # Error handlers
