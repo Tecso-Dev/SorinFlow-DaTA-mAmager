@@ -674,7 +674,7 @@ function updateCityChart(data) {
             datasets: [{
                 data: data.map(d => d.count),
                 backgroundColor: [
-                    '#6366f1','#06b6d4','#10b981','#f59e0b','#f97316',
+                    '#a78bfa','#f0a6ff','#67e8f9','#6366f1','#f59e0b',
                     '#ef4444','#8b5cf6','#14b8a6','#ec4899','#64748b'
                 ],
                 borderColor: themeC.surface,
@@ -709,9 +709,9 @@ function updateTrendChart(data) {
             datasets: [{
                 label: 'تعداد اسکرپ',
                 data: data.map(d => d.count),
-                borderColor: '#6366f1',
-                backgroundColor: 'rgba(99,102,241,0.12)',
-                pointBackgroundColor: '#6366f1',
+                borderColor: '#a78bfa',
+                backgroundColor: 'rgba(167,139,250,0.12)',
+                pointBackgroundColor: '#f0a6ff',
                 pointBorderColor: themeC.surface,
                 pointRadius: 4,
                 fill: true,
@@ -2451,7 +2451,7 @@ function _renderCrmCharts(data) {
     });
     window._crmContactsChart = new Chart(contactsCtx, {
         type: 'bar',
-        data: { labels: contactLabels, datasets: [{ data: contactValues, backgroundColor: '#6366f1' }] },
+        data: { labels: contactLabels, datasets: [{ data: contactValues, backgroundColor: '#a78bfa' }] },
         options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: themeC.text } }, y: { ticks: { color: themeC.text } } } }
     });
 }
