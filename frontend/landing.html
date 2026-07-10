@@ -82,12 +82,12 @@ main{position:relative;z-index:2}
 }
 @keyframes rise{from{opacity:0;transform:translateY(60px)}to{opacity:1;transform:none}}
 .hero-ring{
-  position:absolute;top:46%;right:38%;transform:translate(50%,-50%);
-  width:clamp(160px,24vw,320px);aspect-ratio:1/2.1;z-index:1;
-  pointer-events:none;filter:drop-shadow(0 0 40px rgba(240,166,255,.5));
+  position:absolute;top:44%;right:34%;transform:translate(50%,-50%);
+  width:clamp(300px,44vw,640px);aspect-ratio:2/1;z-index:1;
+  pointer-events:none;filter:drop-shadow(0 0 46px rgba(240,166,255,.55));
   animation:ringFloat 7s ease-in-out infinite;
 }
-@keyframes ringFloat{0%,100%{transform:translate(50%,-50%) rotate(-4deg)}50%{transform:translate(50%,-52%) rotate(5deg)}}
+@keyframes ringFloat{0%,100%{transform:translate(50%,-50%) rotate(-3deg)}50%{transform:translate(50%,-53%) rotate(4deg)}}
 .hero-side{
   position:absolute;left:6vw;bottom:18vh;max-width:300px;z-index:3;
   font-size:.82rem;color:var(--dim);line-height:2;text-align:left;direction:rtl;
@@ -152,19 +152,54 @@ section{padding:16vh 6vw;max-width:1280px;margin:0 auto;position:relative}
   backdrop-filter:blur(20px);
   box-shadow:0 40px 100px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.06);
 }
-.panel .ph{position:absolute;inset:0;padding:26px;display:flex;flex-direction:column;gap:14px}
-.ph-bar{display:flex;gap:7px}
+.panel .ph{position:absolute;inset:0;padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.ph-bar{display:flex;align-items:center;gap:7px}
 .ph-bar i{width:10px;height:10px;border-radius:50%;background:#2c2c3a}
 .ph-bar i:first-child{background:#f0a6ff}.ph-bar i:nth-child(2){background:#a78bfa}.ph-bar i:nth-child(3){background:#67e8f9}
-.ph-row{height:14px;border-radius:7px;background:linear-gradient(90deg,rgba(167,139,250,.25),rgba(103,232,249,.12));width:70%}
-.ph-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;flex:1}
-.ph-card{border-radius:14px;background:rgba(255,255,255,.04);border:1px solid var(--line);position:relative;overflow:hidden}
-.ph-card::after{
-  content:'';position:absolute;inset:0;
-  background:linear-gradient(120deg,transparent 30%,rgba(240,166,255,.14) 50%,transparent 70%);
-  transform:translateX(-100%);animation:sheen 3.4s ease infinite;
+.ph-url{
+  flex:1;margin-right:10px;height:20px;border-radius:10px;
+  background:rgba(255,255,255,.05);border:1px solid var(--line);
+  font-size:.58rem;color:var(--dim);display:flex;align-items:center;padding:0 12px;direction:ltr;
 }
-@keyframes sheen{60%{transform:translateX(100%)}100%{transform:translateX(100%)}}
+.ph-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.ph-stat{
+  border-radius:12px;padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid var(--line);
+}
+.ph-stat b{display:block;font-size:1.05rem;font-weight:900;
+  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.ph-stat span{font-size:.58rem;color:var(--dim)}
+.ph-main{display:grid;grid-template-columns:1.1fr .9fr;gap:10px;flex:1;min-height:0}
+.ph-chart{
+  border-radius:12px;background:rgba(255,255,255,.03);border:1px solid var(--line);
+  display:flex;align-items:flex-end;gap:7px;padding:14px 14px 10px;
+}
+.ph-chart i{
+  flex:1;border-radius:5px 5px 2px 2px;
+  background:linear-gradient(180deg,#f0a6ff,#a78bfa 55%,rgba(103,232,249,.4));
+  animation:bars 2.6s ease-in-out infinite alternate;transform-origin:bottom;opacity:.9;
+}
+.ph-chart i:nth-child(1){height:38%;animation-delay:0s}
+.ph-chart i:nth-child(2){height:62%;animation-delay:.2s}
+.ph-chart i:nth-child(3){height:47%;animation-delay:.4s}
+.ph-chart i:nth-child(4){height:82%;animation-delay:.6s}
+.ph-chart i:nth-child(5){height:58%;animation-delay:.8s}
+.ph-chart i:nth-child(6){height:92%;animation-delay:1s}
+.ph-chart i:nth-child(7){height:70%;animation-delay:1.2s}
+@keyframes bars{from{transform:scaleY(.82)}to{transform:scaleY(1.06)}}
+.ph-list{display:flex;flex-direction:column;gap:8px;min-height:0}
+.ph-item{
+  flex:1;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--line);
+  display:flex;align-items:center;gap:10px;padding:0 12px;overflow:hidden;
+}
+.ph-item .th{width:30px;height:30px;border-radius:8px;flex-shrink:0;
+  background:linear-gradient(135deg,rgba(167,139,250,.5),rgba(103,232,249,.3))}
+.ph-item .tx{flex:1;min-width:0}
+.ph-item .tx u{display:block;height:7px;border-radius:4px;background:rgba(255,255,255,.14);width:85%;text-decoration:none}
+.ph-item .tx u+u{width:50%;margin-top:5px;background:rgba(255,255,255,.08)}
+.ph-item .tag{
+  font-size:.55rem;font-weight:800;padding:3px 9px;border-radius:20px;flex-shrink:0;
+  background:rgba(103,232,249,.12);border:1px solid rgba(103,232,249,.35);color:#67e8f9;direction:ltr;
+}
 .panel .glow{
   position:absolute;inset:auto -30% -55% -30%;height:80%;
   background:radial-gradient(ellipse at center,rgba(167,139,250,.35),transparent 65%);
@@ -252,14 +287,16 @@ footer{
 <main>
 <!-- ═══ hero ═══ -->
 <header class="hero">
-  <svg class="hero-ring" viewBox="0 0 100 210">
+  <svg class="hero-ring" viewBox="0 0 200 100">
     <defs>
-      <linearGradient id="rg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <linearGradient id="rg" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%" stop-color="#f0a6ff"/><stop offset="50%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#67e8f9"/>
       </linearGradient>
     </defs>
-    <ellipse cx="50" cy="105" rx="34" ry="96" fill="none" stroke="url(#rg)" stroke-width="7" opacity=".95"/>
-    <ellipse cx="50" cy="105" rx="34" ry="96" fill="none" stroke="#fff" stroke-width="1.6" opacity=".65"/>
+    <path d="M 40 50 C 40 20, 82 20, 100 50 C 118 80, 160 80, 160 50 C 160 20, 118 20, 100 50 C 82 80, 40 80, 40 50 Z"
+          fill="none" stroke="url(#rg)" stroke-width="7.5" stroke-linecap="round" opacity=".95"/>
+    <path d="M 40 50 C 40 20, 82 20, 100 50 C 118 80, 160 80, 160 50 C 160 20, 118 20, 100 50 C 82 80, 40 80, 40 50 Z"
+          fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" opacity=".7"/>
   </svg>
 
   <h1 class="hero-title">
@@ -311,12 +348,19 @@ footer{
     <div class="panel rv rv-d1">
       <div class="glow"></div>
       <div class="ph">
-        <div class="ph-bar"><i></i><i></i><i></i></div>
-        <div class="ph-row"></div>
-        <div class="ph-row" style="width:45%"></div>
-        <div class="ph-grid">
-          <div class="ph-card"></div><div class="ph-card"></div><div class="ph-card"></div>
-          <div class="ph-card"></div><div class="ph-card"></div><div class="ph-card"></div>
+        <div class="ph-bar"><i></i><i></i><i></i><span class="ph-url">sorinflow.com/dashboard</span></div>
+        <div class="ph-stats">
+          <div class="ph-stat"><b>۱۲,۵۴۰</b><span>آگهی اسکرپ‌شده</span></div>
+          <div class="ph-stat"><b>۳,۴۰۸</b><span>لید فعال</span></div>
+          <div class="ph-stat"><b>۱۶۰</b><span>امتیاز DPA امروز</span></div>
+        </div>
+        <div class="ph-main">
+          <div class="ph-chart"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="ph-list">
+            <div class="ph-item"><span class="th"></span><span class="tx"><u></u><u></u></span><span class="tag">۷ میلیارد</span></div>
+            <div class="ph-item"><span class="th"></span><span class="tx"><u></u><u></u></span><span class="tag">لید جدید</span></div>
+            <div class="ph-item"><span class="th"></span><span class="tx"><u></u><u></u></span><span class="tag">بازدید</span></div>
+          </div>
         </div>
       </div>
     </div>
