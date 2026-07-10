@@ -2590,7 +2590,78 @@ function _renderCrmReportStats(data) {
     _renderCrmCharts(data);
 }
 
+// ── Lead funnel: new → contacted → visit → meeting → qualified → closed ──
+const _FUNNEL_STAGES = [
+    { key: 'new',              label: 'جدید',                grad: 'linear-gradient(90deg,#a78bfa,#8b5cf6)' },
+    { key: 'contacted',        label: 'تماس گرفته',          grad: 'linear-gradient(90deg,#b898fb,#a78bfa)' },
+    { key: 'visit',            label: 'بازدید از فایل',      grad: 'linear-gradient(90deg,#d3a5fd,#c084fc)' },
+    { key: 'contract_meeting', label: 'نشست و تنظیم قرارداد', grad: 'linear-gradient(90deg,#f0a6ff,#e879f9)' },
+    { key: 'qualified',        label: 'واجد شرایط',          grad: 'linear-gradient(90deg,#8ee8f8,#67e8f9)' },
+    { key: 'closed',           label: 'بسته شده 🏆',          grad: 'linear-gradient(90deg,#5eead4,#34d399)' },
+];
+
+function _renderLeadFunnel(data) {
+    const el = document.getElementById('crm-lead-funnel');
+    if (!el) return;
+    const by = data.leads?.by_status || {};
+    const total = data.leads?.total || 0;
+    const rejected = by.rejected ?? 0;
+    const max = Math.max(...(_FUNNEL_STAGES.map(s => by[s.key] ?? 0)), 1);
+
+    el.innerHTML = _FUNNEL_STAGES.map((s, i) => {
+        const v = by[s.key] ?? 0;
+        const w = Math.max((v / max) * 100, v > 0 ? 9 : 3);
+        const pct = total ? Math.round(v * 100 / total) : 0;
+        return `
+        <div class="funnel-row" style="animation-delay:${i * 70}ms">
+            <div class="funnel-label">${s.label}</div>
+            <div class="funnel-track">
+                <div class="funnel-bar" style="width:${w}%;background:${s.grad}"></div>
+            </div>
+            <div class="funnel-val">${formatNumber(v)} <small>(${formatNumber(pct)}٪)</small></div>
+        </div>`;
+    }).join('') + `
+        <div class="funnel-foot">
+            <span><i class="bi bi-people"></i> کل لیدها: <b>${formatNumber(total)}</b></span>
+            <span class="text-danger"><i class="bi bi-x-circle"></i> رد شده: <b>${formatNumber(rejected)}</b></span>
+            <span class="text-success"><i class="bi bi-trophy"></i> نرخ تبدیل: <b>${formatNumber(total ? Math.round((by.closed ?? 0) * 100 / total) : 0)}٪</b></span>
+        </div>`;
+}
+
+// ── Performance summary: progress bars + closed amount ──
+function _renderCrmSummary(data) {
+    const el = document.getElementById('crm-perf-summary');
+    if (!el) return;
+    const t = data.tasks || {}, l = data.leads || {};
+    const taskPct = t.total ? Math.round((t.done ?? 0) * 100 / t.total) : 0;
+    const notifPct = l.total ? Math.round((l.notified ?? 0) * 100 / l.total) : 0;
+
+    const bar = (label, pct, done, total, grad) => `
+        <div class="perf-block">
+            <div class="perf-head">
+                <span>${label}</span>
+                <b>${formatNumber(done)} از ${formatNumber(total)} — ${formatNumber(pct)}٪</b>
+            </div>
+            <div class="perf-track"><div class="perf-fill" style="width:${pct}%;background:${grad}"></div></div>
+        </div>`;
+
+    el.innerHTML = `
+        ${bar('وظایف انجام‌شده', taskPct, t.done ?? 0, t.total ?? 0, 'linear-gradient(90deg,#a78bfa,#f0a6ff)')}
+        ${bar('لیدهای اطلاع‌رسانی‌شده', notifPct, l.notified ?? 0, l.total ?? 0, 'linear-gradient(90deg,#67e8f9,#38bdf8)')}
+        <div class="perf-badges">
+            <span class="perf-chip ${t.overdue ? 'chip-danger' : ''}"><i class="bi bi-hourglass-split"></i> وظایف معوق: <b>${formatNumber(t.overdue ?? 0)}</b></span>
+            <span class="perf-chip"><i class="bi bi-alarm"></i> یادآور امروز: <b>${formatNumber(data.reminders_due_today ?? 0)}</b></span>
+        </div>
+        <div class="perf-amount">
+            <div class="pa-label">💰 جمع مبلغ قراردادهای بسته‌شده</div>
+            <div class="pa-value">${formatPrice(data.deals?.closed_amount)}</div>
+        </div>`;
+}
+
 function _renderCrmCharts(data) {
+    _renderLeadFunnel(data);
+    _renderCrmSummary(data);
+
     const dealsCtx = document.getElementById('crm-deals-chart');
     const contactsCtx = document.getElementById('crm-contacts-chart');
     if (!dealsCtx || !contactsCtx) return;
@@ -2598,6 +2669,7 @@ function _renderCrmCharts(data) {
     const dealStatusLabels = Object.keys(DEAL_STATUS_LABELS);
     const dealValues = dealStatusLabels.map(k => data.deals?.by_status?.[k] ?? 0);
     const dealLabels = dealStatusLabels.map(k => DEAL_STATUS_LABELS[k].label);
+    const dealsTotal = dealValues.reduce((s, v) => s + v, 0);
 
     const contactTypeLabels = Object.keys(CONTACT_TYPE_LABELS);
     const contactValues = contactTypeLabels.map(k => data.contacts?.by_type?.[k] ?? 0);
@@ -2607,15 +2679,82 @@ function _renderCrmCharts(data) {
     if (window._crmContactsChart) window._crmContactsChart.destroy();
 
     const themeC = chartColors();
+
+    // neon doughnut with center total (matches the dashboard charts)
     window._crmDealsChart = new Chart(dealsCtx, {
         type: 'doughnut',
-        data: { labels: dealLabels, datasets: [{ data: dealValues, backgroundColor: ['#f59e0b','#3b82f6','#8b5cf6','#10b981','#ef4444'] }] },
-        options: { plugins: { legend: { labels: { color: themeC.text } } } }
+        data: {
+            labels: dealLabels,
+            datasets: [{
+                data: dealValues,
+                backgroundColor: ['#fcd34d','#67e8f9','#a78bfa','#34d399','#fb7185'],
+                borderWidth: 0, borderRadius: 9, spacing: 4, hoverOffset: 14,
+            }]
+        },
+        plugins: [_sfGlow, _sfCenter],
+        options: {
+            responsive: true, maintainAspectRatio: false, cutout: '72%',
+            animation: { duration: 1000, easing: 'easeOutQuart' },
+            plugins: {
+                sfGlow: { color: 'rgba(167,139,250,.35)', blur: 18 },
+                sfCenter: {
+                    big: formatNumber(dealsTotal), sub: 'معامله',
+                    color: themeC.text === '#475569' ? '#1e2740' : '#f2f3f8',
+                    subColor: themeC.text,
+                },
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        color: themeC.text, font: { family: 'Vazirmatn', size: 11 },
+                        usePointStyle: true, pointStyle: 'circle', boxWidth: 7, padding: 12,
+                    }
+                },
+                tooltip: {
+                    ..._sfTooltip(themeC),
+                    callbacks: { label: c => ` ${formatNumber(c.parsed)} معامله` }
+                }
+            }
+        }
     });
+
+    // horizontal gradient bars with integer Persian axis
+    const cctx = contactsCtx.getContext('2d');
+    const bgrad = cctx.createLinearGradient(0, 0, contactsCtx.parentElement?.clientWidth || 400, 0);
+    bgrad.addColorStop(0, 'rgba(167,139,250,.9)');
+    bgrad.addColorStop(1, 'rgba(103,232,249,.75)');
+
     window._crmContactsChart = new Chart(contactsCtx, {
         type: 'bar',
-        data: { labels: contactLabels, datasets: [{ data: contactValues, backgroundColor: '#a78bfa' }] },
-        options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: themeC.text } }, y: { ticks: { color: themeC.text } } } }
+        data: {
+            labels: contactLabels,
+            datasets: [{ data: contactValues, backgroundColor: bgrad, borderRadius: 9, barThickness: 22 }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true, maintainAspectRatio: false,
+            animation: { duration: 900, easing: 'easeOutQuart' },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    ..._sfTooltip(themeC),
+                    callbacks: { label: c => ` ${formatNumber(c.parsed.x)} مخاطب` }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    grid: { color: themeC.grid }, border: { display: false },
+                    ticks: {
+                        color: themeC.tick, font: { family: 'Vazirmatn', size: 11 },
+                        precision: 0, callback: v => formatNumber(v),
+                    }
+                },
+                y: {
+                    grid: { color: 'transparent' }, border: { display: false },
+                    ticks: { color: themeC.text, font: { family: 'Vazirmatn', size: 12, weight: '600' } }
+                }
+            }
+        }
     });
 }
 

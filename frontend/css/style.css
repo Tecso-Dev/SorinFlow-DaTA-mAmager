@@ -1590,3 +1590,82 @@ html:not([data-theme="light"]) .topbar-title {
   from { opacity: 0; transform: translateY(22px); }
   to   { opacity: 1; transform: none; }
 }
+
+/* ════════════════════════════════════════════════════
+   CRM REPORT — sales funnel + performance summary
+   ════════════════════════════════════════════════════ */
+.funnel-row {
+  display: flex; align-items: center; gap: .8rem;
+  margin-bottom: .85rem;
+  animation: dashIn .5s cubic-bezier(.22,1,.36,1) backwards;
+}
+.funnel-label {
+  width: 150px; flex-shrink: 0; text-align: left;
+  font-size: .8rem; font-weight: 600; color: var(--text-dim);
+}
+.funnel-track {
+  flex: 1; height: 26px; border-radius: 20px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+.funnel-bar {
+  height: 100%; border-radius: 20px;
+  box-shadow: 0 0 16px rgba(167,139,250,.35);
+  transition: width 1s cubic-bezier(.22,1,.36,1);
+}
+.funnel-val {
+  width: 86px; flex-shrink: 0;
+  font-size: .82rem; font-weight: 800; color: var(--text);
+}
+.funnel-val small { color: var(--text-muted); font-weight: 500; }
+.funnel-foot {
+  display: flex; gap: 1.4rem; flex-wrap: wrap;
+  margin-top: 1.1rem; padding-top: .9rem;
+  border-top: 1px solid var(--border-soft);
+  font-size: .8rem; color: var(--text-dim);
+}
+.funnel-foot b { color: var(--text); }
+
+.perf-block { margin-bottom: 1.1rem; }
+.perf-head {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: .8rem; color: var(--text-dim); margin-bottom: .45rem;
+}
+.perf-head b { color: var(--text); font-size: .78rem; }
+.perf-track {
+  height: 12px; border-radius: 10px; overflow: hidden;
+  background: rgba(255,255,255,.05); border: 1px solid var(--border-soft);
+}
+.perf-fill {
+  height: 100%; border-radius: 10px;
+  box-shadow: 0 0 14px rgba(167,139,250,.35);
+  transition: width 1s cubic-bezier(.22,1,.36,1);
+}
+.perf-badges { display: flex; gap: .6rem; flex-wrap: wrap; margin: 1rem 0; }
+.perf-chip {
+  display: inline-flex; align-items: center; gap: .45rem;
+  padding: .42rem .9rem; border-radius: 30px; font-size: .76rem;
+  background: rgba(255,255,255,.045); border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.perf-chip b { color: var(--text); }
+.perf-chip.chip-danger {
+  background: rgba(239,68,68,.1); border-color: rgba(239,68,68,.35); color: #fca5a5;
+}
+.perf-chip.chip-danger b { color: #fecaca; }
+.perf-amount {
+  margin-top: 1.1rem; padding: 1rem 1.2rem; border-radius: var(--r);
+  background: linear-gradient(130deg, rgba(52,211,153,.1), rgba(103,232,249,.06));
+  border: 1px solid rgba(52,211,153,.3);
+}
+.perf-amount .pa-label { font-size: .76rem; color: var(--text-dim); margin-bottom: .3rem; }
+.perf-amount .pa-value {
+  font-size: 1.5rem; font-weight: 900;
+  background: linear-gradient(120deg, #5eead4, #34d399);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+@media (max-width: 600px) {
+  .funnel-label { width: 105px; font-size: .72rem; }
+  .funnel-val { width: 70px; font-size: .74rem; }
+}
