@@ -4,7 +4,7 @@ Leads (from scraper) + Contacts + Notes + Tasks + Deals + Reminders + SMS + Dash
 """
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
@@ -38,8 +38,8 @@ async def list_leads(
     notified: Optional[bool] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -233,8 +233,8 @@ async def list_contacts(
     search: Optional[str] = None,
     contact_type: Optional[str] = None,
     category: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Contact).order_by(Contact.created_at.desc())
@@ -422,8 +422,8 @@ async def list_customers(
     search: Optional[str] = None,
     temperature: Optional[str] = None,
     source: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Customer).order_by(Customer.created_at.desc())
@@ -523,8 +523,8 @@ def _apply_dpa_payload(dpa: DailyPerformance, data: dict) -> None:
 async def list_dpa(
     search: Optional[str] = None,
     date_jalali: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(DailyPerformance).order_by(DailyPerformance.created_at.desc())
@@ -591,8 +591,8 @@ async def list_notes(
     contact_id: Optional[int] = None,
     deal_id: Optional[int] = None,
     property_id: Optional[int] = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Note).order_by(Note.created_at.desc())
@@ -657,8 +657,8 @@ async def list_tasks(
     priority: Optional[str] = None,
     contact_id: Optional[int] = None,
     deal_id: Optional[int] = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Task).order_by(Task.due_date.asc().nullslast(), Task.created_at.desc())
@@ -759,8 +759,8 @@ async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
 async def list_deals(
     status: Optional[str] = None,
     deal_type: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Deal).order_by(Deal.created_at.desc())
@@ -917,8 +917,8 @@ async def delete_deal(deal_id: int, db: AsyncSession = Depends(get_db)):
 @router.get("/reminders")
 async def list_reminders(
     is_sent: Optional[bool] = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Reminder).order_by(Reminder.remind_at.asc())
@@ -1021,8 +1021,8 @@ async def send_sms_route(data: dict, db: AsyncSession = Depends(get_db)):
 async def list_sms_logs(
     contact_id: Optional[int] = None,
     status: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(SmsLog).order_by(SmsLog.sent_at.desc())
