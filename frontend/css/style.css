@@ -1672,3 +1672,118 @@ html:not([data-theme="light"]) .topbar-title {
   .funnel-label { width: 105px; font-size: .72rem; }
   .funnel-val { width: 70px; font-size: .74rem; }
 }
+
+/* ════════════════════════════════════════════════════
+   SPATIAL GLASS THEME — visionOS-style frosted panels,
+   specular edges and layered depth (dark theme)
+   ════════════════════════════════════════════════════ */
+:root { --r: 16px; --r-sm: 11px; --r-lg: 24px; }
+
+/* deeper environment for the glass to refract */
+html:not([data-theme="light"]) body {
+  background:
+    radial-gradient(ellipse 70% 45% at 50% -10%, rgba(99,102,241,.10), transparent 60%),
+    radial-gradient(ellipse 45% 35% at 85% 110%, rgba(6,182,212,.07), transparent 60%),
+    #000;
+  background-attachment: fixed;
+}
+
+/* ── frosted panel material (cards, stat tiles) ── */
+html:not([data-theme="light"]) .card,
+html:not([data-theme="light"]) .stat-card,
+html:not([data-theme="light"]) .welcome-banner {
+  background: linear-gradient(165deg, rgba(255,255,255,.055), rgba(255,255,255,.015) 55%);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255,255,255,.085);
+  box-shadow:
+    0 22px 60px rgba(0,0,0,.5),
+    0 2px 10px rgba(0,0,0,.4),
+    inset 0 1px 0 rgba(255,255,255,.12);   /* specular top edge */
+}
+html:not([data-theme="light"]) .card:hover {
+  box-shadow:
+    0 26px 70px rgba(0,0,0,.55),
+    0 2px 10px rgba(0,0,0,.4),
+    inset 0 1px 0 rgba(255,255,255,.14);
+}
+html:not([data-theme="light"]) .card-header {
+  background: rgba(255,255,255,.03);
+  border-bottom: 1px solid rgba(255,255,255,.07);
+}
+
+/* ── modals become floating glass sheets ── */
+html:not([data-theme="light"]) .modal-content {
+  background: rgba(13,13,22,.78) !important;
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid rgba(255,255,255,.1) !important;
+  border-radius: var(--r-lg);
+  box-shadow: 0 40px 110px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.12);
+}
+html:not([data-theme="light"]) .modal-header,
+html:not([data-theme="light"]) .modal-footer {
+  border-color: rgba(255,255,255,.07);
+  background: transparent;
+}
+html:not([data-theme="light"]) .modal-backdrop.show { opacity: .62; }
+
+/* ── glass inputs with focus glow ── */
+html:not([data-theme="light"]) .form-control,
+html:not([data-theme="light"]) .form-select {
+  background: rgba(255,255,255,.05);
+  border-color: rgba(255,255,255,.09);
+}
+html:not([data-theme="light"]) .form-control:focus,
+html:not([data-theme="light"]) .form-select:focus {
+  background: rgba(255,255,255,.07);
+  border-color: rgba(167,139,250,.55);
+  box-shadow: 0 0 0 3px rgba(167,139,250,.18), 0 0 18px rgba(167,139,250,.12);
+}
+
+/* ── glass chips, buttons, pagination, toasts ── */
+html:not([data-theme="light"]) .health-item,
+html:not([data-theme="light"]) .topbar-badge,
+html:not([data-theme="light"]) .user-card {
+  background: rgba(255,255,255,.045);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
+html:not([data-theme="light"]) .btn-outline-primary,
+html:not([data-theme="light"]) .btn-outline-secondary,
+html:not([data-theme="light"]) .btn-outline-success,
+html:not([data-theme="light"]) .btn-outline-danger,
+html:not([data-theme="light"]) .btn-outline-warning,
+html:not([data-theme="light"]) .btn-outline-info {
+  background: rgba(255,255,255,.04);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+html:not([data-theme="light"]) .page-link {
+  background: rgba(255,255,255,.045);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-color: rgba(255,255,255,.08);
+}
+html:not([data-theme="light"]) .toast {
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  box-shadow: 0 24px 60px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.1);
+}
+
+/* ── table header floats as a glass strip ── */
+html:not([data-theme="light"]) .table > thead > tr > th {
+  background: rgba(255,255,255,.035);
+}
+
+/* ── spatial depth for the two shells ── */
+html:not([data-theme="light"]) #sidebar {
+  box-shadow: -18px 0 50px rgba(0,0,0,.35);
+  border-left-color: rgba(255,255,255,.07);
+}
+html:not([data-theme="light"]) .topbar {
+  box-shadow: 0 14px 40px rgba(0,0,0,.3);
+  border-bottom-color: rgba(255,255,255,.06);
+}

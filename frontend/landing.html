@@ -266,6 +266,23 @@ footer{
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
 }
+
+/* ═══ spatial glass upgrade — frosted material + specular edges ═══ */
+.pill,.panel,.ccard,.stat,.val,.emblem,.cta-band{
+  backdrop-filter:blur(20px) saturate(160%);
+  -webkit-backdrop-filter:blur(20px) saturate(160%);
+}
+.ccard,.stat,.val{
+  background:linear-gradient(165deg,rgba(255,255,255,.055),rgba(255,255,255,.018) 55%);
+  box-shadow:0 18px 50px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.1);
+}
+.panel{
+  box-shadow:0 40px 100px rgba(0,0,0,.6),0 3px 12px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.1);
+  transition:transform .15s ease-out,box-shadow .3s;
+  transform-style:preserve-3d;will-change:transform;
+}
+.cta-band{box-shadow:0 30px 90px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.1)}
+.pill{box-shadow:inset 0 1px 0 rgba(255,255,255,.1)}
 </style>
 </head>
 <body>
@@ -475,6 +492,24 @@ const cio = new IntersectionObserver(es => es.forEach(e => {
     });
   }
   document.querySelectorAll('[data-count]').forEach(el => cio.observe(el));
+})();
+
+/* ═══ spatial tilt on the product glass panel ═══ */
+(() => {
+    const panel = document.querySelector('.panel');
+    if (!panel || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    let raf = null;
+    panel.addEventListener('pointermove', e => {
+        const r = panel.getBoundingClientRect();
+        const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+            panel.style.transform =
+                `perspective(1100px) rotateY(${(px - .5) * 8}deg) rotateX(${(py - .5) * -7}deg) translateZ(4px)`;
+            raf = null;
+        });
+    });
+    panel.addEventListener('pointerleave', () => { panel.style.transform = ''; });
 })();
 
 /* ═══ product list interactivity ═══ */
