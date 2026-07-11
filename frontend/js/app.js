@@ -353,7 +353,46 @@ function copyTotpSecret() {
     navigator.clipboard.writeText(val).then(() => showToast('کپی شد', 'کلید در کلیپ‌بورد کپی شد', 'success'));
 }
 
+// ═══ Hash router: #/login, #/dashboard, #/properties, ... ═══════
+const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'auth', 'proxies', 'users'];
+let _currentSection = null;
+let _intendedRoute = null;   // deep link requested before login
+let _suppressHashNav = false;
+
+function _hashToSection(hash) {
+    const name = (hash || '').replace(/^#\/?/, '');
+    return ROUTE_SECTIONS.includes(name) ? name : null;
+}
+
+function _setRoute(name) {
+    const h = '#/' + name;
+    if (location.hash !== h) {
+        _suppressHashNav = true;
+        location.hash = h;
+    }
+}
+
+addEventListener('hashchange', () => {
+    if (_suppressHashNav) { _suppressHashNav = false; return; }
+    const hash = location.hash;
+    if (hash === '#/login' || hash === '#/login/') {
+        if (!_currentUser) showLoginPage();
+        else _setRoute(_currentSection || _defaultSection()); // logged in — bounce back
+        return;
+    }
+    const section = _hashToSection(hash);
+    if (!section) return;
+    if (!_currentUser) {
+        _intendedRoute = section;
+        showLoginPage();
+        return;
+    }
+    if (section !== _currentSection) showSection(section);
+});
+
 function showLoginPage() {
+    _setRoute('login');
+    document.title = 'SorinFlow — ورود';
     document.getElementById('login-page').style.display = 'flex';
     document.getElementById('main-app').style.display = 'none';
     // Reset to step 1 (login form)
@@ -371,8 +410,10 @@ function showMainApp() {
     document.getElementById('main-app').style.display = 'flex';
     applyRoleUI();
     initApp();
-    // Navigate to the correct default section for this role
-    showSection(_defaultSection());
+    // Deep link (#/crm etc.) wins over the role's default section
+    const target = _intendedRoute || _hashToSection(location.hash) || _defaultSection();
+    _intendedRoute = null;
+    showSection(target);
 }
 
 // Which nav items are visible per role
@@ -420,9 +461,11 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .catch(() => {
                 clearToken();
+                _intendedRoute = _hashToSection(location.hash);
                 showLoginPage();
             });
     } else {
+        _intendedRoute = _hashToSection(location.hash);
         showLoginPage();
     }
 });
@@ -530,6 +573,12 @@ function showSection(sectionName) {
     const tsEl = document.getElementById('topbar-subtitle');
     if (ttEl) ttEl.textContent = meta.title || sectionName;
     if (tsEl) tsEl.textContent = meta.subtitle || '';
+
+    // Publish route + title
+    _currentSection = sectionName;
+    _setRoute(sectionName);
+    const meta2 = SECTION_META[sectionName];
+    document.title = 'SorinFlow — ' + (meta2 ? meta2.title : sectionName);
 
     // Load section data
     switch (sectionName) {
