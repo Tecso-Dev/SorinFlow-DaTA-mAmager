@@ -3134,7 +3134,7 @@ async function notifyLead(id) {
 }
 
 async function deleteLead(id) {
-    if (!confirm('این لید حذف شود؟ این عمل قابل بازگشت نیست.')) return;
+    if (!confirm('این لید و ملکِ متصل به آن از همه‌جا (لیست املاک، یادداشت‌ها و تصاویر) حذف می‌شوند. ادامه می‌دهید؟ این عمل قابل بازگشت نیست.')) return;
     try {
         await apiCall(`/crm/leads/${id}`, { method: 'DELETE' });
         showToast('موفق', 'لید حذف شد', 'success');

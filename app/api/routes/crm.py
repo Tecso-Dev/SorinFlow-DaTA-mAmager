@@ -219,13 +219,53 @@ async def notify_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.delete("/leads/{lead_id}")
 async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete the lead AND wipe the linked property everywhere:
+    the property row itself, any sibling leads on it, its property-notes
+    and its downloaded images. Deals keep their business record (their
+    property link is nulled by the FK)."""
     result = await db.execute(select(Lead).where(Lead.id == lead_id))
     lead = result.scalar_one_or_none()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    await db.delete(lead)
+
+    property_id = lead.property_id
+    prop = (await db.execute(
+        select(Property).where(Property.id == property_id)
+    )).scalar_one_or_none()
+
+    # all leads pointing at this property (FK is NOT NULL, so they must go
+    # before the property row can)
+    siblings = (await db.execute(
+        select(Lead).where(Lead.property_id == property_id)
+    )).scalars().all()
+    for sib in siblings:
+        await db.delete(sib)
+
+    # property-specific notes
+    notes = (await db.execute(
+        select(Note).where(Note.property_id == property_id)
+    )).scalars().all()
+    for note in notes:
+        await db.delete(note)
+
+    divar_id = prop.divar_id if prop else None
+    if prop:
+        await db.delete(prop)
     await db.commit()
-    return {"success": True}
+
+    # downloaded images on disk (best-effort)
+    if divar_id:
+        try:
+            import shutil
+            from app.config import get_settings as _gs
+            img_dir = __import__("pathlib").Path(_gs().images_path) / divar_id
+            if img_dir.is_dir():
+                shutil.rmtree(img_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    return {"success": True, "deleted_property": prop is not None,
+            "deleted_leads": len(siblings), "deleted_notes": len(notes)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
