@@ -298,6 +298,9 @@ class LeadCreate(BaseModel):
     category_name: Optional[str] = None
     listing_type: Optional[str] = None
     price: Optional[int] = None
+    # rent listings use deposit + monthly rent instead of price
+    deposit: Optional[int] = None
+    rent_price: Optional[int] = None
     area: Optional[int] = None
     property_url: Optional[str] = None
     status: Optional[str] = None

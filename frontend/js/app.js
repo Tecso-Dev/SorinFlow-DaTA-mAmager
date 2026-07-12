@@ -3541,13 +3541,21 @@ async function deleteCustomer(id) {
     }
 }
 
+function onAddLeadTypeChange() {
+    const isRent = document.getElementById('add-lead-listing-type').value === 'rent';
+    document.getElementById('add-lead-price-buy').classList.toggle('d-none', isRent);
+    document.querySelectorAll('.add-lead-rent-field').forEach(el =>
+        el.classList.toggle('d-none', !isRent));
+}
+
 function openAddLeadModal() {
-    ['title', 'city', 'category', 'price', 'area', 'phone', 'seller', 'url', 'notes'].forEach(f => {
+    ['title', 'city', 'category', 'price', 'deposit', 'rent', 'area', 'phone', 'seller', 'url', 'notes'].forEach(f => {
         const el = document.getElementById(`add-lead-${f}`);
         if (el) el.value = '';
     });
     document.getElementById('add-lead-listing-type').value = '';
     document.getElementById('add-lead-status').value = 'new';
+    onAddLeadTypeChange();
     new bootstrap.Modal(document.getElementById('addLeadModal')).show();
 }
 
@@ -3555,12 +3563,19 @@ async function submitAddLead() {
     const property_title = document.getElementById('add-lead-title').value.trim();
     if (!property_title) { showToast('خطا', 'عنوان ملک الزامی است', 'warning'); return; }
 
+    const isRent = document.getElementById('add-lead-listing-type').value === 'rent';
+    const numOrNull = id => {
+        const v = document.getElementById(id).value;
+        return v ? Number(v) : null;
+    };
     const payload = {
         property_title,
         city_name: document.getElementById('add-lead-city').value.trim() || null,
         category_name: document.getElementById('add-lead-category').value.trim() || null,
         listing_type: document.getElementById('add-lead-listing-type').value || null,
-        price: document.getElementById('add-lead-price').value ? Number(document.getElementById('add-lead-price').value) : null,
+        price: isRent ? null : numOrNull('add-lead-price'),
+        deposit: isRent ? numOrNull('add-lead-deposit') : null,
+        rent_price: isRent ? numOrNull('add-lead-rent') : null,
         area: document.getElementById('add-lead-area').value ? Number(document.getElementById('add-lead-area').value) : null,
         phone_number: document.getElementById('add-lead-phone').value.trim() || null,
         seller_name: document.getElementById('add-lead-seller').value.trim() || null,

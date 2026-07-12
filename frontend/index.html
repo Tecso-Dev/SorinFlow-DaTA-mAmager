@@ -1728,15 +1728,23 @@
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">نوع آگهی</label>
-                        <select id="add-lead-listing-type" class="form-select">
+                        <select id="add-lead-listing-type" class="form-select" onchange="onAddLeadTypeChange()">
                             <option value="">---</option>
                             <option value="buy">خرید/فروش</option>
                             <option value="rent">اجاره/رهن</option>
                         </select>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-4" id="add-lead-price-buy">
                         <label class="form-label">قیمت (تومان)</label>
                         <input type="number" id="add-lead-price" class="form-control" placeholder="قیمت">
+                    </div>
+                    <div class="col-md-4 add-lead-rent-field d-none">
+                        <label class="form-label">ودیعه (تومان)</label>
+                        <input type="number" id="add-lead-deposit" class="form-control" placeholder="مثلاً 200000000">
+                    </div>
+                    <div class="col-md-4 add-lead-rent-field d-none">
+                        <label class="form-label">اجاره ماهانه (تومان)</label>
+                        <input type="number" id="add-lead-rent" class="form-control" placeholder="مثلاً 15000000">
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">متراژ</label>
@@ -1951,6 +1959,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260711a"></script>
+<script src="js/app.js?v=20260711b"></script>
 </body>
 </html>

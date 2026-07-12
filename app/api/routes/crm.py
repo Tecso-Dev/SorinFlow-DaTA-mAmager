@@ -113,6 +113,7 @@ async def create_lead(
 
     # Manually-added leads aren't scraped from Divar, so we create a minimal
     # Property row to satisfy Lead.property_id's NOT NULL FK.
+    is_rent = data.listing_type == "rent"
     prop = Property(
         tag_number=manual_id,
         divar_id=manual_id,
@@ -120,8 +121,10 @@ async def create_lead(
         city_name=data.city_name,
         category_name=data.category_name,
         listing_type=data.listing_type,
-        price=data.price,
-        total_price=data.price,
+        price=None if is_rent else data.price,
+        total_price=None if is_rent else data.price,
+        deposit=data.deposit if is_rent else None,
+        rent_price=data.rent_price if is_rent else None,
         area=data.area,
         phone_number=data.phone_number,
         seller_name=data.seller_name,
@@ -138,7 +141,8 @@ async def create_lead(
         city_name=data.city_name,
         category_name=data.category_name,
         listing_type=data.listing_type,
-        price=data.price,
+        # the lead's headline number: sale price, or the deposit for rents
+        price=(data.deposit or data.rent_price) if is_rent else data.price,
         area=data.area,
         property_url=data.property_url or "",
         property_title=data.property_title,
