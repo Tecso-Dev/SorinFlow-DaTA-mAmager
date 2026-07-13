@@ -1837,21 +1837,26 @@
 
 <!-- 2FA Management Modal -->
 <!-- ═══ Divar SMS-OTP Modal ══════════════════════════════════════════════════ -->
-<div class="modal fade" id="divarOtpModal" tabindex="-1" data-bs-backdrop="static">
+<div class="modal fade" id="divarOtpModal" tabindex="-1">
     <div class="modal-dialog modal-sm">
         <div class="modal-content" style="background:var(--surface);border:1px solid var(--border);color:var(--text);">
             <div class="modal-header" style="border-color:var(--border);background:var(--surface2);">
                 <h5 class="modal-title" style="color:var(--text);font-size:.9rem;">
                     <i class="bi bi-phone"></i> کد تأیید دیوار
                 </h5>
+                <button type="button" class="btn-close" onclick="dismissDivarOtp()">✕</button>
             </div>
             <div class="modal-body" style="font-size:.85rem;">
                 <p class="text-muted mb-2">دیوار یک کد ۶ رقمی به شماره‌تان ارسال کرد. لطفاً وارد کنید:</p>
                 <input id="divar-otp-input" type="text" class="form-control text-center"
                        maxlength="6" placeholder="------" style="font-size:1.3rem;letter-spacing:.4rem;">
                 <input type="hidden" id="divar-otp-key">
+                <div class="small text-muted mt-2">
+                    کدی نیامد؟ می‌توانید این پنجره را ببندید؛ اگر تسک هنوز فعال باشد دوباره درخواست می‌دهد.
+                </div>
             </div>
             <div class="modal-footer" style="border-color:var(--border);">
+                <button class="btn btn-outline-secondary" onclick="dismissDivarOtp()">بستن</button>
                 <button class="btn btn-primary flex-grow-1" onclick="submitDivarOtp()">
                     <i class="bi bi-check-circle"></i> تأیید
                 </button>
@@ -1959,6 +1964,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260711c"></script>
+<script src="js/app.js?v=20260713a"></script>
 </body>
 </html>

@@ -453,6 +453,21 @@ async def submit_otp_code(key: str, body: OtpSubmitRequest):
     return {"success": True}
 
 
+@router.post("/otp-cancel")
+async def cancel_otp(key: Optional[str] = None):
+    """Dismiss a pending OTP prompt. With a key, clears that one; without,
+    clears every pending OTP request (used by the 'close' button so a stale
+    prompt from a dead job stops re-popping)."""
+    from app.scraper import otp_store
+    if key:
+        otp_store.clear(key)
+        return {"success": True, "cleared": 1}
+    pending = otp_store.get_pending()
+    for item in pending:
+        otp_store.clear(item["key"])
+    return {"success": True, "cleared": len(pending)}
+
+
 class SingleScrapeRequest(BaseModel):
     url: str
 

@@ -2158,11 +2158,15 @@ function _renderJobsTable(items) {
     });
 }
 
+// keys the user explicitly dismissed this session — don't re-pop them
+const _dismissedOtpKeys = new Set();
+
 async function pollDivarOtp() {
     try {
         const data = await apiCall('/scraper/otp-pending');
         if (data.pending && data.pending.length > 0) {
-            const item = data.pending[0];
+            const item = data.pending.find(p => !_dismissedOtpKeys.has(p.key));
+            if (!item) return;
             const modal = document.getElementById('divarOtpModal');
             if (modal && !modal.classList.contains('show')) {
                 document.getElementById('divar-otp-key').value = item.key;
@@ -2172,6 +2176,13 @@ async function pollDivarOtp() {
             }
         }
     } catch(e) { /* silent */ }
+}
+
+async function dismissDivarOtp() {
+    const key = document.getElementById('divar-otp-key').value;
+    if (key) _dismissedOtpKeys.add(key);           // stop the poll from re-opening it
+    bootstrap.Modal.getInstance(document.getElementById('divarOtpModal'))?.hide();
+    try { await apiCall('/scraper/otp-cancel', { method: 'POST' }); } catch (_) {}
 }
 
 async function submitDivarOtp() {
