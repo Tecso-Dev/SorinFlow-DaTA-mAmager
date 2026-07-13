@@ -1080,24 +1080,25 @@ class DivarScraper:
                     logger.info(f"Skipping non-real-estate listing (URL: {decoded_url})")
                     return None
 
-            await asyncio.sleep(1.5)
-            # Wait for property specs to be rendered by React
+            await asyncio.sleep(0.6)
+            # Wait for property specs to be rendered by React (fires as soon as
+            # they appear, so a lower cap only matters on missing/slow pages)
             try:
                 await self.page.wait_for_selector(
                     '.kt-group-row-item, .kt-unexpandable-row, .kt-base-row',
-                    timeout=8000
+                    timeout=4000
                 )
             except Exception:
                 pass
             try:
                 await self.page.wait_for_selector(
                     '[class*="description-row__text"], .kt-description-row',
-                    timeout=3000
+                    timeout=1500
                 )
             except Exception:
                 pass
             await self._simulate_scroll()
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
 
             # Click "Show all details" button if it exists
             await self._click_show_all_details()

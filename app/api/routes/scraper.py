@@ -239,6 +239,11 @@ async def start_scraping_job(
     job_id = str(job.job_id)
     logger.info(f"Created scraping job: {job_id} (divar_phone={job_config.divar_phone or 'auto'})")
 
+    # A fresh job re-enables OTP prompts (a previous dismissal shouldn't
+    # silently suppress phone extraction on the next run).
+    from app.scraper import otp_store
+    otp_store.reset_cancel()
+
     # Store a placeholder to track active jobs
     active_tasks[job_id] = {"status": "starting", "city": job_config.city, "category": job_config.category}
 
@@ -462,10 +467,11 @@ async def cancel_otp(key: Optional[str] = None):
     if key:
         otp_store.clear(key)
         return {"success": True, "cleared": 1}
+    # No key = the "close" button: suppress OTP for the rest of the run so
+    # the scraper stops blocking ~120s on every phone that needs a code.
     pending = otp_store.get_pending()
-    for item in pending:
-        otp_store.clear(item["key"])
-    return {"success": True, "cleared": len(pending)}
+    otp_store.cancel_all()
+    return {"success": True, "cleared": len(pending), "suppressed": True}
 
 
 class SingleScrapeRequest(BaseModel):

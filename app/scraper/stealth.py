@@ -43,10 +43,10 @@ class StealthConfig:
     
     # Delay settings (seconds)
     # کمی کاهش داده شده برای سرعت بیشتر ولی همچنان شبیه کاربر واقعی
-    min_delay: float = 0.7
-    max_delay: float = 1.8
-    page_load_delay: float = 1.0
-    scroll_delay: float = 0.2
+    min_delay: float = 0.35
+    max_delay: float = 0.9
+    page_load_delay: float = 0.6
+    scroll_delay: float = 0.12
     click_delay: float = 0.2
     typing_delay: float = 0.08
 

@@ -316,14 +316,24 @@ class ContactExtractor:
                 return
 
             from app.scraper import otp_store
+            # If the user already dismissed an OTP prompt this run, don't block
+            # every subsequent phone for the full timeout — skip straight away.
+            if otp_store.is_cancelled():
+                logger.info("SMS-OTP suppressed (user dismissed earlier) — skipping phone")
+                return
+
             event = otp_store.request(self.otp_key)
-            logger.info(f"SMS-OTP required — waiting up to 300s for user input (key={self.otp_key})")
+            timeout = getattr(settings, "otp_wait_timeout", 120)
+            logger.info(f"SMS-OTP required — waiting up to {timeout}s for user input (key={self.otp_key})")
 
             try:
-                await asyncio.wait_for(event.wait(), timeout=300)
+                await asyncio.wait_for(event.wait(), timeout=timeout)
             except asyncio.TimeoutError:
-                logger.warning("SMS-OTP timeout — user did not submit code in 300s")
+                logger.warning(f"SMS-OTP timeout — no code in {timeout}s")
                 otp_store.clear(self.otp_key)
+                return
+            # user may have hit "close" while we waited
+            if otp_store.is_cancelled():
                 return
 
             code = otp_store.pop_code(self.otp_key)

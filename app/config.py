@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     scraper_timeout: int = Field(default=60000, env="SCRAPER_TIMEOUT")
     scraper_delay_min: float = Field(default=2.0, env="SCRAPER_DELAY_MIN")
     scraper_delay_max: float = Field(default=5.0, env="SCRAPER_DELAY_MAX")
+    # Max seconds to wait for a Divar SMS-OTP code before giving up on a phone
+    otp_wait_timeout: int = Field(default=120, env="OTP_WAIT_TIMEOUT")
     
     # Proxy Settings
     proxy_enabled: bool = Field(default=False, env="PROXY_ENABLED")
