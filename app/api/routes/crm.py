@@ -312,7 +312,7 @@ async def create_contact(data: dict, db: AsyncSession = Depends(get_db)):
         phone=data.get("phone"),
         phone2=data.get("phone2"),
         email=data.get("email"),
-        contact_type=data.get("contact_type", "buyer"),
+        contact_type=data.get("contact_type", "owner"),
         category=data.get("category", "normal"),
         city=data.get("city"),
         address=data.get("address"),
@@ -340,17 +340,22 @@ async def export_contacts_excel(
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "مخاطبین"
-    headers = ["نام", "تلفن", "تلفن ۲", "ایمیل", "نوع", "دسته‌بندی", "شهر", "آدرس", "تگ‌ها", "تاریخ ثبت"]
+    headers = ["نام", "تلفن", "تلفن ۲", "ایمیل", "دسته", "اولویت", "شهر", "آدرس", "تگ‌ها", "تاریخ ثبت"]
     header_fill = PatternFill("solid", fgColor="1a1a2e")
     for col, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=h)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center")
+    contact_type_fa = {
+        "owner": "مالکین", "landlord": "موجرین", "tenant": "مستاجرین",
+        "seeker": "خواهان", "builder": "سازندگان", "agency": "املاک",
+        "buyer": "خواهان", "seller": "مالکین", "consultant": "املاک", "other": "سایر",
+    }
     for row, c in enumerate(items, 2):
         ws.append([
             c.name, c.phone, c.phone2, c.email,
-            c.contact_type, c.category, c.city, c.address,
+            contact_type_fa.get(c.contact_type, c.contact_type), c.category, c.city, c.address,
             ", ".join(c.tags) if isinstance(c.tags, list) else (c.tags or ""),
             c.created_at.strftime("%Y-%m-%d") if c.created_at else "",
         ])

@@ -17,7 +17,7 @@ class Contact(Base):
     phone = Column(String(20), index=True)
     phone2 = Column(String(20))
     email = Column(String(200))
-    contact_type = Column(String(50), default="buyer", index=True)   # buyer|seller|consultant|other
+    contact_type = Column(String(50), default="owner", index=True)   # owner|landlord|tenant|seeker|builder|agency
     category = Column(String(50), default="normal", index=True)      # VIP|normal|cold
     city = Column(String(100))
     address = Column(Text)

@@ -2637,11 +2637,19 @@ const DEAL_STATUS_LABELS = {
     cancelled: { label: 'لغو', cls: 'bg-danger text-white' },
 };
 const CONTACT_TYPE_LABELS = {
-    buyer: { label: 'خریدار', cls: 'bg-primary text-white' },
-    seller: { label: 'فروشنده', cls: 'bg-warning text-dark' },
-    consultant: { label: 'مشاور', cls: 'bg-info text-white' },
-    other: { label: 'سایر', cls: 'bg-secondary' },
+    owner:    { label: 'مالکین',   cls: 'bg-primary text-white' },
+    landlord: { label: 'موجرین',   cls: 'bg-info text-white' },
+    tenant:   { label: 'مستاجرین', cls: 'bg-success text-white' },
+    seeker:   { label: 'خواهان',   cls: 'bg-warning text-dark' },
+    builder:  { label: 'سازندگان', cls: 'bg-purple text-white' },
+    agency:   { label: 'املاک',    cls: 'bg-orange text-white' },
+    // legacy values kept so old rows still render
+    buyer:    { label: 'خواهان',   cls: 'bg-warning text-dark' },
+    consultant:{ label: 'املاک',   cls: 'bg-orange text-white' },
+    other:    { label: 'سایر',     cls: 'bg-secondary' },
 };
+// the six canonical categories (drives dropdowns + the report chart)
+const CONTACT_TYPES = ['owner', 'landlord', 'tenant', 'seeker', 'builder', 'agency'];
 
 async function loadCrmStats() {
     try {
@@ -2756,9 +2764,8 @@ function _renderCrmCharts(data) {
     const dealLabels = dealStatusLabels.map(k => DEAL_STATUS_LABELS[k].label);
     const dealsTotal = dealValues.reduce((s, v) => s + v, 0);
 
-    const contactTypeLabels = Object.keys(CONTACT_TYPE_LABELS);
-    const contactValues = contactTypeLabels.map(k => data.contacts?.by_type?.[k] ?? 0);
-    const contactLabels = contactTypeLabels.map(k => CONTACT_TYPE_LABELS[k].label);
+    const contactValues = CONTACT_TYPES.map(k => data.contacts?.by_type?.[k] ?? 0);
+    const contactLabels = CONTACT_TYPES.map(k => CONTACT_TYPE_LABELS[k].label);
 
     if (window._crmDealsChart) window._crmDealsChart.destroy();
     if (window._crmContactsChart) window._crmContactsChart.destroy();
@@ -3905,7 +3912,7 @@ async function openContactModal(id = null) {
     document.getElementById('contact-edit-id').value = id || '';
     document.getElementById('contactModalTitle').textContent = id ? 'ویرایش مخاطب' : 'مخاطب جدید';
     ['name','phone','phone2','email','city','address','tags','notes'].forEach(f => document.getElementById(`contact-${f}`).value = '');
-    document.getElementById('contact-type').value = 'buyer';
+    document.getElementById('contact-type').value = 'owner';
     document.getElementById('contact-category').value = 'normal';
     if (id) {
         try {
@@ -3914,7 +3921,7 @@ async function openContactModal(id = null) {
             document.getElementById('contact-phone').value = c.phone || '';
             document.getElementById('contact-phone2').value = c.phone2 || '';
             document.getElementById('contact-email').value = c.email || '';
-            document.getElementById('contact-type').value = c.contact_type || 'buyer';
+            document.getElementById('contact-type').value = c.contact_type || 'owner';
             document.getElementById('contact-category').value = c.category || 'normal';
             document.getElementById('contact-city').value = c.city || '';
             document.getElementById('contact-address').value = c.address || '';

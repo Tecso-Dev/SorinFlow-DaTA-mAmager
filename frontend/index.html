@@ -832,11 +832,13 @@
                                 <div class="d-flex gap-2 flex-wrap">
                                     <input type="text" id="contact-search" class="form-control form-control-sm" placeholder="جستجو نام / تلفن..." style="width:180px;" oninput="loadContacts()">
                                     <select id="contact-filter-type" class="form-select form-select-sm" style="width:130px;" onchange="loadContacts()">
-                                        <option value="">همه انواع</option>
-                                        <option value="buyer">خریدار</option>
-                                        <option value="seller">فروشنده</option>
-                                        <option value="consultant">مشاور</option>
-                                        <option value="other">سایر</option>
+                                        <option value="">همه دسته‌ها</option>
+                                        <option value="owner">مالکین</option>
+                                        <option value="landlord">موجرین</option>
+                                        <option value="tenant">مستاجرین</option>
+                                        <option value="seeker">خواهان</option>
+                                        <option value="builder">سازندگان</option>
+                                        <option value="agency">املاک</option>
                                     </select>
                                     <select id="contact-filter-category" class="form-select form-select-sm" style="width:110px;" onchange="loadContacts()">
                                         <option value="">همه</option>
@@ -851,7 +853,7 @@
                             </div>
                             <div class="table-responsive">
                                 <table class="table">
-                                    <thead><tr><th>نام</th><th>تلفن</th><th>نوع</th><th>دسته‌بندی</th><th>شهر</th><th>تگ‌ها</th><th>عملیات</th></tr></thead>
+                                    <thead><tr><th>نام</th><th>تلفن</th><th>دسته</th><th>اولویت</th><th>شهر</th><th>تگ‌ها</th><th>عملیات</th></tr></thead>
                                     <tbody id="contacts-table"></tbody>
                                 </table>
                             </div>
@@ -1167,9 +1169,9 @@
                                 <div class="col-md-6"><label class="form-label">تلفن اول</label><input type="text" id="contact-phone" class="form-control form-control-sm" placeholder="09xxxxxxxxx"></div>
                                 <div class="col-md-6"><label class="form-label">تلفن دوم</label><input type="text" id="contact-phone2" class="form-control form-control-sm"></div>
                                 <div class="col-md-6"><label class="form-label">ایمیل</label><input type="email" id="contact-email" class="form-control form-control-sm"></div>
-                                <div class="col-md-4"><label class="form-label">نوع</label>
+                                <div class="col-md-4"><label class="form-label">دسته‌بندی</label>
                                     <select id="contact-type" class="form-select form-select-sm">
-                                        <option value="buyer">خریدار</option><option value="seller">فروشنده</option><option value="consultant">مشاور</option><option value="other">سایر</option>
+                                        <option value="owner">مالکین</option><option value="landlord">موجرین</option><option value="tenant">مستاجرین</option><option value="seeker">خواهان</option><option value="builder">سازندگان</option><option value="agency">املاک</option>
                                     </select></div>
                                 <div class="col-md-4"><label class="form-label">دسته‌بندی</label>
                                     <select id="contact-category" class="form-select form-select-sm">
@@ -1964,6 +1966,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260713a"></script>
+<script src="js/app.js?v=20260713b"></script>
 </body>
 </html>
