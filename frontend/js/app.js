@@ -2125,8 +2125,8 @@ async function _pollJobs() {
             if (prev) {
                 // New items added since last poll → refresh list
                 if (job.new_items > prev.new_items) shouldRefreshProps = true;
-                // Job just finished → final refresh
-                if (prev.status === 'running' && job.status !== 'running') shouldRefreshProps = true;
+                // Job just finished → final refresh (pausing for OTP isn't "finished")
+                if (prev.status === 'running' && !['running', 'paused'].includes(job.status)) shouldRefreshProps = true;
             }
             _jobPollSnapshot[job.job_id] = { new_items: job.new_items, status: job.status };
         }
@@ -2146,12 +2146,17 @@ function _renderJobsTable(items) {
         tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">هیچ تسکی وجود ندارد</td></tr>`;
         return;
     }
+    const JOB_STATUS_FA = {
+        pending: 'در صف', running: 'در حال اجرا', paused: '⏸ متوقف — منتظر کد',
+        completed: 'تکمیل شده', failed: 'ناموفق', cancelled: 'لغو شده',
+    };
     items.forEach(job => {
         const row = document.createElement('tr');
         const statusClass = `status-${job.status}`;
+        const statusLabel = JOB_STATUS_FA[job.status] || job.status;
         row.innerHTML = `
             <td><code>${job.job_id.substring(0, 8)}...</code></td>
-            <td><span class="badge ${statusClass}">${job.status}</span></td>
+            <td><span class="badge ${statusClass}">${statusLabel}</span></td>
             <td>
                 <div style="min-width:90px">
                     <div class="progress" style="height:5px;background:var(--border,#333);border-radius:3px;">
@@ -2164,7 +2169,7 @@ function _renderJobsTable(items) {
             <td>${job.new_items} / ${job.updated_items}</td>
             <td>${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
             <td>
-                ${job.status === 'running' ? `
+                ${(job.status === 'running' || job.status === 'paused') ? `
                     <button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.job_id}')">
                         <i class="bi bi-stop-fill"></i>
                     </button>

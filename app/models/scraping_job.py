@@ -19,7 +19,7 @@ class ScrapingJob(Base):
     category_id = Column(Integer, ForeignKey("categories.id"))
     
     # Status
-    status = Column(String(50), default="pending")  # pending, running, completed, failed, cancelled
+    status = Column(String(50), default="pending")  # pending, running, paused, completed, failed, cancelled
     
     # Progress
     total_pages = Column(Integer, default=0)

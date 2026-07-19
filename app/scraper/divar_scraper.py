@@ -1260,7 +1260,34 @@ class DivarScraper:
                 f"{self.current_job.job_id}:{_divar_id}" if self.current_job
                 else f"single:{_divar_id}"
             )
-            contact_extractor = ContactExtractor(self.page, self.images_dir, otp_key=_otp_key)
+            # Flip the job's status while the scraper is blocked on an OTP code,
+            # so the dashboard clearly shows it as paused → running.
+            async def _pause_job():
+                if self.current_job:
+                    self.current_job.status = "paused"
+                    await self.db_session.commit()
+                    logger.info(f"Job {self.current_job.job_id} PAUSED — awaiting OTP code")
+
+            async def _resume_job():
+                if self.current_job:
+                    # don't override a cancellation that happened meanwhile
+                    await self.db_session.refresh(self.current_job)
+                    if self.current_job.status == "paused":
+                        self.current_job.status = "running"
+                        await self.db_session.commit()
+                        logger.info(f"Job {self.current_job.job_id} RESUMED")
+
+            async def _job_cancelled():
+                if not self.current_job:
+                    return False
+                await self.db_session.refresh(self.current_job)
+                return self.current_job.status == "cancelled"
+
+            contact_extractor = ContactExtractor(
+                self.page, self.images_dir, otp_key=_otp_key,
+                on_pause=_pause_job, on_resume=_resume_job,
+                should_cancel=_job_cancelled,
+            )
             phone_number = await contact_extractor.get_phone_number()
             if phone_number:
                 property_data["phone_number"] = phone_number

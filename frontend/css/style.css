@@ -667,6 +667,7 @@ pre {
 .status-completed { background: rgba(16,185,129,.15); color: #6ee7b7; border:1px solid rgba(16,185,129,.3); border-radius:20px; padding:.25rem .65rem; font-size:.72rem; font-weight:600; }
 .status-failed    { background: rgba(239,68,68,.15);  color: #fca5a5; border:1px solid rgba(239,68,68,.3);  border-radius:20px; padding:.25rem .65rem; font-size:.72rem; font-weight:600; }
 .status-cancelled { background: rgba(100,116,139,.15);color: #94a3b8; border:1px solid rgba(100,116,139,.3);border-radius:20px; padding:.25rem .65rem; font-size:.72rem; font-weight:600; }
+.status-paused    { background: rgba(167,139,250,.18);color: #c4b5fd; border:1px solid rgba(167,139,250,.4); border-radius:20px; padding:.25rem .65rem; font-size:.72rem; font-weight:700; animation: pulse-run 1.2s ease-in-out infinite; }
 
 @keyframes pulse-run {
   0%,100% { opacity:1; } 50% { opacity:.6; }

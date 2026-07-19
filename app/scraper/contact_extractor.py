@@ -20,10 +20,17 @@ settings = get_settings()
 class ContactExtractor:
     """Extracts phone numbers from a Divar listing page."""
 
-    def __init__(self, page, images_dir: Path, otp_key: Optional[str] = None):
+    def __init__(self, page, images_dir: Path, otp_key: Optional[str] = None,
+                 on_pause=None, on_resume=None, should_cancel=None):
         self.page = page
         self.images_dir = images_dir
         self.otp_key = otp_key  # key into otp_store; set by scraper when a job is running
+        # async callbacks fired when the scraper pauses (OTP requested) and
+        # resumes (code entered / wait ended) — used to flip the job status
+        self.on_pause = on_pause
+        self.on_resume = on_resume
+        # async predicate: returns True if the job was cancelled → stop waiting
+        self.should_cancel = should_cancel
 
     async def get_phone_number(self) -> Optional[str]:
         """Click the contact button and return the extracted phone number."""
@@ -323,17 +330,54 @@ class ContactExtractor:
                 return
 
             event = otp_store.request(self.otp_key)
-            timeout = getattr(settings, "otp_wait_timeout", 120)
-            logger.info(f"SMS-OTP required — waiting up to {timeout}s for user input (key={self.otp_key})")
+            timeout = getattr(settings, "otp_wait_timeout", 300)
+            logger.info(f"SMS-OTP required — PAUSING scrape, waiting up to {timeout}s for code (key={self.otp_key})")
 
+            # ── pause the job while we wait for the code ──
+            paused_ok = False
+            if self.on_pause:
+                try:
+                    await self.on_pause()
+                    paused_ok = True
+                except Exception as e:
+                    logger.warning(f"on_pause callback failed: {e}")
+
+            got_code = False
             try:
-                await asyncio.wait_for(event.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
-                logger.warning(f"SMS-OTP timeout — no code in {timeout}s")
-                otp_store.clear(self.otp_key)
-                return
-            # user may have hit "close" while we waited
-            if otp_store.is_cancelled():
+                # Wait in short slices so a user "close"/cancel is honored promptly
+                waited = 0.0
+                slice_s = 2.0
+                while waited < timeout:
+                    if otp_store.is_cancelled():
+                        logger.info("SMS-OTP wait cancelled by user")
+                        otp_store.clear(self.otp_key)
+                        break
+                    if self.should_cancel:
+                        try:
+                            if await self.should_cancel():
+                                logger.info("SMS-OTP wait aborted — job cancelled")
+                                otp_store.clear(self.otp_key)
+                                break
+                        except Exception:
+                            pass
+                    try:
+                        await asyncio.wait_for(event.wait(), timeout=slice_s)
+                        got_code = True
+                        break
+                    except asyncio.TimeoutError:
+                        waited += slice_s
+                if not got_code and not otp_store.is_cancelled():
+                    logger.warning(f"SMS-OTP timeout — no code in {timeout}s")
+                    otp_store.clear(self.otp_key)
+            finally:
+                # ── resume the job (code entered, timed out, or cancelled) ──
+                if paused_ok and self.on_resume:
+                    try:
+                        await self.on_resume()
+                    except Exception as e:
+                        logger.warning(f"on_resume callback failed: {e}")
+
+            if not got_code:
                 return
 
             code = otp_store.pop_code(self.otp_key)
