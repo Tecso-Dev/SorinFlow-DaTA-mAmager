@@ -79,8 +79,23 @@ async def init_db():
         await _migrate_users_divar_phone(conn)
         await _migrate_scraping_jobs_divar_phone(conn)
         await _migrate_properties_owner_phone(conn)
+        await _migrate_dpa_activities(conn)
 
     await _seed_super_admin()
+
+
+async def _migrate_dpa_activities(conn):
+    """Idempotently add auto_activities/activities JSON columns to DPA table."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE crm_daily_performance "
+            "ADD COLUMN IF NOT EXISTS auto_activities JSON DEFAULT '{}'"))
+        await conn.execute(text(
+            "ALTER TABLE crm_daily_performance "
+            "ADD COLUMN IF NOT EXISTS activities JSON DEFAULT '{}'"))
+    except Exception as e:
+        print(f"DPA activities migration skipped: {e}")
 
 
 async def _migrate_users_totp(conn):

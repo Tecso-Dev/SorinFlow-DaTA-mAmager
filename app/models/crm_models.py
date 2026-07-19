@@ -288,6 +288,22 @@ class DailyPerformance(Base):
     BONUS_POINTS = {"exclusive": 30, "offer": 20, "close": 50}
     PENALTY_POINTS = {"crm_delay": 10, "cancel": 15, "hot_lead": 20}
 
+    # ── فعالیت‌های امتیازی (امتیاز × تعداد) ──
+    # auto=True → the system counts these itself from CRM events; the agent can
+    # still add extra units for work done outside the panel.
+    ACTIVITIES = (
+        # key,        points, label,                     auto
+        ("call",          2,  "تماس با مشتری",            True),
+        ("showing",      10,  "پرزنت / بازدید ملک",        True),
+        ("new_file",     15,  "ثبت فایل جدید",             True),
+        ("meeting",      20,  "نشست و تنظیم قرارداد",      True),
+        ("exclusive",    30,  "ثبت فایل انحصاری",          False),
+        ("offer",        20,  "دریافت آفر کتبی و بیعانه",  False),
+        ("close",        50,  "بستن قرارداد نهایی",        False),
+    )
+    ACTIVITY_POINTS = {k: p for k, p, _l, _a in ACTIVITIES}
+    AUTO_ACTIVITIES = {k for k, _p, _l, a in ACTIVITIES if a}
+
     id = Column(Integer, primary_key=True, index=True)
 
     # ── سربرگ ──
@@ -304,6 +320,12 @@ class DailyPerformance(Base):
 
     # ── گام‌های عملیاتی پایه: {"prospecting": true, ...} ──
     base_tasks = Column(JSON, default=dict)
+
+    # ── فعالیت‌های امتیازی ──
+    # auto_activities: counted by the system from CRM events (read-only for the agent)
+    # activities: extra units the agent enters manually for off-panel work
+    auto_activities = Column(JSON, default=dict)   # {"call": 7, "showing": 5}
+    activities = Column(JSON, default=dict)        # {"showing": 2}
 
     # ── امتیاز انفجار (تعداد هر مورد) ──
     bonus_exclusive = Column(Integer, default=0)  # ثبت فایل انحصاری +۳۰
@@ -322,9 +344,20 @@ class DailyPerformance(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    def activity_counts(self) -> dict:
+        """Merged per-activity counts: system-counted + manually added."""
+        auto = self.auto_activities or {}
+        manual = self.activities or {}
+        return {
+            key: int(auto.get(key, 0) or 0) + int(manual.get(key, 0) or 0)
+            for key, _p, _l, _a in self.ACTIVITIES
+        }
+
     def scores(self):
         tasks = self.base_tasks or {}
         base = sum(w for key, w in self.BASE_TASKS if tasks.get(key))
+        counts = self.activity_counts()
+        activity = sum(counts[k] * self.ACTIVITY_POINTS[k] for k in counts)
         bonus = (
             (self.bonus_exclusive or 0) * self.BONUS_POINTS["exclusive"]
             + (self.bonus_offer or 0) * self.BONUS_POINTS["offer"]
@@ -335,8 +368,9 @@ class DailyPerformance(Base):
             + (self.pen_cancel or 0) * self.PENALTY_POINTS["cancel"]
             + (self.pen_hot_lead or 0) * self.PENALTY_POINTS["hot_lead"]
         )
-        return {"base_score": base, "bonus_score": bonus,
-                "penalty_score": penalty, "total_score": base + bonus - penalty}
+        return {"base_score": base, "activity_score": activity, "bonus_score": bonus,
+                "penalty_score": penalty,
+                "total_score": base + activity + bonus - penalty}
 
     def to_dict(self):
         return {
@@ -350,6 +384,13 @@ class DailyPerformance(Base):
             "offers_count": self.offers_count,
             "closed_count": self.closed_count,
             "base_tasks": self.base_tasks or {},
+            "auto_activities": self.auto_activities or {},
+            "activities": self.activities or {},
+            "activity_counts": self.activity_counts(),
+            "activity_defs": [
+                {"key": k, "points": p, "label": l, "auto": a}
+                for k, p, l, a in self.ACTIVITIES
+            ],
             "bonus_exclusive": self.bonus_exclusive,
             "bonus_offer": self.bonus_offer,
             "bonus_close": self.bonus_close,

@@ -3168,18 +3168,71 @@ async function deleteLead(id) {
 let _dpaEditId = null;
 const DPA_ROLE_LABELS = { hunter: 'Hunter 🏹', closer: 'Closer 🤝' };
 
+// must mirror DailyPerformance.ACTIVITIES on the backend
+const DPA_ACTIVITIES = [
+    { key: 'call',      points: 2,  label: 'تماس با مشتری',           auto: true },
+    { key: 'showing',   points: 10, label: 'پرزنت / بازدید ملک',       auto: true },
+    { key: 'new_file',  points: 15, label: 'ثبت فایل جدید',            auto: true },
+    { key: 'meeting',   points: 20, label: 'نشست و تنظیم قرارداد',     auto: true },
+    { key: 'exclusive', points: 30, label: 'ثبت فایل انحصاری',         auto: false },
+    { key: 'offer',     points: 20, label: 'دریافت آفر کتبی و بیعانه', auto: false },
+    { key: 'close',     points: 50, label: 'بستن قرارداد نهایی',       auto: false },
+];
+
+function _renderDpaActivities(autoCounts = {}, manualCounts = {}) {
+    const tbody = document.getElementById('dpa-activities-body');
+    if (!tbody) return;
+    tbody.innerHTML = DPA_ACTIVITIES.map(a => {
+        const auto = Number(autoCounts[a.key] || 0);
+        return `
+        <tr>
+            <td>${a.label}</td>
+            <td><span class="badge bg-primary">${formatNumber(a.points)}+</span></td>
+            <td class="text-center">
+                <span class="badge ${auto ? 'bg-success' : 'bg-secondary'}" id="dpa-auto-${a.key}" data-count="${auto}">${formatNumber(auto)}</span>
+                ${a.auto ? '' : '<div class="small text-muted" style="font-size:.6rem">دستی</div>'}
+            </td>
+            <td>
+                <input type="number" class="form-control form-control-sm dpa-act-manual" style="width:90px"
+                       id="dpa-manual-${a.key}" data-key="${a.key}" value="${Number(manualCounts[a.key] || 0)}"
+                       min="0" onchange="updateDpaScore()" oninput="updateDpaScore()">
+            </td>
+            <td class="fw-bold" id="dpa-total-${a.key}">۰</td>
+            <td class="fw-bold text-info" id="dpa-pts-${a.key}">۰</td>
+        </tr>`;
+    }).join('');
+}
+
+function _dpaActivityScore() {
+    let sum = 0;
+    DPA_ACTIVITIES.forEach(a => {
+        const auto = Number(document.getElementById(`dpa-auto-${a.key}`)?.dataset.count || 0);
+        const manual = Math.max(Number(document.getElementById(`dpa-manual-${a.key}`)?.value) || 0, 0);
+        const total = auto + manual, pts = total * a.points;
+        const tEl = document.getElementById(`dpa-total-${a.key}`);
+        const pEl = document.getElementById(`dpa-pts-${a.key}`);
+        if (tEl) tEl.textContent = formatNumber(total);
+        if (pEl) pEl.textContent = formatNumber(pts);
+        sum += pts;
+    });
+    return sum;
+}
+
 function _dpaScoreParts() {
     let base = 0;
     document.querySelectorAll('.dpa-task:checked').forEach(el => { base += Number(el.dataset.weight); });
     const n = id => Math.max(Number(document.getElementById(id).value) || 0, 0);
+    const activity = _dpaActivityScore();
     const bonus = n('dpa-bonus-exclusive') * 30 + n('dpa-bonus-offer') * 20 + n('dpa-bonus-close') * 50;
     const penalty = n('dpa-pen-crm') * 10 + n('dpa-pen-cancel') * 15 + n('dpa-pen-hotlead') * 20;
-    return { base, bonus, penalty, total: base + bonus - penalty };
+    return { base, activity, bonus, penalty, total: base + activity + bonus - penalty };
 }
 
 function updateDpaScore() {
     const s = _dpaScoreParts();
     document.getElementById('dpa-score-base').textContent = s.base;
+    const actEl = document.getElementById('dpa-score-activity');
+    if (actEl) actEl.textContent = `+${formatNumber(s.activity)}`;
     document.getElementById('dpa-score-bonus').textContent = `+${s.bonus}`;
     document.getElementById('dpa-score-penalty').textContent = `-${s.penalty}`;
     const totalEl = document.getElementById('dpa-score-total');
@@ -3203,7 +3256,7 @@ async function loadDpa() {
 
         if (data.items.length === 0) {
             tbody.innerHTML = `
-                <tr><td colspan="10" class="text-center text-muted py-4">
+                <tr><td colspan="11" class="text-center text-muted py-4">
                     <i class="bi bi-clipboard-data" style="font-size:2rem;"></i>
                     <p class="mt-2">هنوز فرمی ثبت نشده</p>
                 </td></tr>`;
@@ -3219,6 +3272,7 @@ async function loadDpa() {
                 <td class="fw-bold">${esc(d.agent_name)}</td>
                 <td>${DPA_ROLE_LABELS[d.role] || d.role || '---'}</td>
                 <td>${d.base_score}</td>
+                <td class="text-info">+${formatNumber(d.activity_score ?? 0)}</td>
                 <td class="text-success">+${d.bonus_score}</td>
                 <td class="text-danger">-${d.penalty_score}</td>
                 <td><span class="badge ${hitTarget ? 'bg-success' : 'bg-warning'}">${d.total_score}</span></td>
@@ -3250,6 +3304,7 @@ function _resetDpaForm() {
     document.querySelectorAll('.dpa-task').forEach(el => { el.checked = false; });
     document.getElementById('dpa-rca').value = '';
     document.getElementById('dpa-mentor').value = '';
+    _renderDpaActivities();
 }
 
 async function openDpaModal(id = null) {
@@ -3276,6 +3331,7 @@ async function openDpaModal(id = null) {
             document.querySelectorAll('.dpa-task').forEach(el => {
                 el.checked = !!(d.base_tasks || {})[el.dataset.task];
             });
+            _renderDpaActivities(d.auto_activities || {}, d.activities || {});
             document.getElementById('dpa-rca').value = d.rca || '';
             document.getElementById('dpa-mentor').value = d.mentor_feedback || '';
         } catch (e) {
@@ -3293,6 +3349,10 @@ async function saveDpa() {
 
     const base_tasks = {};
     document.querySelectorAll('.dpa-task').forEach(el => { base_tasks[el.dataset.task] = el.checked; });
+    const activities = {};
+    document.querySelectorAll('.dpa-act-manual').forEach(el => {
+        activities[el.dataset.key] = Math.max(Number(el.value) || 0, 0);
+    });
     const n = id => Math.max(Number(document.getElementById(id).value) || 0, 0);
 
     const payload = {
@@ -3305,6 +3365,7 @@ async function saveDpa() {
         offers_count: n('dpa-offers'),
         closed_count: n('dpa-closed'),
         base_tasks,
+        activities,
         bonus_exclusive: n('dpa-bonus-exclusive'),
         bonus_offer: n('dpa-bonus-offer'),
         bonus_close: n('dpa-bonus-close'),

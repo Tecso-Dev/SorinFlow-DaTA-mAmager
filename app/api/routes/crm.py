@@ -18,6 +18,7 @@ from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
 from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
+from app.services.dpa_service import record_activity, record_lead_status
 from app.models.user import User
 
 router = APIRouter()
@@ -151,6 +152,11 @@ async def create_lead(
         assigned_to=data.assigned_to,
     )
     db.add(lead)
+
+    agent = (data.assigned_to or "").strip() or (
+        current_user.full_name or current_user.username if current_user else None)
+    await record_activity(db, agent, "new_file")
+
     await db.commit()
     await db.refresh(lead)
     return lead
@@ -170,7 +176,12 @@ async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/leads/{lead_id}", response_model=LeadResponse)
-async def update_lead(lead_id: int, data: LeadUpdate, db: AsyncSession = Depends(get_db)):
+async def update_lead(
+    lead_id: int,
+    data: LeadUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     result = await db.execute(select(Lead).where(Lead.id == lead_id))
     lead = result.scalar_one_or_none()
     if not lead:
@@ -178,7 +189,13 @@ async def update_lead(lead_id: int, data: LeadUpdate, db: AsyncSession = Depends
     if data.status and data.status not in VALID_LEAD_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status")
     if data.status is not None:
+        # Only score a real transition, so re-saving the same status can't farm points
+        status_changed = lead.status != data.status
         lead.status = data.status
+        if status_changed:
+            agent = (lead.assigned_to or "").strip() or (
+                current_user.full_name or current_user.username if current_user else None)
+            await record_lead_status(db, agent, data.status)
     if data.notes is not None:
         lead.notes = data.notes
     if data.assigned_to is not None:
@@ -566,6 +583,17 @@ def _apply_dpa_payload(dpa: DailyPerformance, data: dict) -> None:
                 pass
     if isinstance(data.get("base_tasks"), dict):
         dpa.base_tasks = {k: bool(v) for k, v in data["base_tasks"].items() if k in _DPA_TASK_KEYS}
+    # manual activity units (work done outside the panel); auto counts are
+    # owned by the system and never overwritten from the client
+    if isinstance(data.get("activities"), dict):
+        cleaned = {}
+        for k, v in data["activities"].items():
+            if k in DailyPerformance.ACTIVITY_POINTS:
+                try:
+                    cleaned[k] = max(int(v or 0), 0)
+                except (TypeError, ValueError):
+                    continue
+        dpa.activities = cleaned
 
 
 @router.get("/dpa")

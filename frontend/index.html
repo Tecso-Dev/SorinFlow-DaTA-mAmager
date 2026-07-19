@@ -1108,7 +1108,7 @@
                             </div>
                             <div class="table-responsive">
                                 <table class="table">
-                                    <thead><tr><th>#</th><th>تاریخ</th><th>مشاور</th><th>نقش</th><th>پایه</th><th>بونوس</th><th>جریمه</th><th>امتیاز کل</th><th>هدف</th><th>عملیات</th></tr></thead>
+                                    <thead><tr><th>#</th><th>تاریخ</th><th>مشاور</th><th>نقش</th><th>پایه</th><th>فعالیت</th><th>بونوس</th><th>جریمه</th><th>امتیاز کل</th><th>هدف</th><th>عملیات</th></tr></thead>
                                     <tbody id="crm-dpa-table"></tbody>
                                 </table>
                             </div>
@@ -1470,6 +1470,34 @@
                     </div>
                 </div>
 
+                <!-- فعالیت‌های امتیازی (خودکار + دستی) -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-lightning-charge"></i> فعالیت‌های امتیازی — خودکار از CRM</span>
+                        <span class="small text-muted">امتیاز = تعداد × ارزش هر مورد</span>
+                    </div>
+                    <div class="card-body p-2">
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead><tr>
+                                    <th>فعالیت</th>
+                                    <th style="width:90px">ارزش</th>
+                                    <th style="width:110px">ثبت خودکار</th>
+                                    <th style="width:120px">افزودن دستی</th>
+                                    <th style="width:90px">مجموع</th>
+                                    <th style="width:100px">امتیاز</th>
+                                </tr></thead>
+                                <tbody id="dpa-activities-body"></tbody>
+                            </table>
+                        </div>
+                        <div class="small text-muted mt-2 px-1">
+                            ستون «ثبت خودکار» را سیستم از روی کارهای شما در CRM پر می‌کند
+                            (تغییر وضعیت لید به «تماس گرفته»، «بازدید از فایل»، «نشست و تنظیم قرارداد» و ثبت فایل جدید).
+                            اگر کاری بیرون از پنل انجام داده‌اید، تعدادش را در ستون «افزودن دستی» وارد کنید.
+                        </div>
+                    </div>
+                </div>
+
                 <div class="row g-3 mb-3">
                     <!-- بونوس -->
                     <div class="col-md-6">
@@ -1517,6 +1545,7 @@
                 <div class="card mb-3">
                     <div class="card-body d-flex flex-wrap justify-content-around text-center gap-2">
                         <div><div class="small text-muted">پایه (Base)</div><div class="h4 mb-0" id="dpa-score-base">0</div></div>
+                        <div><div class="small text-muted">فعالیت‌ها</div><div class="h4 mb-0" id="dpa-score-activity" style="color:#67e8f9">0</div></div>
                         <div><div class="small text-muted">بونوس (Bonus)</div><div class="h4 mb-0 text-success" id="dpa-score-bonus">+0</div></div>
                         <div><div class="small text-muted">جریمه (Penalty)</div><div class="h4 mb-0 text-danger" id="dpa-score-penalty">-0</div></div>
                         <div><div class="small text-muted">امتیاز نهایی امروز (Total Daily)</div><div class="h3 mb-0 text-primary" id="dpa-score-total">0</div></div>
@@ -1966,6 +1995,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260713b"></script>
+<script src="js/app.js?v=20260719a"></script>
 </body>
 </html>
