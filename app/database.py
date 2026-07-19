@@ -80,6 +80,7 @@ async def init_db():
         await _migrate_scraping_jobs_divar_phone(conn)
         await _migrate_properties_owner_phone(conn)
         await _migrate_dpa_activities(conn)
+        await _migrate_lead_form_v2(conn)
 
     await _seed_super_admin()
 
@@ -96,6 +97,18 @@ async def _migrate_dpa_activities(conn):
             "ADD COLUMN IF NOT EXISTS activities JSON DEFAULT '{}'"))
     except Exception as e:
         print(f"DPA activities migration skipped: {e}")
+
+
+async def _migrate_lead_form_v2(conn):
+    """Idempotently add properties.extra_attrs and leads.rented_at."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE properties ADD COLUMN IF NOT EXISTS extra_attrs JSON DEFAULT '{}'"))
+        await conn.execute(text(
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS rented_at TIMESTAMPTZ"))
+    except Exception as e:
+        print(f"lead form v2 migration skipped: {e}")
 
 
 async def _migrate_users_totp(conn):

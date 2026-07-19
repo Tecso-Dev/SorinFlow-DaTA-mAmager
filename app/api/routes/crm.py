@@ -4,13 +4,14 @@ Leads (from scraper) + Contacts + Notes + Tasks + Deals + Reminders + SMS + Dash
 """
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 import io
 
 from app.database import get_db
+from app.config import get_settings
 from app.models.lead import Lead
 from app.models.property import Property
 from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance
@@ -27,7 +28,36 @@ router = APIRouter()
 # LEADS (existing — from scraper)
 # ─────────────────────────────────────────────────────────────────────────────
 
-VALID_LEAD_STATUSES = {"new", "contacted", "visit", "contract_meeting", "qualified", "closed", "rejected"}
+VALID_LEAD_STATUSES = {"new", "contacted", "visit", "contract_meeting", "qualified", "closed", "rented", "rejected"}
+
+# ── structured attributes for manual leads ──
+# ints/bools/text mapped to real Property columns; the rest live in extra_attrs
+_ATTR_INT_COLS  = {"area", "floor", "rooms", "year_built", "land_area", "built_area", "total_floors", "frontage"}
+_ATTR_BOOL_COLS = {"has_elevator", "has_parking", "has_storage", "has_balcony"}
+_ATTR_TEXT_COLS = {"document_type"}
+_ATTR_EXTRA_KEYS = {"units_per_floor", "cabinets", "closet", "flooring", "delivery_date",
+                    "hvac", "yard", "position", "height", "mezzanine", "kitchen"}
+VALID_PROPERTY_KINDS = {"apartment", "villa", "shop", "office"}
+
+
+def _split_lead_attrs(attrs: Optional[dict]):
+    """Split incoming attrs into Property column kwargs + extra_attrs JSON."""
+    cols, extra = {}, {}
+    for key, val in (attrs or {}).items():
+        if val is None or val == "":
+            continue
+        if key in _ATTR_INT_COLS:
+            try:
+                cols[key] = int(val)
+            except (TypeError, ValueError):
+                continue
+        elif key in _ATTR_BOOL_COLS:
+            cols[key] = str(val).lower() in ("true", "1", "yes", "بله")
+        elif key in _ATTR_TEXT_COLS:
+            cols[key] = str(val).strip()[:100]
+        elif key in _ATTR_EXTRA_KEYS:
+            extra[key] = str(val).strip()[:200]
+    return cols, extra
 
 
 @router.get("/leads", response_model=LeadList)
@@ -115,6 +145,8 @@ async def create_lead(
     # Manually-added leads aren't scraped from Divar, so we create a minimal
     # Property row to satisfy Lead.property_id's NOT NULL FK.
     is_rent = data.listing_type == "rent"
+    attr_cols, extra_attrs = _split_lead_attrs(data.attrs)
+    images = [u for u in (data.images or []) if isinstance(u, str) and u.startswith("/images/")][:20]
     prop = Property(
         tag_number=manual_id,
         divar_id=manual_id,
@@ -122,6 +154,7 @@ async def create_lead(
         city_name=data.city_name,
         category_name=data.category_name,
         listing_type=data.listing_type,
+        property_type=data.property_kind if data.property_kind in VALID_PROPERTY_KINDS else None,
         price=None if is_rent else data.price,
         total_price=None if is_rent else data.price,
         deposit=data.deposit if is_rent else None,
@@ -130,7 +163,12 @@ async def create_lead(
         phone_number=data.phone_number,
         seller_name=data.seller_name,
         url=data.property_url or "",
+        images=images,
+        thumbnail_url=images[0] if images else None,
+        has_images=bool(images),
+        extra_attrs=extra_attrs,
         owner_phone=current_user.divar_phone if current_user else None,
+        **attr_cols,
     )
     db.add(prop)
     await db.flush()
@@ -144,7 +182,7 @@ async def create_lead(
         listing_type=data.listing_type,
         # the lead's headline number: sale price, or the deposit for rents
         price=(data.deposit or data.rent_price) if is_rent else data.price,
-        area=data.area,
+        area=attr_cols.get("area", data.area),
         property_url=data.property_url or "",
         property_title=data.property_title,
         status=data.status or "new",
@@ -192,6 +230,10 @@ async def update_lead(
         # Only score a real transition, so re-saving the same status can't farm points
         status_changed = lead.status != data.status
         lead.status = data.status
+        if status_changed and data.status == "rented":
+            lead.rented_at = datetime.now()   # lease clock starts; back in a year
+        elif status_changed and lead.rented_at:
+            lead.rented_at = None
         if status_changed:
             agent = (lead.assigned_to or "").strip() or (
                 current_user.full_name or current_user.username if current_user else None)
@@ -283,6 +325,28 @@ async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 
     return {"success": True, "deleted_property": prop is not None,
             "deleted_leads": len(siblings), "deleted_notes": len(notes)}
+
+
+@router.post("/upload-image")
+async def upload_lead_image(file: UploadFile = File(...)):
+    """Store a lead photo under data/images/manual and return its URL."""
+    import uuid as _uuid
+    from pathlib import Path as _Path
+
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="فقط فایل تصویری مجاز است")
+    raw = await file.read()
+    if len(raw) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم تصویر حداکثر ۸ مگابایت")
+
+    ext = _Path(file.filename or "").suffix.lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+        ext = ".jpg"
+    dest_dir = _Path(get_settings().images_path) / "manual"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    name = f"{_uuid.uuid4().hex}{ext}"
+    (dest_dir / name).write_bytes(raw)
+    return {"url": f"/images/manual/{name}"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

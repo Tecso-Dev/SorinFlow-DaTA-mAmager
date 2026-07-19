@@ -33,6 +33,9 @@ class Lead(Base):
     notes = Column(Text)
     assigned_to = Column(String(200))
 
+    # اجاره داده شده — when the lease ends (1 year) the lead returns to "new"
+    rented_at = Column(DateTime(timezone=True), nullable=True)
+
     # Notification tracking
     notified = Column(Boolean, default=False)
     notified_at = Column(DateTime(timezone=True))
@@ -63,6 +66,7 @@ class Lead(Base):
             "status": self.status,
             "notes": self.notes,
             "assigned_to": self.assigned_to,
+            "rented_at": self.rented_at.isoformat() if self.rented_at else None,
             "notified": self.notified,
             "notified_at": self.notified_at.isoformat() if self.notified_at else None,
             "notification_channel": self.notification_channel,

@@ -119,6 +119,9 @@ class Property(Base):
     features = Column(JSON, default=list)
     amenities = Column(JSON, default=list)
     
+    # Structured manual-lead attributes (پوشش کف، کابینت، گرمایش، ...)
+    extra_attrs = Column(JSON, default=dict)
+
     # Owner — which Divar account scraped this property
     owner_phone = Column(String(20), nullable=True, index=True)
 
@@ -169,6 +172,7 @@ class Property(Base):
             "thumbnail_url": self.thumbnail_url,
             "features": self.features,
             "amenities": self.amenities,
+            "extra_attrs": self.extra_attrs or {},
             "owner_phone": self.owner_phone,
             "is_active": self.is_active,
             "posted_at": self.posted_at.isoformat() if self.posted_at else None,

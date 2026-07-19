@@ -292,6 +292,12 @@ class LeadUpdate(BaseModel):
 
 class LeadCreate(BaseModel):
     property_title: str
+    # apartment | villa | shop | office
+    property_kind: Optional[str] = None
+    # uploaded photo URLs (/images/manual/...)
+    images: Optional[List[str]] = None
+    # structured per-kind fields (متراژ، طبقه، پوشش کف، ...)
+    attrs: Optional[dict] = None
     phone_number: Optional[str] = None
     seller_name: Optional[str] = None
     city_name: Optional[str] = None

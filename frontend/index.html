@@ -11,7 +11,7 @@
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260711a">
+    <link rel="stylesheet" href="css/style.css?v=20260719a">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -1032,6 +1032,7 @@
                                         <option value="contract_meeting">نشست و تنظیم قرارداد</option>
                                         <option value="qualified">واجد شرایط</option>
                                         <option value="closed">بسته شده</option>
+                                        <option value="rented">اجاره شده</option>
                                         <option value="rejected">رد شده</option>
                                     </select>
                                     <select id="crm-filter-notified" class="form-select form-select-sm" style="width:130px;">
@@ -1757,6 +1758,31 @@
                         <label class="form-label">دسته‌بندی</label>
                         <input type="text" id="add-lead-category" class="form-control" placeholder="آپارتمان، ویلا، ...">
                     </div>
+                    <div class="col-md-6">
+                        <label class="form-label">نوع ملک</label>
+                        <select id="add-lead-kind" class="form-select" onchange="renderLeadAttrs()">
+                            <option value="">---</option>
+                            <option value="apartment">آپارتمان</option>
+                            <option value="villa">ویلایی</option>
+                            <option value="shop">مغازه</option>
+                            <option value="office">دفتر کار</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">تصاویر ملک</label>
+                        <div class="d-flex align-items-center gap-2">
+                            <button type="button" class="btn btn-outline-primary" onclick="document.getElementById('add-lead-photo-input').click()">
+                                <i class="bi bi-camera"></i> افزودن عکس
+                            </button>
+                            <input type="file" id="add-lead-photo-input" accept="image/*" multiple
+                                   style="display:none" onchange="uploadLeadPhotos(this)">
+                            <span class="small text-muted" id="add-lead-photo-status"></span>
+                        </div>
+                        <div id="add-lead-photo-previews" class="lead-photo-strip mt-2"></div>
+                    </div>
+                    <div class="col-12" id="add-lead-attrs-wrap">
+                        <div class="row g-3" id="add-lead-attrs"></div>
+                    </div>
                     <div class="col-md-4">
                         <label class="form-label">نوع آگهی</label>
                         <select id="add-lead-listing-type" class="form-select" onchange="onAddLeadTypeChange()">
@@ -1802,6 +1828,7 @@
                             <option value="contract_meeting">نشست و تنظیم قرارداد</option>
                             <option value="qualified">واجد شرایط</option>
                             <option value="closed">بسته شده</option>
+                            <option value="rented">اجاره شده</option>
                             <option value="rejected">رد شده</option>
                         </select>
                     </div>
@@ -1995,6 +2022,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260719a"></script>
+<script src="js/app.js?v=20260719b"></script>
 </body>
 </html>

@@ -59,11 +59,15 @@ async def lifespan(app: FastAPI):
     from app.services.backup_service import backup_scheduler
     backup_task = asyncio.create_task(backup_scheduler())
 
+    # Rented leads come back as fresh files when the lease year ends
+    lease_task = asyncio.create_task(_lease_expiry_checker())
+
     yield
 
     # Cleanup
     reminder_task.cancel()
     backup_task.cancel()
+    lease_task.cancel()
     logger.info("Shutting down...")
     await close_db()
     await close_redis()
@@ -125,7 +129,7 @@ async def api_key_middleware(request: Request, call_next):
     public_paths = {"/health", "/", "/favicon.svg", "/favicon.ico", "/api/public/stats", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info", "/api/config",
                     "/api/users/token", "/api/users/token/verify-totp", "/api/users/me",
                     "/api/users/register"}
-    is_dashboard = request.url.path.startswith("/dashboard")
+    is_dashboard = request.url.path.startswith("/dashboard") or request.url.path.startswith("/images")
     is_public = request.url.path in public_paths or is_dashboard
 
     is_preflight = request.method == "OPTIONS"
@@ -209,6 +213,42 @@ async def _fire_due_reminders():
         if reminders:
             await session.commit()
             logger.info(f"Processed {len(reminders)} due reminder(s)")
+
+
+# ─── Rented-lease expiry checker ─────────────────────────────────────────────
+async def _lease_expiry_checker():
+    """Every 6h: leads marked اجاره شده whose lease year is over go back to
+    the fresh pool (status=new) so the file resurfaces automatically."""
+    while True:
+        try:
+            await asyncio.sleep(6 * 3600)
+            await _reactivate_expired_leases()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Lease expiry checker error: {e}")
+
+
+async def _reactivate_expired_leases():
+    from datetime import timedelta
+    from app.database import async_session_maker
+    from app.models.lead import Lead
+    from sqlalchemy import select
+
+    cutoff = datetime.now() - timedelta(days=365)
+    async with async_session_maker() as session:
+        rows = (await session.execute(
+            select(Lead).where(Lead.status == "rented", Lead.rented_at <= cutoff)
+        )).scalars().all()
+        for lead in rows:
+            lead.status = "new"
+            lead.rented_at = None
+            stamp = datetime.now().strftime("%Y-%m-%d")
+            note = f"[{stamp}] پایان مدت اجاره — فایل به‌صورت خودکار به فایل‌های جدید برگشت."
+            lead.notes = f"{lead.notes}\n{note}" if lead.notes else note
+        if rows:
+            await session.commit()
+            logger.info(f"Lease expiry: {len(rows)} rented lead(s) returned to the fresh pool")
 
 
 # Health check endpoint
@@ -325,6 +365,8 @@ async def internal_error_handler(request: Request, exc):
 # Mount static files for frontend
 try:
     app.mount("/dashboard", StaticFiles(directory="frontend", html=True), name="frontend")
+    Path(settings.images_path).mkdir(parents=True, exist_ok=True)
+    app.mount("/images", StaticFiles(directory=settings.images_path), name="images")
 except Exception:
     logger.warning("Frontend directory not found, skipping static file mount")
 

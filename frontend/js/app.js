@@ -1257,6 +1257,23 @@ async function viewProperty(id) {
                     </div>
                 </div>
                 
+                ${Object.keys(property.extra_attrs || {}).length ? `
+                <!-- Extra structured attributes (manual leads) -->
+                <div class="card mb-3">
+                    <div class="card-header bg-secondary text-white">
+                        <i class="bi bi-list-columns"></i> مشخصات تکمیلی
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            ${Object.entries(property.extra_attrs).map(([k, v]) => `
+                                <div class="col-md-4">
+                                    <label class="text-muted small">${LEAD_ATTR_FA[k] || esc(k)}</label>
+                                    <div>${esc(v)}</div>
+                                </div>`).join('')}
+                        </div>
+                    </div>
+                </div>` : ''}
+
                 <!-- Location -->
                 <div class="card mb-3">
                     <div class="card-header bg-warning text-dark">
@@ -2615,8 +2632,126 @@ const CRM_STATUS_LABELS = {
     contract_meeting: { label: 'نشست و تنظیم قرارداد', cls: 'bg-warning text-dark' },
     qualified: { label: 'واجد شرایط', cls: 'bg-primary text-white' },
     closed: { label: 'بسته شده', cls: 'bg-success text-white' },
+    rented: { label: 'اجاره شده', cls: 'bg-purple text-white' },
     rejected: { label: 'رد شده', cls: 'bg-danger text-white' },
 };
+
+// ═══ structured fields per property kind (add-lead form) ═══════
+const LEAD_KIND_LABELS = { apartment: 'آپارتمان', villa: 'ویلایی', shop: 'مغازه', office: 'دفتر کار' };
+const LEAD_KIND_FIELDS = {
+    apartment: [
+        { key: 'area', label: 'متراژ', type: 'num' },
+        { key: 'floor', label: 'طبقه', type: 'num' },
+        { key: 'units_per_floor', label: 'تعداد واحد در طبقه', type: 'num' },
+        { key: 'rooms', label: 'تعداد خواب', type: 'num' },
+        { key: 'year_built', label: 'سال ساخت', type: 'num' },
+        { key: 'has_elevator', label: 'آسانسور', type: 'bool' },
+        { key: 'has_parking', label: 'پارکینگ', type: 'bool' },
+        { key: 'has_storage', label: 'انباری', type: 'bool' },
+        { key: 'cabinets', label: 'کابینت', type: 'text' },
+        { key: 'closet', label: 'کمد دیواری', type: 'bool' },
+        { key: 'flooring', label: 'پوشش کف', type: 'text' },
+        { key: 'has_balcony', label: 'بالکن', type: 'bool' },
+        { key: 'delivery_date', label: 'تاریخ تحویل', type: 'text' },
+        { key: 'hvac', label: 'گرمایش و سرمایش', type: 'text' },
+        { key: 'document_type', label: 'سند', type: 'text' },
+    ],
+    villa: [
+        { key: 'land_area', label: 'متراژ زمین', type: 'num' },
+        { key: 'built_area', label: 'زیربنا', type: 'num' },
+        { key: 'total_floors', label: 'تعداد طبقات', type: 'num' },
+        { key: 'rooms', label: 'تعداد خواب', type: 'num' },
+        { key: 'year_built', label: 'سال ساخت', type: 'num' },
+        { key: 'has_parking', label: 'پارکینگ', type: 'bool' },
+        { key: 'has_storage', label: 'انباری', type: 'bool' },
+        { key: 'has_balcony', label: 'بالکن', type: 'bool' },
+        { key: 'cabinets', label: 'کابینت', type: 'text' },
+        { key: 'closet', label: 'کمد دیواری', type: 'bool' },
+        { key: 'flooring', label: 'پوشش کف', type: 'text' },
+        { key: 'yard', label: 'حیاط', type: 'text' },
+        { key: 'document_type', label: 'سند', type: 'text' },
+        { key: 'position', label: 'موقعیت', type: 'text' },
+        { key: 'delivery_date', label: 'تاریخ تحویل', type: 'text' },
+        { key: 'hvac', label: 'گرمایش و سرمایش', type: 'text' },
+    ],
+    shop: [
+        { key: 'area', label: 'متراژ', type: 'num' },
+        { key: 'frontage', label: 'دهنه (متر)', type: 'num' },
+        { key: 'height', label: 'ارتفاع (متر)', type: 'text' },
+        { key: 'mezzanine', label: 'نیم‌طبقه', type: 'text' },
+        { key: 'document_type', label: 'سند', type: 'text' },
+    ],
+    office: [
+        { key: 'floor', label: 'طبقه چندم', type: 'num' },
+        { key: 'area', label: 'متراژ', type: 'num' },
+        { key: 'rooms', label: 'اتاق', type: 'num' },
+        { key: 'kitchen', label: 'آشپزخانه', type: 'text' },
+        { key: 'units_per_floor', label: 'واحد در طبقات', type: 'num' },
+        { key: 'document_type', label: 'سند', type: 'text' },
+    ],
+};
+// Persian labels for showing extra_attrs in the property modal
+const LEAD_ATTR_FA = {};
+Object.values(LEAD_KIND_FIELDS).flat().forEach(f => { LEAD_ATTR_FA[f.key] = f.label; });
+
+function renderLeadAttrs() {
+    const kind = document.getElementById('add-lead-kind').value;
+    const wrap = document.getElementById('add-lead-attrs');
+    const fields = LEAD_KIND_FIELDS[kind] || [];
+    wrap.innerHTML = fields.map(f => {
+        if (f.type === 'bool') {
+            return `<div class="col-md-4"><label class="form-label">${f.label}</label>
+                <select class="form-select lead-attr" data-key="${f.key}">
+                    <option value="">---</option><option value="true">دارد</option><option value="false">ندارد</option>
+                </select></div>`;
+        }
+        const t = f.type === 'num' ? 'number' : 'text';
+        return `<div class="col-md-4"><label class="form-label">${f.label}</label>
+            <input type="${t}" class="form-control lead-attr" data-key="${f.key}" placeholder="${f.label}"></div>`;
+    }).join('');
+}
+
+// ═══ lead photos ═══════════════════════════════════════════════
+let _leadPhotos = [];
+
+function _renderLeadPhotos() {
+    const wrap = document.getElementById('add-lead-photo-previews');
+    if (!wrap) return;
+    wrap.innerHTML = _leadPhotos.map((u, i) => `
+        <div class="lead-photo-thumb">
+            <img src="${u}" alt="">
+            <button type="button" onclick="_removeLeadPhoto(${i})">✕</button>
+        </div>`).join('');
+}
+
+function _removeLeadPhoto(i) { _leadPhotos.splice(i, 1); _renderLeadPhotos(); }
+
+async function uploadLeadPhotos(input) {
+    const files = [...(input.files || [])];
+    input.value = '';
+    if (!files.length) return;
+    const status = document.getElementById('add-lead-photo-status');
+    for (const f of files) {
+        if (_leadPhotos.length >= 20) break;
+        status.textContent = `در حال آپلود ${esc(f.name)}...`;
+        try {
+            const fd = new FormData();
+            fd.append('file', f);
+            const resp = await fetch(`${API_BASE}/crm/upload-image`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${getToken()}` },
+                body: fd,
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'خطا در آپلود');
+            _leadPhotos.push(data.url);
+            _renderLeadPhotos();
+        } catch (e) {
+            showToast('خطا', e.message || 'آپلود تصویر ناموفق بود', 'danger');
+        }
+    }
+    status.textContent = '';
+}
 
 const TASK_PRIORITY_LABELS = {
     low: { label: 'کم', cls: 'bg-secondary' },
@@ -3634,6 +3769,10 @@ function openAddLeadModal() {
     });
     document.getElementById('add-lead-listing-type').value = '';
     document.getElementById('add-lead-status').value = 'new';
+    document.getElementById('add-lead-kind').value = '';
+    renderLeadAttrs();
+    _leadPhotos = [];
+    _renderLeadPhotos();
     onAddLeadTypeChange();
     new bootstrap.Modal(document.getElementById('addLeadModal')).show();
 }
@@ -3661,6 +3800,11 @@ async function submitAddLead() {
         property_url: document.getElementById('add-lead-url').value.trim() || null,
         status: document.getElementById('add-lead-status').value || 'new',
         notes: document.getElementById('add-lead-notes').value.trim() || null,
+        property_kind: document.getElementById('add-lead-kind').value || null,
+        images: _leadPhotos,
+        attrs: Object.fromEntries([...document.querySelectorAll('#add-lead-attrs .lead-attr')]
+            .map(el => [el.dataset.key, el.value.trim()])
+            .filter(([, v]) => v !== '')),
     };
 
     const btn = document.getElementById('add-lead-save-btn');
