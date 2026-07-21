@@ -613,6 +613,14 @@ function formatNumber(num) {
     return new Intl.NumberFormat('fa-IR').format(num);
 }
 
+// Normalize tags → array. Backend stores them as a comma-separated string,
+// but older/imported rows may already be an array (or null).
+function _tagList(tags) {
+    if (Array.isArray(tags)) return tags.filter(Boolean);
+    if (typeof tags === 'string') return tags.split(',').map(t => t.trim()).filter(Boolean);
+    return [];
+}
+
 // Escape user/scraped content before injecting into innerHTML templates
 function esc(s) {
     if (s === null || s === undefined) return '';
@@ -4100,13 +4108,13 @@ async function loadContacts() {
         tbody.innerHTML = data.items.map(c => {
             const typeInfo = CONTACT_TYPE_LABELS[c.contact_type] || { label: c.contact_type, cls: 'bg-secondary' };
             const catCls = c.category === 'VIP' ? 'bg-warning text-dark' : c.category === 'cold' ? 'bg-secondary' : 'bg-info text-white';
-            const tags = (c.tags || []).map(t => `<span class="badge bg-dark me-1">${t}</span>`).join('');
+            const tags = _tagList(c.tags).map(t => `<span class="badge bg-dark me-1">${esc(t)}</span>`).join('');
             return `<tr>
-                <td>${c.name}</td>
+                <td>${esc(c.name)}</td>
                 <td>${c.phone || '—'}</td>
                 <td><span class="badge ${typeInfo.cls}">${typeInfo.label}</span></td>
                 <td><span class="badge ${catCls}">${c.category || 'عادی'}</span></td>
-                <td>${c.city || '—'}</td>
+                <td>${esc(c.city) || '—'}</td>
                 <td>${tags || '—'}</td>
                 <td>
                     <button class="btn btn-xs btn-outline-primary" onclick="openContactModal(${c.id})"><i class="bi bi-pencil"></i></button>
@@ -4135,7 +4143,7 @@ async function openContactModal(id = null) {
             document.getElementById('contact-category').value = c.category || 'normal';
             document.getElementById('contact-city').value = c.city || '';
             document.getElementById('contact-address').value = c.address || '';
-            document.getElementById('contact-tags').value = (c.tags || []).join(', ');
+            document.getElementById('contact-tags').value = _tagList(c.tags).join(', ');
             document.getElementById('contact-notes').value = c.notes || '';
         } catch(e) { showToast('خطا', e.message, 'danger'); return; }
     }
