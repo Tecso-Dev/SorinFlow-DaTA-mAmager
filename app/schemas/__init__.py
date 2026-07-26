@@ -52,6 +52,7 @@ class PropertyResponse(PropertyBase):
     """Schema for property response"""
     id: int
     tag_number: str
+    serial_no: Optional[int] = None
     divar_id: str
     url: str
     phone_number: Optional[str] = None

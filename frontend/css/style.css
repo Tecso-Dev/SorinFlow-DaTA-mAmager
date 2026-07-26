@@ -1804,3 +1804,12 @@ html:not([data-theme="light"]) .topbar {
   cursor: pointer; line-height: 1;
 }
 .lead-photo-thumb button:hover { background: rgba(239,68,68,.8); color: #fff; }
+
+/* property serial code badge */
+.serial-badge {
+  display: inline-block; font-weight: 800; font-size: .82rem;
+  padding: .18rem .6rem; border-radius: 8px; letter-spacing: .02em;
+  background: linear-gradient(135deg, rgba(167,139,250,.2), rgba(103,232,249,.14));
+  border: 1px solid rgba(167,139,250,.35); color: #c4b5fd;
+  font-variant-numeric: tabular-nums;
+}

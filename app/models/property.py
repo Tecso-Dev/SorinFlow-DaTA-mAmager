@@ -52,6 +52,8 @@ class Property(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     tag_number = Column(String(50), unique=True, nullable=False, index=True)
+    # human-friendly incrementing serial (starts at 1000)
+    serial_no = Column(Integer, unique=True, index=True)
     divar_id = Column(String(50), unique=True, nullable=False, index=True)
     title = Column(String(500), nullable=False)
     description = Column(Text)
@@ -146,6 +148,7 @@ class Property(Base):
         data = {
             "id": self.id,
             "tag_number": self.tag_number,
+            "serial_no": self.serial_no,
             "divar_id": self.divar_id,
             "title": self.title,
             "description": self.description,
@@ -194,3 +197,11 @@ class Property(Base):
             data["deposit"] = self.deposit
             data["rent_price"] = self.rent_price
         return data
+
+
+async def allocate_serial_no(db) -> int:
+    """Next incrementing property serial (starts at 1000). Concurrency-safe
+    enough for our single-writer scraper: reads MAX+1 within the caller's tx."""
+    from sqlalchemy import select, func
+    current_max = (await db.execute(select(func.max(Property.serial_no)))).scalar()
+    return max((current_max or 999) + 1, 1000)

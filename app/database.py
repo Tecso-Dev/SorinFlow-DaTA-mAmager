@@ -81,6 +81,7 @@ async def init_db():
         await _migrate_properties_owner_phone(conn)
         await _migrate_dpa_activities(conn)
         await _migrate_lead_form_v2(conn)
+        await _migrate_property_serial(conn)
 
     await _seed_super_admin()
 
@@ -97,6 +98,26 @@ async def _migrate_dpa_activities(conn):
             "ADD COLUMN IF NOT EXISTS activities JSON DEFAULT '{}'"))
     except Exception as e:
         print(f"DPA activities migration skipped: {e}")
+
+
+async def _migrate_property_serial(conn):
+    """Add properties.serial_no and backfill existing rows from 1000 up."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS serial_no INTEGER"))
+        # backfill any rows still missing a serial, ordered oldest-first
+        await conn.execute(text("""
+            WITH ranked AS (
+                SELECT id, 999 + ROW_NUMBER() OVER (ORDER BY id) AS s
+                FROM properties WHERE serial_no IS NULL
+            )
+            UPDATE properties p SET serial_no = ranked.s
+            FROM ranked WHERE p.id = ranked.id
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_properties_serial_no ON properties (serial_no)"))
+    except Exception as e:
+        print(f"property serial migration skipped: {e}")
 
 
 async def _migrate_lead_form_v2(conn):

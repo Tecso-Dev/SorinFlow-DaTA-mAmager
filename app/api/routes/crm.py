@@ -13,7 +13,7 @@ import io
 from app.database import get_db
 from app.config import get_settings
 from app.models.lead import Lead
-from app.models.property import Property
+from app.models.property import Property, allocate_serial_no
 from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance
 from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
@@ -170,6 +170,7 @@ async def create_lead(
         owner_phone=current_user.divar_phone if current_user else None,
         **attr_cols,
     )
+    prop.serial_no = await allocate_serial_no(db)
     db.add(prop)
     await db.flush()
 

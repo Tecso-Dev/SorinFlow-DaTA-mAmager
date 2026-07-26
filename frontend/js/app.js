@@ -1024,7 +1024,7 @@ async function loadProperties() {
         data.items.forEach(property => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td><code>${property.tag_number}</code></td>
+                <td><span class="serial-badge">${property.serial_no != null ? formatNumber(property.serial_no) : '—'}</span></td>
                 <td title="${esc(property.title)}">${esc(property.title.substring(0, 40))}...</td>
                 <td>${property.city_name || '---'}</td>
                 <td>${formatNumber(property.area)} متر</td>
@@ -1140,8 +1140,9 @@ async function viewProperty(id) {
                     <div class="card-body">
                         <div class="row g-3">
                             <div class="col-md-6">
-                                <label class="text-muted small">شناسه</label>
-                                <div><strong><code>${property.tag_number}</code></strong></div>
+                                <label class="text-muted small">کد ملک</label>
+                                <div><span class="serial-badge" style="font-size:1rem">${property.serial_no != null ? formatNumber(property.serial_no) : '—'}</span>
+                                     <code class="ms-2 text-muted" style="font-size:.72rem">${property.tag_number}</code></div>
                             </div>
                             <div class="col-md-6">
                                 <label class="text-muted small">شناسه دیوار</label>

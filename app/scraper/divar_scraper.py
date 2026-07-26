@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
 from app.config import get_settings, CITIES, CATEGORIES
-from app.models.property import Property, City, Category
+from app.models.property import Property, City, Category, allocate_serial_no
 from app.models.scraping_job import ScrapingJob
 from app.models.proxy import Proxy
 from app.scraper.stealth import StealthConfig, STEALTH_JS, get_browser_args, get_context_options
@@ -2154,6 +2154,7 @@ class DivarScraper:
             else:
                 # Create new
                 property_data['tag_number'] = self._generate_tag_number()
+                property_data['serial_no'] = await allocate_serial_no(self.db_session)
                 property_data['scraped_at'] = datetime.now()
                 if self.active_phone:
                     property_data['owner_phone'] = self.active_phone
