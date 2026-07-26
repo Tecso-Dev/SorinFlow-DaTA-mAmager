@@ -2073,29 +2073,33 @@ class DivarScraper:
             property_dir = self.images_dir / divar_id
             property_dir.mkdir(parents=True, exist_ok=True)
             
+            import io as _io
+            from PIL import Image as _Image
             async with httpx.AsyncClient() as client:
                 for i, url in enumerate(images):
                     try:
                         response = await client.get(url, timeout=30)
                         if response.status_code == 200:
-                            # Generate filename
-                            ext = 'webp' if 'webp' in url else 'jpg'
-                            filename = f"img_{i+1}.{ext}"
+                            # Always convert (webp/png/...) to JPEG so every stored
+                            # image is a browser-universal .jpg
+                            filename = f"img_{i+1}.jpg"
                             filepath = property_dir / filename
-                            
-                            with open(filepath, 'wb') as f:
-                                f.write(response.content)
-                            
-                            local_paths.append(str(filepath))
-                            logger.debug(f"Downloaded image: {filename}")
-                            
-                            await asyncio.sleep(0.5)  # Rate limit downloads
+                            try:
+                                im = _Image.open(_io.BytesIO(response.content)).convert("RGB")
+                                im.save(filepath, format="JPEG", quality=85)
+                            except Exception:
+                                # not a decodable image — skip
+                                continue
+                            # served URL (see /images static mount)
+                            local_paths.append(f"/images/{divar_id}/{filename}")
+                            logger.debug(f"Downloaded+converted image: {filename}")
+                            await asyncio.sleep(0.3)  # Rate limit downloads
                     except Exception as e:
                         logger.warning(f"Failed to download image {i+1}: {e}")
-            
+
         except Exception as e:
             logger.error(f"Failed to download images: {e}")
-        
+
         return local_paths
     
     async def property_exists(self, divar_id: str) -> bool:
@@ -2451,13 +2455,17 @@ class DivarScraper:
                             await self.db_session.commit()
                             continue
 
-                        # Download images if enabled
+                        # Download images if enabled — replace the Divar (webp)
+                        # URLs with our converted local JPEG URLs so the panel
+                        # always serves .jpg
                         if download_images and property_data.get('images'):
                             local_images = await self.download_images(
                                 property_data['images'],
                                 property_data['divar_id']
                             )
                             if local_images:
+                                property_data['images'] = local_images
+                                property_data['thumbnail_url'] = local_images[0]
                                 property_data['images_downloaded'] = True
                         
                         # Save to database

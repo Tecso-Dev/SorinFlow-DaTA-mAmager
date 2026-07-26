@@ -329,9 +329,11 @@ async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/upload-image")
 async def upload_lead_image(file: UploadFile = File(...)):
-    """Store a lead photo under data/images/manual and return its URL."""
+    """Store a lead photo (converted to JPEG) under data/images/manual."""
     import uuid as _uuid
+    import io as _io
     from pathlib import Path as _Path
+    from PIL import Image as _Image
 
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(status_code=400, detail="فقط فایل تصویری مجاز است")
@@ -339,13 +341,16 @@ async def upload_lead_image(file: UploadFile = File(...)):
     if len(raw) > 8 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="حجم تصویر حداکثر ۸ مگابایت")
 
-    ext = _Path(file.filename or "").suffix.lower()
-    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
-        ext = ".jpg"
+    # Always convert (webp/png/heic-ish) to JPEG for a universal format
+    try:
+        im = _Image.open(_io.BytesIO(raw)).convert("RGB")
+    except Exception:
+        raise HTTPException(status_code=400, detail="فایل تصویری معتبر نیست")
+
     dest_dir = _Path(get_settings().images_path) / "manual"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    name = f"{_uuid.uuid4().hex}{ext}"
-    (dest_dir / name).write_bytes(raw)
+    name = f"{_uuid.uuid4().hex}.jpg"
+    im.save(dest_dir / name, format="JPEG", quality=88)
     return {"url": f"/images/manual/{name}"}
 
 
