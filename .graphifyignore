@@ -1,0 +1,11 @@
+# Generated/runtime data and secrets are not part of the code graph.
+data/
+logs/
+nginx/ssl/
+
+# Vendored minified frontend libraries overwhelm project-owned symbols.
+frontend/js/*.min.js
+frontend/css/*.min.css
+
+# Generated graph artifacts must never be re-ingested.
+graphify-out/
