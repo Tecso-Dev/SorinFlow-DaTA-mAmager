@@ -111,14 +111,15 @@ async def verify_totp_login(
     )
 
 
-# ── Public: self-registration ─────────────────────────────────────────────────
+# ── Registration — restricted to super_admin (no public sign-up) ──────────────
 
 @router.post("/register", response_model=UserResponse, status_code=201)
 async def register_user(
     data: UserRegister,
     db: AsyncSession = Depends(get_db),
+    _: User = _super_admin,
 ):
-    """Public endpoint — anyone can create a 'user' account."""
+    """Only a super_admin may create accounts — public sign-up is disabled."""
     existing = await db.execute(select(User).where(User.username == data.username))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="نام کاربری قبلاً ثبت شده است")

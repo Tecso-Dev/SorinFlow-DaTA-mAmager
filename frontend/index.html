@@ -102,14 +102,12 @@
             </button>
         </div>
 
-        <!-- Login / Register toggle link -->
-        <div id="login-toggle-link" style="text-align:center;margin-top:1rem;font-size:.85rem;color:var(--text-muted,#aaa);">
-            حساب ندارید؟
-            <a href="#" onclick="showRegisterForm();return false;" style="color:#7c6ef5;text-decoration:none;">ثبت نام کنید</a>
+        <!-- Public sign-up is disabled — only a super admin can create accounts -->
+        <div id="login-toggle-link" style="text-align:center;margin-top:1rem;font-size:.8rem;color:var(--text-muted,#aaa);">
+            برای ساخت حساب کاربری با مدیر سیستم هماهنگ کنید
         </div>
-        <div id="register-toggle-link" style="text-align:center;margin-top:1rem;font-size:.85rem;color:var(--text-muted,#aaa);display:none;">
-            قبلاً ثبت نام کرده‌اید؟
-            <a href="#" onclick="showLoginForm();return false;" style="color:#7c6ef5;text-decoration:none;">ورود کنید</a>
+        <div id="register-toggle-link" style="display:none;">
+            <a href="#" onclick="showLoginForm();return false;">ورود</a>
         </div>
     </div>
 </div>
@@ -2022,6 +2020,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260721a"></script>
+<script src="js/app.js?v=20260721b"></script>
 </body>
 </html>
