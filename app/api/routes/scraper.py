@@ -293,15 +293,21 @@ async def start_scraping_job(
 @router.get("/jobs", response_model=ScrapingJobList)
 async def get_scraping_jobs(
     status: Optional[str] = None,
+    category: Optional[str] = None,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """Get list of scraping jobs"""
+    from app.models.property import City, Category
     query = select(ScrapingJob).order_by(ScrapingJob.created_at.desc())
 
     if status:
         query = query.where(ScrapingJob.status == status)
+    if category:
+        cat_row = (await db.execute(select(Category).where(Category.name == category))).scalar_one_or_none()
+        if cat_row:
+            query = query.where(ScrapingJob.category_id == cat_row.id)
 
     # Isolate jobs by the user's linked Divar phone (admins see all jobs)
     is_privileged = current_user and current_user.role in ("super_admin", "admin")
@@ -311,13 +317,19 @@ async def get_scraping_jobs(
     query = query.limit(limit)
     result = await db.execute(query)
     jobs = result.scalars().all()
-    
+
+    # id → name lookups so the UI can show/filter by city & category
+    city_map = {c.id: c.name for c in (await db.execute(select(City))).scalars().all()}
+    cat_map = {c.id: c.name for c in (await db.execute(select(Category))).scalars().all()}
+
     return ScrapingJobList(
         items=[ScrapingJobResponse(
             id=j.id,
             job_id=str(j.job_id),
             city_id=j.city_id,
             category_id=j.category_id,
+            city_name=city_map.get(j.city_id),
+            category_name=cat_map.get(j.category_id),
             status=j.status,
             total_pages=j.total_pages,
             scraped_pages=j.scraped_pages,

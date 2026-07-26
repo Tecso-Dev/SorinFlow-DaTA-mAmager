@@ -584,7 +584,7 @@ function showSection(sectionName) {
     switch (sectionName) {
         case 'dashboard':  loadDashboard(); break;
         case 'properties': loadProperties(); break;
-        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); _initScraperDatePicker(); break;
+        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); _initScraperDatePicker(); setTimeout(restoreScraperForm, 200); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
@@ -1686,6 +1686,14 @@ function initCityPicker(containerId, cities, opts = {}) {
 
     // Expose getter
     container._getCityValue = () => selectedValue;
+    // programmatic restore (used by scraper form memory)
+    container._setCityValue = (val) => {
+        if (!val) return;
+        for (const p of provinces) {
+            const c = byProvince[p].find(c => (useSlug ? c.slug : c.name) === val);
+            if (c) { pick(val, c.name); return; }
+        }
+    };
 
     renderList('');
     return { getValue: () => selectedValue };
@@ -1729,7 +1737,7 @@ async function loadCategories() {
         // Same categories drive the properties-list and CRM-leads filters;
         // those filter by category_name, so the option value is the name.
         // data-type (buy/rent) drives the rent-only inputs' visibility.
-        ['filter-category', 'crm-filter-category'].forEach(id => {
+        ['filter-category', 'crm-filter-category', 'jobs-filter-category'].forEach(id => {
             const sel = document.getElementById(id);
             if (!sel) return;
             categories.forEach(cat => {
@@ -1794,6 +1802,47 @@ function _intOrNull(id) {
 }
 
 
+// ═══ Scraper form memory (last used filters persist across visits) ═══
+// note: scraper-posted-date is intentionally NOT persisted — it's a
+// per-run choice and the picker auto-fills today, which would force date mode
+const _SCRAPER_TEXT_FIELDS = [
+    'scraper-category', 'scraper-pages', 'scraper-advertiser-type',
+    'scraper-min-price', 'scraper-max-price', 'scraper-min-ppm', 'scraper-max-ppm',
+    'scraper-min-deposit', 'scraper-max-deposit', 'scraper-min-rent', 'scraper-max-rent',
+    'scraper-min-area', 'scraper-max-area', 'scraper-min-rooms', 'scraper-max-rooms',
+];
+const _SCRAPER_CHECKS = ['scraper-has-images', 'scraper-has-elevator', 'scraper-has-parking',
+    'scraper-has-storage', 'scraper-has-balcony', 'scraper-images'];
+
+function saveScraperForm() {
+    try {
+        const data = { city: document.getElementById('scraper-city')?.value || '' };
+        _SCRAPER_TEXT_FIELDS.forEach(id => { data[id] = document.getElementById(id)?.value ?? ''; });
+        _SCRAPER_CHECKS.forEach(id => { data[id] = !!document.getElementById(id)?.checked; });
+        localStorage.setItem('sf_scraper_form', JSON.stringify(data));
+    } catch (_) {}
+}
+
+function restoreScraperForm() {
+    let data;
+    try { data = JSON.parse(localStorage.getItem('sf_scraper_form') || 'null'); } catch (_) { return; }
+    if (!data) return;
+    _SCRAPER_TEXT_FIELDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && data[id] != null && data[id] !== '') el.value = data[id];
+    });
+    _SCRAPER_CHECKS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && typeof data[id] === 'boolean') el.checked = data[id];
+    });
+    // city picker + category-driven filter visibility
+    const picker = document.getElementById('scraper-city-picker');
+    if (picker && picker._setCityValue && data.city) picker._setCityValue(data.city);
+    if (document.getElementById('scraper-category')?.value) {
+        try { onScraperCategoryChange(); } catch (_) {}
+    }
+}
+
 async function startScraping(e) {
     e.preventDefault();
 
@@ -1842,6 +1891,9 @@ async function startScraping(e) {
     }
 
     // Check cookie status before scraping
+    // remember this configuration for next time
+    saveScraperForm();
+
     if (!cookieStatus.is_valid) {
         pendingScrapingAction = { type: 'bulk', city, category, maxItems, downloadImages, filters };
         showCookieWarning();
@@ -1882,9 +1934,16 @@ async function executeBulkScraping(city, category, maxItems, downloadImages, fil
     }
 }
 
+function _jobsUrl() {
+    let url = '/scraper/jobs?limit=20';
+    const cat = document.getElementById('jobs-filter-category')?.value || '';
+    if (cat) url += `&category=${encodeURIComponent(cat)}`;
+    return url;
+}
+
 async function loadJobs() {
     try {
-        const data = await apiCall('/scraper/jobs?limit=20');
+        const data = await apiCall(_jobsUrl());
         // Seed snapshot so first poll doesn't false-trigger a refresh
         for (const job of data.items) {
             _jobPollSnapshot[job.job_id] = { new_items: job.new_items, status: job.status };
@@ -2126,7 +2185,7 @@ function stopJobPolling() {
 
 async function _pollJobs() {
     try {
-        const data = await apiCall('/scraper/jobs?limit=20');
+        const data = await apiCall(_jobsUrl());
         let shouldRefreshProps = false;
 
         for (const job of data.items) {
@@ -2152,7 +2211,7 @@ function _renderJobsTable(items) {
     if (!tbody) return;
     tbody.innerHTML = '';
     if (items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">هیچ تسکی وجود ندارد</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4">هیچ تسکی وجود ندارد</td></tr>`;
         return;
     }
     const JOB_STATUS_FA = {
@@ -2165,6 +2224,8 @@ function _renderJobsTable(items) {
         const statusLabel = JOB_STATUS_FA[job.status] || job.status;
         row.innerHTML = `
             <td><code>${job.job_id.substring(0, 8)}...</code></td>
+            <td>${job.category_name ? `<span class="badge bg-primary">${esc(job.category_name)}</span>` : '—'}</td>
+            <td>${esc(job.city_name) || '—'}</td>
             <td><span class="badge ${statusClass}">${statusLabel}</span></td>
             <td>
                 <div style="min-width:90px">

@@ -142,6 +142,8 @@ class ScrapingJobResponse(BaseModel):
     job_id: str
     city_id: Optional[int] = None
     category_id: Optional[int] = None
+    city_name: Optional[str] = None
+    category_name: Optional[str] = None
     divar_phone: Optional[str] = None
     status: str
     total_pages: int = 0

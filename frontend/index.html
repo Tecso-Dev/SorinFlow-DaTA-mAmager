@@ -589,20 +589,27 @@
 
                     <div class="col-md-8">
                         <div class="card">
-                            <div class="card-header d-flex justify-content-between align-items-center">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <span>
                                     <i class="bi bi-list-task"></i> تسک‌های اسکرپینگ
                                     <span id="divar-session-badge" class="badge bg-secondary ms-2" style="cursor:default;font-size:.7rem" title="در حال بررسی...">●</span>
                                 </span>
-                                <button class="btn btn-outline-secondary btn-sm" onclick="loadJobs()">
-                                    <i class="bi bi-arrow-clockwise"></i> بروزرسانی
-                                </button>
+                                <div class="d-flex gap-2 align-items-center">
+                                    <select id="jobs-filter-category" class="form-select form-select-sm" style="width:190px;" onchange="loadJobs()">
+                                        <option value="">همه دسته‌بندی‌ها</option>
+                                    </select>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadJobs()">
+                                        <i class="bi bi-arrow-clockwise"></i> بروزرسانی
+                                    </button>
+                                </div>
                             </div>
                             <div class="table-responsive">
                                 <table class="table">
                                     <thead>
                                         <tr>
                                             <th>#</th>
+                                            <th>دسته‌بندی</th>
+                                            <th>شهر</th>
                                             <th>وضعیت</th>
                                             <th>پیشرفت</th>
                                             <th>جدید / بروز</th>
@@ -2020,6 +2027,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260721c"></script>
+<script src="js/app.js?v=20260721d"></script>
 </body>
 </html>
