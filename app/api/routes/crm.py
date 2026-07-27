@@ -202,6 +202,42 @@ async def create_lead(
     return lead
 
 
+async def _lead_with_property(db: AsyncSession, lead: Lead) -> LeadResponse:
+    """Attach the full linked-property snapshot so the CRM lead modal can show
+    exactly what the املاک modal shows."""
+    resp = LeadResponse.model_validate(lead)
+    prop = (await db.execute(
+        select(Property).where(Property.id == lead.property_id)
+    )).scalar_one_or_none()
+    if prop:
+        data = prop.to_dict()
+        # to_dict() omits a few columns the detail view renders
+        data.update({
+            "serial_no": prop.serial_no,
+            "land_area": prop.land_area,
+            "built_area": prop.built_area,
+            "price_per_meter": prop.price_per_meter,
+            "total_price": prop.total_price,
+            "deposit": prop.deposit,
+            "rent_price": prop.rent_price,
+            "building_direction": prop.building_direction,
+            "frontage": prop.frontage,
+            "unit_status": prop.unit_status,
+            "document_type": prop.document_type,
+            "usage_type": prop.usage_type,
+            "building_age": prop.building_age,
+            "latitude": prop.latitude,
+            "longitude": prop.longitude,
+            "advertiser_type": prop.advertiser_type,
+            "has_images": prop.has_images,
+            "extra_attrs": prop.extra_attrs or {},
+            "updated_at": prop.updated_at.isoformat() if prop.updated_at else None,
+        })
+        resp.property = data
+        resp.district = prop.district
+    return resp
+
+
 @router.get("/leads/export/excel")
 async def export_leads_excel(
     status: Optional[str] = None,
@@ -236,11 +272,7 @@ async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     lead = result.scalar_one_or_none()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    resp = LeadResponse.model_validate(lead)
-    resp.district = (await db.execute(
-        select(Property.district).where(Property.id == lead.property_id)
-    )).scalar_one_or_none()
-    return resp
+    return await _lead_with_property(db, lead)
 
 
 @router.patch("/leads/{lead_id}", response_model=LeadResponse)
@@ -281,11 +313,7 @@ async def update_lead(
             prop.district = data.district.strip() or None
     await db.commit()
     await db.refresh(lead)
-    resp = LeadResponse.model_validate(lead)
-    resp.district = (await db.execute(
-        select(Property.district).where(Property.id == lead.property_id)
-    )).scalar_one_or_none()
-    return resp
+    return await _lead_with_property(db, lead)
 
 
 @router.post("/leads/{lead_id}/notify")

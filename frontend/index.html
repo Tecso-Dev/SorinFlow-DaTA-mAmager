@@ -11,7 +11,7 @@
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260721a">
+    <link rel="stylesheet" href="css/style.css?v=20260727a">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -695,6 +695,29 @@
                                 <i class="bi bi-clock-history"></i> نشست‌های ذخیره‌شده
                             </div>
                             <div class="card-body" id="cookies-list"></div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-box-arrow-in-down"></i> افزودن نشست دستی (Import کوکی)
+                            </div>
+                            <div class="card-body">
+                                <p class="small text-muted mb-2">
+                                    برای اضافه کردن شماره‌های بیشتر (و فعال شدن چرخش شماره)، کوکی‌های دیوار را
+                                    از افزونه‌ای مثل EditThisCookie کپی و این‌جا وارد کنید.
+                                </p>
+                                <div class="mb-2">
+                                    <label class="form-label small">شماره موبایل</label>
+                                    <input type="text" id="import-phone" class="form-control form-control-sm" placeholder="09xxxxxxxxx">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small">JSON کوکی‌ها</label>
+                                    <textarea id="import-cookies-json" class="form-control form-control-sm" rows="4"
+                                              placeholder='[{"name":"token","value":"...","domain":".divar.ir"}]' dir="ltr"></textarea>
+                                </div>
+                                <button class="btn btn-primary btn-sm btn-w100" onclick="importCookies()">
+                                    <i class="bi bi-box-arrow-in-down"></i> افزودن نشست
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1925,28 +1948,43 @@
 
 <!-- 2FA Management Modal -->
 <!-- ═══ Divar SMS-OTP Modal ══════════════════════════════════════════════════ -->
-<div class="modal fade" id="divarOtpModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
-        <div class="modal-content" style="background:var(--surface);border:1px solid var(--border);color:var(--text);">
-            <div class="modal-header" style="border-color:var(--border);background:var(--surface2);">
-                <h5 class="modal-title" style="color:var(--text);font-size:.9rem;">
-                    <i class="bi bi-phone"></i> کد تأیید دیوار
-                </h5>
-                <button type="button" class="btn-close" onclick="dismissDivarOtp()">✕</button>
-            </div>
-            <div class="modal-body" style="font-size:.85rem;">
-                <p class="text-muted mb-2">دیوار یک کد ۶ رقمی به شماره‌تان ارسال کرد. لطفاً وارد کنید:</p>
-                <input id="divar-otp-input" type="text" class="form-control text-center"
-                       maxlength="6" placeholder="------" style="font-size:1.3rem;letter-spacing:.4rem;">
-                <input type="hidden" id="divar-otp-key">
-                <div class="small text-muted mt-2">
-                    کدی نیامد؟ می‌توانید این پنجره را ببندید؛ اگر تسک هنوز فعال باشد دوباره درخواست می‌دهد.
+<!-- OTP v2 — segmented code entry with live status -->
+<div class="modal fade otp2" id="divarOtpModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:420px">
+        <div class="modal-content otp2-card">
+            <button type="button" class="otp2-close" onclick="dismissDivarOtp()" aria-label="بستن">✕</button>
+
+            <div class="otp2-head">
+                <div class="otp2-ring">
+                    <i class="bi bi-shield-lock"></i>
                 </div>
+                <h5>کد تأیید دیوار</h5>
+                <p>کد ۶ رقمی ارسال‌شده به شماره‌ی <b id="otp2-phone">دیوار</b> را وارد کنید</p>
             </div>
-            <div class="modal-footer" style="border-color:var(--border);">
-                <button class="btn btn-outline-secondary" onclick="dismissDivarOtp()">بستن</button>
-                <button class="btn btn-primary flex-grow-1" onclick="submitDivarOtp()">
-                    <i class="bi bi-check-circle"></i> تأیید
+
+            <div class="otp2-boxes" id="otp2-boxes" dir="ltr">
+                <input class="otp2-box" type="text" inputmode="numeric" maxlength="1" autocomplete="one-time-code">
+                <input class="otp2-box" type="text" inputmode="numeric" maxlength="1">
+                <input class="otp2-box" type="text" inputmode="numeric" maxlength="1">
+                <input class="otp2-box" type="text" inputmode="numeric" maxlength="1">
+                <input class="otp2-box" type="text" inputmode="numeric" maxlength="1">
+                <input class="otp2-box" type="text" inputmode="numeric" maxlength="1">
+            </div>
+            <input type="hidden" id="divar-otp-key">
+
+            <div class="otp2-status" id="otp2-status">
+                <span class="otp2-dot"></span>
+                <span id="otp2-status-text">اسکرپر متوقف است و منتظر کد می‌ماند</span>
+            </div>
+
+            <div class="otp2-timer" id="otp2-timer"></div>
+
+            <div class="otp2-actions">
+                <button class="btn btn-primary otp2-submit" id="otp2-submit" onclick="submitDivarOtp()">
+                    <i class="bi bi-check-circle"></i> تأیید و ادامه اسکرپ
+                </button>
+                <button class="btn btn-outline-secondary otp2-skip" onclick="dismissDivarOtp()">
+                    رد کردن و ادامه بدون شماره
                 </button>
             </div>
         </div>
@@ -2052,6 +2090,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260727a"></script>
+<script src="js/app.js?v=20260727c"></script>
 </body>
 </html>

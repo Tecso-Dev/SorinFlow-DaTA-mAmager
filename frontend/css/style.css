@@ -1813,3 +1813,88 @@ html:not([data-theme="light"]) .topbar {
   border: 1px solid rgba(167,139,250,.35); color: #c4b5fd;
   font-variant-numeric: tabular-nums;
 }
+
+/* ════════════════════════════════════════════════════
+   OTP v2 — segmented Divar verification prompt
+   ════════════════════════════════════════════════════ */
+.otp2 .otp2-card {
+  position: relative; overflow: hidden;
+  padding: 2rem 1.6rem 1.5rem;
+  border-radius: 26px;
+  background: linear-gradient(165deg, rgba(255,255,255,.06), rgba(255,255,255,.02) 60%), rgba(13,13,22,.92);
+  border: 1px solid rgba(255,255,255,.1);
+  box-shadow: 0 40px 110px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.14);
+  text-align: center;
+}
+.otp2 .otp2-card::before {
+  content: ''; position: absolute; inset: -60% 20% auto 20%; height: 60%;
+  background: radial-gradient(ellipse at center, rgba(167,139,250,.35), transparent 70%);
+  pointer-events: none;
+}
+.otp2-close {
+  position: absolute; top: 14px; left: 16px; z-index: 2;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+  color: var(--text-muted); font-size: .8rem; cursor: pointer; line-height: 1;
+}
+.otp2-close:hover { background: rgba(239,68,68,.18); color: #fca5a5; }
+
+.otp2-head { position: relative; margin-bottom: 1.4rem; }
+.otp2-ring {
+  width: 62px; height: 62px; margin: 0 auto .9rem;
+  border-radius: 20px; display: flex; align-items: center; justify-content: center;
+  font-size: 1.6rem; color: #fff;
+  background: linear-gradient(135deg, #a78bfa, #f0a6ff 55%, #67e8f9);
+  box-shadow: 0 10px 30px rgba(167,139,250,.45);
+  animation: otp2Pulse 2.4s ease-in-out infinite;
+}
+@keyframes otp2Pulse {
+  0%, 100% { transform: translateY(0); box-shadow: 0 10px 30px rgba(167,139,250,.45); }
+  50%      { transform: translateY(-3px); box-shadow: 0 16px 40px rgba(240,166,255,.55); }
+}
+.otp2-head h5 { font-size: 1.05rem; font-weight: 800; margin-bottom: .35rem; }
+.otp2-head p  { font-size: .8rem; color: var(--text-muted); margin: 0; }
+.otp2-head p b { color: var(--text); }
+
+.otp2-boxes { display: flex; gap: .5rem; justify-content: center; margin-bottom: 1rem; }
+.otp2-box {
+  width: 46px; height: 56px; text-align: center;
+  font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums;
+  color: var(--text); caret-color: #a78bfa;
+  background: rgba(255,255,255,.05);
+  border: 1.5px solid rgba(255,255,255,.12); border-radius: 14px;
+  outline: none; transition: all .18s cubic-bezier(.34,1.56,.64,1);
+}
+.otp2-box:focus {
+  border-color: #a78bfa; background: rgba(167,139,250,.12);
+  box-shadow: 0 0 0 4px rgba(167,139,250,.18); transform: translateY(-2px);
+}
+.otp2-box.filled { border-color: rgba(103,232,249,.55); background: rgba(103,232,249,.1); }
+.otp2-boxes.error .otp2-box { border-color: rgba(239,68,68,.6); animation: otp2Shake .4s; }
+@keyframes otp2Shake {
+  0%,100% { transform: translateX(0); } 25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+.otp2-boxes.done .otp2-box { border-color: rgba(52,211,153,.6); background: rgba(52,211,153,.12); }
+
+.otp2-status {
+  display: inline-flex; align-items: center; gap: .5rem;
+  font-size: .76rem; color: var(--text-dim);
+  padding: .4rem .9rem; border-radius: 30px;
+  background: rgba(255,255,255,.045); border: 1px solid var(--border);
+}
+.otp2-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #fcd34d;
+  box-shadow: 0 0 8px #fcd34d; animation: otp2Blink 1.4s ease-in-out infinite;
+}
+@keyframes otp2Blink { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.otp2-status.ok .otp2-dot { background: #34d399; box-shadow: 0 0 8px #34d399; animation: none; }
+.otp2-status.err .otp2-dot { background: #f87171; box-shadow: 0 0 8px #f87171; animation: none; }
+
+.otp2-timer { font-size: .72rem; color: var(--text-muted); margin: .7rem 0 1rem; min-height: 1em; }
+.otp2-actions { display: flex; flex-direction: column; gap: .5rem; }
+.otp2-submit { width: 100%; padding: .7rem; font-weight: 700; border-radius: 14px; }
+.otp2-skip { width: 100%; font-size: .78rem; border-radius: 14px; }
+@media (max-width: 420px) {
+  .otp2-box { width: 40px; height: 50px; font-size: 1.25rem; }
+}

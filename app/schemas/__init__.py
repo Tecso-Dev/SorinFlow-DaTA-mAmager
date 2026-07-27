@@ -284,6 +284,8 @@ class LeadResponse(BaseModel):
     updated_at: Optional[datetime] = None
     # District lives on the linked property (not a Lead column)
     district: Optional[str] = None
+    # Full snapshot of the linked property (same data the املاک modal shows)
+    property: Optional[dict] = None
 
     class Config:
         from_attributes = True

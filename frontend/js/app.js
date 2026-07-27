@@ -1701,7 +1701,9 @@ function initCityPicker(containerId, cities, opts = {}) {
 
 async function loadCities() {
     try {
-        const cities = await apiCall('/scraper/cities');
+        const resp = await apiCall('/scraper/cities');
+        const cities = Array.isArray(resp) ? resp : (resp?.items || []);
+        if (!cities.length) { console.warn('No cities returned'); return; }
 
         initCityPicker('scraper-city-picker', cities, {
             valueId:     'scraper-city',
@@ -1726,7 +1728,8 @@ async function loadCities() {
 
 async function loadCategories() {
     try {
-        const categories = await apiCall('/scraper/categories');
+        const _catResp = await apiCall('/scraper/categories');
+        const categories = Array.isArray(_catResp) ? _catResp : (_catResp?.items || []);
 
         const select = document.getElementById('scraper-category');
         categories.forEach(cat => {
@@ -2255,6 +2258,83 @@ function _renderJobsTable(items) {
 // keys the user explicitly dismissed this session — don't re-pop them
 const _dismissedOtpKeys = new Set();
 
+// ═══ OTP v2 — segmented entry, auto-submit, live countdown ═══════
+let _otp2Timer = null;
+let _otp2Deadline = 0;
+const OTP2_WINDOW = 300;   // must match settings.otp_wait_timeout
+
+function _otp2Els() { return [...document.querySelectorAll('#otp2-boxes .otp2-box')]; }
+function _otp2Code() { return _otp2Els().map(b => b.value).join(''); }
+
+function _otp2SetStatus(text, kind = '') {
+    const wrap = document.getElementById('otp2-status');
+    const label = document.getElementById('otp2-status-text');
+    if (label) label.textContent = text;
+    if (wrap) wrap.className = 'otp2-status' + (kind ? ' ' + kind : '');
+}
+
+function _otp2Reset() {
+    _otp2Els().forEach(b => { b.value = ''; b.classList.remove('filled'); });
+    document.getElementById('otp2-boxes')?.classList.remove('error', 'done');
+    _otp2SetStatus('اسکرپر متوقف است و منتظر کد می‌ماند');
+    const btn = document.getElementById('otp2-submit');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-circle"></i> تأیید و ادامه اسکرپ'; }
+}
+
+function _otp2StartTimer() {
+    _otp2StopTimer();
+    _otp2Deadline = Date.now() + OTP2_WINDOW * 1000;
+    const tick = () => {
+        const left = Math.max(Math.round((_otp2Deadline - Date.now()) / 1000), 0);
+        const el = document.getElementById('otp2-timer');
+        if (el) {
+            const m = String(Math.floor(left / 60)).padStart(2, '0');
+            const s = String(left % 60).padStart(2, '0');
+            el.textContent = left > 0
+                ? `⏳ مهلت ورود کد: ${formatNumber(m)}:${formatNumber(s)}`
+                : 'مهلت تمام شد — اسکرپر بدون این شماره ادامه می‌دهد';
+        }
+        if (left <= 0) _otp2StopTimer();
+    };
+    tick();
+    _otp2Timer = setInterval(tick, 1000);
+}
+
+function _otp2StopTimer() {
+    if (_otp2Timer) { clearInterval(_otp2Timer); _otp2Timer = null; }
+}
+
+function initOtp2Boxes() {
+    const boxes = _otp2Els();
+    if (!boxes.length || boxes[0].dataset.bound) return;
+    boxes.forEach((box, i) => {
+        box.dataset.bound = '1';
+        box.addEventListener('input', () => {
+            box.value = (box.value.replace(/\D/g, '')[0] || '');
+            box.classList.toggle('filled', !!box.value);
+            document.getElementById('otp2-boxes')?.classList.remove('error');
+            if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
+            if (_otp2Code().length === boxes.length) submitDivarOtp();
+        });
+        box.addEventListener('keydown', e => {
+            if (e.key === 'Backspace' && !box.value && i > 0) {
+                boxes[i - 1].focus(); boxes[i - 1].value = ''; boxes[i - 1].classList.remove('filled');
+                e.preventDefault();
+            } else if (e.key === 'ArrowLeft' && i < boxes.length - 1) { boxes[i + 1].focus(); e.preventDefault(); }
+            else if (e.key === 'ArrowRight' && i > 0) { boxes[i - 1].focus(); e.preventDefault(); }
+            else if (e.key === 'Enter') submitDivarOtp();
+        });
+        box.addEventListener('paste', e => {
+            e.preventDefault();
+            const digits = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, boxes.length);
+            digits.split('').forEach((d, k) => { boxes[k].value = d; boxes[k].classList.add('filled'); });
+            boxes[Math.min(digits.length, boxes.length - 1)].focus();
+            if (digits.length === boxes.length) submitDivarOtp();
+        });
+    });
+}
+
+// keys the user explicitly dismissed this session — don't re-pop them
 async function pollDivarOtp() {
     try {
         const data = await apiCall('/scraper/otp-pending');
@@ -2264,9 +2344,14 @@ async function pollDivarOtp() {
             const modal = document.getElementById('divarOtpModal');
             if (modal && !modal.classList.contains('show')) {
                 document.getElementById('divar-otp-key').value = item.key;
-                document.getElementById('divar-otp-input').value = '';
+                const phoneEl = document.getElementById('otp2-phone');
+                if (phoneEl) phoneEl.textContent = item.phone_hint || 'دیوار';
+                initOtp2Boxes();
+                _otp2Reset();
+                _otp2StartTimer();
+                // focus the first box once Bootstrap finished its own focus handling
+                modal.addEventListener('shown.bs.modal', () => _otp2Els()[0]?.focus(), { once: true });
                 new bootstrap.Modal(modal).show();
-                setTimeout(() => document.getElementById('divar-otp-input').focus(), 400);
             }
         }
     } catch(e) { /* silent */ }
@@ -2275,25 +2360,37 @@ async function pollDivarOtp() {
 async function dismissDivarOtp() {
     const key = document.getElementById('divar-otp-key').value;
     if (key) _dismissedOtpKeys.add(key);           // stop the poll from re-opening it
+    _otp2StopTimer();
     bootstrap.Modal.getInstance(document.getElementById('divarOtpModal'))?.hide();
     try { await apiCall('/scraper/otp-cancel', { method: 'POST' }); } catch (_) {}
 }
 
 async function submitDivarOtp() {
     const key  = document.getElementById('divar-otp-key').value;
-    const code = document.getElementById('divar-otp-input').value.trim();
-    if (!code || code.length < 4) { showToast('خطا', 'کد را وارد کنید', 'warning'); return; }
-    const btn = document.querySelector('#divarOtpModal .btn-primary');
-    if (btn) { btn.disabled = true; btn.textContent = 'در حال ارسال...'; }
+    const code = _otp2Code().trim();
+    const boxesWrap = document.getElementById('otp2-boxes');
+    if (code.length < 6) {
+        boxesWrap?.classList.add('error');
+        _otp2SetStatus('کد ۶ رقمی کامل نیست', 'err');
+        return;
+    }
+    const btn = document.getElementById('otp2-submit');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال ارسال...'; }
+    _otp2SetStatus('در حال ارسال کد به دیوار...');
     try {
         await apiCall(`/scraper/otp/${encodeURIComponent(key)}`, { method: 'POST', body: JSON.stringify({ code }) });
-        bootstrap.Modal.getInstance(document.getElementById('divarOtpModal'))?.hide();
-        showToast('تأیید', 'کد ارسال شد', 'success');
+        boxesWrap?.classList.add('done');
+        _otp2SetStatus('کد تأیید شد — اسکرپر ادامه می‌دهد', 'ok');
+        _otp2StopTimer();
+        setTimeout(() => {
+            bootstrap.Modal.getInstance(document.getElementById('divarOtpModal'))?.hide();
+            showToast('تأیید', 'کد ارسال شد و اسکرپ ادامه یافت', 'success');
+        }, 700);
     } catch(e) {
-        const msg = (e?.message || '').includes('No pending OTP') ? 'درخواست OTP منقضی شده — لطفاً صبر کنید تا scraper دوباره درخواست دهد' : 'ارسال کد ناموفق بود';
-        showToast('خطا', msg, 'danger');
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'تأیید'; }
+        boxesWrap?.classList.add('error');
+        const expired = (e?.message || '').includes('No pending OTP');
+        _otp2SetStatus(expired ? 'درخواست منقضی شده — منتظر درخواست بعدی بمانید' : 'ارسال کد ناموفق بود', 'err');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-circle"></i> تأیید و ادامه اسکرپ'; }
     }
 }
 
@@ -3237,6 +3334,89 @@ async function loadLeads() {
     }
 }
 
+// Full property details block — identical data to the لیست املاک modal,
+// reused inside the CRM lead modal.
+function _renderPropertyDetails(p) {
+    if (!p) return '';
+    const row = (label, value) => value === null || value === undefined || value === '' || value === '---'
+        ? '' : `<div class="col-md-4"><label class="text-muted small">${label}</label><div>${value}</div></div>`;
+    const num = v => (v === null || v === undefined) ? '' : formatNumber(v);
+    const yn  = v => v ? '✅ دارد' : '❌ ندارد';
+
+    const specs = [
+        row('کد ملک', p.serial_no != null ? `<span class="serial-badge">${formatNumber(p.serial_no)}</span>` : ''),
+        row('نوع ملک', esc(p.property_type)),
+        row('دسته‌بندی', esc(p.category_name)),
+        row('متراژ', p.area ? num(p.area) + ' متر' : ''),
+        row('متراژ زمین', p.land_area ? num(p.land_area) + ' متر' : ''),
+        row('زیربنا', p.built_area ? num(p.built_area) + ' متر' : ''),
+        row('تعداد اتاق', p.rooms != null ? num(p.rooms) : ''),
+        row('طبقه', p.floor != null ? num(p.floor) : ''),
+        row('کل طبقات', p.total_floors ? num(p.total_floors) : ''),
+        row('سال ساخت', p.year_built ? num(p.year_built) : ''),
+        row('سن بنا', esc(p.building_age)),
+        row('جهت ساختمان', esc(p.building_direction)),
+        row('بر', p.frontage ? num(p.frontage) + ' متر' : ''),
+        row('وضعیت واحد', esc(p.unit_status)),
+        row('نوع سند', esc(p.document_type)),
+        row('نوع کاربری', esc(p.usage_type)),
+        row('آگهی‌دهنده', p.advertiser_type === 'agency' ? 'مشاور املاک' : p.advertiser_type === 'personal' ? 'شخصی' : ''),
+    ].join('');
+
+    const prices = [
+        row('قیمت کل', p.total_price ? formatPrice(p.total_price) : ''),
+        row('قیمت هر متر', p.price_per_meter ? formatPrice(p.price_per_meter) : ''),
+        row('ودیعه', p.deposit ? formatPrice(p.deposit) : ''),
+        row('اجاره ماهانه', p.rent_price ? formatPrice(p.rent_price) : ''),
+    ].join('');
+
+    const amenities = [
+        row('آسانسور', yn(p.has_elevator)), row('پارکینگ', yn(p.has_parking)),
+        row('انباری', yn(p.has_storage)),  row('بالکن', yn(p.has_balcony)),
+    ].join('');
+
+    const location = [
+        row('شهر', esc(p.city_name)), row('منطقه', esc(p.district)), row('محله', esc(p.neighborhood)),
+        p.address ? `<div class="col-12"><label class="text-muted small">آدرس</label><div>${esc(p.address)}</div></div>` : '',
+        (p.latitude && p.longitude)
+            ? `<div class="col-12"><a href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank" class="btn btn-sm btn-outline-primary"><i class="bi bi-map"></i> مشاهده در نقشه</a></div>`
+            : '',
+    ].join('');
+
+    const extras = Object.entries(p.extra_attrs || {})
+        .map(([k, v]) => row(LEAD_ATTR_FA[k] || esc(k), esc(v))).join('');
+
+    const images = (p.images && p.images.length) ? `
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-images"></i> تصاویر (${formatNumber(p.images.length)})</div>
+            <div class="card-body">
+                <div class="lead-photo-strip">
+                    ${p.images.map((img, i) => `
+                        <div class="lead-photo-thumb" style="width:92px;height:92px;cursor:zoom-in">
+                            <img src="${img}" alt="تصویر ${i + 1}" onclick="openImageLightbox(this.src)">
+                        </div>`).join('')}
+                </div>
+            </div>
+        </div>` : '';
+
+    const section = (icon, title, body) => body.trim()
+        ? `<div class="card mb-3"><div class="card-header"><i class="bi ${icon}"></i> ${title}</div>
+             <div class="card-body"><div class="row g-3">${body}</div></div></div>` : '';
+
+    return `
+        <hr>
+        <h6 class="mb-3"><i class="bi bi-house-door"></i> جزئیات کامل ملک</h6>
+        ${images}
+        ${section('bi-info-circle', 'مشخصات ملک', specs)}
+        ${section('bi-currency-exchange', 'اطلاعات قیمت', prices)}
+        ${section('bi-stars', 'امکانات', amenities)}
+        ${section('bi-list-columns', 'مشخصات تکمیلی', extras)}
+        ${section('bi-geo-alt', 'موقعیت مکانی', location)}
+        ${p.description ? `<div class="card mb-3"><div class="card-header"><i class="bi bi-card-text"></i> توضیحات</div>
+            <div class="card-body"><pre style="white-space:pre-wrap;font-family:inherit;font-size:.9rem;margin:0;line-height:1.7">${esc(p.description)}</pre></div></div>` : ''}
+    `;
+}
+
 async function viewLead(id) {
     try {
         const lead = await apiCall(`/crm/leads/${id}`);
@@ -3292,6 +3472,7 @@ async function viewLead(id) {
                             : '<span class="badge bg-secondary">خیر</span>'}
                     </div>
                 </div>
+                <div class="col-12">${_renderPropertyDetails(lead.property)}</div>
                 <hr>
                 <div class="col-md-6">
                     <label class="form-label">وضعیت CRM</label>
