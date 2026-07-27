@@ -3311,13 +3311,112 @@ function clearLeadsFilter() {
     clearLeadsDateFilter();
 }
 
+// ═══ Leads: pagination, quick status change, bulk actions ═══════
+let _leadsPage = 1;
+const LEADS_PAGE_SIZE = 25;
+const _selectedLeads = new Set();
+
+function goToLeadsPage(page) { _leadsPage = Math.max(page, 1); loadLeads(); }
+
+function _renderLeadsPagination(total) {
+    const wrap = document.getElementById('leads-pagination');
+    if (!wrap) return;
+    const pages = Math.max(Math.ceil(total / LEADS_PAGE_SIZE), 1);
+    if (pages <= 1) { wrap.innerHTML = ''; return; }
+    const add = (label, page, opts = {}) =>
+        `<li class="page-item ${opts.active ? 'active' : ''} ${opts.disabled ? 'disabled' : ''}">`
+        + (opts.gap ? `<span class="page-link">…</span>`
+                    : `<a class="page-link" href="#" onclick="goToLeadsPage(${page}); return false;">${label}</a>`)
+        + '</li>';
+    let html = add('‹', Math.max(_leadsPage - 1, 1), { disabled: _leadsPage === 1 });
+    let last = 0;
+    for (let i = 1; i <= pages; i++) {
+        if (i === 1 || i === pages || Math.abs(i - _leadsPage) <= 2) {
+            if (i - last > 1) html += add('', 0, { gap: true });
+            html += add(formatNumber(i), i, { active: i === _leadsPage });
+            last = i;
+        }
+    }
+    html += add('›', Math.min(_leadsPage + 1, pages), { disabled: _leadsPage === pages });
+    wrap.innerHTML = `<ul class="pagination pagination-sm justify-content-center mb-0">${html}</ul>`;
+}
+
+function toggleLeadSelection(id, checked) {
+    if (checked) _selectedLeads.add(id); else _selectedLeads.delete(id);
+    _updateBulkBar();
+}
+
+function toggleAllLeads(checked) {
+    document.querySelectorAll('.lead-check').forEach(cb => {
+        cb.checked = checked;
+        const id = Number(cb.dataset.id);
+        if (checked) _selectedLeads.add(id); else _selectedLeads.delete(id);
+    });
+    _updateBulkBar();
+}
+
+function _updateBulkBar() {
+    const bar = document.getElementById('leads-bulk-bar');
+    const count = document.getElementById('leads-bulk-count');
+    if (!bar) return;
+    bar.classList.toggle('d-none', _selectedLeads.size === 0);
+    if (count) count.textContent = formatNumber(_selectedLeads.size);
+}
+
+function clearLeadSelection() {
+    _selectedLeads.clear();
+    document.querySelectorAll('.lead-check').forEach(cb => { cb.checked = false; });
+    const all = document.getElementById('leads-check-all');
+    if (all) all.checked = false;
+    _updateBulkBar();
+}
+
+async function quickLeadStatus(id, status, selectEl) {
+    try {
+        await apiCall(`/crm/leads/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+        showToast('موفق', 'وضعیت لید تغییر کرد', 'success');
+        loadLeads();
+        loadCrmStats();
+    } catch (e) {
+        showToast('خطا', e.message, 'danger');
+        if (selectEl) loadLeads();   // revert the visual change
+    }
+}
+
+async function bulkLeadStatus(status) {
+    if (!_selectedLeads.size || !status) return;
+    try {
+        const r = await apiCall('/crm/leads/bulk', {
+            method: 'POST',
+            body: JSON.stringify({ ids: [..._selectedLeads], action: 'status', status })
+        });
+        showToast('موفق', `${formatNumber(r.updated)} لید بروزرسانی شد`, 'success');
+        clearLeadSelection();
+        loadLeads(); loadCrmStats();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function bulkDeleteLeads() {
+    if (!_selectedLeads.size) return;
+    if (!confirm(`${_selectedLeads.size} لید انتخاب‌شده حذف شوند؟ این عمل قابل بازگشت نیست.`)) return;
+    try {
+        const r = await apiCall('/crm/leads/bulk', {
+            method: 'POST',
+            body: JSON.stringify({ ids: [..._selectedLeads], action: 'delete' })
+        });
+        showToast('موفق', `${formatNumber(r.deleted)} لید حذف شد`, 'success');
+        clearLeadSelection();
+        loadLeads(); loadCrmStats();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
 async function loadLeads() {
     const status   = document.getElementById('crm-filter-status').value;
     const notified = document.getElementById('crm-filter-notified').value;
     const search   = document.getElementById('crm-filter-search')?.value.trim() || '';
     const category = document.getElementById('crm-filter-category')?.value || '';
 
-    let url = '/crm/leads?limit=100';
+    let url = `/crm/leads?limit=${LEADS_PAGE_SIZE}&offset=${(_leadsPage - 1) * LEADS_PAGE_SIZE}`;
     if (status)          url += `&status=${status}`;
     if (notified !== '') url += `&notified=${notified}`;
     if (search)          url += `&search=${encodeURIComponent(search)}`;
@@ -3336,11 +3435,12 @@ async function loadLeads() {
         if (data.items.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="9" class="text-center text-muted py-4">
+                    <td colspan="10" class="text-center text-muted py-4">
                         <i class="bi bi-inbox" style="font-size:2rem;"></i>
                         <p class="mt-2">هیچ لیدی یافت نشد</p>
                     </td>
                 </tr>`;
+            _renderLeadsPagination(data.total ?? 0);
             return;
         }
 
@@ -3355,6 +3455,9 @@ async function loadLeads() {
 
             const row = document.createElement('tr');
             row.innerHTML = `
+                <td><input type="checkbox" class="form-check-input lead-check" data-id="${lead.id}"
+                           ${_selectedLeads.has(lead.id) ? 'checked' : ''}
+                           onchange="toggleLeadSelection(${lead.id}, this.checked)"></td>
                 <td>${lead.id}</td>
                 <td title="${esc(lead.property_title)}">${esc((lead.property_title || '---').substring(0, 35))}...</td>
                 <td>${lead.city_name || '---'}</td>
@@ -3364,7 +3467,14 @@ async function loadLeads() {
                         ? `<a href="tel:${lead.phone_number}" class="text-success fw-bold">${lead.phone_number}</a>`
                         : '<span class="text-muted">---</span>'}
                 </td>
-                <td><span class="badge ${st.cls}">${st.label}</span></td>
+                <td>
+                    <select class="form-select form-select-sm status-quick ${st.cls}" style="min-width:130px"
+                            onchange="quickLeadStatus(${lead.id}, this.value, this)">
+                        ${Object.entries(CRM_STATUS_LABELS).map(([val, info]) =>
+                            `<option value="${val}" ${lead.status === val ? 'selected' : ''}>${info.label}</option>`
+                        ).join('')}
+                    </select>
+                </td>
                 <td>${notifiedBadge}</td>
                 <td>${createdAt}</td>
                 <td>
@@ -3385,6 +3495,15 @@ async function loadLeads() {
             `;
             tbody.appendChild(row);
         });
+
+        _renderLeadsPagination(data.total ?? data.items.length);
+        // keep the header checkbox in sync with the rendered page
+        const allBox = document.getElementById('leads-check-all');
+        if (allBox) {
+            const boxes = [...document.querySelectorAll('.lead-check')];
+            allBox.checked = boxes.length > 0 && boxes.every(cb => cb.checked);
+        }
+        _updateBulkBar();
     } catch (error) {
         showToast('خطا', 'بارگیری لیدها ناموفق بود', 'danger');
     }
@@ -3471,6 +3590,49 @@ function _renderPropertyDetails(p) {
         ${p.description ? `<div class="card mb-3"><div class="card-header"><i class="bi bi-card-text"></i> توضیحات</div>
             <div class="card-body"><pre style="white-space:pre-wrap;font-family:inherit;font-size:.9rem;margin:0;line-height:1.7">${esc(p.description)}</pre></div></div>` : ''}
     `;
+}
+
+// ═══ Activity timeline & lead → deal conversion ═══════════════════
+const ACTIVITY_ICONS = {
+    status_change: 'bi-arrow-repeat', note: 'bi-journal-text', created: 'bi-plus-circle',
+    converted: 'bi-handshake', notified: 'bi-bell',
+};
+
+async function loadActivity(entityType, entityId, containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = '<div class="text-muted small">در حال بارگیری تاریخچه...</div>';
+    try {
+        const data = await apiCall(`/crm/activity/${entityType}/${entityId}`);
+        if (!data.items.length) {
+            el.innerHTML = '<div class="text-muted small">هنوز فعالیتی ثبت نشده است</div>';
+            return;
+        }
+        el.innerHTML = `<div class="timeline">${data.items.map(a => `
+            <div class="tl-item">
+                <div class="tl-dot"><i class="bi ${ACTIVITY_ICONS[a.action] || 'bi-dot'}"></i></div>
+                <div class="tl-body">
+                    <div class="tl-text">${esc(a.detail)}</div>
+                    <div class="tl-meta">
+                        ${a.actor ? esc(a.actor) + ' · ' : ''}
+                        ${a.created_at ? new Date(a.created_at).toLocaleString('fa-IR') : ''}
+                    </div>
+                </div>
+            </div>`).join('')}</div>`;
+    } catch (e) {
+        el.innerHTML = '<div class="text-muted small">بارگیری تاریخچه ناموفق بود</div>';
+    }
+}
+
+async function convertLeadToDeal(leadId) {
+    if (!confirm('از این لید یک معامله ساخته شود؟')) return;
+    try {
+        const r = await apiCall(`/crm/leads/${leadId}/convert-to-deal`, { method: 'POST' });
+        showToast('موفق', `معامله #${r.deal.id} ساخته شد`, 'success');
+        bootstrap.Modal.getInstance(document.getElementById('leadModal'))?.hide();
+        document.querySelector('[data-bs-target="#crm-tab-deals"]')?.click();
+        loadDeals();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
 // ═══ تطابق‌سازی — similar properties & customer suggestions ═══════
@@ -3567,6 +3729,9 @@ async function viewLead(id) {
                         <button class="btn btn-sm btn-match" onclick="showSimilarForLead(${lead.id})">
                             <i class="bi bi-diagram-3"></i> ملک‌های مشابه
                         </button>
+                        <button class="btn btn-sm btn-outline-success" onclick="convertLeadToDeal(${lead.id})">
+                            <i class="bi bi-handshake"></i> تبدیل به معامله
+                        </button>
                     </div>
                 </div>
                 <div class="col-md-4">
@@ -3606,6 +3771,11 @@ async function viewLead(id) {
                     </div>
                 </div>
                 <div class="col-12">${_renderPropertyDetails(lead.property_detail)}</div>
+                <div class="col-12">
+                    <hr>
+                    <h6 class="mb-2"><i class="bi bi-clock-history"></i> تاریخچه فعالیت</h6>
+                    <div id="lead-activity"></div>
+                </div>
                 <hr>
                 <div class="col-md-6">
                     <label class="form-label">وضعیت CRM</label>
@@ -3634,6 +3804,7 @@ async function viewLead(id) {
         `;
 
         document.getElementById('lead-save-btn').onclick = () => saveLead(id);
+        loadActivity('lead', id, 'lead-activity');
 
         new bootstrap.Modal(document.getElementById('leadModal')).show();
     } catch (error) {

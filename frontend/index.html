@@ -11,7 +11,7 @@
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260727b">
+    <link rel="stylesheet" href="css/style.css?v=20260727d">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -1130,11 +1130,37 @@
                                 </div>
                             </div>
 
+                            <div id="leads-bulk-bar" class="leads-bulk-bar d-none">
+                                <span><i class="bi bi-check2-square"></i> <b id="leads-bulk-count">۰</b> لید انتخاب شده</span>
+                                <select class="form-select form-select-sm" style="width:190px" onchange="bulkLeadStatus(this.value); this.value='';">
+                                    <option value="">تغییر وضعیت گروهی...</option>
+                                    <option value="new">جدید</option>
+                                    <option value="contacted">تماس گرفته</option>
+                                    <option value="visit">بازدید از فایل</option>
+                                    <option value="contract_meeting">نشست و تنظیم قرارداد</option>
+                                    <option value="qualified">واجد شرایط</option>
+                                    <option value="closed">بسته شده</option>
+                                    <option value="rented">اجاره شده</option>
+                                    <option value="rejected">رد شده</option>
+                                </select>
+                                <button class="btn btn-sm btn-outline-danger" onclick="bulkDeleteLeads()">
+                                    <i class="bi bi-trash"></i> حذف گروهی
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="clearLeadSelection()">
+                                    لغو انتخاب
+                                </button>
+                            </div>
                             <div class="table-responsive">
                                 <table class="table">
-                                    <thead><tr><th>#</th><th>عنوان ملک</th><th>شهر</th><th>قیمت</th><th>شماره تماس</th><th>وضعیت CRM</th><th>اطلاع‌رسانی</th><th>تاریخ</th><th>عملیات</th></tr></thead>
+                                    <thead><tr>
+                                        <th style="width:34px"><input type="checkbox" class="form-check-input" id="leads-check-all" onchange="toggleAllLeads(this.checked)" title="انتخاب همه"></th>
+                                        <th>#</th><th>عنوان ملک</th><th>شهر</th><th>قیمت</th><th>شماره تماس</th><th>وضعیت CRM</th><th>اطلاع‌رسانی</th><th>تاریخ</th><th>عملیات</th>
+                                    </tr></thead>
                                     <tbody id="crm-leads-table"></tbody>
                                 </table>
+                            </div>
+                            <div class="card-body py-2">
+                                <nav id="leads-pagination"></nav>
                             </div>
                         </div>
                     </div>
@@ -2103,6 +2129,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260727f"></script>
+<script src="js/app.js?v=20260727h"></script>
 </body>
 </html>

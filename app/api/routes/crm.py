@@ -9,12 +9,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 import io
+from loguru import logger
 
 from app.database import get_db
 from app.config import get_settings
 from app.models.lead import Lead
 from app.models.property import Property, allocate_serial_no
-from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance
+from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance, ActivityLog
 from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
@@ -267,6 +268,55 @@ async def export_leads_excel(
     return xlsx_response("leads.xlsx", "لیدها", headers, rows)
 
 
+@router.post("/leads/bulk")
+async def bulk_update_leads(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Bulk status change or delete for the selected leads.
+
+    body: {"ids": [1,2,3], "action": "status"|"delete", "status": "contacted"}
+    """
+    ids = [int(i) for i in (data.get("ids") or []) if str(i).isdigit()][:500]
+    action = data.get("action")
+    if not ids:
+        raise HTTPException(status_code=400, detail="هیچ لیدی انتخاب نشده است")
+
+    leads = (await db.execute(select(Lead).where(Lead.id.in_(ids)))).scalars().all()
+
+    if action == "status":
+        new_status = data.get("status")
+        if new_status not in VALID_LEAD_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid status")
+        changed = 0
+        for lead in leads:
+            if lead.status != new_status:
+                lead.status = new_status
+                if new_status == "rented":
+                    lead.rented_at = datetime.now()
+                elif lead.rented_at:
+                    lead.rented_at = None
+                agent = (lead.assigned_to or "").strip() or (
+                    current_user.full_name or current_user.username if current_user else None)
+                await record_lead_status(db, agent, new_status)
+                _log_activity(db, "lead", lead.id, "status_change",
+                              f"وضعیت گروهی به «{new_status}» تغییر کرد", agent)
+                changed += 1
+        await db.commit()
+        return {"success": True, "updated": changed}
+
+    if action == "delete":
+        removed = 0
+        for lead in leads:
+            await db.delete(lead)
+            removed += 1
+        await db.commit()
+        return {"success": True, "deleted": removed}
+
+    raise HTTPException(status_code=400, detail="Unknown action")
+
+
 @router.get("/leads/{lead_id}", response_model=LeadResponse)
 async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Lead).where(Lead.id == lead_id))
@@ -301,6 +351,8 @@ async def update_lead(
             agent = (lead.assigned_to or "").strip() or (
                 current_user.full_name or current_user.username if current_user else None)
             await record_lead_status(db, agent, data.status)
+            _log_activity(db, "lead", lead.id, "status_change",
+                          f"وضعیت به «{data.status}» تغییر کرد", agent)
     if data.notes is not None:
         lead.notes = data.notes
     if data.assigned_to is not None:
@@ -465,6 +517,87 @@ async def export_dpa_excel(
             d.rca, d.mentor_feedback,
         ])
     return xlsx_response("dpa.xlsx", "ارزیابی روزانه", headers, rows)
+
+
+def _log_activity(db: AsyncSession, entity_type: str, entity_id: int,
+                  action: str, detail: str, actor: Optional[str] = None) -> None:
+    """Append a timeline entry. Fire-and-forget: never breaks the caller."""
+    try:
+        db.add(ActivityLog(entity_type=entity_type, entity_id=entity_id,
+                           action=action, detail=detail[:500], actor=actor))
+    except Exception as e:
+        logger.warning(f"[activity] failed to log {action}: {e}")
+
+
+@router.get("/activity/{entity_type}/{entity_id}")
+async def get_activity(
+    entity_type: str,
+    entity_id: int,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Timeline for a lead / customer / deal."""
+    if entity_type not in ("lead", "customer", "deal"):
+        raise HTTPException(status_code=400, detail="Unknown entity type")
+    rows = (await db.execute(
+        select(ActivityLog)
+        .where(ActivityLog.entity_type == entity_type, ActivityLog.entity_id == entity_id)
+        .order_by(ActivityLog.created_at.desc()).limit(limit)
+    )).scalars().all()
+    return {"items": [r.to_dict() for r in rows], "total": len(rows)}
+
+
+@router.post("/leads/{lead_id}/convert-to-deal")
+async def convert_lead_to_deal(
+    lead_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Create a deal pre-filled from this lead (title, property, amount, seller)."""
+    lead = (await db.execute(select(Lead).where(Lead.id == lead_id))).scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    # reuse an existing contact with the same phone, otherwise create one
+    seller_id = None
+    if lead.phone_number:
+        existing = (await db.execute(
+            select(Contact).where(Contact.phone == lead.phone_number)
+        )).scalars().first()
+        if existing:
+            seller_id = existing.id
+        else:
+            contact = Contact(
+                name=lead.seller_name or f"فروشنده {lead.property_title or ''}".strip(),
+                phone=lead.phone_number, contact_type="owner",
+                city=lead.city_name, notes=f"از لید #{lead.id} ساخته شد",
+            )
+            db.add(contact)
+            await db.flush()
+            seller_id = contact.id
+
+    deal = Deal(
+        title=lead.property_title or f"معامله لید #{lead.id}",
+        deal_type="rent" if lead.listing_type == "rent" else "buy",
+        status="new",
+        property_id=lead.property_id,
+        seller_contact_id=seller_id,
+        amount=lead.price,
+        notes=f"ساخته‌شده از لید #{lead.id}" + (f"\n{lead.notes}" if lead.notes else ""),
+    )
+    db.add(deal)
+    await db.flush()
+
+    actor = (lead.assigned_to or "").strip() or (
+        current_user.full_name or current_user.username if current_user else None)
+    _log_activity(db, "lead", lead.id, "converted",
+                  f"تبدیل به معامله #{deal.id}", actor)
+    _log_activity(db, "deal", deal.id, "created",
+                  f"ساخته‌شده از لید #{lead.id}", actor)
+    await db.commit()
+    await db.refresh(deal)
+    return {"success": True, "deal": deal.to_dict()}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

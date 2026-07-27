@@ -403,3 +403,27 @@ class DailyPerformance(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class ActivityLog(Base):
+    """Timeline entry — who did what to a lead / customer / deal, and when."""
+    __tablename__ = "crm_activity_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_type = Column(String(20), nullable=False, index=True)  # lead|customer|deal
+    entity_id = Column(Integer, nullable=False, index=True)
+    action = Column(String(50), nullable=False)   # status_change|note|created|converted|notified
+    detail = Column(Text)                          # human-readable Persian summary
+    actor = Column(String(200))                    # who did it
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "entity_type": self.entity_type,
+            "entity_id": self.entity_id,
+            "action": self.action,
+            "detail": self.detail,
+            "actor": self.actor,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
