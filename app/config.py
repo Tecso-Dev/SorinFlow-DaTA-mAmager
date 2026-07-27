@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     melipayamak_api_key: str = Field(default="", env="MELIPAYAMAK_API_KEY")
     melipayamak_from: str = Field(default="", env="MELIPAYAMAK_FROM")
 
+    # LLM (optional) — powers the AI reasons in property matching.
+    # Any OpenAI-compatible endpoint works (OpenAI, OpenRouter, local vLLM…).
+    llm_api_key: str = Field(default="", env="LLM_API_KEY")
+    llm_base_url: str = Field(default="https://api.openai.com/v1", env="LLM_BASE_URL")
+    llm_model: str = Field(default="gpt-4o-mini", env="LLM_MODEL")
+
     # CRN — Telegram notification
     telegram_bot_token: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", env="TELEGRAM_CHAT_ID")

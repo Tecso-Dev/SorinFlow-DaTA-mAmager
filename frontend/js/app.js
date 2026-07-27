@@ -1377,6 +1377,9 @@ async function viewProperty(id) {
                     <a href="${property.url}" target="_blank" class="btn btn-primary flex-grow-1">
                         <i class="bi bi-box-arrow-up-right"></i> مشاهده در دیوار
                     </a>
+                    <button class="btn btn-match" onclick="showSimilarForProperty(${property.id})">
+                        <i class="bi bi-diagram-3"></i> ملک‌های مشابه
+                    </button>
                     <button class="btn btn-outline-danger" onclick="deleteProperty(${property.id}); bootstrap.Modal.getInstance(document.getElementById('propertyModal')).hide();">
                         <i class="bi bi-trash"></i> حذف
                     </button>
@@ -3470,6 +3473,80 @@ function _renderPropertyDetails(p) {
     `;
 }
 
+// ═══ تطابق‌سازی — similar properties & customer suggestions ═══════
+function _matchCard(m) {
+    const price = m.price ? formatPrice(m.price) : '—';
+    const reasons = (m.reasons || []).slice(0, 3)
+        .map(r => `<span class="match-tag">${esc(r)}</span>`).join('');
+    const ai = m.ai_reason ? `<div class="match-ai"><i class="bi bi-stars"></i> ${esc(m.ai_reason)}</div>` : '';
+    const scoreCls = m.score >= 75 ? 'high' : m.score >= 50 ? 'mid' : 'low';
+    return `
+    <div class="match-card">
+        <div class="match-score ${scoreCls}">${formatNumber(m.score)}<small>٪</small></div>
+        <div class="match-body">
+            <div class="match-title" title="${esc(m.title)}">${esc(m.title)}</div>
+            <div class="match-meta">
+                ${m.serial_no != null ? `<span class="serial-badge">${formatNumber(m.serial_no)}</span>` : ''}
+                ${m.city_name ? esc(m.city_name) : ''}${m.district ? ' · ' + esc(m.district) : ''}
+                ${m.area ? ' · ' + formatNumber(m.area) + ' متر' : ''}
+                ${m.rooms != null ? ' · ' + formatNumber(m.rooms) + ' خواب' : ''}
+            </div>
+            <div class="match-tags">${reasons}</div>
+            ${ai}
+        </div>
+        <div class="match-side">
+            <div class="match-price">${price}</div>
+            <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${m.id})">
+                <i class="bi bi-eye"></i> جزئیات
+            </button>
+            ${m.phone_number ? `<a href="tel:${m.phone_number}" class="btn btn-sm btn-outline-success">
+                <i class="bi bi-telephone"></i> ${m.phone_number}</a>` : ''}
+        </div>
+    </div>`;
+}
+
+async function _openMatchModal(title, url, emptyMsg) {
+    const modalEl = document.getElementById('matchModal');
+    document.getElementById('match-modal-title').innerHTML = title;
+    document.getElementById('match-modal-body').innerHTML =
+        '<div class="text-center py-5 text-muted"><span class="spinner-border"></span><p class="mt-3">در حال یافتن بهترین موارد...</p></div>';
+    new bootstrap.Modal(modalEl).show();
+    try {
+        const data = await apiCall(url);
+        const items = data.items || [];
+        if (!items.length) {
+            document.getElementById('match-modal-body').innerHTML =
+                `<div class="text-center py-5 text-muted"><i class="bi bi-search" style="font-size:2rem"></i><p class="mt-3">${emptyMsg}</p></div>`;
+            return;
+        }
+        const src = data.source?.title || data.source?.name || '';
+        document.getElementById('match-modal-body').innerHTML = `
+            ${src ? `<div class="match-source">مبنای تطابق: <b>${esc(src)}</b> — ${formatNumber(items.length)} مورد یافت شد</div>` : ''}
+            <div class="match-list">${items.map(_matchCard).join('')}</div>`;
+    } catch (e) {
+        document.getElementById('match-modal-body').innerHTML =
+            `<div class="alert alert-danger">خطا در تطابق‌سازی: ${esc(e.message)}</div>`;
+    }
+}
+
+function showSimilarForLead(leadId) {
+    _openMatchModal('<i class="bi bi-diagram-3"></i> ملک‌های مشابه',
+        `/crm/match/lead/${leadId}?limit=12`,
+        'ملک مشابهی پیدا نشد — با اسکرپ بیشتر، نتایج بهتر می‌شود.');
+}
+
+function showSimilarForProperty(propertyId) {
+    _openMatchModal('<i class="bi bi-diagram-3"></i> ملک‌های مشابه',
+        `/crm/match/property/${propertyId}?limit=12`,
+        'ملک مشابهی پیدا نشد.');
+}
+
+function showMatchesForCustomer(customerId) {
+    _openMatchModal('<i class="bi bi-magic"></i> ملک‌های پیشنهادی برای مشتری',
+        `/crm/match/customer/${customerId}?limit=12`,
+        'ملکی مطابق بودجه و درخواست این مشتری پیدا نشد.');
+}
+
 async function viewLead(id) {
     try {
         const lead = await apiCall(`/crm/leads/${id}`);
@@ -3483,10 +3560,13 @@ async function viewLead(id) {
                 </div>
                 <div class="col-md-6">
                     <label class="text-muted small">لینک</label>
-                    <div>
+                    <div class="d-flex gap-2 flex-wrap">
                         <a href="${lead.property_url}" target="_blank" class="btn btn-sm btn-outline-primary">
                             <i class="bi bi-box-arrow-up-right"></i> مشاهده آگهی
                         </a>
+                        <button class="btn btn-sm btn-match" onclick="showSimilarForLead(${lead.id})">
+                            <i class="bi bi-diagram-3"></i> ملک‌های مشابه
+                        </button>
                     </div>
                 </div>
                 <div class="col-md-4">
@@ -3911,6 +3991,9 @@ async function loadCustomers() {
                 <td>${c.consultant_name || '---'}</td>
                 <td>${nextFollowup}</td>
                 <td>
+                    <button class="btn btn-sm btn-match" onclick="showMatchesForCustomer(${c.id})" title="ملک‌های پیشنهادی">
+                        <i class="bi bi-magic"></i>
+                    </button>
                     <button class="btn btn-sm btn-outline-primary" onclick="openCustomerModal(${c.id})" title="ویرایش">
                         <i class="bi bi-pencil"></i>
                     </button>

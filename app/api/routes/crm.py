@@ -21,6 +21,7 @@ from app.services.sms_service import send_sms
 from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
 from app.services.dpa_service import record_activity, record_lead_status
 from app.services.excel_export import xlsx_response, fa_date
+from app.services.match_service import similar_to_property, matches_for_customer
 from app.models.user import User
 
 router = APIRouter()
@@ -464,6 +465,64 @@ async def export_dpa_excel(
             d.rca, d.mentor_feedback,
         ])
     return xlsx_response("dpa.xlsx", "ارزیابی روزانه", headers, rows)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MATCHING — «تطابق‌سازی»
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/match/property/{property_id}")
+async def match_similar_properties(
+    property_id: int,
+    limit: int = Query(12, ge=1, le=50),
+    use_llm: bool = True,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Listings similar to this one — «مشتری این ملک را پسندید، مشابهش را نشان بده»."""
+    prop = (await db.execute(select(Property).where(Property.id == property_id))).scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    items = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
+    return {"items": items, "total": len(items),
+            "source": {"id": prop.id, "title": prop.title, "serial_no": prop.serial_no}}
+
+
+@router.get("/match/lead/{lead_id}")
+async def match_similar_for_lead(
+    lead_id: int,
+    limit: int = Query(12, ge=1, le=50),
+    use_llm: bool = True,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Same as above but addressed by lead id (the CRM's natural handle)."""
+    lead = (await db.execute(select(Lead).where(Lead.id == lead_id))).scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    prop = (await db.execute(select(Property).where(Property.id == lead.property_id))).scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Linked property not found")
+    items = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
+    return {"items": items, "total": len(items),
+            "source": {"id": prop.id, "title": prop.title, "serial_no": prop.serial_no}}
+
+
+@router.get("/match/customer/{customer_id}")
+async def match_properties_for_customer(
+    customer_id: int,
+    limit: int = Query(12, ge=1, le=50),
+    use_llm: bool = True,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Listings that fit this customer's budget / district / specs (BANT)."""
+    customer = (await db.execute(select(Customer).where(Customer.id == customer_id))).scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    items = await matches_for_customer(db, customer, limit=limit, use_llm=use_llm)
+    return {"items": items, "total": len(items),
+            "source": {"id": customer.id, "name": customer.full_name}}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
