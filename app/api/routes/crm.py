@@ -20,6 +20,7 @@ from app.crm.notification import notify
 from app.services.sms_service import send_sms
 from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
 from app.services.dpa_service import record_activity, record_lead_status
+from app.services.excel_export import xlsx_response, fa_date
 from app.models.user import User
 
 router = APIRouter()
@@ -201,6 +202,34 @@ async def create_lead(
     return lead
 
 
+@router.get("/leads/export/excel")
+async def export_leads_excel(
+    status: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Excel counterpart of the leads list (respects the status filter)."""
+    query = select(Lead).order_by(Lead.created_at.desc())
+    if status:
+        query = query.where(Lead.status == status)
+    items = (await db.execute(query.limit(5000))).scalars().all()
+
+    status_fa = {
+        "new": "جدید", "contacted": "تماس گرفته", "visit": "بازدید از فایل",
+        "contract_meeting": "نشست و تنظیم قرارداد", "qualified": "واجد شرایط",
+        "closed": "بسته شده", "rented": "اجاره شده", "rejected": "رد شده",
+    }
+    headers = ["#", "عنوان ملک", "شهر", "دسته‌بندی", "قیمت", "متراژ",
+               "شماره تماس", "فروشنده", "وضعیت CRM", "مسئول پیگیری",
+               "اطلاع‌رسانی", "یادداشت", "تاریخ ثبت"]
+    rows = [[
+        l.id, l.property_title, l.city_name, l.category_name, l.price, l.area,
+        l.phone_number, l.seller_name, status_fa.get(l.status, l.status),
+        l.assigned_to, "بله" if l.notified else "خیر", l.notes, fa_date(l.created_at),
+    ] for l in items]
+    return xlsx_response("leads.xlsx", "لیدها", headers, rows)
+
+
 @router.get("/leads/{lead_id}", response_model=LeadResponse)
 async def get_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Lead).where(Lead.id == lead_id))
@@ -353,6 +382,60 @@ async def upload_lead_image(file: UploadFile = File(...)):
     name = f"{_uuid.uuid4().hex}.jpg"
     im.save(dest_dir / name, format="JPEG", quality=88)
     return {"url": f"/images/manual/{name}"}
+
+
+@router.get("/customers/export/excel")
+async def export_customers_excel(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Excel export of the customer intake list."""
+    items = (await db.execute(
+        select(Customer).order_by(Customer.created_at.desc()).limit(5000)
+    )).scalars().all()
+
+    temp_fa = {"hot": "داغ", "warm": "گرم", "cold": "سرد"}
+    source_fa = {"in_person": "حضوری", "divar": "دیوار", "referral": "معرف"}
+    headers = ["#", "نام و نام خانوادگی", "موبایل ۱", "موبایل ۲", "حرارت", "منبع",
+               "مشاور", "سقف بودجه", "نحوه پرداخت", "متراژ/خواب", "منطقه درخواستی",
+               "خط قرمزها", "تعداد بازدید", "پیگیری بعدی", "یادداشت", "تاریخ ثبت"]
+    rows = []
+    for c in items:
+        followups = c.followups or []
+        next_fu = f"{followups[0].get('date','')} {followups[0].get('time','')}".strip() if followups else ""
+        rows.append([
+            c.id, c.full_name, c.mobile1, c.mobile2,
+            temp_fa.get(c.temperature, c.temperature), source_fa.get(c.source, c.source),
+            c.consultant_name, c.budget_max, c.payment_methods, c.desired_specs,
+            c.desired_district, c.red_lines, len(c.showings or []), next_fu,
+            c.notes, fa_date(c.created_at),
+        ])
+    return xlsx_response("customers.xlsx", "مشتریان", headers, rows)
+
+
+@router.get("/dpa/export/excel")
+async def export_dpa_excel(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Excel export of daily performance records with the score breakdown."""
+    items = (await db.execute(
+        select(DailyPerformance).order_by(DailyPerformance.created_at.desc()).limit(5000)
+    )).scalars().all()
+
+    headers = ["#", "تاریخ", "مشاور", "نقش", "فایل جدید", "بازدید", "آفر", "قرارداد",
+               "امتیاز پایه", "امتیاز فعالیت", "بونوس", "جریمه", "امتیاز کل", "هدف",
+               "تحلیل موانع", "بازخورد منتور"]
+    rows = []
+    for d in items:
+        s = d.scores()
+        rows.append([
+            d.id, d.date_jalali, d.agent_name, d.role, d.new_files, d.showings_count,
+            d.offers_count, d.closed_count, s["base_score"], s["activity_score"],
+            s["bonus_score"], s["penalty_score"], s["total_score"], d.target_points,
+            d.rca, d.mentor_feedback,
+        ])
+    return xlsx_response("dpa.xlsx", "ارزیابی روزانه", headers, rows)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

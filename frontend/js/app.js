@@ -4571,6 +4571,26 @@ function exportExcel(type) {
     _downloadExport(`${API_BASE}/crm/${type}/export/excel`, `${type}.xlsx`);
 }
 
+// ── Excel exports that mirror the current filters of each list ──
+function exportPropertiesExcel() {
+    const params = new URLSearchParams();
+    const city = document.getElementById('filter-city-hidden')?.value || '';
+    const category = document.getElementById('filter-category')?.value || '';
+    const search = document.getElementById('search-properties')?.value.trim() || '';
+    const type = _selectedCategoryType();
+    if (city) params.set('city', city);
+    if (category) params.set('category', category);
+    if (search) params.set('search', search);
+    if (type === 'buy' || type === 'rent') params.set('listing_type', type);
+    _downloadExport(`${API_BASE}/properties/export/excel?${params}`, 'properties.xlsx');
+}
+
+function exportLeadsExcel() {
+    const status = document.getElementById('crm-filter-status')?.value || '';
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    _downloadExport(`${API_BASE}/crm/leads/export/excel${qs}`, 'leads.xlsx');
+}
+
 function exportJson(type) {
     _downloadExport(`${API_BASE}/crm/${type}/export/json`, `${type}.json`);
 }

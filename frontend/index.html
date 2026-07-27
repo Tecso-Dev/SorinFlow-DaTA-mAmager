@@ -385,8 +385,11 @@
                             <button class="btn btn-primary btn-sm" onclick="loadProperties()">
                                 <i class="bi bi-search"></i> جستجو
                             </button>
-                            <button class="btn btn-outline-success btn-sm" onclick="exportProperties()">
-                                <i class="bi bi-download"></i> خروجی
+                            <button class="btn btn-outline-success btn-sm" onclick="exportPropertiesExcel()">
+                                <i class="bi bi-file-earmark-excel"></i> خروجی اکسل
+                            </button>
+                            <button class="btn btn-outline-info btn-sm" onclick="exportProperties()">
+                                <i class="bi bi-filetype-json"></i> خروجی JSON
                             </button>
                         </div>
                         <div id="rent-filters" class="d-none d-flex gap-2 flex-wrap mt-2">
@@ -1003,6 +1006,9 @@
                                         <option value="oldest">قدیمی‌ترین‌ها</option>
                                         <option value="name">بر اساس نام</option>
                                     </select>
+                                    <button class="btn btn-outline-success btn-sm" onclick="exportExcel('customers')" title="خروجی اکسل">
+                                        <i class="bi bi-file-earmark-excel"></i> اکسل
+                                    </button>
                                     <button class="btn btn-primary btn-sm" onclick="loadCustomers()">
                                         <i class="bi bi-search"></i> جستجو
                                     </button>
@@ -1055,6 +1061,9 @@
                                     </button>
                                     <button class="btn btn-outline-secondary btn-sm" onclick="clearLeadsFilter()" title="پاک کردن همه فیلترها">
                                         <i class="bi bi-x-lg"></i>
+                                    </button>
+                                    <button class="btn btn-outline-success btn-sm" onclick="exportLeadsExcel()" title="خروجی اکسل">
+                                        <i class="bi bi-file-earmark-excel"></i> اکسل
                                     </button>
                                     <button class="btn btn-outline-secondary btn-sm" onclick="loadLeads()" title="بارگیری مجدد">
                                         <i class="bi bi-arrow-clockwise"></i>
@@ -1112,6 +1121,9 @@
                                     </button>
                                     <input type="text" id="dpa-search" class="form-control form-control-sm" style="width:170px;"
                                            placeholder="جستجوی نام مشاور...">
+                                    <button class="btn btn-outline-success btn-sm" onclick="exportExcel('dpa')" title="خروجی اکسل">
+                                        <i class="bi bi-file-earmark-excel"></i> اکسل
+                                    </button>
                                     <button class="btn btn-primary btn-sm" onclick="loadDpa()">
                                         <i class="bi bi-search"></i> جستجو
                                     </button>
@@ -2032,6 +2044,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260721e"></script>
+<script src="js/app.js?v=20260721f"></script>
 </body>
 </html>

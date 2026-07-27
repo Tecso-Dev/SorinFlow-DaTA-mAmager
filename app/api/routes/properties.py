@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models.property import Property, City, Category
 from app.models.user import User
 from app.auth.dependencies import get_current_user_optional
+from app.services.excel_export import xlsx_response, fa_date
 from app.schemas import (
     PropertyResponse,
     PropertyListResponse,
@@ -152,6 +153,41 @@ async def get_properties(
         size=size,
         pages=(total + size - 1) // size
     )
+
+
+@router.get("/export/excel")
+async def export_properties_excel(
+    city: Optional[str] = None,
+    category: Optional[str] = None,
+    listing_type: Optional[str] = None,
+    search: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Excel counterpart of the properties JSON export (same filters)."""
+    query = select(Property).where(Property.is_active == True).order_by(Property.serial_no.desc())
+    if city:
+        query = query.where(Property.city_name.ilike(f"%{city}%"))
+    if category:
+        query = query.where(Property.category_name.ilike(f"%{category}%"))
+    if listing_type:
+        query = query.where(Property.listing_type == listing_type)
+    if search:
+        term = f"%{search}%"
+        query = query.where(or_(Property.title.ilike(term), Property.description.ilike(term)))
+
+    items = (await db.execute(query.limit(10000))).scalars().all()
+
+    headers = ["کد ملک", "عنوان", "شهر", "منطقه", "دسته‌بندی", "نوع آگهی", "متراژ",
+               "اتاق", "طبقه", "سال ساخت", "قیمت کل", "ودیعه", "اجاره ماهانه",
+               "شماره تماس", "فروشنده", "لینک آگهی", "تاریخ ثبت"]
+    rows = [[
+        p.serial_no, p.title, p.city_name, p.district, p.category_name,
+        "اجاره" if p.listing_type == "rent" else "خرید",
+        p.area, p.rooms, p.floor, p.year_built,
+        p.total_price or p.price, p.deposit, p.rent_price,
+        p.phone_number, p.seller_name, p.url, fa_date(p.scraped_at or p.created_at),
+    ] for p in items]
+    return xlsx_response("properties.xlsx", "لیست املاک", headers, rows)
 
 
 @router.get("/{property_id}", response_model=PropertyResponse)
