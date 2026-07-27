@@ -1800,9 +1800,59 @@ function clearScraperDate() {
 }
 
 function _intOrNull(id) {
-    const v = parseInt(document.getElementById(id)?.value);
+    // money inputs carry «/» separators (and may hold Persian digits)
+    const raw = _digitsOnly(document.getElementById(id)?.value || '');
+    const v = parseInt(raw, 10);
     return isNaN(v) || v <= 0 ? null : v;
 }
+
+// ═══ Money inputs: live «123/321/111/001» grouping ═══════════════
+// Divar-style thousands separator using «/» as the user asked.
+function _digitsOnly(str) {
+    return String(str)
+        // Persian ۰-۹ and Arabic ٠-٩ → ASCII
+        .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 1776))
+        .replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 1632))
+        .replace(/\D/g, '');
+}
+
+function _groupMoney(digits) {
+    if (!digits) return '';
+    // strip leading zeros but keep a single "0"
+    const clean = digits.replace(/^0+(?=\d)/, '');
+    return clean.replace(/\B(?=(\d{3})+(?!\d))/g, '/');
+}
+
+function _formatMoneyInput(el) {
+    const before = el.value;
+    // how many digits sit left of the caret, so we can restore the position
+    const caret = el.selectionStart ?? before.length;
+    const digitsBeforeCaret = _digitsOnly(before.slice(0, caret)).length;
+
+    const formatted = _groupMoney(_digitsOnly(before));
+    if (formatted === before) return;
+    el.value = formatted;
+
+    // put the caret back after the same number of digits
+    let seen = 0, pos = formatted.length;
+    for (let i = 0; i < formatted.length; i++) {
+        if (/\d/.test(formatted[i])) seen++;
+        if (seen === digitsBeforeCaret) { pos = i + 1; break; }
+        if (digitsBeforeCaret === 0) { pos = 0; break; }
+    }
+    try { el.setSelectionRange(pos, pos); } catch (_) {}
+}
+
+function initMoneyInputs(root = document) {
+    root.querySelectorAll('input.money-input').forEach(el => {
+        if (el.dataset.moneyBound) return;
+        el.dataset.moneyBound = '1';
+        el.addEventListener('input', () => _formatMoneyInput(el));
+        el.addEventListener('blur', () => _formatMoneyInput(el));
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => initMoneyInputs());
 
 
 // ═══ Scraper form memory (last used filters persist across visits) ═══
@@ -1832,7 +1882,10 @@ function restoreScraperForm() {
     if (!data) return;
     _SCRAPER_TEXT_FIELDS.forEach(id => {
         const el = document.getElementById(id);
-        if (el && data[id] != null && data[id] !== '') el.value = data[id];
+        if (el && data[id] != null && data[id] !== '') {
+            el.value = data[id];
+            if (el.classList.contains('money-input')) _formatMoneyInput(el);
+        }
     });
     _SCRAPER_CHECKS.forEach(id => {
         const el = document.getElementById(id);
