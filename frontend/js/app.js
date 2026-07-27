@@ -3631,10 +3631,13 @@ async function loadCustomers() {
     const temp   = document.getElementById('customer-filter-temp')?.value || '';
     const source = document.getElementById('customer-filter-source')?.value || '';
 
+    const sort = document.getElementById('customer-sort')?.value || 'newest';
+
     let url = '/crm/customers?limit=100';
     if (search) url += `&search=${encodeURIComponent(search)}`;
     if (temp)   url += `&temperature=${temp}`;
     if (source) url += `&source=${source}`;
+    url += `&sort=${sort}`;
 
     try {
         const data = await apiCall(url);
@@ -3658,10 +3661,12 @@ async function loadCustomers() {
             const nextFollowup = (c.followups && c.followups.length)
                 ? `${c.followups[0].date || ''} ${c.followups[0].time || ''}`.trim() || '---'
                 : '---';
+            // "جدید" badge for customers added within the last 3 days
+            const isNew = c.created_at && (Date.now() - new Date(c.created_at).getTime()) < 3 * 86400000;
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${c.id}</td>
-                <td class="fw-bold">${esc(c.full_name)}</td>
+                <td class="fw-bold">${esc(c.full_name)}${isNew ? ' <span class="badge bg-success" style="font-size:.6rem;vertical-align:middle">جدید</span>' : ''}</td>
                 <td>${c.mobile1 ? `<a href="tel:${c.mobile1}" class="text-success">${c.mobile1}</a>` : '---'}</td>
                 <td><span class="badge ${t.cls}">${t.label}</span></td>
                 <td>${CUSTOMER_SOURCE_LABELS[c.source] || '---'}</td>

@@ -558,11 +558,17 @@ async def list_customers(
     search: Optional[str] = None,
     temperature: Optional[str] = None,
     source: Optional[str] = None,
+    sort: str = "newest",
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Customer).order_by(Customer.created_at.desc())
+    order = {
+        "newest": Customer.created_at.desc(),
+        "oldest": Customer.created_at.asc(),
+        "name": Customer.full_name.asc(),
+    }.get(sort, Customer.created_at.desc())
+    query = select(Customer).order_by(order)
     if search:
         term = f"%{search.strip()}%"
         query = query.where(or_(

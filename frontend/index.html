@@ -998,6 +998,11 @@
                                         <option value="divar">دیوار</option>
                                         <option value="referral">معرف</option>
                                     </select>
+                                    <select id="customer-sort" class="form-select form-select-sm" style="width:150px;" onchange="loadCustomers()">
+                                        <option value="newest">🆕 جدیدترین‌ها</option>
+                                        <option value="oldest">قدیمی‌ترین‌ها</option>
+                                        <option value="name">بر اساس نام</option>
+                                    </select>
                                     <button class="btn btn-primary btn-sm" onclick="loadCustomers()">
                                         <i class="bi bi-search"></i> جستجو
                                     </button>
@@ -2027,6 +2032,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260721d"></script>
+<script src="js/app.js?v=20260721e"></script>
 </body>
 </html>
