@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     scraper_delay_max: float = Field(default=5.0, env="SCRAPER_DELAY_MAX")
     # Max seconds to wait for a Divar SMS-OTP code before giving up on a phone
     otp_wait_timeout: int = Field(default=120, env="OTP_WAIT_TIMEOUT")
+    # Rotate to another saved Divar account every N scraped listings so a
+    # single number isn't hammered (0 = never rotate)
+    cookie_rotate_every: int = Field(default=15, env="COOKIE_ROTATE_EVERY")
     
     # Proxy Settings
     proxy_enabled: bool = Field(default=False, env="PROXY_ENABLED")

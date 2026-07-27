@@ -564,6 +564,14 @@
                                             خالی بگذارید تا <b>همه</b> آگهی‌های آن تاریخ اسکرپ شوند؛ برای محدود کردن، عدد وارد کنید
                                         </small>
                                     </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">چرخش شماره دیوار (هر چند آگهی)</label>
+                                        <input type="number" id="scraper-rotate-every" class="form-control" min="0" max="200" placeholder="۱۵">
+                                        <small class="text-muted d-block mt-1">
+                                            برای کم شدن پیامک احراز هویت، هر این تعداد آگهی به شماره بعدیِ ذخیره‌شده سوییچ می‌کند.
+                                            ۰ = بدون چرخش. (نیازمند بیش از یک نشست فعال در «احراز هویت دیوار»)
+                                        </small>
+                                    </div>
                                     <div class="mb-3 form-check">
                                         <input type="checkbox" id="scraper-images" class="form-check-input" checked>
                                         <label class="form-check-label" for="scraper-images">دانلود تصاویر</label>
@@ -2044,6 +2052,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260721f"></script>
+<script src="js/app.js?v=20260727a"></script>
 </body>
 </html>

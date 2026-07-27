@@ -99,6 +99,11 @@ class DivarScraper:
         self.images_dir.mkdir(parents=True, exist_ok=True)
 
         self.active_phone: Optional[str] = None  # Divar account used for this session
+        # Cookie rotation: cycle through saved Divar accounts mid-scrape so a
+        # single number isn't hammered (which is what triggers the SMS checks)
+        self._rotation_pool: List[str] = []
+        self._since_rotation = 0
+        self._rotate_every_override: Optional[int] = None
 
         self.current_job: Optional[ScrapingJob] = None
         self.request_count = 0
@@ -2102,6 +2107,73 @@ class DivarScraper:
 
         return local_paths
     
+    async def _load_rotation_pool(self) -> List[str]:
+        """Valid saved Divar accounts, newest first — the rotation candidates."""
+        if not self.db_session:
+            return []
+        try:
+            from app.models.cookie import Cookie as CookieModel
+            rows = (await self.db_session.execute(
+                select(CookieModel)
+                .where(CookieModel.is_valid == True)
+                .order_by(CookieModel.updated_at.desc())
+            )).scalars().all()
+            # de-dupe while keeping order (one entry per phone)
+            seen, pool = set(), []
+            for r in rows:
+                if r.phone_number and r.phone_number not in seen:
+                    seen.add(r.phone_number)
+                    pool.append(r.phone_number)
+            return pool
+        except Exception as e:
+            logger.warning(f"[rotate] could not load cookie pool: {e}")
+            return []
+
+    async def maybe_rotate_account(self) -> bool:
+        """Every `cookie_rotate_every` listings, switch to the next saved Divar
+        account so Divar sees the load spread across numbers (fewer SMS checks).
+
+        Returns True when the active account actually changed.
+        """
+        override = getattr(self, "_rotate_every_override", None)
+        every = override if override is not None else (getattr(settings, "cookie_rotate_every", 0) or 0)
+        if every <= 0:
+            return False
+
+        self._since_rotation += 1
+        if self._since_rotation < every:
+            return False
+        self._since_rotation = 0
+
+        if not self._rotation_pool:
+            self._rotation_pool = await self._load_rotation_pool()
+        # nothing to rotate to (single account) — keep going as-is
+        if len(self._rotation_pool) < 2:
+            return False
+
+        # pick the next phone after the current one
+        try:
+            idx = self._rotation_pool.index(self.active_phone) if self.active_phone in self._rotation_pool else -1
+        except ValueError:
+            idx = -1
+        for offset in range(1, len(self._rotation_pool) + 1):
+            candidate = self._rotation_pool[(idx + offset) % len(self._rotation_pool)]
+            if candidate == self.active_phone:
+                continue
+            try:
+                restored = await self.auth.restore_session(candidate)
+            except Exception as e:
+                logger.warning(f"[rotate] restore failed for {candidate}: {e}")
+                restored = False
+            if restored:
+                previous = self.active_phone
+                self.active_phone = candidate
+                logger.info(f"[rotate] switched Divar account {previous} → {candidate}")
+                return True
+            logger.warning(f"[rotate] session for {candidate} not usable — trying next")
+        logger.info("[rotate] no alternative account could be restored; staying on current")
+        return False
+
     async def property_exists(self, divar_id: str) -> bool:
         """Check if property already exists in database"""
         try:
@@ -2209,6 +2281,7 @@ class DivarScraper:
         advertiser_type: Optional[str] = None,
         max_age_hours: Optional[int] = None,
         posted_date: Optional[str] = None,
+        rotate_every: Optional[int] = None,
     ) -> ScrapingJob:
         """Start a complete scraping job for a city and category"""
 
@@ -2222,6 +2295,9 @@ class DivarScraper:
             except ValueError:
                 logger.warning(f"Invalid posted_date {posted_date!r} — ignoring")
         date_mode = target_day is not None
+        # per-job cookie-rotation interval (None → server default)
+        if rotate_every is not None:
+            self._rotate_every_override = max(int(rotate_every), 0)
         if not date_mode:
             max_items = max_items or 100
         # Progress is pool-based only when there is no numeric target at all
@@ -2485,8 +2561,11 @@ class DivarScraper:
                     job.scraped_items = (i + 1) if pool_progress else min(job.new_items, max_items)
                     await self.db_session.commit()
 
+                    # spread the load across saved Divar accounts
+                    await self.maybe_rotate_account()
+
                     await self._human_like_delay()
-                    
+
                 except Exception as e:
                     logger.error(f"Failed to process listing: {e}")
                     job.failed_items += 1

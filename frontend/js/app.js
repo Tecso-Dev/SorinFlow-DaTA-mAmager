@@ -1806,7 +1806,7 @@ function _intOrNull(id) {
 // note: scraper-posted-date is intentionally NOT persisted — it's a
 // per-run choice and the picker auto-fills today, which would force date mode
 const _SCRAPER_TEXT_FIELDS = [
-    'scraper-category', 'scraper-pages', 'scraper-advertiser-type',
+    'scraper-category', 'scraper-pages', 'scraper-advertiser-type', 'scraper-rotate-every',
     'scraper-min-price', 'scraper-max-price', 'scraper-min-ppm', 'scraper-max-ppm',
     'scraper-min-deposit', 'scraper-max-deposit', 'scraper-min-rent', 'scraper-max-rent',
     'scraper-min-area', 'scraper-max-area', 'scraper-min-rooms', 'scraper-max-rooms',
@@ -1881,6 +1881,8 @@ async function startScraping(e) {
         has_balcony:           _chk('scraper-has-balcony'),
         // آگهی‌دهنده
         advertiser_type:       document.getElementById('scraper-advertiser-type')?.value || null,
+        // چرخش شماره دیوار (خالی = پیش‌فرض سرور)
+        rotate_every:          _intOrNull('scraper-rotate-every'),
     };
 
     // Date mode: scrape the selected Jalali day (count becomes an optional cap)

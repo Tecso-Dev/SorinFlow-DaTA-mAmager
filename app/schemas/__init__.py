@@ -134,6 +134,9 @@ class ScrapingJobCreate(BaseModel):
     # Scrape ALL listings posted on this exact date (Gregorian "YYYY-MM-DD");
     # when set, max_items and max_age_hours are ignored
     posted_date: Optional[str] = None
+    # Switch to the next saved Divar account every N listings (0 = never,
+    # None = use the server default)
+    rotate_every: Optional[int] = None
 
 
 class ScrapingJobResponse(BaseModel):
