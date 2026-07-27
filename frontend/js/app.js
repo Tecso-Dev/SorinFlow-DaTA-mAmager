@@ -3525,7 +3525,7 @@ async function viewLead(id) {
                             : '<span class="badge bg-secondary">خیر</span>'}
                     </div>
                 </div>
-                <div class="col-12">${_renderPropertyDetails(lead.property)}</div>
+                <div class="col-12">${_renderPropertyDetails(lead.property_detail)}</div>
                 <hr>
                 <div class="col-md-6">
                     <label class="form-label">وضعیت CRM</label>

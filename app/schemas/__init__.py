@@ -284,8 +284,10 @@ class LeadResponse(BaseModel):
     updated_at: Optional[datetime] = None
     # District lives on the linked property (not a Lead column)
     district: Optional[str] = None
-    # Full snapshot of the linked property (same data the املاک modal shows)
-    property: Optional[dict] = None
+    # Full snapshot of the linked property (same data the املاک modal shows).
+    # NOT named `property` — that collides with Lead.property (a SQLAlchemy
+    # relationship), which from_attributes would try to coerce into a dict.
+    property_detail: Optional[dict] = None
 
     class Config:
         from_attributes = True

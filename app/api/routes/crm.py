@@ -233,7 +233,7 @@ async def _lead_with_property(db: AsyncSession, lead: Lead) -> LeadResponse:
             "extra_attrs": prop.extra_attrs or {},
             "updated_at": prop.updated_at.isoformat() if prop.updated_at else None,
         })
-        resp.property = data
+        resp.property_detail = data
         resp.district = prop.district
     return resp
 
