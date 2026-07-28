@@ -3410,6 +3410,34 @@ async function bulkDeleteLeads() {
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
+// Compact «مشخصات» cell for the leads table: سند / پارکینگ / آسانسور / جهت.
+// Four separate columns would push the table into horizontal scrolling, so
+// they share one cell as chips — full text stays in the tooltip and the modal.
+function _leadSpecChips(lead) {
+    const chips = [];
+    const short = (v, n) => (v.length > n ? v.substring(0, n) + '…' : v);
+
+    if (lead.document_type) {
+        chips.push(`<span class="lead-chip" title="سند: ${esc(lead.document_type)}">
+            <i class="bi bi-file-earmark-text"></i>${esc(short(lead.document_type, 9))}</span>`);
+    }
+    const bool = (val, icon, label) => {
+        if (val === null || val === undefined) return;
+        chips.push(`<span class="lead-chip ${val ? 'on' : 'off'}" title="${label}: ${val ? 'دارد' : 'ندارد'}">
+            <i class="bi ${icon}"></i></span>`);
+    };
+    bool(lead.has_parking, 'bi-car-front', 'پارکینگ');
+    bool(lead.has_elevator, 'bi-arrow-up-square', 'آسانسور');
+
+    if (lead.building_direction) {
+        chips.push(`<span class="lead-chip" title="جهت: ${esc(lead.building_direction)}">
+            <i class="bi bi-compass"></i>${esc(short(lead.building_direction, 8))}</span>`);
+    }
+    return chips.length
+        ? `<div class="lead-chips">${chips.join('')}</div>`
+        : '<span class="text-muted">---</span>';
+}
+
 async function loadLeads() {
     const status   = document.getElementById('crm-filter-status').value;
     const notified = document.getElementById('crm-filter-notified').value;
@@ -3435,7 +3463,7 @@ async function loadLeads() {
         if (data.items.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="10" class="text-center text-muted py-4">
+                    <td colspan="11" class="text-center text-muted py-4">
                         <i class="bi bi-inbox" style="font-size:2rem;"></i>
                         <p class="mt-2">هیچ لیدی یافت نشد</p>
                     </td>
@@ -3452,6 +3480,9 @@ async function loadLeads() {
             const createdAt = lead.created_at
                 ? new Date(lead.created_at).toLocaleDateString('fa-IR')
                 : '---';
+            const scrapedAt = lead.scraped_at
+                ? new Date(lead.scraped_at).toLocaleDateString('fa-IR')
+                : '';
 
             const row = document.createElement('tr');
             row.innerHTML = `
@@ -3461,7 +3492,11 @@ async function loadLeads() {
                 <td>${lead.id}</td>
                 <td title="${esc(lead.property_title)}">${esc((lead.property_title || '---').substring(0, 35))}...</td>
                 <td>${lead.city_name || '---'}</td>
-                <td>${formatPrice(lead.price)}</td>
+                <td>
+                    <div>${formatPrice(lead.price)}</div>
+                    ${lead.price_per_meter ? `<small class="lead-subline" title="قیمت هر متر">${formatPrice(lead.price_per_meter)} <span class="opacity-75">/ متر</span></small>` : ''}
+                </td>
+                <td>${_leadSpecChips(lead)}</td>
                 <td>
                     ${lead.phone_number
                         ? `<a href="tel:${lead.phone_number}" class="text-success fw-bold">${lead.phone_number}</a>`
@@ -3476,7 +3511,10 @@ async function loadLeads() {
                     </select>
                 </td>
                 <td>${notifiedBadge}</td>
-                <td>${createdAt}</td>
+                <td>
+                    <div>${createdAt}</div>
+                    ${scrapedAt ? `<small class="lead-subline" title="تاریخ برداشت آگهی"><i class="bi bi-download"></i> ${scrapedAt}</small>` : ''}
+                </td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary" onclick="viewLead(${lead.id})" title="ویرایش">
                         <i class="bi bi-pencil"></i>

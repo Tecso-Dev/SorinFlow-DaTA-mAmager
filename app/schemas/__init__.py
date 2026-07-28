@@ -284,6 +284,14 @@ class LeadResponse(BaseModel):
     updated_at: Optional[datetime] = None
     # District lives on the linked property (not a Lead column)
     district: Optional[str] = None
+    # Columns the leads table shows but that live on the linked property.
+    # Filled by _attach_property_columns(); None when the property is gone.
+    scraped_at: Optional[datetime] = None        # تاریخ برداشت آگهی
+    price_per_meter: Optional[int] = None        # قیمت هر متر
+    document_type: Optional[str] = None          # سند
+    has_parking: Optional[bool] = None           # پارکینگ
+    has_elevator: Optional[bool] = None          # آسانسور
+    building_direction: Optional[str] = None     # جهت
     # Full snapshot of the linked property (same data the املاک modal shows).
     # NOT named `property` — that collides with Lead.property (a SQLAlchemy
     # relationship), which from_attributes would try to coerce into a dict.

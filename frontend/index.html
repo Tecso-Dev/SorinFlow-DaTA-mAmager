@@ -11,7 +11,7 @@
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260727d">
+    <link rel="stylesheet" href="css/style.css?v=20260728a">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -1154,7 +1154,12 @@
                                 <table class="table">
                                     <thead><tr>
                                         <th style="width:34px"><input type="checkbox" class="form-check-input" id="leads-check-all" onchange="toggleAllLeads(this.checked)" title="انتخاب همه"></th>
-                                        <th>#</th><th>عنوان ملک</th><th>شهر</th><th>قیمت</th><th>شماره تماس</th><th>وضعیت CRM</th><th>اطلاع‌رسانی</th><th>تاریخ</th><th>عملیات</th>
+                                        <th>#</th><th>عنوان ملک</th><th>شهر</th>
+                                        <th title="قیمت کل — خط دوم: قیمت هر متر">قیمت</th>
+                                        <th style="min-width:118px" title="سند، پارکینگ، آسانسور، جهت">مشخصات</th>
+                                        <th>شماره تماس</th><th>وضعیت CRM</th><th>اطلاع‌رسانی</th>
+                                        <th title="تاریخ ثبت لید — خط دوم: تاریخ برداشت آگهی">تاریخ</th>
+                                        <th>عملیات</th>
                                     </tr></thead>
                                     <tbody id="crm-leads-table"></tbody>
                                 </table>
@@ -2129,6 +2134,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260727h"></script>
+<script src="js/app.js?v=20260728a"></script>
 </body>
 </html>

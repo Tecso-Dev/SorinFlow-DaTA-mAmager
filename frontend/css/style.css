@@ -1981,6 +1981,27 @@ select.status-quick {
   border-color: rgba(255,255,255,.12);
 }
 
+/* leads table — secondary line under قیمت / تاریخ (قیمت هر متر، تاریخ برداشت) */
+.lead-subline {
+  display: block; font-size: .68rem; color: var(--text-muted);
+  margin-top: .12rem; white-space: nowrap;
+}
+
+/* leads table — سند / پارکینگ / آسانسور / جهت packed into one cell */
+.lead-chips { display: flex; flex-wrap: wrap; gap: .22rem; max-width: 150px; }
+.lead-chip {
+  display: inline-flex; align-items: center; gap: .22rem;
+  padding: .1rem .38rem; border-radius: 7px; font-size: .66rem; line-height: 1.5;
+  background: rgba(255,255,255,.05); border: 1px solid var(--border);
+  color: var(--text-dim); white-space: nowrap; cursor: default;
+}
+.lead-chip i { font-size: .72rem; opacity: .85; }
+.lead-chip.on {
+  background: rgba(52,211,153,.13); border-color: rgba(52,211,153,.35); color: #6ee7b7;
+}
+.lead-chip.off { opacity: .42; text-decoration: line-through; }
+.lead-chip.off i { text-decoration: none; }
+
 /* activity timeline */
 .timeline { display: flex; flex-direction: column; gap: .1rem; }
 .tl-item { display: flex; gap: .7rem; padding: .4rem 0; position: relative; }

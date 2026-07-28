@@ -3,7 +3,7 @@ SorinFlow CRM — API routes
 Leads (from scraper) + Contacts + Notes + Tasks + Deals + Reminders + SMS + Dashboard
 """
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -130,7 +130,7 @@ async def list_leads(
     total = count_result.scalar_one()
     result = await db.execute(query.limit(limit).offset(offset))
     leads = result.scalars().all()
-    return LeadList(items=leads, total=total)
+    return LeadList(items=await _attach_property_columns(db, leads), total=total)
 
 
 @router.post("/leads", response_model=LeadResponse)
@@ -204,6 +204,53 @@ async def create_lead(
     return lead
 
 
+def _derive_price_per_meter(row) -> Optional[int]:
+    """Divar often omits the per-meter price on total-price ads — derive it."""
+    if row.price_per_meter:
+        return row.price_per_meter
+    base = row.total_price or row.price
+    if base and row.area:
+        return int(base / row.area)
+    return None
+
+
+async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse]:
+    """Fill the property-owned columns the leads table renders.
+
+    One extra query per page instead of a join: selecting whole Property rows
+    would drag description/images through the serializer for data no column
+    displays.
+    """
+    items = [LeadResponse.model_validate(l) for l in leads]
+    prop_ids = {l.property_id for l in leads if l.property_id}
+    if not prop_ids:
+        return items
+
+    rows = (await db.execute(
+        select(
+            Property.id, Property.scraped_at, Property.posted_at, Property.district,
+            Property.price_per_meter, Property.total_price, Property.price, Property.area,
+            Property.document_type, Property.has_parking, Property.has_elevator,
+            Property.building_direction,
+        ).where(Property.id.in_(prop_ids))
+    )).all()
+    by_id = {r.id: r for r in rows}
+
+    for item in items:
+        p = by_id.get(item.property_id)
+        if not p:
+            continue
+        # «برداشت» = when we pulled the ad; fall back to the posting date
+        item.scraped_at = p.scraped_at or p.posted_at
+        item.price_per_meter = _derive_price_per_meter(p)
+        item.document_type = p.document_type
+        item.has_parking = p.has_parking
+        item.has_elevator = p.has_elevator
+        item.building_direction = p.building_direction
+        item.district = item.district or p.district
+    return items
+
+
 async def _lead_with_property(db: AsyncSession, lead: Lead) -> LeadResponse:
     """Attach the full linked-property snapshot so the CRM lead modal can show
     exactly what the املاک modal shows."""
@@ -237,6 +284,13 @@ async def _lead_with_property(db: AsyncSession, lead: Lead) -> LeadResponse:
         })
         resp.property_detail = data
         resp.district = prop.district
+        # same columns the list rows show, so the modal and the table agree
+        resp.scraped_at = prop.scraped_at or prop.posted_at
+        resp.price_per_meter = _derive_price_per_meter(prop)
+        resp.document_type = prop.document_type
+        resp.has_parking = prop.has_parking
+        resp.has_elevator = prop.has_elevator
+        resp.building_direction = prop.building_direction
     return resp
 
 
@@ -257,14 +311,21 @@ async def export_leads_excel(
         "contract_meeting": "نشست و تنظیم قرارداد", "qualified": "واجد شرایط",
         "closed": "بسته شده", "rented": "اجاره شده", "rejected": "رد شده",
     }
-    headers = ["#", "عنوان ملک", "شهر", "دسته‌بندی", "قیمت", "متراژ",
+    # mirror the on-screen columns, including the ones owned by the property
+    enriched = await _attach_property_columns(db, items)
+    headers = ["#", "عنوان ملک", "شهر", "دسته‌بندی", "قیمت", "قیمت هر متر", "متراژ",
+               "سند", "پارکینگ", "آسانسور", "جهت",
                "شماره تماس", "فروشنده", "وضعیت CRM", "مسئول پیگیری",
-               "اطلاع‌رسانی", "یادداشت", "تاریخ ثبت"]
+               "اطلاع‌رسانی", "یادداشت", "تاریخ برداشت آگهی", "تاریخ ثبت"]
+    yn = lambda v: "" if v is None else ("دارد" if v else "ندارد")
     rows = [[
-        l.id, l.property_title, l.city_name, l.category_name, l.price, l.area,
+        l.id, l.property_title, l.city_name, l.category_name, l.price,
+        l.price_per_meter, l.area,
+        l.document_type, yn(l.has_parking), yn(l.has_elevator), l.building_direction,
         l.phone_number, l.seller_name, status_fa.get(l.status, l.status),
-        l.assigned_to, "بله" if l.notified else "خیر", l.notes, fa_date(l.created_at),
-    ] for l in items]
+        l.assigned_to, "بله" if l.notified else "خیر", l.notes,
+        fa_date(l.scraped_at), fa_date(l.created_at),
+    ] for l in enriched]
     return xlsx_response("leads.xlsx", "لیدها", headers, rows)
 
 
