@@ -405,6 +405,95 @@ class DailyPerformance(Base):
         }
 
 
+class CalendarEvent(Base):
+    """A scheduled appointment — بازدید ملک، نشست قرارداد، تماس، …
+
+    Distinct from Task (a to-do with a deadline) and Reminder (a ping at a
+    moment): an event occupies a slot of time and usually a place, which is
+    what the calendar grid draws. Tasks and reminders are overlaid on the
+    same grid read-only rather than copied into this table.
+    """
+    __tablename__ = "crm_calendar_events"
+
+    # type → (Persian label, colour used by both the grid and the legend)
+    EVENT_TYPES = {
+        "visit":    ("بازدید ملک", "#34d399"),
+        "meeting":  ("نشست و قرارداد", "#a78bfa"),
+        "call":     ("تماس تلفنی", "#38bdf8"),
+        "showing":  ("نمایش به مشتری", "#fbbf24"),
+        "personal": ("شخصی", "#94a3b8"),
+        "other":    ("سایر", "#f472b6"),
+    }
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(500), nullable=False)
+    event_type = Column(String(20), default="visit", index=True)
+    description = Column(Text)
+
+    start_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    end_at = Column(DateTime(timezone=True))
+    all_day = Column(Boolean, default=False)
+
+    # where the visit happens — free text, prefilled from the property address
+    location = Column(String(500))
+
+    # what the appointment is about (all optional, all SET NULL on delete)
+    property_id = Column(Integer, ForeignKey("properties.id", ondelete="SET NULL"), nullable=True, index=True)
+    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True, index=True)
+    customer_id = Column(Integer, ForeignKey("crm_customers.id", ondelete="SET NULL"), nullable=True, index=True)
+    contact_id = Column(Integer, ForeignKey("crm_contacts.id", ondelete="SET NULL"), nullable=True)
+    deal_id = Column(Integer, ForeignKey("crm_deals.id", ondelete="SET NULL"), nullable=True)
+
+    attendee_name = Column(String(200))    # who we're meeting
+    attendee_phone = Column(String(20))
+    assigned_to = Column(String(200))      # which agent is going
+    status = Column(String(20), default="scheduled", index=True)  # scheduled|done|canceled
+    outcome = Column(Text)                 # what came of it, filled after the fact
+
+    # in-app reminder: minutes before start (0/None = no reminder)
+    remind_before = Column(Integer, default=60)
+
+    created_by = Column(String(200))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    @property
+    def type_label(self) -> str:
+        return self.EVENT_TYPES.get(self.event_type, self.EVENT_TYPES["other"])[0]
+
+    @property
+    def color(self) -> str:
+        return self.EVENT_TYPES.get(self.event_type, self.EVENT_TYPES["other"])[1]
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "kind": "event",          # tells the grid this row is editable
+            "title": self.title,
+            "event_type": self.event_type,
+            "type_label": self.type_label,
+            "color": self.color,
+            "description": self.description,
+            "start_at": self.start_at.isoformat() if self.start_at else None,
+            "end_at": self.end_at.isoformat() if self.end_at else None,
+            "all_day": bool(self.all_day),
+            "location": self.location,
+            "property_id": self.property_id,
+            "lead_id": self.lead_id,
+            "customer_id": self.customer_id,
+            "contact_id": self.contact_id,
+            "deal_id": self.deal_id,
+            "attendee_name": self.attendee_name,
+            "attendee_phone": self.attendee_phone,
+            "assigned_to": self.assigned_to,
+            "status": self.status,
+            "outcome": self.outcome,
+            "remind_before": self.remind_before,
+            "created_by": self.created_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class ActivityLog(Base):
     """Timeline entry — who did what to a lead / customer / deal, and when."""
     __tablename__ = "crm_activity_log"

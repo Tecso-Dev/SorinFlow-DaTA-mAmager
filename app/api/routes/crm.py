@@ -15,7 +15,10 @@ from app.database import get_db
 from app.config import get_settings
 from app.models.lead import Lead
 from app.models.property import Property, allocate_serial_no
-from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance, ActivityLog
+from app.models.crm_models import (
+    Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance,
+    ActivityLog, CalendarEvent,
+)
 from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
@@ -1644,3 +1647,250 @@ async def crm_stats(
         "reminders_due_today": reminders_due_today,
         "total_sms": total_sms,
     }
+
+
+# ============== Calendar — تقویم ==============
+#
+# The grid draws three sources at once so «برنامهٔ امروز» lives in one place:
+#   • CalendarEvent — real appointments, created and edited here
+#   • Task.due_date — overlaid read-only, edited in the وظایف tab
+#   • Reminder.remind_at — overlaid read-only, edited in the یادآورها tab
+# Overlay rows carry kind="task"/"reminder" so the UI knows not to offer edit.
+
+def _task_as_event(t: Task) -> dict:
+    prio_color = {"urgent": "#f87171", "high": "#fb923c",
+                  "medium": "#60a5fa", "low": "#94a3b8"}
+    return {
+        "id": t.id, "kind": "task", "title": t.title,
+        "event_type": "task", "type_label": "وظیفه",
+        "color": prio_color.get(t.priority, "#60a5fa"),
+        "start_at": t.due_date.isoformat() if t.due_date else None,
+        "end_at": None, "all_day": True, "location": None,
+        "status": "done" if t.status == "done" else "scheduled",
+        "assigned_to": t.assigned_to, "description": t.description,
+    }
+
+
+def _reminder_as_event(r: Reminder) -> dict:
+    return {
+        "id": r.id, "kind": "reminder", "title": r.title,
+        "event_type": "reminder", "type_label": "یادآور", "color": "#e879f9",
+        "start_at": r.remind_at.isoformat() if r.remind_at else None,
+        "end_at": None, "all_day": False, "location": None,
+        "status": "done" if r.is_sent else "scheduled",
+        "assigned_to": None, "description": None,
+    }
+
+
+async def _calendar_rows(db: AsyncSession, start: datetime, end: datetime,
+                         include_overlay: bool = True,
+                         event_type: Optional[str] = None,
+                         assigned_to: Optional[str] = None) -> List[dict]:
+    """Every dated row that falls inside [start, end)."""
+    q = select(CalendarEvent).where(
+        CalendarEvent.start_at >= start, CalendarEvent.start_at < end)
+    if event_type:
+        q = q.where(CalendarEvent.event_type == event_type)
+    if assigned_to:
+        q = q.where(CalendarEvent.assigned_to == assigned_to)
+    rows = [e.to_dict() for e in (await db.execute(q)).scalars().all()]
+
+    # A type filter is about appointment types, so it hides the overlays too
+    if include_overlay and not event_type:
+        tasks = (await db.execute(select(Task).where(
+            Task.due_date >= start, Task.due_date < end))).scalars().all()
+        rows += [_task_as_event(t) for t in tasks
+                 if not assigned_to or t.assigned_to == assigned_to]
+        if not assigned_to:
+            rems = (await db.execute(select(Reminder).where(
+                Reminder.remind_at >= start, Reminder.remind_at < end))).scalars().all()
+            rows += [_reminder_as_event(r) for r in rems]
+
+    rows.sort(key=lambda r: r["start_at"] or "")
+    return rows
+
+
+@router.get("/calendar")
+async def list_calendar(
+    date_from: str,
+    date_to: str,
+    event_type: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    include_overlay: bool = True,
+    db: AsyncSession = Depends(get_db),
+):
+    """Events (plus tasks/reminders) in a date window — what a grid page needs."""
+    try:
+        start, end = _parse_datetime(date_from), _parse_datetime(date_to)
+    except Exception:
+        raise HTTPException(status_code=400, detail="بازهٔ تاریخ نامعتبر است")
+    if end <= start:
+        raise HTTPException(status_code=400, detail="تاریخ پایان باید بعد از شروع باشد")
+    items = await _calendar_rows(db, start, end, include_overlay, event_type, assigned_to)
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/calendar/upcoming")
+async def upcoming_events(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """Next appointments from now — the dashboard strip and the «قرارهای پیشِ رو» box."""
+    now = datetime.now()
+    rows = await _calendar_rows(db, now, now + timedelta(days=days))
+    rows = [r for r in rows if r.get("status") != "canceled"]
+    return {"items": rows[:limit], "total": len(rows)}
+
+
+@router.get("/calendar/export/excel")
+async def export_calendar_excel(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Excel counterpart of the calendar (appointments only, not overlays)."""
+    q = select(CalendarEvent).order_by(CalendarEvent.start_at.asc())
+    for value, column, op in ((date_from, CalendarEvent.start_at, "ge"),
+                              (date_to, CalendarEvent.start_at, "lt")):
+        if value:
+            try:
+                dt = _parse_datetime(value)
+                q = q.where(column >= dt if op == "ge" else column < dt)
+            except Exception:
+                pass
+    items = (await db.execute(q.limit(5000))).scalars().all()
+
+    status_fa = {"scheduled": "برنامه‌ریزی‌شده", "done": "انجام شد", "canceled": "لغو شد"}
+    headers = ["#", "عنوان", "نوع", "تاریخ شروع", "ساعت", "تاریخ پایان",
+               "محل بازدید", "طرف قرار", "شماره تماس", "مسئول",
+               "وضعیت", "نتیجه", "توضیحات"]
+    rows = [[
+        e.id, e.title, e.type_label, fa_date(e.start_at),
+        "" if e.all_day else e.start_at.strftime("%H:%M"),
+        fa_date(e.end_at), e.location, e.attendee_name, e.attendee_phone,
+        e.assigned_to, status_fa.get(e.status, e.status), e.outcome, e.description,
+    ] for e in items]
+    return xlsx_response("calendar.xlsx", "تقویم", headers, rows)
+
+
+def _apply_event_fields(event: CalendarEvent, data: dict) -> None:
+    """Copy the writable fields off a request body onto an event."""
+    for field in ("title", "description", "location", "attendee_name",
+                  "attendee_phone", "assigned_to", "outcome"):
+        if field in data:
+            setattr(event, field, data[field])
+    if data.get("event_type") in CalendarEvent.EVENT_TYPES:
+        event.event_type = data["event_type"]
+    if data.get("status") in ("scheduled", "done", "canceled"):
+        event.status = data["status"]
+    if "all_day" in data:
+        event.all_day = bool(data["all_day"])
+    if "remind_before" in data:
+        try:
+            event.remind_before = int(data["remind_before"] or 0)
+        except (TypeError, ValueError):
+            pass
+    for field in ("property_id", "lead_id", "customer_id", "contact_id", "deal_id"):
+        if field in data:
+            setattr(event, field, data[field] or None)
+    if data.get("start_at"):
+        try:
+            event.start_at = _parse_datetime(data["start_at"])
+        except Exception:
+            raise HTTPException(status_code=400, detail="تاریخ شروع نامعتبر است")
+    if "end_at" in data:                      # explicit null clears the end time
+        if data["end_at"]:
+            try:
+                event.end_at = _parse_datetime(data["end_at"])
+            except Exception:
+                raise HTTPException(status_code=400, detail="تاریخ پایان نامعتبر است")
+        else:
+            event.end_at = None
+
+
+@router.post("/calendar")
+async def create_event(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    if not (data.get("title") or "").strip():
+        raise HTTPException(status_code=400, detail="عنوان قرار الزامی است")
+    if not data.get("start_at"):
+        raise HTTPException(status_code=400, detail="تاریخ شروع الزامی است")
+
+    event = CalendarEvent(title=data["title"].strip(), start_at=datetime.now())
+    _apply_event_fields(event, data)
+    if event.end_at and event.end_at < event.start_at:
+        raise HTTPException(status_code=400, detail="پایان قرار قبل از شروع آن است")
+    event.created_by = getattr(current_user, "full_name", None) or getattr(current_user, "username", None)
+
+    # A visit without an address is a visit nobody can attend — borrow the
+    # property's own address when the caller did not supply one.
+    if not event.location and event.property_id:
+        prop = (await db.execute(
+            select(Property).where(Property.id == event.property_id))).scalar_one_or_none()
+        if prop:
+            event.location = prop.address or " ".join(
+                filter(None, [prop.city_name, prop.district, prop.neighborhood])) or None
+
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+
+    if event.lead_id:
+        await _log_activity(db, "lead", event.lead_id, "event",
+                            f"{event.type_label} ثبت شد: {event.title}", event.created_by)
+    if event.customer_id:
+        await _log_activity(db, "customer", event.customer_id, "event",
+                            f"{event.type_label} ثبت شد: {event.title}", event.created_by)
+    return event.to_dict()
+
+
+@router.get("/calendar/{event_id}")
+async def get_event(event_id: int, db: AsyncSession = Depends(get_db)):
+    event = (await db.execute(
+        select(CalendarEvent).where(CalendarEvent.id == event_id))).scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="قرار یافت نشد")
+    return event.to_dict()
+
+
+@router.patch("/calendar/{event_id}")
+async def update_event(
+    event_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    event = (await db.execute(
+        select(CalendarEvent).where(CalendarEvent.id == event_id))).scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="قرار یافت نشد")
+
+    old_status = event.status
+    _apply_event_fields(event, data)
+    if event.end_at and event.end_at < event.start_at:
+        raise HTTPException(status_code=400, detail="پایان قرار قبل از شروع آن است")
+    await db.commit()
+    await db.refresh(event)
+
+    if event.status != old_status and event.lead_id:
+        status_fa = {"scheduled": "برنامه‌ریزی‌شده", "done": "انجام شد", "canceled": "لغو شد"}
+        actor = getattr(current_user, "full_name", None) or getattr(current_user, "username", None)
+        await _log_activity(db, "lead", event.lead_id, "event",
+                            f"{event.type_label} «{event.title}» → {status_fa.get(event.status)}", actor)
+    return event.to_dict()
+
+
+@router.delete("/calendar/{event_id}")
+async def delete_event(event_id: int, db: AsyncSession = Depends(get_db)):
+    event = (await db.execute(
+        select(CalendarEvent).where(CalendarEvent.id == event_id))).scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="قرار یافت نشد")
+    await db.delete(event)
+    await db.commit()
+    return {"success": True}

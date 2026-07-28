@@ -740,6 +740,7 @@ async function loadDashboard() {
     }
 
     _loadDashboardWidgets();
+    loadUpcomingEvents();
 }
 
 // ── Latest-activity widgets (recent properties & leads) ──
@@ -3779,6 +3780,9 @@ async function viewLead(id) {
                         <button class="btn btn-sm btn-outline-success" onclick="convertLeadToDeal(${lead.id})">
                             <i class="bi bi-handshake"></i> تبدیل به معامله
                         </button>
+                        <button class="btn btn-sm btn-outline-info" onclick="scheduleVisitForLead(${lead.id})">
+                            <i class="bi bi-calendar-plus"></i> ثبت بازدید
+                        </button>
                     </div>
                 </div>
                 <div class="col-md-4">
@@ -5122,6 +5126,13 @@ function exportPropertiesExcel() {
     _downloadExport(`${API_BASE}/properties/export/excel?${params}`, 'properties.xlsx');
 }
 
+function exportCalendarExcel() {
+    const { start, end } = _calRange();
+    _downloadExport(
+        `${API_BASE}/crm/calendar/export/excel?date_from=${_isoLocal(start)}&date_to=${_isoLocal(end)}`,
+        'calendar.xlsx');
+}
+
 function exportLeadsExcel() {
     const status = document.getElementById('crm-filter-status')?.value || '';
     const qs = status ? `?status=${encodeURIComponent(status)}` : '';
@@ -5148,6 +5159,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tab.addEventListener('shown.bs.tab', e => {
             const target = e.target.getAttribute('data-bs-target');
             if (target === '#crm-tab-tasks')     loadTasks();
+            if (target === '#crm-tab-calendar')  { loadCalendar(); loadUpcomingEvents(); }
             if (target === '#crm-tab-customers') loadCustomers();
             if (target === '#crm-tab-dpa')       loadDpa();
             if (target === '#crm-tab-contacts')  loadContacts();
@@ -5160,3 +5172,593 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// تقویم — Jalali calendar
+// ═══════════════════════════════════════════════════════════════
+//
+// Jalali conversion runs on Intl's built-in Persian calendar rather than a
+// library: persian-date is loaded from a CDN, and a CDN outage must not take
+// the calendar down with it. Intl ships with the browser and is exact.
+
+const _JFMT = new Intl.DateTimeFormat('en-u-ca-persian',
+    { year: 'numeric', month: 'numeric', day: 'numeric' });
+
+const J_MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
+                  'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+const J_WEEKDAYS = ['شنبه', 'یک‌شنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنج‌شنبه', 'جمعه'];
+const J_WEEKDAYS_SHORT = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'];
+
+const CAL_TYPES = {
+    visit:    { label: 'بازدید ملک',      color: '#34d399', icon: 'bi-geo-alt' },
+    meeting:  { label: 'نشست و قرارداد',  color: '#a78bfa', icon: 'bi-file-earmark-text' },
+    call:     { label: 'تماس تلفنی',      color: '#38bdf8', icon: 'bi-telephone' },
+    showing:  { label: 'نمایش به مشتری',  color: '#fbbf24', icon: 'bi-eye' },
+    personal: { label: 'شخصی',            color: '#94a3b8', icon: 'bi-person' },
+    other:    { label: 'سایر',            color: '#f472b6', icon: 'bi-three-dots' },
+    task:     { label: 'وظیفه',           color: '#60a5fa', icon: 'bi-check2-square' },
+    reminder: { label: 'یادآور',          color: '#e879f9', icon: 'bi-alarm' },
+};
+
+/** Jalali year/month/day of a Date, via the platform calendar. */
+function jParts(d) {
+    const out = {};
+    for (const p of _JFMT.formatToParts(d)) {
+        if (p.type === 'year' || p.type === 'month' || p.type === 'day') out[p.type] = +p.value;
+    }
+    return { jy: out.year, jm: out.month, jd: out.day };
+}
+
+/** Noon copy — keeps day arithmetic clear of midnight/DST edges. */
+function _noon(d) {
+    const x = new Date(d);
+    x.setHours(12, 0, 0, 0);
+    return x;
+}
+
+function jStartOfMonth(d) {
+    const x = _noon(d);
+    x.setDate(x.getDate() - (jParts(x).jd - 1));
+    return x;
+}
+
+/** Walk whole Jalali months. +32 days from the 1st always lands in the next
+ *  month (they run 29–31 days), so snapping back to the 1st is exact. */
+function jAddMonths(d, n) {
+    let x = jStartOfMonth(d);
+    for (let i = 0; i < Math.abs(n); i++) {
+        x.setDate(x.getDate() + (n > 0 ? 32 : -1));
+        x = jStartOfMonth(x);
+    }
+    return x;
+}
+
+function jDaysInMonth(d) {
+    const start = jStartOfMonth(d), m = jParts(start).jm;
+    for (let i = 28; i <= 32; i++) {
+        const t = new Date(start);
+        t.setDate(t.getDate() + i);
+        if (jParts(t).jm !== m) return i;
+    }
+    return 31;
+}
+
+/** Jalali y/m/d → Date. Walks months instead of guessing offsets, so it never
+ *  oscillates around a boundary. Returns null for a date that does not exist. */
+function jalaliToDate(jy, jm, jd) {
+    if (!jy || !jm || !jd || jm < 1 || jm > 12 || jd < 1 || jd > 31) return null;
+    let cur = _noon(new Date(jy + 621, 2, 21));      // ≈ Nowruz of that year
+    for (let guard = 0; guard < 40; guard++) {        // land in the right year
+        const p = jParts(cur);
+        if (p.jy === jy) break;
+        cur.setDate(cur.getDate() + (jy - p.jy) * 365);
+    }
+    cur = jStartOfMonth(cur);
+    for (let guard = 0; guard < 30; guard++) {        // then the right month
+        const p = jParts(cur);
+        if (p.jy === jy && p.jm === jm) break;
+        const behind = p.jy < jy || (p.jy === jy && p.jm < jm);
+        cur = jAddMonths(cur, behind ? 1 : -1);
+    }
+    const at = jParts(cur);
+    if (at.jy !== jy || at.jm !== jm) return null;
+    cur.setDate(cur.getDate() + (jd - 1));
+    const got = jParts(cur);
+    return (got.jy === jy && got.jm === jm && got.jd === jd) ? cur : null;
+}
+
+const _pad2 = n => String(n).padStart(2, '0');
+
+/** Persian digits with no thousands separator — years and day numbers are
+ *  labels, not quantities: formatNumber() would render 1405 as ۱٬۴۰۵. */
+const _faNum = n => String(n).replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+
+/** 1405/05/06 */
+function jFormat(d) {
+    const { jy, jm, jd } = jParts(d);
+    return `${jy}/${_pad2(jm)}/${_pad2(jd)}`;
+}
+
+/** ۶ مرداد ۱۴۰۵ */
+function jFormatLong(d) {
+    const { jy, jm, jd } = jParts(d);
+    return `${_faNum(jd)} ${J_MONTHS[jm - 1]} ${_faNum(jy)}`;
+}
+
+/** Parse 1405/05/06 (or ۱۴۰۵-۵-۶) back to a Date. */
+function jParseInput(text) {
+    if (!text) return null;
+    const ascii = String(text).replace(/[۰-۹]/g, c => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c));
+    const m = ascii.match(/(\d{4})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{1,2})/);
+    return m ? jalaliToDate(+m[1], +m[2], +m[3]) : null;
+}
+
+/** Column 0..6 with Saturday first, the way Persian weeks are laid out. */
+const jWeekCol = d => (d.getDay() + 1) % 7;
+
+function jStartOfWeek(d) {
+    const x = _noon(d);
+    x.setDate(x.getDate() - jWeekCol(x));
+    return x;
+}
+
+/** Wall-clock ISO with no timezone suffix — the server stores what we send. */
+function _isoLocal(d) {
+    return `${d.getFullYear()}-${_pad2(d.getMonth() + 1)}-${_pad2(d.getDate())}` +
+           `T${_pad2(d.getHours())}:${_pad2(d.getMinutes())}:00`;
+}
+
+const _sameDay = (a, b) => a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+// ── calendar state ──────────────────────────────────────────────
+let _calCursor = new Date();     // any date inside the shown period
+let _calView = 'month';          // month | week | day
+let _calType = '';               // event-type filter
+let _calRows = [];               // what the grid is currently drawing
+const CAL_HOUR_H = 46;           // px per hour in the week/day grid
+
+const _faTime = d => d.toLocaleTimeString('fa-IR',
+    { hour: '2-digit', minute: '2-digit', hour12: false });
+
+function _calMeta(row) {
+    return CAL_TYPES[row.event_type] || CAL_TYPES.other;
+}
+
+/** [start, end) of the visible period, plus its Persian caption. */
+function _calRange() {
+    if (_calView === 'day') {
+        const s = _noon(_calCursor); s.setHours(0, 0, 0, 0);
+        const e = new Date(s); e.setDate(e.getDate() + 1);
+        return { start: s, end: e, title: `${J_WEEKDAYS[jWeekCol(_calCursor)]}، ${jFormatLong(_calCursor)}` };
+    }
+    if (_calView === 'week') {
+        const s = jStartOfWeek(_calCursor); s.setHours(0, 0, 0, 0);
+        const e = new Date(s); e.setDate(e.getDate() + 7);
+        const last = new Date(s); last.setDate(last.getDate() + 6);
+        const a = jParts(s), b = jParts(last);
+        // «۳ تا ۹ مرداد ۱۴۰۵» rather than repeating the month twice
+        const title = (a.jy === b.jy && a.jm === b.jm)
+            ? `${_faNum(a.jd)} تا ${_faNum(b.jd)} ${J_MONTHS[a.jm - 1]} ${_faNum(a.jy)}`
+            : `${jFormatLong(s)} تا ${jFormatLong(last)}`;
+        return { start: s, end: e, title };
+    }
+    // month view draws whole weeks, so the window spills into the neighbours
+    const first = jStartOfMonth(_calCursor);
+    const s = jStartOfWeek(first); s.setHours(0, 0, 0, 0);
+    const e = new Date(s); e.setDate(e.getDate() + 42);
+    const { jy, jm } = jParts(first);
+    return { start: s, end: e, title: `${J_MONTHS[jm - 1]} ${_faNum(jy)}` };
+}
+
+function switchCalView(view) {
+    _calView = view;
+    document.querySelectorAll('#cal-view-switch .btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.view === view));
+    loadCalendar();
+}
+
+function calStep(dir) {
+    const x = _noon(_calCursor);
+    if (_calView === 'month') {
+        // Keep the day of month: jAddMonths lands on the 1st, and losing the
+        // day means switching to هفته/روز afterwards jumps to the wrong week.
+        const day = jParts(x).jd;
+        const target = jAddMonths(x, dir);
+        target.setDate(target.getDate() + Math.min(day, jDaysInMonth(target)) - 1);
+        _calCursor = target;
+    } else {
+        x.setDate(x.getDate() + dir * (_calView === 'week' ? 7 : 1));
+        _calCursor = x;
+    }
+    loadCalendar();
+}
+
+function calToday() { _calCursor = new Date(); loadCalendar(); }
+
+async function loadCalendar() {
+    const { start, end, title } = _calRange();
+    const caption = document.getElementById('cal-title');
+    if (caption) caption.textContent = title;
+
+    let url = `/crm/calendar?date_from=${_isoLocal(start)}&date_to=${_isoLocal(end)}`;
+    if (_calType) url += `&event_type=${_calType}`;
+
+    const body = document.getElementById('cal-body');
+    try {
+        const data = await apiCall(url);
+        _calRows = (data.items || []).filter(r => r.start_at);
+        body.innerHTML = _calView === 'month'
+            ? _renderCalMonth(start)
+            : _renderCalTimeGrid(start, _calView === 'week' ? 7 : 1);
+        _renderCalLegend();
+    } catch (e) {
+        body.innerHTML = `<div class="text-center text-muted py-5">
+            <i class="bi bi-calendar-x" style="font-size:2rem"></i>
+            <p class="mt-2">بارگیری تقویم ناموفق بود</p></div>`;
+    }
+}
+
+/** Rows that fall on a given day, in time order. */
+function _calRowsOn(day) {
+    return _calRows
+        .filter(r => _sameDay(new Date(r.start_at), day))
+        .sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
+}
+
+function _calChip(row, withTime = true) {
+    const meta = _calMeta(row);
+    const d = new Date(row.start_at);
+    const done = row.status === 'done', canceled = row.status === 'canceled';
+    const time = (row.all_day || !withTime) ? '' : `<b>${_faTime(d)}</b> `;
+    return `<button type="button" class="cal-chip${done ? ' done' : ''}${canceled ? ' canceled' : ''}"
+            style="--c:${meta.color}" title="${esc(row.title)} — ${meta.label}"
+            onclick="event.stopPropagation(); openCalRow('${row.kind}', ${row.id})">
+        ${time}${esc(row.title)}</button>`;
+}
+
+function _renderCalMonth(gridStart) {
+    const monthOf = jParts(jStartOfMonth(_calCursor)).jm;
+    const today = new Date();
+    let html = '<div class="cal-month">';
+    // own classes rather than Bootstrap's d-md-* utilities: the vendored RTL
+    // build does not apply the responsive display variants here
+    html += J_WEEKDAYS.map((w, i) =>
+        `<div class="cal-dow"><span class="dow-full">${w}</span>` +
+        `<span class="dow-short">${J_WEEKDAYS_SHORT[i]}</span></div>`).join('');
+
+    for (let i = 0; i < 42; i++) {
+        const day = new Date(gridStart);
+        day.setDate(day.getDate() + i);
+        const { jm, jd } = jParts(day);
+        const rows = _calRowsOn(day);
+        const cls = [
+            'cal-cell',
+            jm !== monthOf ? 'muted' : '',
+            _sameDay(day, today) ? 'today' : '',
+            jWeekCol(day) === 6 ? 'holiday' : '',   // جمعه
+        ].filter(Boolean).join(' ');
+
+        const shown = rows.slice(0, 3).map(r => _calChip(r)).join('');
+        const more = rows.length > 3
+            ? `<button type="button" class="cal-more"
+                 onclick="event.stopPropagation(); openCalDay('${_isoLocal(day)}')">
+                 ${_faNum(rows.length - 3)}+ بیشتر</button>` : '';
+
+        html += `<div class="${cls}" onclick="openEventModal(null, '${_isoLocal(day)}')"
+                      title="افزودن قرار در ${jFormat(day)}">
+            <div class="cal-daynum">${_faNum(jd)}</div>
+            <div class="cal-chips">${shown}${more}</div>
+        </div>`;
+    }
+    return html + '</div>';
+}
+
+/** Shared renderer for هفته (7 columns) and روز (1 column). */
+function _renderCalTimeGrid(start, dayCount) {
+    const days = [];
+    for (let i = 0; i < dayCount; i++) {
+        const d = new Date(start); d.setDate(d.getDate() + i); days.push(d);
+    }
+    const timed = _calRows.filter(r => !r.all_day);
+    // default work window, widened so nothing sits outside the grid
+    let minH = 7, maxH = 21;
+    timed.forEach(r => {
+        const h = new Date(r.start_at).getHours();
+        minH = Math.min(minH, h);
+        maxH = Math.max(maxH, h + 1);
+    });
+    const hours = [];
+    for (let h = minH; h <= maxH; h++) hours.push(h);
+
+    const today = new Date();
+    const gridVars = `--cols:${dayCount}; --hh:${CAL_HOUR_H}px`;
+    let head = `<div class="cal-tg-head" style="${gridVars}"><div class="cal-tg-gutter"></div>`;
+    days.forEach(d => {
+        const { jd, jm } = jParts(d);
+        head += `<div class="cal-tg-day${_sameDay(d, today) ? ' today' : ''}"
+                      onclick="openEventModal(null, '${_isoLocal(d)}')">
+            <span class="dow">${J_WEEKDAYS[jWeekCol(d)]}</span>
+            <span class="num">${_faNum(jd)} ${J_MONTHS[jm - 1]}</span></div>`;
+    });
+    head += '</div>';
+
+    // all-day strip, only when something needs it
+    const allDay = _calRows.filter(r => r.all_day);
+    let strip = '';
+    if (allDay.length) {
+        strip = `<div class="cal-tg-allday" style="${gridVars}"><div class="cal-tg-gutter">تمام‌روز</div>`;
+        days.forEach(d => {
+            strip += `<div class="cal-tg-adcell">
+                ${allDay.filter(r => _sameDay(new Date(r.start_at), d))
+                        .map(r => _calChip(r, false)).join('')}</div>`;
+        });
+        strip += '</div>';
+    }
+
+    let gutter = '<div class="cal-tg-gutter">';
+    hours.forEach(h => gutter += `<div class="cal-tg-hour">${_faNum(_pad2(h))}:۰۰</div>`);
+    gutter += '</div>';
+
+    let cols = '';
+    days.forEach(d => {
+        const rows = _calRowsOn(d).filter(r => !r.all_day);
+        let cells = hours.map(() => '<div class="cal-tg-slot"></div>').join('');
+        const lanes = _calLanes(rows);
+        const blocks = rows.map((r, i) => {
+            const s = new Date(r.start_at);
+            const e = r.end_at ? new Date(r.end_at) : new Date(s.getTime() + 60 * 60 * 1000);
+            const top = ((s.getHours() - minH) * 60 + s.getMinutes()) / 60 * CAL_HOUR_H;
+            const mins = Math.max(30, (e - s) / 60000);
+            const meta = _calMeta(r);
+            const { lane, of } = lanes[i];
+            return `<button type="button" class="cal-block${r.status === 'done' ? ' done' : ''}${r.status === 'canceled' ? ' canceled' : ''}"
+                style="--c:${meta.color}; top:${top}px; height:${Math.max(24, mins / 60 * CAL_HOUR_H - 2)}px;
+                       width:calc(${100 / of}% - 4px); right:calc(${(lane * 100) / of}% + 2px)"
+                title="${esc(r.title)} — ${meta.label}"
+                onclick="event.stopPropagation(); openCalRow('${r.kind}', ${r.id})">
+                <span class="t">${_faTime(s)}</span> ${esc(r.title)}
+                ${r.location ? `<span class="loc"><i class="bi bi-geo-alt"></i> ${esc(r.location)}</span>` : ''}
+            </button>`;
+        }).join('');
+        cols += `<div class="cal-tg-col" onclick="openEventModal(null, '${_isoLocal(d)}')">
+                    ${cells}${blocks}</div>`;
+    });
+
+    return `${head}${strip}<div class="cal-tg-body" style="${gridVars}">${gutter}${cols}</div>`;
+}
+
+/** Side-by-side placement for appointments that overlap in time. */
+function _calLanes(rows) {
+    const out = rows.map(() => ({ lane: 0, of: 1 }));
+    const ends = [];   // end time per lane
+    const spans = rows.map(r => {
+        const s = new Date(r.start_at).getTime();
+        const e = r.end_at ? new Date(r.end_at).getTime() : s + 3600000;
+        return [s, Math.max(e, s + 1800000)];
+    });
+    let group = [], groupEnd = -Infinity;
+    const flush = () => {
+        const width = Math.max(1, ends.length);
+        group.forEach(i => out[i].of = width);
+        group = []; ends.length = 0; groupEnd = -Infinity;
+    };
+    rows.forEach((_r, i) => {
+        const [s, e] = spans[i];
+        if (s >= groupEnd && group.length) flush();
+        let lane = ends.findIndex(end => end <= s);
+        if (lane === -1) { lane = ends.length; ends.push(e); } else { ends[lane] = e; }
+        out[i].lane = lane;
+        group.push(i);
+        groupEnd = Math.max(groupEnd, e);
+    });
+    if (group.length) flush();
+    return out;
+}
+
+function _renderCalLegend() {
+    const el = document.getElementById('cal-legend');
+    if (!el) return;
+    const used = new Set(_calRows.map(r => r.event_type));
+    el.innerHTML = Object.entries(CAL_TYPES)
+        .filter(([k]) => used.has(k))
+        .map(([, m]) => `<span class="cal-legend-item"><i style="background:${m.color}"></i>${m.label}</span>`)
+        .join('') || '<span class="text-muted">قراری در این بازه ثبت نشده است</span>';
+}
+
+/** Jump to the day view for a date the month grid could not fit. */
+function openCalDay(iso) {
+    _calCursor = new Date(iso);
+    switchCalView('day');
+}
+
+/** Tasks and reminders are overlays — send the user to their own tab. */
+function openCalRow(kind, id) {
+    if (kind === 'event') return openEventModal(id);
+    const tab = kind === 'task' ? '#crm-tab-tasks' : '#crm-tab-reminders';
+    showToast('توجه', kind === 'task'
+        ? 'این یک وظیفه است و در تب «وظایف» ویرایش می‌شود'
+        : 'این یک یادآور است و در تب «یادآورها» ویرایش می‌شود', 'info');
+    document.querySelector(`[data-bs-target="${tab}"]`)?.click();
+}
+
+// ── event modal ─────────────────────────────────────────────────
+let _editingEventId = null;
+
+const CAL_REMIND_OPTIONS = [
+    [0, 'بدون یادآوری'], [15, '۱۵ دقیقه قبل'], [30, '۳۰ دقیقه قبل'],
+    [60, '۱ ساعت قبل'], [180, '۳ ساعت قبل'], [1440, '۱ روز قبل'],
+];
+
+function _calSetForm(ev) {
+    const v = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+    const start = ev.start_at ? new Date(ev.start_at) : new Date();
+    v('ev-title', ev.title || '');
+    v('ev-type', ev.event_type || 'visit');
+    v('ev-date', jFormat(start));
+    v('ev-start-time', ev.all_day ? '' : `${_pad2(start.getHours())}:${_pad2(start.getMinutes())}`);
+    v('ev-end-time', ev.end_at ? `${_pad2(new Date(ev.end_at).getHours())}:${_pad2(new Date(ev.end_at).getMinutes())}` : '');
+    v('ev-location', ev.location || '');
+    v('ev-attendee', ev.attendee_name || '');
+    v('ev-phone', ev.attendee_phone || '');
+    v('ev-assigned', ev.assigned_to || '');
+    v('ev-property', ev.property_id || '');
+    v('ev-description', ev.description || '');
+    v('ev-outcome', ev.outcome || '');
+    v('ev-status', ev.status || 'scheduled');
+    v('ev-remind', ev.remind_before ?? 60);
+    const allDay = document.getElementById('ev-all-day');
+    if (allDay) { allDay.checked = !!ev.all_day; toggleEventAllDay(); }
+    document.getElementById('ev-lead-id').value = ev.lead_id || '';
+    document.getElementById('ev-customer-id').value = ev.customer_id || '';
+}
+
+function toggleEventAllDay() {
+    const on = document.getElementById('ev-all-day')?.checked;
+    document.getElementById('ev-time-wrap')?.classList.toggle('d-none', !!on);
+}
+
+/**
+ * @param id       event to edit, or null to create
+ * @param isoDate  day to prefill when creating from a grid cell
+ * @param preset   extra fields (used by «ثبت بازدید» on a lead)
+ */
+async function openEventModal(id = null, isoDate = null, preset = {}) {
+    _editingEventId = id;
+    const modalEl = document.getElementById('eventModal');
+    const editing = !!id;
+
+    document.getElementById('eventModalTitle').innerHTML = editing
+        ? '<i class="bi bi-calendar-check"></i> ویرایش قرار'
+        : '<i class="bi bi-calendar-plus"></i> قرار جدید';
+    document.getElementById('ev-delete-btn').classList.toggle('d-none', !editing);
+    document.getElementById('ev-done-wrap').classList.toggle('d-none', !editing);
+
+    let ev = { event_type: 'visit', remind_before: 60, status: 'scheduled', ...preset };
+    if (editing) {
+        try { ev = await apiCall(`/crm/calendar/${id}`); }
+        catch (e) { showToast('خطا', 'قرار یافت نشد', 'danger'); return; }
+    } else if (isoDate) {
+        const d = new Date(isoDate);
+        if (!d.getHours()) d.setHours(10, 0, 0, 0);      // sensible default slot
+        ev.start_at = ev.start_at || _isoLocal(d);
+    } else {
+        ev.start_at = ev.start_at || _isoLocal(new Date());
+    }
+    _calSetForm(ev);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+function _calReadForm() {
+    const val = id => document.getElementById(id)?.value.trim() || '';
+    const title = val('ev-title');
+    if (!title) { showToast('خطا', 'عنوان قرار الزامی است', 'warning'); return null; }
+
+    const day = jParseInput(val('ev-date'));
+    if (!day) { showToast('خطا', 'تاریخ نامعتبر است — نمونهٔ درست: ۱۴۰۵/۰۵/۰۶', 'warning'); return null; }
+
+    const allDay = document.getElementById('ev-all-day').checked;
+    const start = new Date(day);
+    const end = new Date(day);
+    if (allDay) {
+        start.setHours(0, 0, 0, 0);
+    } else {
+        const [sh, sm] = (val('ev-start-time') || '10:00').split(':').map(Number);
+        start.setHours(sh || 0, sm || 0, 0, 0);
+        const endTime = val('ev-end-time');
+        if (endTime) {
+            const [eh, em] = endTime.split(':').map(Number);
+            end.setHours(eh || 0, em || 0, 0, 0);
+            if (end <= start) { showToast('خطا', 'ساعت پایان باید بعد از شروع باشد', 'warning'); return null; }
+        }
+    }
+    const num = id => { const v = val(id); return v ? parseInt(v, 10) : null; };
+    return {
+        title,
+        event_type: val('ev-type') || 'visit',
+        start_at: _isoLocal(start),
+        end_at: (!allDay && val('ev-end-time')) ? _isoLocal(end) : null,
+        all_day: allDay,
+        location: val('ev-location') || null,
+        attendee_name: val('ev-attendee') || null,
+        attendee_phone: val('ev-phone') || null,
+        assigned_to: val('ev-assigned') || null,
+        property_id: num('ev-property'),
+        lead_id: num('ev-lead-id'),
+        customer_id: num('ev-customer-id'),
+        description: val('ev-description') || null,
+        outcome: val('ev-outcome') || null,
+        status: val('ev-status') || 'scheduled',
+        remind_before: num('ev-remind') ?? 60,
+    };
+}
+
+async function saveEvent() {
+    const body = _calReadForm();
+    if (!body) return;
+    try {
+        if (_editingEventId) {
+            await apiCall(`/crm/calendar/${_editingEventId}`, { method: 'PATCH', body: JSON.stringify(body) });
+            showToast('موفق', 'قرار به‌روزرسانی شد', 'success');
+        } else {
+            await apiCall('/crm/calendar', { method: 'POST', body: JSON.stringify(body) });
+            showToast('موفق', 'قرار ثبت شد', 'success');
+        }
+        bootstrap.Modal.getInstance(document.getElementById('eventModal'))?.hide();
+        loadCalendar(); loadUpcomingEvents();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function deleteEventFromModal() {
+    if (!_editingEventId || !confirm('این قرار حذف شود؟')) return;
+    try {
+        await apiCall(`/crm/calendar/${_editingEventId}`, { method: 'DELETE' });
+        showToast('موفق', 'قرار حذف شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('eventModal'))?.hide();
+        loadCalendar(); loadUpcomingEvents();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+/** «ثبت بازدید» inside the lead modal — carries the property over. */
+async function scheduleVisitForLead(leadId) {
+    let lead = null;
+    try { lead = await apiCall(`/crm/leads/${leadId}`); } catch (e) { /* fall through */ }
+    const p = lead?.property_detail || {};
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(10, 0, 0, 0);
+
+    bootstrap.Modal.getInstance(document.getElementById('leadModal'))?.hide();
+    openEventModal(null, null, {
+        event_type: 'visit',
+        title: `بازدید — ${lead?.property_title || 'ملک'}`,
+        start_at: _isoLocal(tomorrow),
+        location: p.address || [p.city_name, p.district, p.neighborhood].filter(Boolean).join('، ') || '',
+        property_id: lead?.property_id || null,
+        lead_id: leadId,
+        attendee_name: lead?.seller_name || '',
+        attendee_phone: lead?.phone_number || '',
+    });
+}
+
+/** Small «قرارهای پیشِ رو» list shown above the grid and on the dashboard. */
+async function loadUpcomingEvents() {
+    const boxes = ['cal-upcoming', 'dash-upcoming'].map(id => document.getElementById(id)).filter(Boolean);
+    if (!boxes.length) return;
+    try {
+        const data = await apiCall('/crm/calendar/upcoming?days=7&limit=8');
+        const items = data.items || [];
+        const html = items.length ? items.map(r => {
+            const d = new Date(r.start_at), meta = _calMeta(r);
+            const today = _sameDay(d, new Date());
+            return `<button type="button" class="cal-up-item" style="--c:${meta.color}"
+                        onclick="openCalRow('${r.kind}', ${r.id})">
+                <i class="bi ${meta.icon}"></i>
+                <span class="up-when">${today ? 'امروز' : _faNum(jFormat(d))}${r.all_day ? '' : ' · ' + _faTime(d)}</span>
+                <span class="up-title">${esc(r.title)}</span>
+                ${r.location ? `<span class="up-loc"><i class="bi bi-geo-alt"></i>${esc(r.location)}</span>` : ''}
+            </button>`;
+        }).join('') : '<span class="text-muted small">قراری در ۷ روز آینده ثبت نشده است</span>';
+        boxes.forEach(b => b.innerHTML = html);
+    } catch (e) { /* the strip is a nicety — never block the page for it */ }
+}

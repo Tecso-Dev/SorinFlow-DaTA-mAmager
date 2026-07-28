@@ -2022,3 +2022,120 @@ select.status-quick {
 }
 .tl-text { font-size: .82rem; color: var(--text); }
 .tl-meta { font-size: .68rem; color: var(--text-muted); margin-top: .1rem; }
+
+/* ═══════════════ تقویم — calendar ═══════════════ */
+
+/* upcoming strip (calendar header + dashboard) */
+.cal-upcoming { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.cal-up-item {
+  display: inline-flex; align-items: center; gap: .45rem;
+  padding: .35rem .6rem; border-radius: 11px; font-size: .76rem;
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 40%, transparent);
+  color: var(--text); text-align: right; cursor: pointer; max-width: 100%;
+}
+.cal-up-item:hover { background: color-mix(in srgb, var(--c) 22%, transparent); }
+.cal-up-item i { color: var(--c); }
+.cal-up-item .up-when { color: var(--text-dim); font-size: .7rem; white-space: nowrap; }
+.cal-up-item .up-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.cal-up-item .up-loc { color: var(--text-muted); font-size: .68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+
+/* legend */
+.cal-legend { display: flex; gap: .8rem; flex-wrap: wrap; margin-top: .7rem; font-size: .72rem; color: var(--text-dim); }
+.cal-legend-item { display: inline-flex; align-items: center; gap: .32rem; }
+.cal-legend-item i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+/* ── month grid ── */
+.cal-month {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px; background: var(--border); border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+}
+.cal-dow {
+  background: rgba(255,255,255,.04); padding: .45rem .3rem; text-align: center;
+  font-size: .74rem; font-weight: 600; color: var(--text-dim);
+}
+.cal-dow .dow-full { display: inline; }
+.cal-dow .dow-short { display: none; }
+.cal-cell {
+  background: var(--surface2); min-height: 96px; padding: .3rem;
+  display: flex; flex-direction: column; gap: .2rem; cursor: pointer;
+  transition: background .15s;
+}
+.cal-cell:hover { background: rgba(167,139,250,.08); }
+.cal-cell.muted { opacity: .38; }
+.cal-cell.holiday .cal-daynum { color: #f87171; }
+.cal-cell.today { background: rgba(167,139,250,.13); }
+.cal-cell.today .cal-daynum {
+  background: #a78bfa; color: #0b1020; border-radius: 50%;
+  width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+}
+.cal-daynum { font-size: .78rem; font-weight: 600; color: var(--text); align-self: flex-start; }
+.cal-chips { display: flex; flex-direction: column; gap: .15rem; overflow: hidden; }
+.cal-chip {
+  display: block; width: 100%; text-align: right; border: 0;
+  padding: .12rem .34rem; border-radius: 6px; font-size: .66rem; line-height: 1.45;
+  background: color-mix(in srgb, var(--c) 20%, transparent);
+  border-right: 3px solid var(--c); color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.cal-chip:hover { background: color-mix(in srgb, var(--c) 34%, transparent); }
+.cal-chip.done { opacity: .55; text-decoration: line-through; }
+.cal-chip.canceled { opacity: .4; text-decoration: line-through; }
+.cal-more {
+  border: 0; background: none; color: var(--text-muted);
+  font-size: .64rem; text-align: right; padding: 0 .34rem; cursor: pointer;
+}
+.cal-more:hover { color: #a78bfa; }
+
+/* ── week / day time grid ── */
+.cal-tg-head, .cal-tg-allday {
+  display: grid; grid-template-columns: 54px repeat(var(--cols, 7), minmax(0, 1fr));
+  gap: 1px; background: var(--border); border: 1px solid var(--border);
+  border-bottom: 0; border-radius: 12px 12px 0 0; overflow: hidden;
+}
+.cal-tg-day {
+  background: rgba(255,255,255,.04); padding: .4rem .2rem; text-align: center;
+  cursor: pointer; display: flex; flex-direction: column; gap: .05rem;
+}
+.cal-tg-day .dow { font-size: .72rem; font-weight: 600; color: var(--text-dim); }
+.cal-tg-day .num { font-size: .68rem; color: var(--text-muted); }
+.cal-tg-day.today { background: rgba(167,139,250,.16); }
+.cal-tg-day.today .dow { color: #c4b5fd; }
+.cal-tg-allday { border-radius: 0; }
+.cal-tg-adcell { background: var(--surface2); padding: .2rem; min-height: 30px; display: flex; flex-direction: column; gap: .15rem; }
+.cal-tg-gutter {
+  background: rgba(255,255,255,.03); font-size: .64rem; color: var(--text-muted);
+  display: flex; flex-direction: column; align-items: center;
+}
+/* no top padding here: the hour labels have to line up with the slot borders
+   the blocks are positioned against */
+.cal-tg-body .cal-tg-gutter { padding-top: 0; }
+.cal-tg-body {
+  display: grid; grid-template-columns: 54px repeat(var(--cols, 7), minmax(0, 1fr));
+  gap: 1px; background: var(--border); border: 1px solid var(--border);
+  border-radius: 0 0 12px 12px; overflow: hidden; max-height: 62vh; overflow-y: auto;
+}
+.cal-tg-hour { height: var(--hh, 46px); display: flex; align-items: flex-start; justify-content: center; }
+.cal-tg-col { background: var(--surface2); position: relative; cursor: pointer; }
+.cal-tg-slot { height: var(--hh, 46px); border-bottom: 1px solid rgba(255,255,255,.045); }
+.cal-block {
+  position: absolute; border: 0; border-right: 3px solid var(--c);
+  background: color-mix(in srgb, var(--c) 24%, var(--surface2));
+  color: var(--text); border-radius: 7px; padding: .14rem .3rem;
+  font-size: .66rem; line-height: 1.4; text-align: right; cursor: pointer;
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.cal-block:hover { background: color-mix(in srgb, var(--c) 38%, var(--surface2)); z-index: 3; }
+.cal-block .t { font-weight: 700; font-size: .62rem; color: var(--text-dim); }
+.cal-block .loc { font-size: .6rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-block.done { opacity: .55; }
+.cal-block.canceled { opacity: .4; text-decoration: line-through; }
+
+@media (max-width: 768px) {
+  .cal-cell { min-height: 72px; }
+  .cal-dow .dow-full { display: none; }
+  .cal-dow .dow-short { display: inline; }
+  .cal-chip { font-size: .6rem; }
+  .cal-tg-head, .cal-tg-allday, .cal-tg-body { grid-template-columns: 40px repeat(var(--cols, 7), minmax(0, 1fr)); }
+}
