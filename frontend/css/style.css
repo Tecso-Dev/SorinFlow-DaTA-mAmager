@@ -2001,6 +2001,10 @@ select.status-quick {
 }
 .lead-chip.off { opacity: .42; text-decoration: line-through; }
 .lead-chip.off i { text-decoration: none; }
+/* نبش is a selling point — give it its own tint so it reads at a glance */
+.lead-chip.corner {
+  background: rgba(251,191,36,.13); border-color: rgba(251,191,36,.35); color: #fcd34d;
+}
 
 /* activity timeline */
 .timeline { display: flex; flex-direction: column; gap: .1rem; }

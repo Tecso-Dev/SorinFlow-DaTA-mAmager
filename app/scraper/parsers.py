@@ -47,6 +47,45 @@ def parse_persian_number(text: str) -> Optional[int]:
         return None
 
 
+# ---------------------------------------------------------------------------
+# نبش (corner lot)
+# ---------------------------------------------------------------------------
+
+# Ordered: the more specific counts first. Matched against text that has
+# already been through normalize_persian_digits() (ZWNJ stripped, Persian
+# digits → ASCII), so «دو‌نبش» and «دونبش» both arrive as "دونبش".
+_CORNER_PATTERNS = [
+    ("سه‌نبش",  r"(?:سه|3)\s?نبش"),
+    ("چهارنبش", r"(?:چهار|4)\s?نبش"),
+    ("دونبش",   r"(?:دو|2)\s?نبش"),
+    ("تک‌نبش",  r"(?:تک|یک|1)\s?نبش"),
+]
+# «کوچه ۲ نبش خیابان بهار» is an address, not a corner lot
+_CORNER_ADDRESS_PREFIX = re.compile(
+    r"(?:کوچه|خیابان|خ|بلوار|بل|میدان|پلاک|فرعی|روبروی|نرسیده به)\s*\S{0,4}$")
+
+
+def detect_corner_type(*texts: Optional[str]) -> Optional[str]:
+    """Find «دونبش / سه‌نبش / تک‌نبش» in free ad text.
+
+    Divar has no field for it — it only ever shows up in the title, the
+    description or a feature chip, so it has to be read out of the prose.
+
+    Only count-prefixed forms count. A bare «نبش» is ignored on purpose:
+    in Persian addresses it means "at the corner of <street>", which says
+    nothing about the lot itself.
+    """
+    blob = normalize_persian_digits(" ".join(t for t in texts if t))
+    if not blob or "نبش" not in blob:
+        return None
+    for label, pattern in _CORNER_PATTERNS:
+        for m in re.finditer(pattern, blob):
+            if _CORNER_ADDRESS_PREFIX.search(blob[max(0, m.start() - 20):m.start()]):
+                continue
+            return label
+    return None
+
+
 def parse_price_with_unit(text: str) -> Optional[int]:
     """Parse '۹۰۰ میلیون', '۱.۸۰۰ میلیارد', 'رایگان' etc. → int (Tomans)."""
     if not text:
@@ -435,6 +474,8 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
                 details['has_images'] = 'بله' in vt or 'دارد' in vt
             elif 'جهت' in tt:
                 details['building_direction'] = vt
+            elif 'نبش' in tt:
+                details['corner_type'] = detect_corner_type(tt, vt) or vt
             elif 'بر' in tt and 'متر' in vt:
                 details['frontage'] = parse_persian_number(vt)
             elif 'وضعیت' in tt:
@@ -586,6 +627,12 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
 
     except Exception as e:
         logger.warning(f"Failed to extract property details: {e}")
+
+    # نبش is almost never a table row — read it out of the ad title
+    if not details.get('corner_type') and title:
+        corner = detect_corner_type(title)
+        if corner:
+            details['corner_type'] = corner
 
     return details
 

@@ -32,6 +32,7 @@ class PropertyBase(BaseModel):
     category_name: Optional[str] = None
     property_type: Optional[str] = None
     listing_type: Optional[str] = None
+    corner_type: Optional[str] = None  # نبش
 
 
 class PropertyCreate(PropertyBase):
@@ -292,6 +293,7 @@ class LeadResponse(BaseModel):
     has_parking: Optional[bool] = None           # پارکینگ
     has_elevator: Optional[bool] = None          # آسانسور
     building_direction: Optional[str] = None     # جهت
+    corner_type: Optional[str] = None            # نبش
     # Full snapshot of the linked property (same data the املاک modal shows).
     # NOT named `property` — that collides with Lead.property (a SQLAlchemy
     # relationship), which from_attributes would try to coerce into a dict.

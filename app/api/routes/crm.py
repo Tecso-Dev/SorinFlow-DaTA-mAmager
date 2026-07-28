@@ -231,7 +231,7 @@ async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse
             Property.id, Property.scraped_at, Property.posted_at, Property.district,
             Property.price_per_meter, Property.total_price, Property.price, Property.area,
             Property.document_type, Property.has_parking, Property.has_elevator,
-            Property.building_direction,
+            Property.building_direction, Property.corner_type,
         ).where(Property.id.in_(prop_ids))
     )).all()
     by_id = {r.id: r for r in rows}
@@ -247,6 +247,7 @@ async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse
         item.has_parking = p.has_parking
         item.has_elevator = p.has_elevator
         item.building_direction = p.building_direction
+        item.corner_type = p.corner_type
         item.district = item.district or p.district
     return items
 
@@ -291,6 +292,7 @@ async def _lead_with_property(db: AsyncSession, lead: Lead) -> LeadResponse:
         resp.has_parking = prop.has_parking
         resp.has_elevator = prop.has_elevator
         resp.building_direction = prop.building_direction
+        resp.corner_type = prop.corner_type
     return resp
 
 
@@ -314,14 +316,15 @@ async def export_leads_excel(
     # mirror the on-screen columns, including the ones owned by the property
     enriched = await _attach_property_columns(db, items)
     headers = ["#", "عنوان ملک", "شهر", "دسته‌بندی", "قیمت", "قیمت هر متر", "متراژ",
-               "سند", "پارکینگ", "آسانسور", "جهت",
+               "سند", "پارکینگ", "آسانسور", "جهت", "نبش",
                "شماره تماس", "فروشنده", "وضعیت CRM", "مسئول پیگیری",
                "اطلاع‌رسانی", "یادداشت", "تاریخ برداشت آگهی", "تاریخ ثبت"]
     yn = lambda v: "" if v is None else ("دارد" if v else "ندارد")
     rows = [[
         l.id, l.property_title, l.city_name, l.category_name, l.price,
         l.price_per_meter, l.area,
-        l.document_type, yn(l.has_parking), yn(l.has_elevator), l.building_direction,
+        l.document_type, yn(l.has_parking), yn(l.has_elevator),
+        l.building_direction, l.corner_type,
         l.phone_number, l.seller_name, status_fa.get(l.status, l.status),
         l.assigned_to, "بله" if l.notified else "خیر", l.notes,
         fa_date(l.scraped_at), fa_date(l.created_at),

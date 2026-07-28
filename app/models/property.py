@@ -83,6 +83,7 @@ class Property(Base):
     
     # Additional Info
     building_direction = Column(String(50))  # North, South, etc.
+    corner_type = Column(String(20))  # نبش: تک‌نبش | دونبش | سه‌نبش | چهارنبش
     frontage = Column(Integer)  # Building frontage/width in meters (بر)
     unit_status = Column(String(50))  # Empty, Tenant, Owner
     document_type = Column(String(100))  # Type of ownership document
@@ -168,6 +169,7 @@ class Property(Base):
             "category_name": self.category_name,
             "property_type": self.property_type,
             "listing_type": self.listing_type,
+            "corner_type": self.corner_type,
             "phone_number": self.phone_number,
             "seller_name": self.seller_name,
             "url": self.url,

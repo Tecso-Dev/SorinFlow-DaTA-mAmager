@@ -1247,6 +1247,10 @@ async function viewProperty(id) {
                                 <div>${property.building_direction || '---'}</div>
                             </div>
                             <div class="col-md-6">
+                                <label class="text-muted small">نبش</label>
+                                <div>${esc(property.corner_type) || '---'}</div>
+                            </div>
+                            <div class="col-md-6">
                                 <label class="text-muted small">بر (متر)</label>
                                 <div>${property.frontage ? formatNumber(property.frontage) + ' متر' : '---'}</div>
                             </div>
@@ -3433,6 +3437,10 @@ function _leadSpecChips(lead) {
         chips.push(`<span class="lead-chip" title="جهت: ${esc(lead.building_direction)}">
             <i class="bi bi-compass"></i>${esc(short(lead.building_direction, 8))}</span>`);
     }
+    if (lead.corner_type) {
+        chips.push(`<span class="lead-chip corner" title="نبش: ${esc(lead.corner_type)}">
+            <i class="bi bi-bounding-box"></i>${esc(lead.corner_type)}</span>`);
+    }
     return chips.length
         ? `<div class="lead-chips">${chips.join('')}</div>`
         : '<span class="text-muted">---</span>';
@@ -3569,6 +3577,7 @@ function _renderPropertyDetails(p) {
         row('سال ساخت', p.year_built ? num(p.year_built) : ''),
         row('سن بنا', esc(p.building_age)),
         row('جهت ساختمان', esc(p.building_direction)),
+        row('نبش', esc(p.corner_type)),
         row('بر', p.frontage ? num(p.frontage) + ' متر' : ''),
         row('وضعیت واحد', esc(p.unit_status)),
         row('نوع سند', esc(p.document_type)),

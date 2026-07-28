@@ -178,13 +178,17 @@ async def export_properties_excel(
     items = (await db.execute(query.limit(10000))).scalars().all()
 
     headers = ["کد ملک", "عنوان", "شهر", "منطقه", "دسته‌بندی", "نوع آگهی", "متراژ",
-               "اتاق", "طبقه", "سال ساخت", "قیمت کل", "ودیعه", "اجاره ماهانه",
+               "اتاق", "طبقه", "سال ساخت", "قیمت کل", "قیمت هر متر", "ودیعه", "اجاره ماهانه",
+               "سند", "پارکینگ", "آسانسور", "جهت", "نبش",
                "شماره تماس", "فروشنده", "لینک آگهی", "تاریخ ثبت"]
+    yn = lambda v: "" if v is None else ("دارد" if v else "ندارد")
     rows = [[
         p.serial_no, p.title, p.city_name, p.district, p.category_name,
         "اجاره" if p.listing_type == "rent" else "خرید",
         p.area, p.rooms, p.floor, p.year_built,
-        p.total_price or p.price, p.deposit, p.rent_price,
+        p.total_price or p.price, p.price_per_meter, p.deposit, p.rent_price,
+        p.document_type, yn(p.has_parking), yn(p.has_elevator),
+        p.building_direction, p.corner_type,
         p.phone_number, p.seller_name, p.url, fa_date(p.scraped_at or p.created_at),
     ] for p in items]
     return xlsx_response("properties.xlsx", "لیست املاک", headers, rows)

@@ -82,6 +82,7 @@ async def init_db():
         await _migrate_dpa_activities(conn)
         await _migrate_lead_form_v2(conn)
         await _migrate_property_serial(conn)
+        await _migrate_property_corner(conn)
 
     await _seed_super_admin()
 
@@ -118,6 +119,40 @@ async def _migrate_property_serial(conn):
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_properties_serial_no ON properties (serial_no)"))
     except Exception as e:
         print(f"property serial migration skipped: {e}")
+
+
+async def _migrate_property_corner(conn):
+    """Add properties.corner_type and recover it from already-scraped ad text.
+
+    Divar has no «نبش» field, so it only ever appears in the title, the
+    description or a feature chip. Old rows are backfilled with the same
+    detector the scraper now runs, which is why this scans instead of just
+    adding the column. Rows whose «نبش» turns out to be part of an address
+    stay NULL and get re-checked on the next boot — a cheap re-read of a
+    small subset, and self-healing if the detector improves.
+    """
+    try:
+        from sqlalchemy import text
+        from app.scraper.parsers import detect_corner_type
+        await conn.execute(text(
+            "ALTER TABLE properties ADD COLUMN IF NOT EXISTS corner_type VARCHAR(20)"))
+        rows = (await conn.execute(text(
+            "SELECT id, title, description FROM properties "
+            "WHERE corner_type IS NULL "
+            "AND (title LIKE '%نبش%' OR description LIKE '%نبش%')"
+        ))).all()
+        found = 0
+        for r in rows:
+            corner = detect_corner_type(r.title, r.description)
+            if corner:
+                await conn.execute(
+                    text("UPDATE properties SET corner_type = :c WHERE id = :i"),
+                    {"c": corner, "i": r.id})
+                found += 1
+        if rows:
+            print(f"corner_type backfill: {found}/{len(rows)} rows mentioning نبش matched")
+    except Exception as e:
+        print(f"property corner migration skipped: {e}")
 
 
 async def _migrate_lead_form_v2(conn):

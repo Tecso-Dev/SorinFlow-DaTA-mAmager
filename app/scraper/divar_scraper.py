@@ -27,6 +27,7 @@ from app.scraper.contact_extractor import ContactExtractor
 from app.scraper.parsers import (
     extract_property_details as _parse_property_details,
     extract_price_info as _parse_price_info,
+    detect_corner_type as _detect_corner,
 )
 
 settings = get_settings()
@@ -1203,7 +1204,18 @@ class DivarScraper:
             # Extract amenities/features
             property_data["features"] = self._extract_features(soup)
             property_data["amenities"] = self._extract_amenities(soup)
-            
+
+            # نبش has no Divar field — recover it from the ad's own prose
+            if not property_data.get("corner_type"):
+                corner = _detect_corner(
+                    property_data.get("title"),
+                    property_data.get("description"),
+                    " ".join(property_data.get("features") or []),
+                )
+                if corner:
+                    property_data["corner_type"] = corner
+
+
             # Extract images (use Playwright JS to capture all gallery slides)
             property_data["images"] = await self._extract_images_from_page()
             if not property_data["images"]:
@@ -1398,6 +1410,8 @@ class DivarScraper:
                 details['has_balcony'] = not _is_negated(v)
             elif 'جهت' in t:
                 if v: details.setdefault('building_direction', v)
+            elif 'نبش' in t:
+                details.setdefault('corner_type', _detect_corner(t, v) or v or None)
             elif 'وضعیت' in t:
                 if v: details.setdefault('unit_status', v)
             elif 'سند' in t:
@@ -1537,7 +1551,7 @@ class DivarScraper:
         'سال ساخت', 'سن بنا',
         'طبقه', 'تعداد طبقات',
         'آسانسور', 'پارکینگ', 'انباری', 'بالکن', 'تراس',
-        'جهت', 'جهت ساختمان',
+        'جهت', 'جهت ساختمان', 'نبش',
         'وضعیت', 'وضعیت واحد',
         'نوع سند', 'سند',
         'کاربری', 'نوع کاربری',
