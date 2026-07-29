@@ -1213,28 +1213,93 @@ textarea.form-control { resize: vertical; }
 .datepicker-plot-area .prev-month td, .datepicker-plot-area .next-month td { color: var(--text-dim, #555) !important; }
 
 /* Dark-theme nav-tabs override for CRM */
-#crm-main-tabs {
-    border-bottom: 1px solid var(--border);
-}
+/* ── CRM tabs ──────────────────────────────────────────
+   Each section owns a hue so the eye can find it without reading. Keyed on
+   the tab's target rather than :nth-child so reordering the bar cannot
+   silently reshuffle the colours. --tab falls back to the site accent, so a
+   tab added without an entry here still looks deliberate. */
+#crm-main-tabs { border-bottom: 1px solid var(--border); }
 #crm-main-tabs .nav-link {
+    --tab: var(--accent);
     font-size: .82rem;
     padding: .4rem .7rem;
-    color: var(--text-muted);
+    /* --text-muted fell to ~2.8:1 on the light background; the active tab is
+       now marked by its hue, weight and top bar, so idle labels can be
+       legible without stealing the emphasis */
+    color: var(--text-dim);
     background: transparent;
     border: 1px solid transparent;
     border-radius: .35rem .35rem 0 0;
+    position: relative;
 }
+#crm-main-tabs [data-bs-target="#crm-tab-tasks"]     { --tab: #34d399; }
+#crm-main-tabs [data-bs-target="#crm-tab-calendar"]  { --tab: #a78bfa; }
+#crm-main-tabs [data-bs-target="#crm-tab-customers"] { --tab: #38bdf8; }
+#crm-main-tabs [data-bs-target="#crm-tab-contacts"]  { --tab: #2dd4bf; }
+#crm-main-tabs [data-bs-target="#crm-tab-deals"]     { --tab: #fbbf24; }
+#crm-main-tabs [data-bs-target="#crm-tab-notes"]     { --tab: #fb923c; }
+#crm-main-tabs [data-bs-target="#crm-tab-reminders"] { --tab: #e879f9; }
+#crm-main-tabs [data-bs-target="#crm-tab-sms"]       { --tab: #22d3ee; }
+#crm-main-tabs [data-bs-target="#crm-tab-leads"]     { --tab: #818cf8; }
+#crm-main-tabs [data-bs-target="#crm-tab-dpa"]       { --tab: #fb7185; }
+#crm-main-tabs [data-bs-target="#crm-tab-report"]    { --tab: #a3e635; }
+
+/* idle: only the icon carries the hue, and quietly */
+#crm-main-tabs .nav-link i { color: var(--tab); opacity: .55; transition: opacity .18s; }
 #crm-main-tabs .nav-link:hover {
     color: var(--text);
     border-color: var(--border);
+    background: color-mix(in srgb, var(--tab) 7%, transparent);
 }
+#crm-main-tabs .nav-link:hover i { opacity: .9; }
 #crm-main-tabs .nav-link.active {
-    color: var(--accent, #6366f1);
-    background: var(--surface);
-    border-color: var(--border) var(--border) var(--surface);
+    color: var(--tab);
+    background: color-mix(in srgb, var(--tab) 10%, var(--surface));
+    border-color: var(--border) var(--border) transparent;
     font-weight: 600;
 }
+#crm-main-tabs .nav-link.active i { opacity: 1; }
+/* the active tab's hue continues into the panel below it */
+#crm-main-tabs .nav-link.active::after {
+    content: ''; position: absolute; inset: 0 0 auto 0; height: 2px;
+    background: var(--tab); border-radius: 2px 2px 0 0;
+}
+/* light theme: the same hues, darkened enough to read on white */
+[data-theme="light"] #crm-main-tabs .nav-link.active { color: color-mix(in srgb, var(--tab) 58%, #000); }
+[data-theme="light"] #crm-main-tabs .nav-link i { color: color-mix(in srgb, var(--tab) 72%, #000); }
+
 .tab-content > .tab-pane { padding-top: .5rem; }
+
+/* ── CRM tables ────────────────────────────────────────
+   Scoped to the CRM: faint banding to follow a row across many columns, and
+   a hover that marks the row's leading edge (right, in RTL). */
+#section-crm .table > thead > tr > th {
+    background: linear-gradient(180deg,
+        rgba(129,140,248,.10), color-mix(in srgb, var(--accent) 4%, var(--surface2)));
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+    color: var(--text-dim);
+}
+#section-crm .table > tbody > tr:nth-child(even) > td { background: rgba(255,255,255,.025); }
+#section-crm .table tbody tr:hover td {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+#section-crm .table tbody tr:hover td:first-child {
+    box-shadow: inset -2px 0 0 var(--accent);
+}
+[data-theme="light"] #section-crm .table > tbody > tr:nth-child(even) > td {
+    background: rgba(15,23,42,.022);
+}
+
+/* CRM card headers: a warm accent edge on the leading side (right, in RTL)
+   so each panel reads as part of the section instead of a grey bar. */
+#section-crm .card > .card-header {
+    background: linear-gradient(275deg,
+        color-mix(in srgb, var(--accent) 9%, transparent) 0%,
+        color-mix(in srgb, var(--accent2) 4%, transparent) 38%,
+        var(--surface2) 78%);
+    border-right: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+#section-crm .card > .card-header i { color: var(--accent2); }
 
 /* btn-close dark theme fix */
 .btn-close {
