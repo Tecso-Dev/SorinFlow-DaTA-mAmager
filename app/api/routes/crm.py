@@ -25,7 +25,7 @@ from app.services.sms_service import send_sms
 from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
 from app.services.dpa_service import record_activity, record_lead_status
 from app.services.excel_export import xlsx_response, fa_date
-from app.services.match_service import similar_to_property, matches_for_customer
+from app.services.match_service import similar_to_property, matches_for_customer, customer_intent
 from app.models.user import User
 
 router = APIRouter()
@@ -714,16 +714,23 @@ async def match_properties_for_customer(
     customer_id: int,
     limit: int = Query(12, ge=1, le=50),
     use_llm: bool = True,
+    city: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Listings that fit this customer's budget / district / specs (BANT)."""
+    """Listings that fit this customer's budget / district / specs (BANT).
+
+    `city` narrows the search — the intake form has no city field, and street
+    names repeat across cities, so without it a matching district elsewhere
+    can surface.
+    """
     customer = (await db.execute(select(Customer).where(Customer.id == customer_id))).scalar_one_or_none()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
-    items = await matches_for_customer(db, customer, limit=limit, use_llm=use_llm)
+    items = await matches_for_customer(db, customer, limit=limit, use_llm=use_llm, city=city)
     return {"items": items, "total": len(items),
-            "source": {"id": customer.id, "name": customer.full_name}}
+            "source": {"id": customer.id, "name": customer.full_name},
+            "intent": customer_intent(customer)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
