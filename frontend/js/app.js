@@ -3774,6 +3774,19 @@ function _matchCard(m) {
     </div>`;
 }
 
+const MATCH_TYPE_FA = { apartment: 'آپارتمان', house: 'ویلایی / خانه', land: 'زمین',
+                        shop: 'مغازه', office: 'دفتر کار' };
+
+/** The criteria the server actually filtered on — shown so a short or empty
+ *  list is explainable rather than mysterious. */
+function _matchCriteria(intent) {
+    if (!intent) return '';
+    const bits = [intent.listing_type === 'rent' ? 'رهن و اجاره' : 'خرید'];
+    if (intent.family) bits.push(MATCH_TYPE_FA[intent.family] || intent.family);
+    if (intent.city) bits.push(esc(intent.city));
+    return bits.join(' • ');
+}
+
 async function _openMatchModal(title, url, emptyMsg) {
     const modalEl = document.getElementById('matchModal');
     document.getElementById('match-modal-title').innerHTML = title;
@@ -3783,14 +3796,23 @@ async function _openMatchModal(title, url, emptyMsg) {
     try {
         const data = await apiCall(url);
         const items = data.items || [];
+        const criteria = _matchCriteria(data.intent);
         if (!items.length) {
-            document.getElementById('match-modal-body').innerHTML =
-                `<div class="text-center py-5 text-muted"><i class="bi bi-search" style="font-size:2rem"></i><p class="mt-3">${emptyMsg}</p></div>`;
+            // an empty list is almost always a criterion that is too narrow,
+            // so show what was searched for instead of a bare "not found"
+            document.getElementById('match-modal-body').innerHTML = `
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-search" style="font-size:2rem"></i>
+                    <p class="mt-3">${emptyMsg}</p>
+                    ${criteria ? `<p class="small">جستجو بر اساس: ${criteria}<br>
+                        اگر انتظار نتیجه داشتید، این معیارها را در پروندهٔ مشتری بازبینی کنید.</p>` : ''}
+                </div>`;
             return;
         }
         const src = data.source?.title || data.source?.name || '';
         document.getElementById('match-modal-body').innerHTML = `
-            ${src ? `<div class="match-source">مبنای تطابق: <b>${esc(src)}</b> — ${formatNumber(items.length)} مورد یافت شد</div>` : ''}
+            ${src ? `<div class="match-source">مبنای تطابق: <b>${esc(src)}</b> — ${formatNumber(items.length)} مورد یافت شد
+                ${criteria ? `<div class="small mt-1">${criteria}</div>` : ''}</div>` : ''}
             <div class="match-list">${items.map(_matchCard).join('')}</div>`;
     } catch (e) {
         document.getElementById('match-modal-body').innerHTML =
@@ -4320,12 +4342,29 @@ function addFollowupRow(data = {}) {
 
 const _CUST_PAY_MAP = { cash: 'cust-pay-cash', loan: 'cust-pay-loan', has_property: 'cust-pay-property', barter: 'cust-pay-barter' };
 
+/** Suggest the cities we actually hold listings for — a typo here silently
+ *  empties the customer's suggestion list, since it filters on exact match. */
+async function _fillCustomerCityOptions() {
+    const list = document.getElementById('cust-city-options');
+    if (!list || list.dataset.filled) return;
+    try {
+        const resp = await apiCall('/scraper/cities');
+        const cities = Array.isArray(resp) ? resp : (resp?.items || []);
+        list.innerHTML = cities
+            .map(c => `<option value="${esc(c.name || c)}"></option>`).join('');
+        list.dataset.filled = '1';
+    } catch (e) { /* free text still works without the suggestions */ }
+}
+
 function _resetCustomerForm() {
     ['cust-full-name', 'cust-mobile1', 'cust-mobile2', 'cust-consultant',
-     'cust-budget', 'cust-specs', 'cust-district', 'cust-redlines', 'cust-notes']
+     'cust-budget', 'cust-specs', 'cust-district', 'cust-city',
+     'cust-desired-type', 'cust-redlines', 'cust-notes']
         .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     document.getElementById('cust-source').value = 'in_person';
     document.getElementById('cust-temperature').value = 'warm';
+    document.getElementById('cust-deal-type').value = 'buy';
+    _fillCustomerCityOptions();
     Object.values(_CUST_PAY_MAP).forEach(id => { document.getElementById(id).checked = false; });
     document.getElementById('cust-showings-body').innerHTML = '';
     document.getElementById('cust-followups-body').innerHTML = '';
@@ -4349,6 +4388,9 @@ async function openCustomerModal(id = null) {
             document.getElementById('cust-budget').value = c.budget_max || '';
             document.getElementById('cust-specs').value = c.desired_specs || '';
             document.getElementById('cust-district').value = c.desired_district || '';
+            document.getElementById('cust-city').value = c.desired_city || '';
+            document.getElementById('cust-desired-type').value = c.desired_type || '';
+            document.getElementById('cust-deal-type').value = c.deal_type || 'buy';
             document.getElementById('cust-redlines').value = c.red_lines || '';
             document.getElementById('cust-notes').value = c.notes || '';
             const methods = (c.payment_methods || '').split(',').map(s => s.trim());
@@ -4395,6 +4437,9 @@ function _collectCustomerPayload() {
         payment_methods: payment_methods || null,
         desired_specs: document.getElementById('cust-specs').value.trim() || null,
         desired_district: document.getElementById('cust-district').value.trim() || null,
+        desired_city: document.getElementById('cust-city').value.trim() || null,
+        desired_type: document.getElementById('cust-desired-type').value || null,
+        deal_type: document.getElementById('cust-deal-type').value || 'buy',
         red_lines: document.getElementById('cust-redlines').value.trim() || null,
         notes: document.getElementById('cust-notes').value.trim() || null,
         showings,

@@ -232,6 +232,12 @@ class Customer(Base):
     payment_methods = Column(String(200))              # cash,loan,has_property,barter (comma-separated)
     desired_specs = Column(String(300))                # متراژ / تعداد خواب
     desired_district = Column(String(300))             # منطقه درخواستی
+    # Explicit search criteria. Without these the matcher had to guess the
+    # customer's intent from the free text above, which cannot distinguish a
+    # street called کاشانی in Urmia from the one in Tehran.
+    desired_city = Column(String(100))                 # شهر
+    desired_type = Column(String(20))                  # apartment|house|land|shop|office
+    deal_type = Column(String(10), default="buy")      # buy|rent
     red_lines = Column(Text)                           # خط قرمزها (نمی‌خواهد)
 
     # ── خط تولید بازدید (Showing Pipeline) ──
@@ -259,6 +265,9 @@ class Customer(Base):
             "payment_methods": self.payment_methods,
             "desired_specs": self.desired_specs,
             "desired_district": self.desired_district,
+            "desired_city": self.desired_city,
+            "desired_type": self.desired_type,
+            "deal_type": self.deal_type or "buy",
             "red_lines": self.red_lines,
             "showings": self.showings or [],
             "followups": self.followups or [],

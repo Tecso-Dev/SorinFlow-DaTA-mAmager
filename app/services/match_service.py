@@ -157,19 +157,28 @@ def score_similarity(target: Property, cand: Property) -> Dict[str, Any]:
 def customer_intent(customer) -> Dict[str, Any]:
     """What the customer is actually shopping for.
 
-    The intake form has no «نوع ملک» or «خرید/اجاره» field, so this is read out
-    of the free-text BANT answers. red_lines is deliberately excluded — it
-    lists what the customer does NOT want, and reading a type out of it would
-    invert the filter.
+    The intake form asks for city, type and buy-or-rent outright. Those answers
+    win. Customers recorded before those fields existed — or left blank — fall
+    back to reading the free-text BANT answers, so nothing stops matching.
+    red_lines is deliberately excluded from that fallback: it lists what the
+    customer does NOT want, and reading a type out of it would invert the gate.
     """
     import re as _re
     blob = " ".join(filter(None, [customer.desired_specs, getattr(customer, "notes", None)]))
-    rent = any(w in blob for w in ("رهن", "اجاره", "ودیعه"))
+
+    family = getattr(customer, "desired_type", None) or _family(blob)
+    deal = getattr(customer, "deal_type", None)
+    if deal not in ("buy", "rent"):
+        deal = "rent" if any(w in blob for w in ("رهن", "اجاره", "ودیعه")) else "buy"
+
     return {
-        "family": _family(blob),
-        "listing_type": "rent" if rent else "buy",
+        "family": family or None,
+        "listing_type": deal,
+        "city": (getattr(customer, "desired_city", None) or "").strip() or None,
         # «۲ خواب» only makes sense for somewhere to live
-        "wants_rooms": bool(_re.search(r"خواب", blob)),
+        "wants_rooms": bool(_re.search(r"خواب", blob)) or family in ("apartment", "house"),
+        "explicit": bool(getattr(customer, "desired_type", None)
+                         or getattr(customer, "desired_city", None)),
     }
 
 
@@ -183,9 +192,16 @@ def customer_wants(customer, cand: Property, intent: Optional[Dict[str, Any]] = 
     intent = intent or customer_intent(customer)
     if cand.listing_type and cand.listing_type != intent["listing_type"]:
         return False
-    fam = property_family(cand)
-    if intent["family"] and fam and fam != intent["family"]:
+    if intent.get("city") and cand.city_name and cand.city_name != intent["city"]:
         return False
+    fam = property_family(cand)
+    if intent["family"]:
+        # An explicitly chosen type is binding even when the ad is unreadable:
+        # the agent said what they want, so do not fall back to guessing.
+        if intent.get("explicit") and fam is None:
+            return False
+        if fam and fam != intent["family"]:
+            return False
     if intent["wants_rooms"] and fam in _ROOMLESS_FAMILIES:
         return False
     return True
@@ -390,6 +406,8 @@ async def matches_for_customer(db: AsyncSession, customer, limit: int = 12,
         # buying and renting are different searches; a deposit is not a price
         or_(Property.listing_type == intent["listing_type"], Property.listing_type.is_(None)),
     )
+    # the customer's own city wins; the parameter is a per-search override
+    city = city or intent.get("city")
     if city:
         q = q.where(Property.city_name == city)
     # newest first, so the pool is the freshest rows rather than an arbitrary cut

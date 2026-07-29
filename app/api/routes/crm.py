@@ -545,8 +545,12 @@ async def export_customers_excel(
 
     temp_fa = {"hot": "داغ", "warm": "گرم", "cold": "سرد"}
     source_fa = {"in_person": "حضوری", "divar": "دیوار", "referral": "معرف"}
+    type_fa = {"apartment": "آپارتمان", "house": "ویلایی / خانه", "land": "زمین",
+               "shop": "مغازه", "office": "دفتر کار"}
+    deal_fa = {"buy": "خرید", "rent": "رهن و اجاره"}
     headers = ["#", "نام و نام خانوادگی", "موبایل ۱", "موبایل ۲", "حرارت", "منبع",
-               "مشاور", "سقف بودجه", "نحوه پرداخت", "متراژ/خواب", "منطقه درخواستی",
+               "مشاور", "نوع معامله", "نوع ملک", "شهر", "سقف بودجه", "نحوه پرداخت",
+               "متراژ/خواب", "منطقه درخواستی",
                "خط قرمزها", "تعداد بازدید", "پیگیری بعدی", "یادداشت", "تاریخ ثبت"]
     rows = []
     for c in items:
@@ -555,7 +559,9 @@ async def export_customers_excel(
         rows.append([
             c.id, c.full_name, c.mobile1, c.mobile2,
             temp_fa.get(c.temperature, c.temperature), source_fa.get(c.source, c.source),
-            c.consultant_name, c.budget_max, c.payment_methods, c.desired_specs,
+            c.consultant_name,
+            deal_fa.get(c.deal_type or "buy", ""), type_fa.get(c.desired_type, ""), c.desired_city,
+            c.budget_max, c.payment_methods, c.desired_specs,
             c.desired_district, c.red_lines, len(c.showings or []), next_fu,
             c.notes, fa_date(c.created_at),
         ])
@@ -892,9 +898,12 @@ async def delete_contact(contact_id: int, db: AsyncSession = Depends(get_db)):
 
 VALID_CUSTOMER_SOURCES = {"in_person", "divar", "referral"}
 VALID_CUSTOMER_TEMPS = {"hot", "warm", "cold"}
+VALID_CUSTOMER_TYPES = {"apartment", "house", "land", "shop", "office"}
+VALID_DEAL_TYPES = {"buy", "rent"}
 CUSTOMER_TEXT_FIELDS = (
     "full_name", "mobile1", "mobile2", "consultant_name",
-    "payment_methods", "desired_specs", "desired_district", "red_lines", "notes",
+    "payment_methods", "desired_specs", "desired_district", "desired_city",
+    "red_lines", "notes",
 )
 
 
@@ -918,6 +927,11 @@ def _apply_customer_payload(customer: Customer, data: dict) -> None:
         customer.source = data["source"]
     if "temperature" in data and data["temperature"] in VALID_CUSTOMER_TEMPS:
         customer.temperature = data["temperature"]
+    if "desired_type" in data:
+        # "" clears it and puts the matcher back on text inference
+        customer.desired_type = data["desired_type"] if data["desired_type"] in VALID_CUSTOMER_TYPES else None
+    if "deal_type" in data and data["deal_type"] in VALID_DEAL_TYPES:
+        customer.deal_type = data["deal_type"]
     if "budget_max" in data:
         try:
             customer.budget_max = int(data["budget_max"]) if data["budget_max"] else None

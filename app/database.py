@@ -84,6 +84,7 @@ async def init_db():
         await _migrate_property_serial(conn)
         await _migrate_property_corner(conn)
         await _migrate_calendar_sms(conn)
+        await _migrate_customer_criteria(conn)
 
     await _seed_super_admin()
 
@@ -120,6 +121,24 @@ async def _migrate_property_serial(conn):
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_properties_serial_no ON properties (serial_no)"))
     except Exception as e:
         print(f"property serial migration skipped: {e}")
+
+
+async def _migrate_customer_criteria(conn):
+    """Explicit search criteria on the customer intake form.
+
+    Existing rows are left with NULLs on purpose: the matcher falls back to
+    reading intent from the free-text fields, so nothing stops working until
+    someone opens the customer and fills them in.
+    """
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE crm_customers "
+            "ADD COLUMN IF NOT EXISTS desired_city VARCHAR(100), "
+            "ADD COLUMN IF NOT EXISTS desired_type VARCHAR(20), "
+            "ADD COLUMN IF NOT EXISTS deal_type VARCHAR(10) DEFAULT 'buy'"))
+    except Exception as e:
+        print(f"customer criteria migration skipped: {e}")
 
 
 async def _migrate_calendar_sms(conn):
