@@ -123,13 +123,25 @@ async def _migrate_property_serial(conn):
 
 
 async def _migrate_calendar_sms(conn):
-    """Add the SMS-reminder columns to an already-created calendar table."""
+    """SMS-reminder columns, plus the split of the single attendee into the
+    three sides of an appointment (مالک / مشتری / کارشناس فروش)."""
     try:
         from sqlalchemy import text
         await conn.execute(text(
             "ALTER TABLE crm_calendar_events "
             "ADD COLUMN IF NOT EXISTS sms_reminder BOOLEAN DEFAULT FALSE, "
-            "ADD COLUMN IF NOT EXISTS sms_sent BOOLEAN DEFAULT FALSE"))
+            "ADD COLUMN IF NOT EXISTS sms_sent BOOLEAN DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS owner_name VARCHAR(200), "
+            "ADD COLUMN IF NOT EXISTS owner_phone VARCHAR(20), "
+            "ADD COLUMN IF NOT EXISTS customer_name VARCHAR(200), "
+            "ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(20), "
+            "ADD COLUMN IF NOT EXISTS agent_phone VARCHAR(20)"))
+        # rows written before the split kept both sides in attendee_*
+        await conn.execute(text(
+            "UPDATE crm_calendar_events "
+            "SET owner_name = COALESCE(owner_name, attendee_name), "
+            "    owner_phone = COALESCE(owner_phone, attendee_phone) "
+            "WHERE owner_phone IS NULL AND attendee_phone IS NOT NULL"))
     except Exception as e:
         print(f"calendar sms migration skipped: {e}")
 

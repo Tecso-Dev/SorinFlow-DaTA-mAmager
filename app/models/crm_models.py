@@ -444,9 +444,18 @@ class CalendarEvent(Base):
     contact_id = Column(Integer, ForeignKey("crm_contacts.id", ondelete="SET NULL"), nullable=True)
     deal_id = Column(Integer, ForeignKey("crm_deals.id", ondelete="SET NULL"), nullable=True)
 
-    attendee_name = Column(String(200))    # who we're meeting
+    # An appointment has up to three sides, and the reminder goes to each
+    # number that is filled in.
+    owner_name = Column(String(200))       # مالک
+    owner_phone = Column(String(20))
+    customer_name = Column(String(200))    # مشتری
+    customer_phone = Column(String(20))
+    assigned_to = Column(String(200))      # کارشناس فروش
+    agent_phone = Column(String(20))
+
+    # superseded by owner_* — kept so rows written before the split survive
+    attendee_name = Column(String(200))
     attendee_phone = Column(String(20))
-    assigned_to = Column(String(200))      # which agent is going
     status = Column(String(20), default="scheduled", index=True)  # scheduled|done|canceled
     outcome = Column(Text)                 # what came of it, filled after the fact
 
@@ -468,8 +477,28 @@ class CalendarEvent(Base):
     def color(self) -> str:
         return self.EVENT_TYPES.get(self.event_type, self.EVENT_TYPES["other"])[1]
 
-    def sms_text(self) -> str:
-        """The reminder an attendee receives before this appointment."""
+    def sms_targets(self):
+        """(role, name, phone) for every side of this appointment that has a
+        number. Duplicates are dropped so one person is never texted twice."""
+        candidates = [
+            ("مالک", self.owner_name or self.attendee_name, self.owner_phone or self.attendee_phone),
+            ("مشتری", self.customer_name, self.customer_phone),
+            ("کارشناس فروش", self.assigned_to, self.agent_phone),
+        ]
+        seen, out = set(), []
+        for role, name, phone in candidates:
+            digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+            if digits and digits not in seen:
+                seen.add(digits)
+                out.append((role, name, phone.strip()))
+        return out
+
+    def sms_text(self, role=None) -> str:
+        """The reminder a participant receives before this appointment.
+
+        The agent is told who they are meeting; the owner and the customer
+        are told which agent is coming.
+        """
         # imported here because dpa_service imports this module
         from app.services.dpa_service import to_jalali
         when = to_jalali(self.start_at)
@@ -478,7 +507,12 @@ class CalendarEvent(Base):
         lines = [f"{self.type_label}: {self.title}", f"زمان: {when}"]
         if self.location:
             lines.append(f"محل: {self.location}")
-        if self.assigned_to:
+        if role == "کارشناس فروش":
+            others = "، ".join(n for n in (self.owner_name or self.attendee_name,
+                                           self.customer_name) if n)
+            if others:
+                lines.append(f"طرف قرار: {others}")
+        elif self.assigned_to:
             lines.append(f"همراه: {self.assigned_to}")
         lines.append("املاک سورین")
         return "\n".join(lines)
@@ -501,9 +535,16 @@ class CalendarEvent(Base):
             "customer_id": self.customer_id,
             "contact_id": self.contact_id,
             "deal_id": self.deal_id,
-            "attendee_name": self.attendee_name,
-            "attendee_phone": self.attendee_phone,
+            "owner_name": self.owner_name,
+            "owner_phone": self.owner_phone,
+            "customer_name": self.customer_name,
+            "customer_phone": self.customer_phone,
             "assigned_to": self.assigned_to,
+            "agent_phone": self.agent_phone,
+            "sms_recipients": [
+                {"role": role, "name": name, "phone": phone}
+                for role, name, phone in self.sms_targets()
+            ],
             "status": self.status,
             "outcome": self.outcome,
             "remind_before": self.remind_before,

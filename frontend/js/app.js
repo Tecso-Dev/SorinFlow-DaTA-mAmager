@@ -5660,11 +5660,14 @@ function _calSetForm(ev) {
     v('ev-type', ev.event_type || 'visit');
     v('ev-date', jFormat(start));
     v('ev-start-time', ev.all_day ? '' : `${_pad2(start.getHours())}:${_pad2(start.getMinutes())}`);
-    v('ev-end-time', ev.end_at ? `${_pad2(new Date(ev.end_at).getHours())}:${_pad2(new Date(ev.end_at).getMinutes())}` : '');
     v('ev-location', ev.location || '');
-    v('ev-attendee', ev.attendee_name || '');
-    v('ev-phone', ev.attendee_phone || '');
+    // attendee_* is what rows created before the three-way split carry
+    v('ev-owner-name', ev.owner_name || ev.attendee_name || '');
+    v('ev-owner-phone', ev.owner_phone || ev.attendee_phone || '');
+    v('ev-customer-name', ev.customer_name || '');
+    v('ev-customer-phone', ev.customer_phone || '');
     v('ev-assigned', ev.assigned_to || '');
+    v('ev-agent-phone', ev.agent_phone || '');
     v('ev-property', ev.property_id || '');
     v('ev-description', ev.description || '');
     v('ev-outcome', ev.outcome || '');
@@ -5682,19 +5685,37 @@ function _calSetForm(ev) {
     updateSmsHint();
 }
 
+/** Whoever will be texted: مالک / مشتری / کارشناس فروش, minus blanks and
+ *  duplicates — the same rule the server applies. */
+function _smsRecipients() {
+    const val = id => document.getElementById(id)?.value.trim() || '';
+    const rows = [
+        { role: 'مالک', phone: val('ev-owner-phone') },
+        { role: 'مشتری', phone: val('ev-customer-phone') },
+        { role: 'کارشناس فروش', phone: val('ev-agent-phone') },
+    ];
+    const seen = new Set();
+    return rows.filter(r => {
+        const digits = r.phone.replace(/\D/g, '');
+        if (!digits || seen.has(digits)) return false;
+        seen.add(digits);
+        return true;
+    });
+}
+
 /** Explain what the SMS switch will actually do, given the rest of the form. */
 function updateSmsHint() {
     const hint = document.getElementById('ev-sms-hint');
     const sms = document.getElementById('ev-sms');
     if (!hint || !sms) return;
-    const phone = document.getElementById('ev-phone')?.value.trim();
     const remind = document.getElementById('ev-remind')?.value;
     const REMIND_FA = { '0': '', '15': '۱۵ دقیقه', '30': '۳۰ دقیقه', '60': '۱ ساعت',
                         '180': '۳ ساعت', '1440': '۱ روز' };
+    const to = _smsRecipients();
 
     if (!sms.checked) { hint.textContent = ''; hint.className = 'form-text'; return; }
-    if (!phone) {
-        hint.textContent = 'شماره تماس را وارد کنید، وگرنه پیامکی ارسال نمی‌شود.';
+    if (!to.length) {
+        hint.textContent = 'هیچ شماره‌ای وارد نشده — پیامکی ارسال نمی‌شود.';
         hint.className = 'form-text text-warning';
         return;
     }
@@ -5706,22 +5727,33 @@ function updateSmsHint() {
     hint.className = 'form-text text-info';
     hint.textContent = sms.dataset.sent
         ? 'پیامک این قرار قبلاً ارسال شده است.'
-        : `${REMIND_FA[remind] || remind + ' دقیقه'} قبل از قرار به ${phone} پیامک می‌رود.`;
+        : `${REMIND_FA[remind] || remind + ' دقیقه'} قبل از قرار به ${to.length} نفر پیامک می‌رود: `
+          + to.map(r => `${r.role} (${r.phone})`).join('، ');
 }
 
-/** Send the appointment details to the attendee right now (confirmations). */
+/** Send the appointment details to everyone involved right now (confirmations). */
 async function sendEventSmsNow() {
     if (!_editingEventId) return;
-    const phone = document.getElementById('ev-phone')?.value.trim();
-    if (!phone) { showToast('خطا', 'شمارهٔ طرف قرار وارد نشده است', 'warning'); return; }
-    if (!confirm(`پیامک مشخصات این قرار به ${phone} ارسال شود؟`)) return;
+    const to = _smsRecipients();
+    if (!to.length) { showToast('خطا', 'هیچ شماره‌ای برای این قرار وارد نشده است', 'warning'); return; }
+    const who = to.map(r => `${r.role} (${r.phone})`).join('\n');
+    if (!confirm(`پیامک مشخصات این قرار برای ${to.length} نفر ارسال شود؟\n\n${who}`)) return;
+
     const btn = document.getElementById('ev-sms-now-btn');
     if (btn) btn.disabled = true;
     try {
-        await apiCall(`/crm/calendar/${_editingEventId}/sms`, {
-            method: 'POST', body: JSON.stringify({ to: phone })
+        // save first, otherwise the server texts the numbers it already has
+        await apiCall(`/crm/calendar/${_editingEventId}`, {
+            method: 'PATCH', body: JSON.stringify(_calReadForm() || {})
         });
-        showToast('موفق', 'پیامک ارسال شد', 'success');
+        const r = await apiCall(`/crm/calendar/${_editingEventId}/sms`, {
+            method: 'POST', body: JSON.stringify({})
+        });
+        const ok = (r.sent || []).length, bad = (r.failed || []).length;
+        showToast(bad ? 'ناقص' : 'موفق',
+            bad ? `${formatNumber(ok)} پیامک ارسال شد، ${formatNumber(bad)} ناموفق`
+                : `پیامک برای ${formatNumber(ok)} نفر ارسال شد`,
+            bad ? 'warning' : 'success');
     } catch (e) {
         showToast('خطا', e.message, 'danger');
     } finally {
@@ -5775,30 +5807,26 @@ function _calReadForm() {
 
     const allDay = document.getElementById('ev-all-day').checked;
     const start = new Date(day);
-    const end = new Date(day);
     if (allDay) {
         start.setHours(0, 0, 0, 0);
     } else {
         const [sh, sm] = (val('ev-start-time') || '10:00').split(':').map(Number);
         start.setHours(sh || 0, sm || 0, 0, 0);
-        const endTime = val('ev-end-time');
-        if (endTime) {
-            const [eh, em] = endTime.split(':').map(Number);
-            end.setHours(eh || 0, em || 0, 0, 0);
-            if (end <= start) { showToast('خطا', 'ساعت پایان باید بعد از شروع باشد', 'warning'); return null; }
-        }
     }
     const num = id => { const v = val(id); return v ? parseInt(v, 10) : null; };
     return {
         title,
         event_type: val('ev-type') || 'visit',
         start_at: _isoLocal(start),
-        end_at: (!allDay && val('ev-end-time')) ? _isoLocal(end) : null,
+        end_at: null,               // how long a visit runs is never known up front
         all_day: allDay,
         location: val('ev-location') || null,
-        attendee_name: val('ev-attendee') || null,
-        attendee_phone: val('ev-phone') || null,
+        owner_name: val('ev-owner-name') || null,
+        owner_phone: val('ev-owner-phone') || null,
+        customer_name: val('ev-customer-name') || null,
+        customer_phone: val('ev-customer-phone') || null,
         assigned_to: val('ev-assigned') || null,
+        agent_phone: val('ev-agent-phone') || null,
         property_id: num('ev-property'),
         lead_id: num('ev-lead-id'),
         customer_id: num('ev-customer-id'),
@@ -5853,8 +5881,10 @@ async function scheduleVisitForLead(leadId) {
         location: p.address || [p.city_name, p.district, p.neighborhood].filter(Boolean).join('، ') || '',
         property_id: lead?.property_id || null,
         lead_id: leadId,
-        attendee_name: lead?.seller_name || '',
-        attendee_phone: lead?.phone_number || '',
+        // the lead's contact is the property owner; the customer side is
+        // filled in by hand once we know who is being shown the place
+        owner_name: lead?.seller_name || '',
+        owner_phone: lead?.phone_number || '',
     });
 }
 

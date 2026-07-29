@@ -1764,22 +1764,28 @@ async def export_calendar_excel(
     items = (await db.execute(q.limit(5000))).scalars().all()
 
     status_fa = {"scheduled": "برنامه‌ریزی‌شده", "done": "انجام شد", "canceled": "لغو شد"}
-    headers = ["#", "عنوان", "نوع", "تاریخ شروع", "ساعت", "تاریخ پایان",
-               "محل بازدید", "طرف قرار", "شماره تماس", "مسئول",
-               "وضعیت", "نتیجه", "توضیحات"]
+    headers = ["#", "عنوان", "نوع", "تاریخ", "ساعت", "محل بازدید",
+               "مالک", "شماره مالک", "مشتری", "شماره مشتری",
+               "کارشناس فروش", "شماره کارشناس",
+               "یادآوری پیامکی", "وضعیت", "نتیجه", "توضیحات"]
     rows = [[
         e.id, e.title, e.type_label, fa_date(e.start_at),
-        "" if e.all_day else e.start_at.strftime("%H:%M"),
-        fa_date(e.end_at), e.location, e.attendee_name, e.attendee_phone,
-        e.assigned_to, status_fa.get(e.status, e.status), e.outcome, e.description,
+        "" if e.all_day else e.start_at.strftime("%H:%M"), e.location,
+        e.owner_name or e.attendee_name, e.owner_phone or e.attendee_phone,
+        e.customer_name, e.customer_phone,
+        e.assigned_to, e.agent_phone,
+        ("ارسال شد" if e.sms_sent else "فعال") if e.sms_reminder else "",
+        status_fa.get(e.status, e.status), e.outcome, e.description,
     ] for e in items]
     return xlsx_response("calendar.xlsx", "تقویم", headers, rows)
 
 
 def _apply_event_fields(event: CalendarEvent, data: dict) -> None:
     """Copy the writable fields off a request body onto an event."""
-    for field in ("title", "description", "location", "attendee_name",
-                  "attendee_phone", "assigned_to", "outcome"):
+    for field in ("title", "description", "location", "outcome",
+                  "owner_name", "owner_phone", "customer_name", "customer_phone",
+                  "assigned_to", "agent_phone",
+                  "attendee_name", "attendee_phone"):   # legacy, still accepted
         if field in data:
             setattr(event, field, data[field])
     if data.get("event_type") in CalendarEvent.EVENT_TYPES:
@@ -1920,22 +1926,28 @@ async def send_event_sms(
     if not event:
         raise HTTPException(status_code=404, detail="قرار یافت نشد")
 
-    to_number = ((data or {}).get("to") or event.attendee_phone or "").strip()
-    if not to_number:
-        raise HTTPException(status_code=400, detail="شمارهٔ طرف قرار ثبت نشده است")
+    override = ((data or {}).get("to") or "").strip()
+    targets = [("طرف قرار", None, override)] if override else event.sms_targets()
+    if not targets:
+        raise HTTPException(status_code=400, detail="هیچ شماره‌ای برای این قرار ثبت نشده است")
 
-    message = ((data or {}).get("message") or "").strip() or event.sms_text()
-
-    res = await send_sms(to_number, message)
-    db.add(SmsLog(
-        to_number=to_number, message=message,
-        status="sent" if res.get("success") else "failed",
-        provider=res.get("provider", "kavenegar"),
-        response=str(res.get("response", ""))[:2000],
-        contact_id=event.contact_id,
-    ))
+    custom = ((data or {}).get("message") or "").strip()
+    sent, failed = [], []
+    for role, _name, phone in targets:
+        message = custom or event.sms_text(role)
+        res = await send_sms(phone, message)
+        db.add(SmsLog(
+            to_number=phone, message=message,
+            status="sent" if res.get("success") else "failed",
+            provider=res.get("provider", "kavenegar"),
+            response=str(res.get("response", ""))[:2000],
+            contact_id=event.contact_id,
+        ))
+        (sent if res.get("success") else failed).append(
+            {"role": role, "phone": phone, "error": str(res.get("response", ""))[:200]})
     await db.commit()
 
-    if not res.get("success"):
-        raise HTTPException(status_code=502, detail=f"ارسال پیامک ناموفق بود: {res.get('response')}")
-    return {"success": True, "to": to_number, "message": message}
+    if not sent:
+        detail = failed[0].get("error") if failed else ""
+        raise HTTPException(status_code=502, detail=f"ارسال پیامک ناموفق بود: {detail}")
+    return {"success": True, "sent": sent, "failed": failed}

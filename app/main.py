@@ -210,21 +210,24 @@ async def _fire_due_event_sms():
             if event.start_at < now:
                 logger.info(f"Skipped SMS for past event {event.id}")
                 continue
-            if not event.attendee_phone:
+
+            targets = event.sms_targets()     # مالک / مشتری / کارشناس فروش
+            if not targets:
                 logger.warning(f"Event {event.id} wants an SMS but has no phone")
                 continue
 
-            message = event.sms_text()
-            res = await send_sms(event.attendee_phone, message)
-            session.add(SmsLog(
-                to_number=event.attendee_phone, message=message,
-                status="sent" if res.get("success") else "failed",
-                provider=res.get("provider", "kavenegar"),
-                response=str(res.get("response", ""))[:2000],
-                contact_id=event.contact_id,
-            ))
-            fired += 1
-            logger.info(f"Event SMS to {event.attendee_phone}: {res.get('success')}")
+            for role, _name, phone in targets:
+                message = event.sms_text(role)
+                res = await send_sms(phone, message)
+                session.add(SmsLog(
+                    to_number=phone, message=message,
+                    status="sent" if res.get("success") else "failed",
+                    provider=res.get("provider", "kavenegar"),
+                    response=str(res.get("response", ""))[:2000],
+                    contact_id=event.contact_id,
+                ))
+                fired += 1
+                logger.info(f"Event {event.id} SMS → {role} {phone}: {res.get('success')}")
 
         if rows:
             await session.commit()
