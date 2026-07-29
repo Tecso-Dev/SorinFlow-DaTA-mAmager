@@ -47,6 +47,9 @@ class PropertyUpdate(BaseModel):
     description: Optional[str] = None
     price: Optional[int] = None
     is_active: Optional[bool] = None
+    # Divar frequently omits these, so they are editable by hand per property
+    building_direction: Optional[str] = None   # جهت
+    corner_type: Optional[str] = None          # نبش
 
 
 class PropertyResponse(PropertyBase):

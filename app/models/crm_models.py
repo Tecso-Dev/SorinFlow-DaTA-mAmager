@@ -452,6 +452,9 @@ class CalendarEvent(Base):
 
     # in-app reminder: minutes before start (0/None = no reminder)
     remind_before = Column(Integer, default=60)
+    # SMS reminder to attendee_phone, fired remind_before minutes ahead
+    sms_reminder = Column(Boolean, default=False)
+    sms_sent = Column(Boolean, default=False, index=True)
 
     created_by = Column(String(200))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -464,6 +467,21 @@ class CalendarEvent(Base):
     @property
     def color(self) -> str:
         return self.EVENT_TYPES.get(self.event_type, self.EVENT_TYPES["other"])[1]
+
+    def sms_text(self) -> str:
+        """The reminder an attendee receives before this appointment."""
+        # imported here because dpa_service imports this module
+        from app.services.dpa_service import to_jalali
+        when = to_jalali(self.start_at)
+        if not self.all_day:
+            when += f" ساعت {self.start_at.strftime('%H:%M')}"
+        lines = [f"{self.type_label}: {self.title}", f"زمان: {when}"]
+        if self.location:
+            lines.append(f"محل: {self.location}")
+        if self.assigned_to:
+            lines.append(f"همراه: {self.assigned_to}")
+        lines.append("املاک سورین")
+        return "\n".join(lines)
 
     def to_dict(self):
         return {
@@ -489,6 +507,8 @@ class CalendarEvent(Base):
             "status": self.status,
             "outcome": self.outcome,
             "remind_before": self.remind_before,
+            "sms_reminder": bool(self.sms_reminder),
+            "sms_sent": bool(self.sms_sent),
             "created_by": self.created_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

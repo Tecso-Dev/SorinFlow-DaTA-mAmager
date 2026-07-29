@@ -168,10 +168,68 @@ async def _reminder_checker():
         try:
             await asyncio.sleep(60)
             await _fire_due_reminders()
+            await _fire_due_event_sms()
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"Reminder checker error: {e}")
+
+
+async def _fire_due_event_sms():
+    """Text attendees whose appointment is coming up.
+
+    Only appointments still ahead of us are texted: after downtime, a
+    reminder for a visit that already happened is noise, so those are
+    marked as handled without sending.
+    """
+    from app.database import async_session_maker
+    from app.models.crm_models import CalendarEvent, SmsLog
+    from app.services.sms_service import send_sms
+    from sqlalchemy import select
+    from datetime import timedelta
+
+    async with async_session_maker() as session:
+        now = datetime.now()
+        # widest lead time any row can ask for, so the DB does the filtering
+        horizon = now + timedelta(days=7)
+        rows = (await session.execute(
+            select(CalendarEvent).where(
+                CalendarEvent.sms_reminder == True,      # noqa: E712
+                CalendarEvent.sms_sent == False,         # noqa: E712
+                CalendarEvent.status == "scheduled",
+                CalendarEvent.start_at <= horizon,
+            )
+        )).scalars().all()
+
+        fired = 0
+        for event in rows:
+            due_at = event.start_at - timedelta(minutes=event.remind_before or 0)
+            if due_at > now:
+                continue                      # not yet time
+            event.sms_sent = True             # one attempt per appointment
+            if event.start_at < now:
+                logger.info(f"Skipped SMS for past event {event.id}")
+                continue
+            if not event.attendee_phone:
+                logger.warning(f"Event {event.id} wants an SMS but has no phone")
+                continue
+
+            message = event.sms_text()
+            res = await send_sms(event.attendee_phone, message)
+            session.add(SmsLog(
+                to_number=event.attendee_phone, message=message,
+                status="sent" if res.get("success") else "failed",
+                provider=res.get("provider", "kavenegar"),
+                response=str(res.get("response", ""))[:2000],
+                contact_id=event.contact_id,
+            ))
+            fired += 1
+            logger.info(f"Event SMS to {event.attendee_phone}: {res.get('success')}")
+
+        if rows:
+            await session.commit()
+        if fired:
+            logger.info(f"Sent {fired} appointment reminder(s)")
 
 
 async def _fire_due_reminders():

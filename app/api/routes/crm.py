@@ -40,7 +40,8 @@ VALID_LEAD_STATUSES = {"new", "contacted", "visit", "contract_meeting", "qualifi
 # ints/bools/text mapped to real Property columns; the rest live in extra_attrs
 _ATTR_INT_COLS  = {"area", "floor", "rooms", "year_built", "land_area", "built_area", "total_floors", "frontage"}
 _ATTR_BOOL_COLS = {"has_elevator", "has_parking", "has_storage", "has_balcony"}
-_ATTR_TEXT_COLS = {"document_type"}
+# text column → its own max length, so a long paste cannot overflow the column
+_ATTR_TEXT_COLS = {"document_type": 100, "building_direction": 50, "corner_type": 20}
 _ATTR_EXTRA_KEYS = {"units_per_floor", "cabinets", "closet", "flooring", "delivery_date",
                     "hvac", "yard", "position", "height", "mezzanine", "kitchen"}
 VALID_PROPERTY_KINDS = {"apartment", "villa", "shop", "office"}
@@ -60,7 +61,7 @@ def _split_lead_attrs(attrs: Optional[dict]):
         elif key in _ATTR_BOOL_COLS:
             cols[key] = str(val).lower() in ("true", "1", "yes", "بله")
         elif key in _ATTR_TEXT_COLS:
-            cols[key] = str(val).strip()[:100]
+            cols[key] = str(val).strip()[:_ATTR_TEXT_COLS[key]]
         elif key in _ATTR_EXTRA_KEYS:
             extra[key] = str(val).strip()[:200]
     return cols, extra
@@ -1792,14 +1793,20 @@ def _apply_event_fields(event: CalendarEvent, data: dict) -> None:
             event.remind_before = int(data["remind_before"] or 0)
         except (TypeError, ValueError):
             pass
+    if "sms_reminder" in data:
+        event.sms_reminder = bool(data["sms_reminder"])
     for field in ("property_id", "lead_id", "customer_id", "contact_id", "deal_id"):
         if field in data:
             setattr(event, field, data[field] or None)
     if data.get("start_at"):
         try:
-            event.start_at = _parse_datetime(data["start_at"])
+            new_start = _parse_datetime(data["start_at"])
         except Exception:
             raise HTTPException(status_code=400, detail="تاریخ شروع نامعتبر است")
+        if event.start_at and new_start != event.start_at:
+            # rescheduled — the attendee is owed a reminder for the new time
+            event.sms_sent = False
+        event.start_at = new_start
     if "end_at" in data:                      # explicit null clears the end time
         if data["end_at"]:
             try:
@@ -1894,3 +1901,41 @@ async def delete_event(event_id: int, db: AsyncSession = Depends(get_db)):
     await db.delete(event)
     await db.commit()
     return {"success": True}
+
+
+@router.post("/calendar/{event_id}/sms")
+async def send_event_sms(
+    event_id: int,
+    data: Optional[dict] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Text the attendee about this appointment now — confirmations, changes.
+
+    Separate from the scheduled reminder: sending by hand does not consume
+    the automatic one, so a confirmation today still gets a reminder tomorrow.
+    """
+    event = (await db.execute(
+        select(CalendarEvent).where(CalendarEvent.id == event_id))).scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="قرار یافت نشد")
+
+    to_number = ((data or {}).get("to") or event.attendee_phone or "").strip()
+    if not to_number:
+        raise HTTPException(status_code=400, detail="شمارهٔ طرف قرار ثبت نشده است")
+
+    message = ((data or {}).get("message") or "").strip() or event.sms_text()
+
+    res = await send_sms(to_number, message)
+    db.add(SmsLog(
+        to_number=to_number, message=message,
+        status="sent" if res.get("success") else "failed",
+        provider=res.get("provider", "kavenegar"),
+        response=str(res.get("response", ""))[:2000],
+        contact_id=event.contact_id,
+    ))
+    await db.commit()
+
+    if not res.get("success"):
+        raise HTTPException(status_code=502, detail=f"ارسال پیامک ناموفق بود: {res.get('response')}")
+    return {"success": True, "to": to_number, "message": message}

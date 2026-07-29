@@ -1245,11 +1245,11 @@ async function viewProperty(id) {
                             </div>
                             <div class="col-md-6">
                                 <label class="text-muted small">جهت ساختمان</label>
-                                <div>${property.building_direction || '---'}</div>
+                                ${_propertyFieldSelect(property.id, 'building_direction', property.building_direction, DIRECTION_OPTIONS, 'جهت ساختمان')}
                             </div>
                             <div class="col-md-6">
                                 <label class="text-muted small">نبش</label>
-                                <div>${esc(property.corner_type) || '---'}</div>
+                                ${_propertyFieldSelect(property.id, 'corner_type', property.corner_type, CORNER_OPTIONS, 'نبش')}
                             </div>
                             <div class="col-md-6">
                                 <label class="text-muted small">بر (متر)</label>
@@ -2871,6 +2871,15 @@ const CRM_STATUS_LABELS = {
     rejected: { label: 'رد شده', cls: 'bg-danger text-white' },
 };
 
+// جهت and نبش are missing from most Divar ads, so both are entered by hand:
+// on the add-lead form below, and in place on any property that is displayed.
+// Fixed option lists keep the wording consistent enough for the matching
+// engine to compare two properties on them.
+const DIRECTION_OPTIONS = ['شمالی', 'جنوبی', 'شرقی', 'غربی',
+                           'شمالی جنوبی', 'شرقی غربی',
+                           'شمالی شرقی', 'شمالی غربی', 'جنوبی شرقی', 'جنوبی غربی'];
+const CORNER_OPTIONS = ['تک‌نبش', 'دونبش', 'سه‌نبش', 'چهارنبش'];
+
 // ═══ structured fields per property kind (add-lead form) ═══════
 const LEAD_KIND_LABELS = { apartment: 'آپارتمان', villa: 'ویلایی', shop: 'مغازه', office: 'دفتر کار' };
 const LEAD_KIND_FIELDS = {
@@ -2890,6 +2899,8 @@ const LEAD_KIND_FIELDS = {
         { key: 'delivery_date', label: 'تاریخ تحویل', type: 'text' },
         { key: 'hvac', label: 'گرمایش و سرمایش', type: 'text' },
         { key: 'document_type', label: 'سند', type: 'text' },
+        { key: 'building_direction', label: 'جهت', type: 'pick', options: DIRECTION_OPTIONS },
+        { key: 'corner_type', label: 'نبش', type: 'pick', options: CORNER_OPTIONS },
     ],
     villa: [
         { key: 'land_area', label: 'متراژ زمین', type: 'num' },
@@ -2908,6 +2919,8 @@ const LEAD_KIND_FIELDS = {
         { key: 'position', label: 'موقعیت', type: 'text' },
         { key: 'delivery_date', label: 'تاریخ تحویل', type: 'text' },
         { key: 'hvac', label: 'گرمایش و سرمایش', type: 'text' },
+        { key: 'building_direction', label: 'جهت', type: 'pick', options: DIRECTION_OPTIONS },
+        { key: 'corner_type', label: 'نبش', type: 'pick', options: CORNER_OPTIONS },
     ],
     shop: [
         { key: 'area', label: 'متراژ', type: 'num' },
@@ -2915,6 +2928,8 @@ const LEAD_KIND_FIELDS = {
         { key: 'height', label: 'ارتفاع (متر)', type: 'text' },
         { key: 'mezzanine', label: 'نیم‌طبقه', type: 'text' },
         { key: 'document_type', label: 'سند', type: 'text' },
+        { key: 'building_direction', label: 'جهت', type: 'pick', options: DIRECTION_OPTIONS },
+        { key: 'corner_type', label: 'نبش', type: 'pick', options: CORNER_OPTIONS },
     ],
     office: [
         { key: 'floor', label: 'طبقه چندم', type: 'num' },
@@ -2923,6 +2938,8 @@ const LEAD_KIND_FIELDS = {
         { key: 'kitchen', label: 'آشپزخانه', type: 'text' },
         { key: 'units_per_floor', label: 'واحد در طبقات', type: 'num' },
         { key: 'document_type', label: 'سند', type: 'text' },
+        { key: 'building_direction', label: 'جهت', type: 'pick', options: DIRECTION_OPTIONS },
+        { key: 'corner_type', label: 'نبش', type: 'pick', options: CORNER_OPTIONS },
     ],
 };
 // Persian labels for showing extra_attrs in the property modal
@@ -2938,6 +2955,13 @@ function renderLeadAttrs() {
             return `<div class="col-md-4"><label class="form-label">${f.label}</label>
                 <select class="form-select lead-attr" data-key="${f.key}">
                     <option value="">---</option><option value="true">دارد</option><option value="false">ندارد</option>
+                </select></div>`;
+        }
+        if (f.type === 'pick') {
+            return `<div class="col-md-4"><label class="form-label">${f.label}</label>
+                <select class="form-select lead-attr" data-key="${f.key}">
+                    <option value="">---</option>
+                    ${(f.options || []).map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}
                 </select></div>`;
         }
         const t = f.type === 'num' ? 'number' : 'text';
@@ -3556,6 +3580,38 @@ async function loadLeads() {
     }
 }
 
+/**
+ * A select that writes straight back to the property.
+ * Free-typed values already on the record (e.g. scraped wording that is not
+ * in the list) are kept as an extra option so editing never silently drops them.
+ */
+function _propertyFieldSelect(propId, field, value, options, label) {
+    if (!propId) return `<div>${esc(value) || '---'}</div>`;
+    const all = value && !options.includes(value) ? [value, ...options] : options;
+    const opts = ['<option value="">— نامشخص —</option>']
+        .concat(all.map(o => `<option value="${esc(o)}"${o === value ? ' selected' : ''}>${esc(o)}</option>`))
+        .join('');
+    return `<select class="form-select form-select-sm prop-inline-edit" title="${label} — با انتخاب، ذخیره می‌شود"
+                    onchange="savePropertyField(${propId}, '${field}', this.value, this)">${opts}</select>`;
+}
+
+async function savePropertyField(propId, field, value, el) {
+    const previous = el?.dataset.previous ?? '';
+    if (el) el.disabled = true;
+    try {
+        await apiCall(`/properties/${propId}`, {
+            method: 'PATCH', body: JSON.stringify({ [field]: value || null })
+        });
+        if (el) el.dataset.previous = value;
+        showToast('ذخیره شد', value ? `ثبت شد: ${value}` : 'مقدار پاک شد', 'success');
+    } catch (e) {
+        if (el) el.value = previous;      // put the old choice back on failure
+        showToast('خطا', e.message, 'danger');
+    } finally {
+        if (el) el.disabled = false;
+    }
+}
+
 // Full property details block — identical data to the لیست املاک modal,
 // reused inside the CRM lead modal.
 function _renderPropertyDetails(p) {
@@ -3577,8 +3633,11 @@ function _renderPropertyDetails(p) {
         row('کل طبقات', p.total_floors ? num(p.total_floors) : ''),
         row('سال ساخت', p.year_built ? num(p.year_built) : ''),
         row('سن بنا', esc(p.building_age)),
-        row('جهت ساختمان', esc(p.building_direction)),
-        row('نبش', esc(p.corner_type)),
+        // always rendered, even when empty — these two are meant to be filled in
+        `<div class="col-md-4"><label class="text-muted small">جهت ساختمان</label>
+            ${_propertyFieldSelect(p.id, 'building_direction', p.building_direction, DIRECTION_OPTIONS, 'جهت ساختمان')}</div>`,
+        `<div class="col-md-4"><label class="text-muted small">نبش</label>
+            ${_propertyFieldSelect(p.id, 'corner_type', p.corner_type, CORNER_OPTIONS, 'نبش')}</div>`,
         row('بر', p.frontage ? num(p.frontage) + ' متر' : ''),
         row('وضعیت واحد', esc(p.unit_status)),
         row('نوع سند', esc(p.document_type)),
@@ -5411,10 +5470,14 @@ function _calChip(row, withTime = true) {
     const d = new Date(row.start_at);
     const done = row.status === 'done', canceled = row.status === 'canceled';
     const time = (row.all_day || !withTime) ? '' : `<b>${_faTime(d)}</b> `;
+    const sms = row.sms_reminder
+        ? `<i class="bi bi-chat-dots-fill cal-sms${row.sms_sent ? ' sent' : ''}"
+              title="${row.sms_sent ? 'پیامک ارسال شد' : 'یادآوری پیامکی فعال است'}"></i> `
+        : '';
     return `<button type="button" class="cal-chip${done ? ' done' : ''}${canceled ? ' canceled' : ''}"
             style="--c:${meta.color}" title="${esc(row.title)} — ${meta.label}"
             onclick="event.stopPropagation(); openCalRow('${row.kind}', ${row.id})">
-        ${time}${esc(row.title)}</button>`;
+        ${sms}${time}${esc(row.title)}</button>`;
 }
 
 function _renderCalMonth(gridStart) {
@@ -5611,6 +5674,59 @@ function _calSetForm(ev) {
     if (allDay) { allDay.checked = !!ev.all_day; toggleEventAllDay(); }
     document.getElementById('ev-lead-id').value = ev.lead_id || '';
     document.getElementById('ev-customer-id').value = ev.customer_id || '';
+
+    const sms = document.getElementById('ev-sms');
+    if (sms) { sms.checked = !!ev.sms_reminder; sms.dataset.sent = ev.sms_sent ? '1' : ''; }
+    // «ارسال الان» needs a saved event to send about
+    document.getElementById('ev-sms-now-btn')?.classList.toggle('d-none', !ev.id);
+    updateSmsHint();
+}
+
+/** Explain what the SMS switch will actually do, given the rest of the form. */
+function updateSmsHint() {
+    const hint = document.getElementById('ev-sms-hint');
+    const sms = document.getElementById('ev-sms');
+    if (!hint || !sms) return;
+    const phone = document.getElementById('ev-phone')?.value.trim();
+    const remind = document.getElementById('ev-remind')?.value;
+    const REMIND_FA = { '0': '', '15': '۱۵ دقیقه', '30': '۳۰ دقیقه', '60': '۱ ساعت',
+                        '180': '۳ ساعت', '1440': '۱ روز' };
+
+    if (!sms.checked) { hint.textContent = ''; hint.className = 'form-text'; return; }
+    if (!phone) {
+        hint.textContent = 'شماره تماس را وارد کنید، وگرنه پیامکی ارسال نمی‌شود.';
+        hint.className = 'form-text text-warning';
+        return;
+    }
+    if (remind === '0') {
+        hint.textContent = 'یادآوری روی «بدون یادآوری» است — زمان ارسال را انتخاب کنید.';
+        hint.className = 'form-text text-warning';
+        return;
+    }
+    hint.className = 'form-text text-info';
+    hint.textContent = sms.dataset.sent
+        ? 'پیامک این قرار قبلاً ارسال شده است.'
+        : `${REMIND_FA[remind] || remind + ' دقیقه'} قبل از قرار به ${phone} پیامک می‌رود.`;
+}
+
+/** Send the appointment details to the attendee right now (confirmations). */
+async function sendEventSmsNow() {
+    if (!_editingEventId) return;
+    const phone = document.getElementById('ev-phone')?.value.trim();
+    if (!phone) { showToast('خطا', 'شمارهٔ طرف قرار وارد نشده است', 'warning'); return; }
+    if (!confirm(`پیامک مشخصات این قرار به ${phone} ارسال شود؟`)) return;
+    const btn = document.getElementById('ev-sms-now-btn');
+    if (btn) btn.disabled = true;
+    try {
+        await apiCall(`/crm/calendar/${_editingEventId}/sms`, {
+            method: 'POST', body: JSON.stringify({ to: phone })
+        });
+        showToast('موفق', 'پیامک ارسال شد', 'success');
+    } catch (e) {
+        showToast('خطا', e.message, 'danger');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 function toggleEventAllDay() {
@@ -5690,6 +5806,7 @@ function _calReadForm() {
         outcome: val('ev-outcome') || null,
         status: val('ev-status') || 'scheduled',
         remind_before: num('ev-remind') ?? 60,
+        sms_reminder: !!document.getElementById('ev-sms')?.checked,
     };
 }
 

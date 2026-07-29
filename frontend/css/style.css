@@ -2082,6 +2082,17 @@ select.status-quick {
 .cal-chip:hover { background: color-mix(in srgb, var(--c) 34%, transparent); }
 .cal-chip.done { opacity: .55; text-decoration: line-through; }
 .cal-chip.canceled { opacity: .4; text-decoration: line-through; }
+/* fields edited straight from a detail modal (جهت / نبش) */
+.prop-inline-edit {
+  font-size: .78rem; padding: .18rem 1.5rem .18rem .5rem; margin-top: .1rem;
+  background-color: rgba(255,255,255,.04) !important;
+  border-color: rgba(255,255,255,.12);
+}
+.prop-inline-edit:disabled { opacity: .5; }
+
+/* SMS marker: hollow while the reminder is pending, solid once it has gone */
+.cal-sms { font-size: .58rem; color: #67e8f9; opacity: .75; }
+.cal-sms.sent { color: #34d399; opacity: 1; }
 .cal-more {
   border: 0; background: none; color: var(--text-muted);
   font-size: .64rem; text-align: right; padding: 0 .34rem; cursor: pointer;

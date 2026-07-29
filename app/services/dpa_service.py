@@ -22,9 +22,8 @@ LEAD_STATUS_ACTIVITY = {
 }
 
 
-def today_jalali() -> str:
-    """Today as a Jalali YYYY/MM/DD string (pure arithmetic, no deps)."""
-    g = datetime.now()
+def to_jalali(g: datetime) -> str:
+    """A datetime as a Jalali YYYY/MM/DD string (pure arithmetic, no deps)."""
     gy, gm, gd = g.year, g.month, g.day
     g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
     gy2 = gy - 1600
@@ -43,11 +42,19 @@ def today_jalali() -> str:
         jy += (j_day_no - 1) // 365
         j_day_no = (j_day_no - 1) % 365
     j_all = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29]
+    # Stop at Esfand (index 11) instead of running past it: in a Jalali leap
+    # year Esfand has 30 days, and letting the loop consume the table's 29
+    # rolled the date over into a nonexistent month 13.
     jm = 0
-    while jm < 12 and j_day_no >= j_all[jm]:
+    while jm < 11 and j_day_no >= j_all[jm]:
         j_day_no -= j_all[jm]
         jm += 1
     return f"{jy}/{jm + 1:02d}/{j_day_no + 1:02d}"
+
+
+def today_jalali() -> str:
+    """Today as a Jalali YYYY/MM/DD string."""
+    return to_jalali(datetime.now())
 
 
 async def record_activity(

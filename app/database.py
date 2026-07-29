@@ -83,6 +83,7 @@ async def init_db():
         await _migrate_lead_form_v2(conn)
         await _migrate_property_serial(conn)
         await _migrate_property_corner(conn)
+        await _migrate_calendar_sms(conn)
 
     await _seed_super_admin()
 
@@ -119,6 +120,18 @@ async def _migrate_property_serial(conn):
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_properties_serial_no ON properties (serial_no)"))
     except Exception as e:
         print(f"property serial migration skipped: {e}")
+
+
+async def _migrate_calendar_sms(conn):
+    """Add the SMS-reminder columns to an already-created calendar table."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE crm_calendar_events "
+            "ADD COLUMN IF NOT EXISTS sms_reminder BOOLEAN DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS sms_sent BOOLEAN DEFAULT FALSE"))
+    except Exception as e:
+        print(f"calendar sms migration skipped: {e}")
 
 
 async def _migrate_property_corner(conn):
