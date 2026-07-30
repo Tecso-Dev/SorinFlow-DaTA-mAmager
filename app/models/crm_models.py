@@ -540,6 +540,9 @@ class CalendarEvent(Base):
             "all_day": bool(self.all_day),
             "location": self.location,
             "property_id": self.property_id,
+            # the code the agent sees everywhere else; filled by
+            # _attach_event_serials(), since it lives on the properties table
+            "property_serial": getattr(self, "_property_serial", None),
             "lead_id": self.lead_id,
             "customer_id": self.customer_id,
             "contact_id": self.contact_id,

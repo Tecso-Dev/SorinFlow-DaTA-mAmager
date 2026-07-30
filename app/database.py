@@ -108,10 +108,15 @@ async def _migrate_property_serial(conn):
     try:
         from sqlalchemy import text
         await conn.execute(text("ALTER TABLE properties ADD COLUMN IF NOT EXISTS serial_no INTEGER"))
-        # backfill any rows still missing a serial, ordered oldest-first
+        # Backfill any row still missing a serial, oldest first, continuing
+        # from the highest serial already handed out. Restarting at 1000 would
+        # collide with existing codes, and the unique index would abort the
+        # whole migration — leaving those rows without a code indefinitely.
         await conn.execute(text("""
             WITH ranked AS (
-                SELECT id, 999 + ROW_NUMBER() OVER (ORDER BY id) AS s
+                SELECT id,
+                       (SELECT COALESCE(MAX(serial_no), 999) FROM properties)
+                       + ROW_NUMBER() OVER (ORDER BY id) AS s
                 FROM properties WHERE serial_no IS NULL
             )
             UPDATE properties p SET serial_no = ranked.s

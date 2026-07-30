@@ -93,17 +93,22 @@ async def list_leads(
     if category:
         query = query.where(Lead.category_name.ilike(f"%{category}%"))
     if search:
-        term = f"%{search.strip()}%"
+        raw = search.strip()
+        term = f"%{raw}%"
         # Street/neighborhood names usually live in the linked property's
         # address or description, not in the lead's own columns
+        prop_filters = [
+            Property.address.ilike(term),
+            Property.district.ilike(term),
+            Property.neighborhood.ilike(term),
+            Property.description.ilike(term),
+        ]
+        # the leads table shows کد ملک, so a bare number should find that lead
+        if raw.isdigit():
+            prop_filters.append(Property.serial_no == int(raw))
         prop_match = select(Property.id).where(
             Property.id == Lead.property_id,
-            or_(
-                Property.address.ilike(term),
-                Property.district.ilike(term),
-                Property.neighborhood.ilike(term),
-                Property.description.ilike(term),
-            ),
+            or_(*prop_filters),
         ).correlate(Lead).exists()
         query = query.where(or_(
             Lead.property_title.ilike(term),
@@ -232,7 +237,8 @@ async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse
 
     rows = (await db.execute(
         select(
-            Property.id, Property.scraped_at, Property.posted_at, Property.district,
+            Property.id, Property.serial_no,
+            Property.scraped_at, Property.posted_at, Property.district,
             Property.price_per_meter, Property.total_price, Property.price, Property.area,
             Property.document_type, Property.has_parking, Property.has_elevator,
             Property.building_direction, Property.corner_type,
@@ -244,6 +250,8 @@ async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse
         p = by_id.get(item.property_id)
         if not p:
             continue
+        # one property has one code everywhere it appears
+        item.serial_no = p.serial_no
         # «برداشت» = when we pulled the ad; fall back to the posting date
         item.scraped_at = p.scraped_at or p.posted_at
         item.price_per_meter = _derive_price_per_meter(p)
@@ -289,6 +297,7 @@ async def _lead_with_property(db: AsyncSession, lead: Lead) -> LeadResponse:
         })
         resp.property_detail = data
         resp.district = prop.district
+        resp.serial_no = prop.serial_no
         # same columns the list rows show, so the modal and the table agree
         resp.scraped_at = prop.scraped_at or prop.posted_at
         resp.price_per_meter = _derive_price_per_meter(prop)
@@ -319,13 +328,13 @@ async def export_leads_excel(
     }
     # mirror the on-screen columns, including the ones owned by the property
     enriched = await _attach_property_columns(db, items)
-    headers = ["#", "عنوان ملک", "شهر", "دسته‌بندی", "قیمت", "قیمت هر متر", "متراژ",
+    headers = ["کد ملک", "عنوان ملک", "شهر", "دسته‌بندی", "قیمت", "قیمت هر متر", "متراژ",
                "سند", "پارکینگ", "آسانسور", "جهت", "نبش",
                "شماره تماس", "فروشنده", "وضعیت CRM", "مسئول پیگیری",
                "اطلاع‌رسانی", "یادداشت", "تاریخ برداشت آگهی", "تاریخ ثبت"]
     yn = lambda v: "" if v is None else ("دارد" if v else "ندارد")
     rows = [[
-        l.id, l.property_title, l.city_name, l.category_name, l.price,
+        l.serial_no, l.property_title, l.city_name, l.category_name, l.price,
         l.price_per_meter, l.area,
         l.document_type, yn(l.has_parking), yn(l.has_elevator),
         l.building_direction, l.corner_type,
@@ -1679,6 +1688,45 @@ async def crm_stats(
 #   • Reminder.remind_at — overlaid read-only, edited in the یادآورها tab
 # Overlay rows carry kind="task"/"reminder" so the UI knows not to offer edit.
 
+async def _attach_event_serials(db: AsyncSession, events) -> None:
+    """Stamp each event with its property's کد ملک.
+
+    Appointments store property_id, but every screen an agent reads shows the
+    serial, so the two must not be confused with each other.
+    """
+    ids = {e.property_id for e in events if e.property_id}
+    if not ids:
+        return
+    rows = (await db.execute(
+        select(Property.id, Property.serial_no).where(Property.id.in_(ids)))).all()
+    by_id = {r.id: r.serial_no for r in rows}
+    for e in events:
+        e._property_serial = by_id.get(e.property_id)
+
+
+async def _resolve_property_serial(db: AsyncSession, data: dict) -> None:
+    """Turn a کد ملک typed into the form into the property_id we store.
+
+    Without this the serial would be written straight into property_id and
+    silently attach the appointment to a different property.
+    """
+    if "property_serial" not in data:
+        return
+    raw = data.get("property_serial")
+    if raw in (None, "", 0):
+        data["property_id"] = None
+        return
+    try:
+        serial = int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="کد ملک نامعتبر است")
+    prop_id = (await db.execute(
+        select(Property.id).where(Property.serial_no == serial))).scalar_one_or_none()
+    if prop_id is None:
+        raise HTTPException(status_code=400, detail=f"ملکی با کد {serial} یافت نشد")
+    data["property_id"] = prop_id
+
+
 def _task_as_event(t: Task) -> dict:
     prio_color = {"urgent": "#f87171", "high": "#fb923c",
                   "medium": "#60a5fa", "low": "#94a3b8"}
@@ -1715,7 +1763,9 @@ async def _calendar_rows(db: AsyncSession, start: datetime, end: datetime,
         q = q.where(CalendarEvent.event_type == event_type)
     if assigned_to:
         q = q.where(CalendarEvent.assigned_to == assigned_to)
-    rows = [e.to_dict() for e in (await db.execute(q)).scalars().all()]
+    events = (await db.execute(q)).scalars().all()
+    await _attach_event_serials(db, events)
+    rows = [e.to_dict() for e in events]
 
     # A type filter is about appointment types, so it hides the overlays too
     if include_overlay and not event_type:
@@ -1785,12 +1835,13 @@ async def export_calendar_excel(
     items = (await db.execute(q.limit(5000))).scalars().all()
 
     status_fa = {"scheduled": "برنامه‌ریزی‌شده", "done": "انجام شد", "canceled": "لغو شد"}
-    headers = ["#", "عنوان", "نوع", "تاریخ", "ساعت", "محل بازدید",
+    await _attach_event_serials(db, items)
+    headers = ["#", "عنوان", "نوع", "کد ملک", "تاریخ", "ساعت", "محل بازدید",
                "مالک", "شماره مالک", "مشتری", "شماره مشتری",
                "کارشناس فروش", "شماره کارشناس",
                "یادآوری پیامکی", "وضعیت", "نتیجه", "توضیحات"]
     rows = [[
-        e.id, e.title, e.type_label, fa_date(e.start_at),
+        e.id, e.title, e.type_label, getattr(e, "_property_serial", None), fa_date(e.start_at),
         "" if e.all_day else e.start_at.strftime("%H:%M"), e.location,
         e.owner_name or e.attendee_name, e.owner_phone or e.attendee_phone,
         e.customer_name, e.customer_phone,
@@ -1855,6 +1906,7 @@ async def create_event(
     if not data.get("start_at"):
         raise HTTPException(status_code=400, detail="تاریخ شروع الزامی است")
 
+    await _resolve_property_serial(db, data)
     event = CalendarEvent(title=data["title"].strip(), start_at=datetime.now())
     _apply_event_fields(event, data)
     if event.end_at and event.end_at < event.start_at:
@@ -1880,6 +1932,7 @@ async def create_event(
     if event.customer_id:
         await _log_activity(db, "customer", event.customer_id, "event",
                             f"{event.type_label} ثبت شد: {event.title}", event.created_by)
+    await _attach_event_serials(db, [event])
     return event.to_dict()
 
 
@@ -1889,6 +1942,7 @@ async def get_event(event_id: int, db: AsyncSession = Depends(get_db)):
         select(CalendarEvent).where(CalendarEvent.id == event_id))).scalar_one_or_none()
     if not event:
         raise HTTPException(status_code=404, detail="قرار یافت نشد")
+    await _attach_event_serials(db, [event])
     return event.to_dict()
 
 
@@ -1905,6 +1959,7 @@ async def update_event(
         raise HTTPException(status_code=404, detail="قرار یافت نشد")
 
     old_status = event.status
+    await _resolve_property_serial(db, data)
     _apply_event_fields(event, data)
     if event.end_at and event.end_at < event.start_at:
         raise HTTPException(status_code=400, detail="پایان قرار قبل از شروع آن است")
@@ -1916,6 +1971,7 @@ async def update_event(
         actor = getattr(current_user, "full_name", None) or getattr(current_user, "username", None)
         await _log_activity(db, "lead", event.lead_id, "event",
                             f"{event.type_label} «{event.title}» → {status_fa.get(event.status)}", actor)
+    await _attach_event_serials(db, [event])
     return event.to_dict()
 
 

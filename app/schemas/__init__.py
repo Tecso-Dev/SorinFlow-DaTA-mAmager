@@ -290,6 +290,7 @@ class LeadResponse(BaseModel):
     district: Optional[str] = None
     # Columns the leads table shows but that live on the linked property.
     # Filled by _attach_property_columns(); None when the property is gone.
+    serial_no: Optional[int] = None              # کد ملک — same number as لیست املاک
     scraped_at: Optional[datetime] = None        # تاریخ برداشت آگهی
     price_per_meter: Optional[int] = None        # قیمت هر متر
     document_type: Optional[str] = None          # سند

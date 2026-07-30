@@ -613,6 +613,13 @@ function formatNumber(num) {
     return new Intl.NumberFormat('fa-IR').format(num);
 }
 
+// کد ملک is an identifier, not a quantity: «۱۰۴۲», never «۱٬۰۴۲». Grouping it
+// also stops the displayed code from matching what you type into search.
+function formatSerial(num) {
+    if (num === null || num === undefined || isNaN(num)) return '—';
+    return new Intl.NumberFormat('fa-IR', { useGrouping: false }).format(num);
+}
+
 // Normalize tags → array. Backend stores them as a comma-separated string,
 // but older/imported rows may already be an array (or null).
 function _tagList(tags) {
@@ -1025,7 +1032,7 @@ async function loadProperties() {
         data.items.forEach(property => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td><span class="serial-badge">${property.serial_no != null ? formatNumber(property.serial_no) : '—'}</span></td>
+                <td><span class="serial-badge">${formatSerial(property.serial_no)}</span></td>
                 <td title="${esc(property.title)}">${esc(property.title.substring(0, 40))}...</td>
                 <td>${property.city_name || '---'}</td>
                 <td>${formatNumber(property.area)} متر</td>
@@ -1142,7 +1149,7 @@ async function viewProperty(id) {
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="text-muted small">کد ملک</label>
-                                <div><span class="serial-badge" style="font-size:1rem">${property.serial_no != null ? formatNumber(property.serial_no) : '—'}</span>
+                                <div><span class="serial-badge" style="font-size:1rem">${formatSerial(property.serial_no)}</span>
                                      <code class="ms-2 text-muted" style="font-size:.72rem">${property.tag_number}</code></div>
                             </div>
                             <div class="col-md-6">
@@ -3522,7 +3529,9 @@ async function loadLeads() {
                 <td><input type="checkbox" class="form-check-input lead-check" data-id="${lead.id}"
                            ${_selectedLeads.has(lead.id) ? 'checked' : ''}
                            onchange="toggleLeadSelection(${lead.id}, this.checked)"></td>
-                <td>${lead.id}</td>
+                <td>${lead.serial_no != null
+                        ? `<span class="serial-badge" title="کد ملک — همان کدی که در لیست املاک است">${formatSerial(lead.serial_no)}</span>`
+                        : '<span class="text-muted" title="ملک این لید حذف شده است">—</span>'}</td>
                 <td title="${esc(lead.property_title)}">${esc((lead.property_title || '---').substring(0, 35))}...</td>
                 <td>${lead.city_name || '---'}</td>
                 <td>
@@ -3622,7 +3631,7 @@ function _renderPropertyDetails(p) {
     const yn  = v => v ? '✅ دارد' : '❌ ندارد';
 
     const specs = [
-        row('کد ملک', p.serial_no != null ? `<span class="serial-badge">${formatNumber(p.serial_no)}</span>` : ''),
+        row('کد ملک', p.serial_no != null ? `<span class="serial-badge">${formatSerial(p.serial_no)}</span>` : ''),
         row('نوع ملک', esc(p.property_type)),
         row('دسته‌بندی', esc(p.category_name)),
         row('متراژ', p.area ? num(p.area) + ' متر' : ''),
@@ -3755,7 +3764,7 @@ function _matchCard(m) {
         <div class="match-body">
             <div class="match-title" title="${esc(m.title)}">${esc(m.title)}</div>
             <div class="match-meta">
-                ${m.serial_no != null ? `<span class="serial-badge">${formatNumber(m.serial_no)}</span>` : ''}
+                ${m.serial_no != null ? `<span class="serial-badge">${formatSerial(m.serial_no)}</span>` : ''}
                 ${m.city_name ? esc(m.city_name) : ''}${m.district ? ' · ' + esc(m.district) : ''}
                 ${m.area ? ' · ' + formatNumber(m.area) + ' متر' : ''}
                 ${m.rooms != null ? ' · ' + formatNumber(m.rooms) + ' خواب' : ''}
@@ -5713,7 +5722,7 @@ function _calSetForm(ev) {
     v('ev-customer-phone', ev.customer_phone || '');
     v('ev-assigned', ev.assigned_to || '');
     v('ev-agent-phone', ev.agent_phone || '');
-    v('ev-property', ev.property_id || '');
+    v('ev-property', ev.property_serial || '');
     v('ev-description', ev.description || '');
     v('ev-outcome', ev.outcome || '');
     v('ev-status', ev.status || 'scheduled');
@@ -5872,7 +5881,8 @@ function _calReadForm() {
         customer_phone: val('ev-customer-phone') || null,
         assigned_to: val('ev-assigned') || null,
         agent_phone: val('ev-agent-phone') || null,
-        property_id: num('ev-property'),
+        // the کد ملک the agent typed; the server turns it into the row id
+        property_serial: num('ev-property'),
         lead_id: num('ev-lead-id'),
         customer_id: num('ev-customer-id'),
         description: val('ev-description') || null,
@@ -5924,7 +5934,7 @@ async function scheduleVisitForLead(leadId) {
         title: `بازدید — ${lead?.property_title || 'ملک'}`,
         start_at: _isoLocal(tomorrow),
         location: p.address || [p.city_name, p.district, p.neighborhood].filter(Boolean).join('، ') || '',
-        property_id: lead?.property_id || null,
+        property_serial: lead?.serial_no ?? p.serial_no ?? null,
         lead_id: leadId,
         // the lead's contact is the property owner; the customer side is
         // filled in by hand once we know who is being shown the place
