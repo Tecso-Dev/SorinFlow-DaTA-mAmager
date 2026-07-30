@@ -85,6 +85,7 @@ async def init_db():
         await _migrate_property_corner(conn)
         await _migrate_calendar_sms(conn)
         await _migrate_customer_criteria(conn)
+        await _migrate_filing(conn)
 
     await _seed_super_admin()
 
@@ -126,6 +127,37 @@ async def _migrate_property_serial(conn):
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_properties_serial_no ON properties (serial_no)"))
     except Exception as e:
         print(f"property serial migration skipped: {e}")
+
+
+async def _migrate_filing(conn):
+    """کمد و زونکن — the filing columns on properties.
+
+    The two tables themselves are created by create_all; only the columns
+    added to the existing properties table need an ALTER.
+    """
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE properties "
+            "ADD COLUMN IF NOT EXISTS binder_id INTEGER, "
+            "ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS is_private BOOLEAN DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS is_draft BOOLEAN DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS created_by VARCHAR(200), "
+            "ADD COLUMN IF NOT EXISTS tags VARCHAR(500)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_properties_binder_id ON properties (binder_id)"))
+        # added after the table, so it survives a database that predates it
+        await conn.execute(text("""
+            DO $$ BEGIN
+                ALTER TABLE properties ADD CONSTRAINT fk_properties_binder
+                    FOREIGN KEY (binder_id) REFERENCES crm_binders(id) ON DELETE SET NULL;
+            EXCEPTION WHEN duplicate_object OR undefined_table THEN NULL;
+            END $$;
+        """))
+    except Exception as e:
+        print(f"filing migration skipped: {e}")
 
 
 async def _migrate_customer_criteria(conn):

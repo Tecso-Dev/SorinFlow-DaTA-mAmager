@@ -11,7 +11,7 @@
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260730a">
+    <link rel="stylesheet" href="css/style.css?v=20260730d">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -829,6 +829,7 @@
                 <!-- CRM Tab Nav -->
                 <ul class="nav nav-tabs mb-3 flex-wrap" id="crm-main-tabs" role="tablist">
                     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#crm-tab-tasks" type="button"><i class="bi bi-check2-square"></i> وظایف</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-filing" type="button"><i class="bi bi-archive"></i> کمد و زونکن</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-calendar" type="button"><i class="bi bi-calendar3"></i> تقویم</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-customers" type="button"><i class="bi bi-person-vcard"></i> مشتریان</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-contacts" type="button"><i class="bi bi-person-lines-fill"></i> دفترچه تلفن</button></li>
@@ -876,6 +877,62 @@
                     </div>
 
                     <!-- ── CALENDAR ── -->
+                    <!-- ═══ کمد و زونکن ═══ -->
+                    <div class="tab-pane fade" id="crm-tab-filing" role="tabpanel">
+                        <div class="card mb-3">
+                            <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+                                <i class="bi bi-archive"></i> کمد و زونکن
+                                <div id="filing-counts" class="d-flex flex-wrap gap-2 ms-auto"></div>
+                                <button class="btn btn-sm btn-success" onclick="openCabinetModal()">
+                                    <i class="bi bi-plus-lg"></i> کمد جدید
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div id="filing-shelves"></div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+                                <i class="bi bi-folder2-open"></i>
+                                <span id="filing-files-title">فایل‌های بایگانی‌نشده</span>
+                                <span class="badge bg-secondary" id="filing-files-count">۰</span>
+                                <div class="ms-auto d-flex flex-wrap gap-2">
+                                    <input type="text" id="filing-search" class="form-control form-control-sm"
+                                           style="width:190px" placeholder="جستجو یا کد ملک..."
+                                           onkeydown="if(event.key==='Enter')loadFilingFiles()">
+                                    <select id="filing-tag" class="form-select form-select-sm" style="width:150px"
+                                            onchange="loadFilingFiles()">
+                                        <option value="">همه برچسب‌ها</option>
+                                    </select>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="loadFilingFiles()">
+                                        <i class="bi bi-search"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-warning" id="filing-archived-btn"
+                                            onclick="toggleFilingArchived()">
+                                        <i class="bi bi-archive"></i> بایگانی
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="filing-bulk-bar" class="leads-bulk-bar d-none">
+                                <span><i class="bi bi-check2-square"></i> <b id="filing-bulk-count">۰</b> فایل انتخاب شده</span>
+                                <select class="form-select form-select-sm" style="width:200px"
+                                        onchange="bulkMoveFiles(this.value); this.value='';">
+                                    <option value="">انتقال به زونکن...</option>
+                                </select>
+                                <button class="btn btn-sm btn-outline-info" onclick="bulkFileAction('pin')"><i class="bi bi-pin-angle"></i> سنجاق</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="bulkFileAction('unpin')">لغو سنجاق</button>
+                                <button class="btn btn-sm btn-outline-warning" onclick="bulkFileAction('archive')"><i class="bi bi-archive"></i> بایگانی</button>
+                                <button class="btn btn-sm btn-outline-primary" onclick="bulkTagFiles()"><i class="bi bi-tag"></i> برچسب</button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="bulkFileAction('private')"><i class="bi bi-lock"></i> شخصی</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="clearFileSelection()">لغو انتخاب</button>
+                            </div>
+                            <div class="card-body">
+                                <div id="filing-files" class="filing-files"></div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="tab-pane fade" id="crm-tab-calendar" role="tabpanel">
                         <div class="card">
                             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -1883,6 +1940,88 @@
 </div>
 
 <!-- Matching results modal -->
+<!-- ═══ کمد / زونکن ═══ -->
+<div class="modal fade" id="cabinetModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cabinet-modal-title"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label">نام کمد *</label>
+                        <input type="text" id="cab-name" class="form-control" placeholder="مثلاً فروش آپارتمان">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">رنگ</label>
+                        <div id="cab-colors" class="filing-palette"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-danger d-none me-auto" id="cab-delete-btn" onclick="deleteCabinet()">
+                    <i class="bi bi-trash"></i> حذف کمد
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">انصراف</button>
+                <button type="button" class="btn btn-primary" onclick="saveCabinet()"><i class="bi bi-check-lg"></i> ذخیره</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="binderModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="binder-modal-title"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label">نام زونکن *</label>
+                        <input type="text" id="bin-name" class="form-control" placeholder="مثلاً آپارتمان ۱۰۰ تا ۱۵۰ متر">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">نوع فایل</label>
+                        <select id="bin-kind" class="form-select">
+                            <option value="property">فایل ملکی</option>
+                            <option value="demand">فایل متقاضی</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">نوع معامله</label>
+                        <select id="bin-deal" class="form-select">
+                            <option value="">همه</option>
+                            <option value="buy">خرید و فروش</option>
+                            <option value="rent">رهن و اجاره</option>
+                            <option value="partnership">مشارکت</option>
+                            <option value="presale">پیش‌فروش</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">توضیح</label>
+                        <input type="text" id="bin-description" class="form-control" placeholder="اختیاری">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">رنگ</label>
+                        <div id="bin-colors" class="filing-palette"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-danger d-none me-auto" id="bin-delete-btn" onclick="deleteBinder()">
+                    <i class="bi bi-trash"></i> حذف زونکن
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">انصراف</button>
+                <button type="button" class="btn btn-primary" onclick="saveBinder()"><i class="bi bi-check-lg"></i> ذخیره</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="matchModal" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
@@ -2355,6 +2494,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260730b"></script>
+<script src="js/app.js?v=20260730c"></script>
 </body>
 </html>

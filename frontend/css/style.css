@@ -1233,6 +1233,7 @@ textarea.form-control { resize: vertical; }
     position: relative;
 }
 #crm-main-tabs [data-bs-target="#crm-tab-tasks"]     { --tab: #34d399; }
+#crm-main-tabs [data-bs-target="#crm-tab-filing"]    { --tab: #f59e0b; }
 #crm-main-tabs [data-bs-target="#crm-tab-calendar"]  { --tab: #a78bfa; }
 #crm-main-tabs [data-bs-target="#crm-tab-customers"] { --tab: #38bdf8; }
 #crm-main-tabs [data-bs-target="#crm-tab-contacts"]  { --tab: #2dd4bf; }
@@ -2215,3 +2216,116 @@ select.status-quick {
   .cal-chip { font-size: .6rem; }
   .cal-tg-head, .cal-tg-allday, .cal-tg-body { grid-template-columns: 40px repeat(var(--cols, 7), minmax(0, 1fr)); }
 }
+
+/* ══ کمد و زونکن ══════════════════════════════════════
+   Binders are drawn as spines on a shelf: the paper metaphor is the
+   whole point, so a consultant recognises their own filing at a glance. */
+.filing-cabinet {
+  border: 1px solid var(--border); border-radius: var(--r);
+  margin-bottom: 1rem; overflow: hidden;
+  background: color-mix(in srgb, var(--c) 5%, transparent);
+  border-right: 3px solid var(--c);
+}
+.filing-cabinet-head {
+  display: flex; align-items: center; gap: .55rem; flex-wrap: wrap;
+  padding: .6rem .9rem; font-size: .85rem;
+  background: color-mix(in srgb, var(--c) 12%, var(--surface2));
+  border-bottom: 1px solid var(--border);
+}
+.filing-cabinet-head i { color: var(--c); }
+.filing-shelf {
+  display: flex; gap: .55rem; flex-wrap: wrap; padding: .9rem;
+  /* the shelf board the binders stand on */
+  background: linear-gradient(180deg, transparent 0%, transparent 78%,
+              color-mix(in srgb, var(--c) 22%, transparent) 78%, transparent 100%);
+}
+.filing-binder {
+  position: relative; width: 108px; min-height: 132px; cursor: pointer;
+  padding: .5rem .45rem .55rem; border-radius: 5px 5px 3px 3px;
+  background: linear-gradient(160deg,
+      color-mix(in srgb, var(--c) 88%, #000) 0%,
+      color-mix(in srgb, var(--c) 62%, #000) 100%);
+  border: 1px solid color-mix(in srgb, var(--c) 55%, #000);
+  box-shadow: inset -3px 0 0 rgba(0,0,0,.22), 0 3px 10px rgba(0,0,0,.35);
+  color: #fff; transition: transform .16s, box-shadow .16s;
+  display: flex; flex-direction: column; gap: .25rem;
+}
+.filing-binder:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(0,0,0,.45); }
+.filing-binder.active { outline: 2px solid #fff; outline-offset: 2px; }
+/* the two ring holes down the spine */
+.filing-binder::before, .filing-binder::after {
+  content: ''; position: absolute; right: 8px; width: 11px; height: 11px;
+  border-radius: 50%; background: rgba(0,0,0,.3);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.5);
+}
+.filing-binder::before { top: 26px; }
+.filing-binder::after  { bottom: 22px; }
+.filing-binder-count {
+  align-self: flex-start; background: rgba(255,255,255,.9); color: #111;
+  border-radius: 5px; padding: 0 .32rem; font-size: .7rem; font-weight: 700;
+}
+.filing-binder-name {
+  font-size: .72rem; font-weight: 600; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden; text-shadow: 0 1px 2px rgba(0,0,0,.4);
+}
+/* «فایل ملکی • خرید و فروش» is too long for a 108px spine — keep it to two
+   lines inside the binder instead of spilling over the edge */
+.filing-binder-kind {
+  font-size: .55rem; line-height: 1.3; opacity: .85; margin-top: auto;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; padding-left: .1rem;
+}
+.filing-binder-edit {
+  position: absolute; top: 3px; left: 3px; border: 0; background: none;
+  color: rgba(255,255,255,.75); font-size: .7rem; padding: .1rem .25rem;
+  border-radius: 4px; cursor: pointer;
+}
+.filing-binder-edit:hover { background: rgba(0,0,0,.28); color: #fff; }
+
+/* colour picker shared by both modals */
+.filing-palette { display: flex; flex-wrap: wrap; gap: .4rem; }
+.filing-swatch {
+  width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  background: var(--c); border: 2px solid transparent;
+}
+.filing-swatch.on { border-color: var(--text); transform: scale(1.1); }
+
+/* the file cards inside a binder */
+.filing-files { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.file-card {
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: .6rem .7rem; background: var(--surface2); cursor: pointer;
+  display: flex; flex-direction: column; gap: .3rem;
+  transition: border-color .15s, background .15s;
+}
+.file-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.file-card.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface2));
+}
+.file-card-head { display: flex; align-items: center; gap: .4rem; }
+.file-marks { margin-right: auto; display: flex; gap: .25rem; }
+.file-mark { font-size: .72rem; }
+.file-mark.pin { color: #67e8f9; }
+.file-mark.private { color: #f87171; }
+.file-mark.arch { color: #fbbf24; }
+.file-mark.draft { color: #94a3b8; }
+.file-card-title {
+  font-size: .78rem; font-weight: 600; color: var(--text); line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.file-card-meta { font-size: .68rem; color: var(--text-muted); }
+.file-card-price { font-size: .8rem; font-weight: 700; color: var(--accent3); }
+.file-tags { display: flex; flex-wrap: wrap; gap: .2rem; }
+.file-tag {
+  font-size: .62rem; padding: .05rem .35rem; border-radius: 5px; cursor: pointer;
+  background: rgba(167,139,250,.16); border: 1px solid rgba(167,139,250,.3); color: #c4b5fd;
+}
+.file-tag:hover { background: rgba(167,139,250,.3); }
+.file-card-actions { display: flex; gap: .2rem; margin-top: .15rem; }
+.file-card-actions .btn { padding: .1rem .35rem; font-size: .68rem; }
+#filing-archived-btn.active { background: var(--warning); color: #111; }
+
+[data-theme="light"] .filing-binder-count { background: #fff; }
+[data-theme="light"] .file-tag { background: rgba(124,58,237,.1); color: #6d28d9; }

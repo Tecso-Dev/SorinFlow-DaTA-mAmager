@@ -5273,6 +5273,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const target = e.target.getAttribute('data-bs-target');
             if (target === '#crm-tab-tasks')     loadTasks();
             if (target === '#crm-tab-calendar')  { loadCalendar(); loadUpcomingEvents(); }
+            if (target === '#crm-tab-filing')    loadFiling();
             if (target === '#crm-tab-customers') loadCustomers();
             if (target === '#crm-tab-dpa')       loadDpa();
             if (target === '#crm-tab-contacts')  loadContacts();
@@ -5963,4 +5964,337 @@ async function loadUpcomingEvents() {
         }).join('') : '<span class="text-muted small">قراری در ۷ روز آینده ثبت نشده است</span>';
         boxes.forEach(b => b.innerHTML = html);
     } catch (e) { /* the strip is a nicety — never block the page for it */ }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  کمد و زونکن — filing
+//  A cabinet holds binders, a binder holds files. A "file" is a
+//  property; nothing is copied, only filed and marked.
+// ═══════════════════════════════════════════════════════════════════
+const FILING_PALETTE = ['#fbbf24', '#34d399', '#38bdf8', '#a78bfa', '#f472b6',
+                        '#fb923c', '#2dd4bf', '#f87171', '#a3e635', '#e879f9'];
+let _cabinets = [];
+let _activeBinder = null;        // null = the unfiled tray
+let _filingArchived = false;
+let _selectedFiles = new Set();
+let _cabinetEditId = null, _binderEditId = null, _binderCabinetId = null;
+let _cabColor = FILING_PALETTE[0], _binColor = FILING_PALETTE[2];
+
+function _paletteHtml(selected, onpick) {
+    return FILING_PALETTE.map(c =>
+        `<button type="button" class="filing-swatch${c === selected ? ' on' : ''}"
+                 style="--c:${c}" onclick="${onpick}('${c}')" title="${c}"></button>`).join('');
+}
+function pickCabColor(c) { _cabColor = c; document.getElementById('cab-colors').innerHTML = _paletteHtml(c, 'pickCabColor'); }
+function pickBinColor(c) { _binColor = c; document.getElementById('bin-colors').innerHTML = _paletteHtml(c, 'pickBinColor'); }
+
+async function loadFiling() {
+    try {
+        const [cabs, counts, tags] = await Promise.all([
+            apiCall('/filing/cabinets'),
+            apiCall('/filing/overview'),
+            apiCall('/filing/tags'),
+        ]);
+        _cabinets = cabs.items || [];
+        _renderFilingCounts(counts);
+        _renderShelves();
+        _renderTagFilter(tags.items || []);
+        _renderBinderPickers();
+        await loadFilingFiles();
+    } catch (e) {
+        showToast('خطا', 'بارگیری کمدها ناموفق بود', 'danger');
+    }
+}
+
+function _renderFilingCounts(c) {
+    const box = document.getElementById('filing-counts');
+    if (!box) return;
+    const chip = (label, value, cls) =>
+        `<span class="badge ${cls}">${label}: ${formatNumber(value || 0)}</span>`;
+    box.innerHTML =
+        chip('بایگانی‌شده در زونکن', c.filed, 'bg-primary-subtle text-primary-emphasis') +
+        chip('بدون زونکن', c.unfiled, 'bg-warning-subtle text-warning-emphasis') +
+        chip('سنجاق', c.pinned, 'bg-info-subtle text-info-emphasis') +
+        chip('بایگانی', c.archived, 'bg-secondary') +
+        chip('شخصی', c.private, 'bg-danger-subtle text-danger-emphasis');
+}
+
+function _renderShelves() {
+    const wrap = document.getElementById('filing-shelves');
+    if (!wrap) return;
+    if (!_cabinets.length) {
+        wrap.innerHTML = `<div class="text-center text-muted py-4">
+            <i class="bi bi-archive" style="font-size:2rem"></i>
+            <p class="mt-2">هنوز کمدی نساخته‌اید. با «کمد جدید» شروع کنید.</p></div>`;
+        return;
+    }
+    wrap.innerHTML = _cabinets.map(cab => `
+        <div class="filing-cabinet" style="--c:${cab.color}">
+            <div class="filing-cabinet-head">
+                <i class="bi ${esc(cab.icon) || 'bi-archive'}"></i>
+                <b>${esc(cab.name)}</b>
+                <span class="text-muted small">${formatNumber(cab.file_count || 0)} فایل</span>
+                ${cab.owner ? '<span class="badge bg-danger-subtle text-danger-emphasis">شخصی</span>' : ''}
+                <div class="ms-auto d-flex gap-1">
+                    <button class="btn btn-sm btn-outline-success" onclick="openBinderModal(null, ${cab.id})" title="زونکن جدید">
+                        <i class="bi bi-plus-lg"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="openCabinetModal(${cab.id})" title="ویرایش کمد">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="filing-shelf">
+                ${(cab.binders || []).map(_binderSpine).join('') ||
+                  '<div class="text-muted small py-3">این کمد خالی است</div>'}
+            </div>
+        </div>`).join('');
+}
+
+/** A binder drawn as a spine on the shelf, like the paper it replaces. */
+function _binderSpine(b) {
+    const active = _activeBinder && _activeBinder.id === b.id;
+    return `<div class="filing-binder${active ? ' active' : ''}" style="--c:${b.color}"
+                 onclick="openBinder(${b.id})" title="${esc(b.name)}${b.description ? ' — ' + esc(b.description) : ''}">
+        <button class="filing-binder-edit" onclick="event.stopPropagation(); openBinderModal(${b.id}, ${b.cabinet_id})" title="ویرایش">
+            <i class="bi bi-three-dots"></i>
+        </button>
+        <div class="filing-binder-count">${formatNumber(b.file_count || 0)}</div>
+        <div class="filing-binder-name">${esc(b.name)}</div>
+        <div class="filing-binder-kind">${esc(b.kind_label)}${b.deal_label ? ' • ' + esc(b.deal_label) : ''}</div>
+    </div>`;
+}
+
+function _renderTagFilter(tags) {
+    const sel = document.getElementById('filing-tag');
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">همه برچسب‌ها</option>' + tags.map(t =>
+        `<option value="${esc(t.name)}">${esc(t.name)} (${formatNumber(t.count)})</option>`).join('');
+    sel.value = keep;
+}
+
+/** Every "move to binder" dropdown shares the same option list. */
+function _renderBinderPickers() {
+    const opts = '<option value="">انتقال به زونکن...</option>' +
+        _cabinets.map(c => `<optgroup label="${esc(c.name)}">` +
+            (c.binders || []).map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('') +
+            '</optgroup>').join('') +
+        '<option value="none">— خارج کردن از زونکن —</option>';
+    document.querySelectorAll('#filing-bulk-bar select').forEach(s => { s.innerHTML = opts; });
+}
+
+function openBinder(id) {
+    _activeBinder = _allBinders().find(b => b.id === id) || null;
+    _filingArchived = false;
+    clearFileSelection();
+    _renderShelves();
+    loadFilingFiles();
+}
+function _allBinders() { return _cabinets.flatMap(c => c.binders || []); }
+
+function toggleFilingArchived() {
+    _filingArchived = !_filingArchived;
+    document.getElementById('filing-archived-btn')?.classList.toggle('active', _filingArchived);
+    clearFileSelection();
+    loadFilingFiles();
+}
+
+async function loadFilingFiles() {
+    const box = document.getElementById('filing-files');
+    if (!box) return;
+    const search = document.getElementById('filing-search')?.value.trim() || '';
+    const tag = document.getElementById('filing-tag')?.value || '';
+
+    let url = `/filing/files?limit=60&archived=${_filingArchived}`;
+    if (_activeBinder) url += `&binder_id=${_activeBinder.id}`;
+    else if (!search && !tag) url += '&unfiled=true';
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (tag) url += `&tag=${encodeURIComponent(tag)}`;
+
+    document.getElementById('filing-files-title').textContent = _filingArchived
+        ? 'فایل‌های بایگانی‌شده'
+        : (_activeBinder ? `زونکن: ${_activeBinder.name}`
+                         : (search || tag ? 'نتیجهٔ جستجو' : 'فایل‌های بدون زونکن'));
+    try {
+        const data = await apiCall(url);
+        document.getElementById('filing-files-count').textContent = formatNumber(data.total || 0);
+        if (!(data.items || []).length) {
+            box.innerHTML = `<div class="text-center text-muted py-4">
+                <i class="bi bi-inbox" style="font-size:2rem"></i>
+                <p class="mt-2">فایلی اینجا نیست</p></div>`;
+            return;
+        }
+        box.innerHTML = data.items.map(_fileCard).join('');
+        _updateFileBulkBar();
+    } catch (e) {
+        showToast('خطا', 'بارگیری فایل‌ها ناموفق بود', 'danger');
+    }
+}
+
+function _fileCard(f) {
+    const marks = [];
+    if (f.is_pinned)   marks.push('<i class="bi bi-pin-angle-fill file-mark pin" title="سنجاق‌شده"></i>');
+    if (f.is_private)  marks.push('<i class="bi bi-lock-fill file-mark private" title="فایل شخصی"></i>');
+    if (f.is_archived) marks.push('<i class="bi bi-archive-fill file-mark arch" title="بایگانی"></i>');
+    if (f.is_draft)    marks.push('<i class="bi bi-pencil-square file-mark draft" title="پیش‌نویس"></i>');
+    const tags = (f.tags || []).map(t =>
+        `<span class="file-tag" onclick="event.stopPropagation(); filterByTag('${esc(t)}')">${esc(t)}</span>`).join('');
+    return `<div class="file-card${_selectedFiles.has(f.id) ? ' selected' : ''}" data-id="${f.id}"
+                 onclick="toggleFileSelection(${f.id}, this)">
+        <div class="file-card-head">
+            <span class="serial-badge">${formatSerial(f.serial_no)}</span>
+            <div class="file-marks">${marks.join('')}</div>
+        </div>
+        <div class="file-card-title" title="${esc(f.title)}">${esc(f.title)}</div>
+        <div class="file-card-meta">
+            ${f.area ? formatNumber(f.area) + ' متر' : ''}
+            ${f.rooms != null ? ' • ' + formatNumber(f.rooms) + ' خواب' : ''}
+            ${f.district ? ' • ' + esc(f.district) : (f.city_name ? ' • ' + esc(f.city_name) : '')}
+        </div>
+        <div class="file-card-price">${f.price ? formatPrice(f.price) : '—'}</div>
+        ${tags ? `<div class="file-tags">${tags}</div>` : ''}
+        <div class="file-card-actions" onclick="event.stopPropagation()">
+            <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${f.id})" title="جزئیات"><i class="bi bi-eye"></i></button>
+            <button class="btn btn-sm btn-outline-info" onclick="quickFileAction(${f.id}, '${f.is_pinned ? 'unpin' : 'pin'}')" title="سنجاق"><i class="bi bi-pin-angle"></i></button>
+            <button class="btn btn-sm btn-outline-warning" onclick="quickFileAction(${f.id}, '${f.is_archived ? 'unarchive' : 'archive'}')" title="بایگانی"><i class="bi bi-archive"></i></button>
+            <button class="btn btn-sm btn-outline-success" onclick="showSimilarForProperty(${f.id})" title="مشابه"><i class="bi bi-diagram-3"></i></button>
+        </div>
+    </div>`;
+}
+
+function filterByTag(tag) {
+    const sel = document.getElementById('filing-tag');
+    if (sel) { sel.value = tag; loadFilingFiles(); }
+}
+
+function toggleFileSelection(id, el) {
+    if (_selectedFiles.has(id)) _selectedFiles.delete(id); else _selectedFiles.add(id);
+    el?.classList.toggle('selected', _selectedFiles.has(id));
+    _updateFileBulkBar();
+}
+function clearFileSelection() {
+    _selectedFiles.clear();
+    document.querySelectorAll('.file-card.selected').forEach(c => c.classList.remove('selected'));
+    _updateFileBulkBar();
+}
+function _updateFileBulkBar() {
+    const bar = document.getElementById('filing-bulk-bar');
+    if (!bar) return;
+    bar.classList.toggle('d-none', _selectedFiles.size === 0);
+    const n = document.getElementById('filing-bulk-count');
+    if (n) n.textContent = formatNumber(_selectedFiles.size);
+}
+
+async function _fileBulk(body, okMsg) {
+    try {
+        const r = await apiCall('/filing/files/bulk', { method: 'POST', body: JSON.stringify(body) });
+        showToast('موفق', `${okMsg} (${formatNumber(r.updated)} فایل)`, 'success');
+        clearFileSelection();
+        await loadFiling();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+async function quickFileAction(id, action) { await _fileBulk({ ids: [id], action }, 'انجام شد'); }
+async function bulkFileAction(action) {
+    if (!_selectedFiles.size) return;
+    const fa = { pin: 'سنجاق شد', unpin: 'سنجاق برداشته شد', archive: 'بایگانی شد',
+                 unarchive: 'از بایگانی خارج شد', private: 'شخصی شد', public: 'عمومی شد' };
+    if (action === 'archive' && !confirm(`${_selectedFiles.size} فایل بایگانی شود؟`)) return;
+    await _fileBulk({ ids: [..._selectedFiles], action }, fa[action] || 'انجام شد');
+}
+async function bulkMoveFiles(binderId) {
+    if (!binderId || !_selectedFiles.size) return;
+    await _fileBulk({ ids: [..._selectedFiles], action: 'move',
+                      binder_id: binderId === 'none' ? null : Number(binderId) },
+                    binderId === 'none' ? 'از زونکن خارج شد' : 'به زونکن منتقل شد');
+}
+async function bulkTagFiles() {
+    if (!_selectedFiles.size) return;
+    const tags = prompt('برچسب‌ها را با ویرگول جدا کنید:');
+    if (!tags || !tags.trim()) return;
+    await _fileBulk({ ids: [..._selectedFiles], action: 'tag', tags }, 'برچسب خورد');
+}
+
+// ── cabinet / binder modals ────────────────────────────────────────
+function openCabinetModal(id = null) {
+    _cabinetEditId = id;
+    const cab = id ? _cabinets.find(c => c.id === id) : null;
+    document.getElementById('cabinet-modal-title').innerHTML = id
+        ? '<i class="bi bi-archive"></i> ویرایش کمد' : '<i class="bi bi-archive"></i> کمد جدید';
+    document.getElementById('cab-name').value = cab?.name || '';
+    document.getElementById('cab-delete-btn').classList.toggle('d-none', !id);
+    pickCabColor(cab?.color || FILING_PALETTE[0]);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('cabinetModal')).show();
+}
+
+async function saveCabinet() {
+    const name = document.getElementById('cab-name').value.trim();
+    if (!name) { showToast('خطا', 'نام کمد الزامی است', 'warning'); return; }
+    const body = JSON.stringify({ name, color: _cabColor });
+    try {
+        if (_cabinetEditId) await apiCall(`/filing/cabinets/${_cabinetEditId}`, { method: 'PATCH', body });
+        else await apiCall('/filing/cabinets', { method: 'POST', body });
+        showToast('موفق', 'کمد ذخیره شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('cabinetModal'))?.hide();
+        loadFiling();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function deleteCabinet() {
+    if (!_cabinetEditId) return;
+    if (!confirm('این کمد و زونکن‌هایش حذف شوند؟ فایل‌ها حذف نمی‌شوند، فقط از زونکن خارج می‌شوند.')) return;
+    try {
+        const r = await apiCall(`/filing/cabinets/${_cabinetEditId}`, { method: 'DELETE' });
+        showToast('موفق', `کمد حذف شد — ${formatNumber(r.unfiled)} فایل بدون زونکن شد`, 'success');
+        bootstrap.Modal.getInstance(document.getElementById('cabinetModal'))?.hide();
+        _activeBinder = null;
+        loadFiling();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+function openBinderModal(id = null, cabinetId = null) {
+    _binderEditId = id;
+    _binderCabinetId = cabinetId;
+    const bin = id ? _allBinders().find(b => b.id === id) : null;
+    document.getElementById('binder-modal-title').innerHTML = id
+        ? '<i class="bi bi-journal-bookmark"></i> ویرایش زونکن'
+        : '<i class="bi bi-journal-plus"></i> زونکن جدید';
+    document.getElementById('bin-name').value = bin?.name || '';
+    document.getElementById('bin-kind').value = bin?.kind || 'property';
+    document.getElementById('bin-deal').value = bin?.deal_type || '';
+    document.getElementById('bin-description').value = bin?.description || '';
+    document.getElementById('bin-delete-btn').classList.toggle('d-none', !id);
+    pickBinColor(bin?.color || FILING_PALETTE[2]);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('binderModal')).show();
+}
+
+async function saveBinder() {
+    const name = document.getElementById('bin-name').value.trim();
+    if (!name) { showToast('خطا', 'نام زونکن الزامی است', 'warning'); return; }
+    const body = JSON.stringify({
+        name, color: _binColor,
+        kind: document.getElementById('bin-kind').value,
+        deal_type: document.getElementById('bin-deal').value,
+        description: document.getElementById('bin-description').value.trim(),
+        cabinet_id: _binderCabinetId,
+    });
+    try {
+        if (_binderEditId) await apiCall(`/filing/binders/${_binderEditId}`, { method: 'PATCH', body });
+        else await apiCall('/filing/binders', { method: 'POST', body });
+        showToast('موفق', 'زونکن ذخیره شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('binderModal'))?.hide();
+        loadFiling();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function deleteBinder() {
+    if (!_binderEditId) return;
+    if (!confirm('این زونکن حذف شود؟ فایل‌ها حذف نمی‌شوند، فقط از زونکن خارج می‌شوند.')) return;
+    try {
+        const r = await apiCall(`/filing/binders/${_binderEditId}`, { method: 'DELETE' });
+        showToast('موفق', `زونکن حذف شد — ${formatNumber(r.unfiled)} فایل بدون زونکن شد`, 'success');
+        bootstrap.Modal.getInstance(document.getElementById('binderModal'))?.hide();
+        if (_activeBinder?.id === _binderEditId) _activeBinder = null;
+        loadFiling();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }

@@ -2,7 +2,7 @@
 SorinFlow Divar Scraper - API Routes
 """
 from fastapi import APIRouter, Depends
-from app.api.routes import properties, scraper, auth, stats, proxies, crm, users
+from app.api.routes import properties, scraper, auth, stats, proxies, crm, users, filing
 from app.auth.dependencies import get_current_user
 
 router = APIRouter()
@@ -19,3 +19,4 @@ router.include_router(auth.router, prefix="/auth", tags=["Authentication"], depe
 router.include_router(stats.router, prefix="/stats", tags=["Statistics"], dependencies=_auth)
 router.include_router(proxies.router, prefix="/proxies", tags=["Proxies"], dependencies=_auth)
 router.include_router(crm.router, prefix="/crm", tags=["CRM"], dependencies=_auth)
+router.include_router(filing.router, prefix="/filing", tags=["Filing"], dependencies=_auth)

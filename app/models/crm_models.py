@@ -589,3 +589,74 @@ class ActivityLog(Base):
             "actor": self.actor,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class Cabinet(Base):
+    """کمد — the top shelf a consultant's binders sit on.
+
+    Mirrors how an agency actually files paper: a cabinet per broad concern
+    (فروش، اجاره، متقاضی…), binders inside it, files inside those.
+    """
+    __tablename__ = "crm_cabinets"
+
+    PALETTE = ["#fbbf24", "#34d399", "#38bdf8", "#a78bfa", "#f472b6",
+               "#fb923c", "#2dd4bf", "#f87171", "#a3e635", "#e879f9"]
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), nullable=False)
+    color = Column(String(20), default="#fbbf24")
+    icon = Column(String(40), default="bi-archive")
+    sort_order = Column(Integer, default=0, index=True)
+    owner = Column(String(200), index=True)   # None = shared across the agency
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    binders = relationship("Binder", back_populates="cabinet",
+                           cascade="all, delete-orphan", order_by="Binder.sort_order")
+
+    def to_dict(self, with_binders=False):
+        data = {
+            "id": self.id, "name": self.name, "color": self.color,
+            "icon": self.icon, "sort_order": self.sort_order, "owner": self.owner,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+        if with_binders:
+            data["binders"] = [b.to_dict() for b in (self.binders or [])]
+        return data
+
+
+class Binder(Base):
+    """زونکن — one binder of files inside a cabinet.
+
+    kind separates the two things an agency files: املاکی که داریم
+    (property) and مشتری‌هایی که دنبال ملک‌اند (demand).
+    """
+    __tablename__ = "crm_binders"
+
+    KINDS = {"property": "فایل ملکی", "demand": "فایل متقاضی"}
+    DEAL_TYPES = {"buy": "خرید و فروش", "rent": "رهن و اجاره",
+                  "partnership": "مشارکت", "presale": "پیش‌فروش", "": "همه"}
+
+    id = Column(Integer, primary_key=True, index=True)
+    cabinet_id = Column(Integer, ForeignKey("crm_cabinets.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    color = Column(String(20), default="#38bdf8")
+    kind = Column(String(20), default="property", index=True)
+    deal_type = Column(String(20), default="")
+    description = Column(String(300))
+    sort_order = Column(Integer, default=0, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    cabinet = relationship("Cabinet", back_populates="binders")
+
+    def to_dict(self, file_count=None):
+        return {
+            "id": self.id, "cabinet_id": self.cabinet_id, "name": self.name,
+            "color": self.color, "kind": self.kind,
+            "kind_label": self.KINDS.get(self.kind, self.kind),
+            "deal_type": self.deal_type,
+            "deal_label": self.DEAL_TYPES.get(self.deal_type or "", ""),
+            "description": self.description, "sort_order": self.sort_order,
+            "file_count": file_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

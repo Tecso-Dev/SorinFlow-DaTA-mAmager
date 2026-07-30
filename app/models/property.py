@@ -128,6 +128,16 @@ class Property(Base):
     # Owner — which Divar account scraped this property
     owner_phone = Column(String(20), nullable=True, index=True)
 
+    # ── Filing (کمد و زونکن) ──
+    binder_id = Column(Integer, ForeignKey("crm_binders.id", ondelete="SET NULL"),
+                       nullable=True, index=True)
+    is_pinned = Column(Boolean, default=False, index=True)     # سنجاق
+    is_archived = Column(Boolean, default=False, index=True)   # بایگانی
+    is_private = Column(Boolean, default=False, index=True)    # فایل شخصی
+    is_draft = Column(Boolean, default=False, index=True)      # پیش‌نویس
+    created_by = Column(String(200), index=True)               # who filed it
+    tags = Column(String(500))                                 # برچسب، comma-separated
+
     # Status
     is_active = Column(Boolean, default=True)
     
@@ -180,6 +190,13 @@ class Property(Base):
             "extra_attrs": self.extra_attrs or {},
             "owner_phone": self.owner_phone,
             "is_active": self.is_active,
+            "binder_id": self.binder_id,
+            "is_pinned": bool(self.is_pinned),
+            "is_archived": bool(self.is_archived),
+            "is_private": bool(self.is_private),
+            "is_draft": bool(self.is_draft),
+            "created_by": self.created_by,
+            "tags": self.tags,
             "posted_at": self.posted_at.isoformat() if self.posted_at else None,
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
