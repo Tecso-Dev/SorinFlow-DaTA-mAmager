@@ -2329,3 +2329,10 @@ select.status-quick {
 
 [data-theme="light"] .filing-binder-count { background: #fff; }
 [data-theme="light"] .file-tag { background: rgba(124,58,237,.1); color: #6d28d9; }
+
+/* advanced filter drawer inside the filing tab */
+.filing-advanced {
+  padding: .75rem 1rem; border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface2));
+}
+.filing-advanced .form-label { font-size: .7rem; margin-bottom: .15rem; color: var(--text-muted); }

@@ -11,7 +11,7 @@
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260730d">
+    <link rel="stylesheet" href="css/style.css?v=20260730e">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -908,10 +908,65 @@
                                     <button class="btn btn-sm btn-outline-secondary" onclick="loadFilingFiles()">
                                         <i class="bi bi-search"></i>
                                     </button>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="toggleAdvancedFilters()">
+                                        <i class="bi bi-sliders"></i> فیلتر پیشرفته
+                                        <span class="badge bg-primary d-none" id="filing-filter-count">۰</span>
+                                    </button>
                                     <button class="btn btn-sm btn-outline-warning" id="filing-archived-btn"
                                             onclick="toggleFilingArchived()">
                                         <i class="bi bi-archive"></i> بایگانی
                                     </button>
+                                </div>
+                            </div>
+                            <div id="filing-advanced" class="filing-advanced d-none">
+                                <div class="row g-2">
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label">قیمت از (تومان)</label>
+                                        <input type="text" id="ff-price-min" class="form-control form-control-sm money-input" inputmode="numeric" dir="ltr">
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label">تا</label>
+                                        <input type="text" id="ff-price-max" class="form-control form-control-sm money-input" inputmode="numeric" dir="ltr">
+                                    </div>
+                                    <div class="col-6 col-md-2">
+                                        <label class="form-label">متراژ از</label>
+                                        <input type="number" id="ff-area-min" class="form-control form-control-sm" dir="ltr">
+                                    </div>
+                                    <div class="col-6 col-md-2">
+                                        <label class="form-label">تا</label>
+                                        <input type="number" id="ff-area-max" class="form-control form-control-sm" dir="ltr">
+                                    </div>
+                                    <div class="col-6 col-md-2">
+                                        <label class="form-label">حداقل خواب</label>
+                                        <input type="number" id="ff-rooms-min" class="form-control form-control-sm" dir="ltr">
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label">محله / منطقه</label>
+                                        <input type="text" id="ff-district" class="form-control form-control-sm" placeholder="مثلاً کاشانی">
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label">نوع ملک</label>
+                                        <input type="text" id="ff-type" class="form-control form-control-sm" placeholder="مثلاً آپارتمان">
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        <label class="form-label">نوع معامله</label>
+                                        <select id="ff-listing" class="form-select form-select-sm">
+                                            <option value="">همه</option>
+                                            <option value="buy">خرید و فروش</option>
+                                            <option value="rent">رهن و اجاره</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3 d-flex align-items-end">
+                                        <div class="d-flex flex-wrap gap-2 pb-1">
+                                            <div class="form-check"><input class="form-check-input" type="checkbox" id="ff-elevator"><label class="form-check-label small" for="ff-elevator">آسانسور</label></div>
+                                            <div class="form-check"><input class="form-check-input" type="checkbox" id="ff-parking"><label class="form-check-label small" for="ff-parking">پارکینگ</label></div>
+                                            <div class="form-check"><input class="form-check-input" type="checkbox" id="ff-storage"><label class="form-check-label small" for="ff-storage">انباری</label></div>
+                                        </div>
+                                    </div>
+                                    <div class="col-12 d-flex gap-2">
+                                        <button class="btn btn-sm btn-primary" onclick="loadFilingFiles()"><i class="bi bi-search"></i> اعمال فیلتر</button>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="clearAdvancedFilters()">پاک کردن</button>
+                                    </div>
                                 </div>
                             </div>
                             <div id="filing-bulk-bar" class="leads-bulk-bar d-none">
@@ -1940,6 +1995,40 @@
 </div>
 
 <!-- Matching results modal -->
+<div class="modal fade" id="shareModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-share"></i> اشتراک‌گذاری با مشتری</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-success py-2 px-3" style="font-size:.8rem">
+                    <i class="bi bi-shield-check"></i>
+                    <span id="share-removed"></span>
+                </div>
+                <textarea id="share-text" class="form-control" rows="12" dir="rtl" style="font-size:.85rem"></textarea>
+                <div id="share-images" class="lead-photo-strip mt-2"></div>
+            </div>
+            <div class="modal-footer flex-wrap gap-2">
+                <button type="button" class="btn btn-outline-secondary" onclick="copyShareText()">
+                    <i class="bi bi-clipboard"></i> کپی متن
+                </button>
+                <a id="share-whatsapp" class="btn btn-outline-success" target="_blank" rel="noopener">
+                    <i class="bi bi-whatsapp"></i> واتس‌اپ
+                </a>
+                <a id="share-telegram" class="btn btn-outline-info" target="_blank" rel="noopener">
+                    <i class="bi bi-telegram"></i> تلگرام
+                </a>
+                <button type="button" class="btn btn-outline-primary" onclick="shareViaSms()">
+                    <i class="bi bi-chat-dots"></i> پیامک
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">بستن</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ═══ کمد / زونکن ═══ -->
 <div class="modal fade" id="cabinetModal" tabindex="-1">
     <div class="modal-dialog">
@@ -2494,6 +2583,6 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260730c"></script>
+<script src="js/app.js?v=20260730f"></script>
 </body>
 </html>

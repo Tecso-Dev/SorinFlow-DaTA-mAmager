@@ -25,7 +25,9 @@ from app.services.sms_service import send_sms
 from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
 from app.services.dpa_service import record_activity, record_lead_status
 from app.services.excel_export import xlsx_response, fa_date
-from app.services.match_service import similar_to_property, matches_for_customer, customer_intent
+from app.services.match_service import (
+    similar_to_property, matches_for_customer, customer_intent, customers_for_property,
+)
 from app.models.user import User
 
 router = APIRouter()
@@ -2028,3 +2030,24 @@ async def send_event_sms(
         detail = failed[0].get("error") if failed else ""
         raise HTTPException(status_code=502, detail=f"ارسال پیامک ناموفق بود: {detail}")
     return {"success": True, "sent": sent, "failed": failed}
+
+
+@router.get("/match/property/{property_id}/customers")
+async def match_customers_for_property(
+    property_id: int,
+    limit: int = Query(12, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """«متقاضیان هم‌خوان» — who was looking for a file like this one.
+
+    The inverse of /match/customer/{id}: a new file arrives and the question
+    is who to ring, not what to show.
+    """
+    prop = (await db.execute(
+        select(Property).where(Property.id == property_id))).scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=404, detail="ملک یافت نشد")
+    items = await customers_for_property(db, prop, limit=limit)
+    return {"items": items, "total": len(items),
+            "source": {"id": prop.id, "title": prop.title, "serial_no": prop.serial_no}}

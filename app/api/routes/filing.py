@@ -234,6 +234,19 @@ async def list_files(
     archived: bool = False,
     search: Optional[str] = None,
     tag: Optional[str] = None,
+    # ── جستجوی پیشرفته: the variables a consultant actually asks about ──
+    price_min: Optional[int] = None,
+    price_max: Optional[int] = None,
+    area_min: Optional[int] = None,
+    area_max: Optional[int] = None,
+    rooms_min: Optional[int] = None,
+    district: Optional[str] = None,
+    property_type: Optional[str] = None,
+    listing_type: Optional[str] = None,
+    has_elevator: Optional[bool] = None,
+    has_parking: Optional[bool] = None,
+    has_storage: Optional[bool] = None,
+    pinned: Optional[bool] = None,
     limit: int = Query(60, ge=1, le=300),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -251,6 +264,39 @@ async def list_files(
 
     if tag:
         q = q.where(Property.tags.ilike(f"%{tag}%"))
+
+    # A rent listing's headline number is its deposit, a sale's is the total,
+    # so the price band has to be applied against whichever one applies.
+    headline = func.coalesce(
+        Property.total_price, Property.price, Property.deposit, Property.rent_price)
+    if price_min is not None:
+        q = q.where(headline >= price_min)
+    if price_max is not None:
+        q = q.where(headline <= price_max)
+    if area_min is not None:
+        q = q.where(Property.area >= area_min)
+    if area_max is not None:
+        q = q.where(Property.area <= area_max)
+    if rooms_min is not None:
+        q = q.where(Property.rooms >= rooms_min)
+    if district:
+        like = f"%{district.strip()}%"
+        q = q.where(or_(Property.district.ilike(like),
+                        Property.neighborhood.ilike(like),
+                        Property.address.ilike(like)))
+    if property_type:
+        like = f"%{property_type.strip()}%"
+        q = q.where(or_(Property.property_type.ilike(like),
+                        Property.category_name.ilike(like),
+                        Property.title.ilike(like)))
+    if listing_type:
+        q = q.where(Property.listing_type == listing_type)
+    for flag, column in ((has_elevator, Property.has_elevator),
+                         (has_parking, Property.has_parking),
+                         (has_storage, Property.has_storage),
+                         (pinned, Property.is_pinned)):
+        if flag:                       # only ever a positive filter
+            q = q.where(column == True)   # noqa: E712
     if search:
         raw = search.strip()
         term = f"%{raw}%"
@@ -367,3 +413,86 @@ async def filing_overview(
         "archived": await count(Property.is_archived == True),                                # noqa: E712
         "private": await count(Property.is_private == True),                                  # noqa: E712
     }
+
+
+# ── اشتراک‌گذاری با مشتری ───────────────────────────────────────────────
+
+# Never leaves the office: the owner's identity is the consultant's asset,
+# and a shared card that carries it cuts them out of their own deal.
+_SHARE_STRIPPED = ("phone_number", "seller_name", "owner_phone", "url", "address")
+
+
+def _fa_price(n: Optional[int]) -> str:
+    if not n:
+        return "توافقی"
+    if n >= 1_000_000_000:
+        v = n / 1_000_000_000
+        return (f"{v:.3f}".rstrip("0").rstrip(".")) + " میلیارد تومان"
+    if n >= 1_000_000:
+        return f"{round(n / 1_000_000)} میلیون تومان"
+    return f"{n:,} تومان"
+
+
+def build_share_card(p: Property, include_area: bool = True) -> dict:
+    """A presentable card for the customer, with the confidential bits gone.
+
+    Address is reduced to district/neighbourhood — enough to judge the
+    location, not enough to knock on the door and skip the agency.
+    """
+    lines = [p.title or "ملک"]
+    spec = []
+    if p.area:
+        spec.append(f"متراژ {p.area} متر")
+    if p.rooms is not None:
+        spec.append(f"{p.rooms} خواب")
+    if p.year_built:
+        spec.append(f"ساخت {p.year_built}")
+    if p.floor is not None:
+        spec.append(f"طبقه {p.floor}")
+    if spec:
+        lines.append(" • ".join(spec))
+
+    where = " ، ".join(filter(None, [p.city_name, p.district, p.neighborhood]))
+    if where:
+        lines.append(f"موقعیت: {where}")
+
+    if p.listing_type == "rent":
+        lines.append(f"ودیعه: {_fa_price(p.deposit)}")
+        lines.append(f"اجاره ماهانه: {_fa_price(p.rent_price)}")
+    else:
+        lines.append(f"قیمت: {_fa_price(p.total_price or p.price)}")
+        if p.price_per_meter:
+            lines.append(f"هر متر: {_fa_price(p.price_per_meter)}")
+
+    amen = [fa for attr, fa in (("has_elevator", "آسانسور"), ("has_parking", "پارکینگ"),
+                                ("has_storage", "انباری"), ("has_balcony", "بالکن"))
+            if getattr(p, attr, False)]
+    if amen:
+        lines.append("امکانات: " + " ، ".join(amen))
+    for label, value in (("سند", p.document_type), ("جهت", p.building_direction),
+                         ("نبش", p.corner_type)):
+        if value:
+            lines.append(f"{label}: {value}")
+
+    lines.append(f"کد ملک: {p.serial_no}")
+    lines.append("املاک سورین")
+    return {
+        "text": "\n".join(lines),
+        "serial_no": p.serial_no,
+        "images": (p.images or [])[:6],
+        "removed": [f for f in _SHARE_STRIPPED if getattr(p, f, None)],
+    }
+
+
+@router.get("/files/{property_id}/share")
+async def share_file(
+    property_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The customer-safe version of a file, ready to paste into a chat."""
+    prop = (await db.execute(
+        select(Property).where(Property.id == property_id))).scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=404, detail="فایل یافت نشد")
+    return build_share_card(prop)

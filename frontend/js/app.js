@@ -3753,6 +3753,8 @@ async function convertLeadToDeal(leadId) {
 
 // ═══ تطابق‌سازی — similar properties & customer suggestions ═══════
 function _matchCard(m) {
+    // the reverse direction returns people, not listings
+    if (m.full_name !== undefined) return _customerMatchCard(m);
     const price = m.price ? formatPrice(m.price) : '—';
     const reasons = (m.reasons || []).slice(0, 3)
         .map(r => `<span class="match-tag">${esc(r)}</span>`).join('');
@@ -6108,9 +6110,11 @@ async function loadFilingFiles() {
 
     let url = `/filing/files?limit=60&archived=${_filingArchived}`;
     if (_activeBinder) url += `&binder_id=${_activeBinder.id}`;
-    else if (!search && !tag) url += '&unfiled=true';
+    else if (!search && !tag && !_advancedFilterParams().length) url += '&unfiled=true';
     if (search) url += `&search=${encodeURIComponent(search)}`;
     if (tag) url += `&tag=${encodeURIComponent(tag)}`;
+    const advanced = _advancedFilterParams();
+    if (advanced.length) url += '&' + advanced.join('&');
 
     document.getElementById('filing-files-title').textContent = _filingArchived
         ? 'فایل‌های بایگانی‌شده'
@@ -6158,7 +6162,9 @@ function _fileCard(f) {
             <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${f.id})" title="جزئیات"><i class="bi bi-eye"></i></button>
             <button class="btn btn-sm btn-outline-info" onclick="quickFileAction(${f.id}, '${f.is_pinned ? 'unpin' : 'pin'}')" title="سنجاق"><i class="bi bi-pin-angle"></i></button>
             <button class="btn btn-sm btn-outline-warning" onclick="quickFileAction(${f.id}, '${f.is_archived ? 'unarchive' : 'archive'}')" title="بایگانی"><i class="bi bi-archive"></i></button>
-            <button class="btn btn-sm btn-outline-success" onclick="showSimilarForProperty(${f.id})" title="مشابه"><i class="bi bi-diagram-3"></i></button>
+            <button class="btn btn-sm btn-outline-success" onclick="showSimilarForProperty(${f.id})" title="ملک‌های مشابه"><i class="bi bi-diagram-3"></i></button>
+            <button class="btn btn-sm btn-outline-warning" onclick="showCustomersForProperty(${f.id})" title="متقاضیان هم‌خوان"><i class="bi bi-person-check"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="shareFile(${f.id})" title="اشتراک‌گذاری با مشتری"><i class="bi bi-share"></i></button>
         </div>
     </div>`;
 }
@@ -6297,4 +6303,132 @@ async function deleteBinder() {
         if (_activeBinder?.id === _binderEditId) _activeBinder = null;
         loadFiling();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// ── جستجوی پیشرفته ─────────────────────────────────────────────────
+function toggleAdvancedFilters() {
+    document.getElementById('filing-advanced')?.classList.toggle('d-none');
+}
+
+/** Only the boxes that were actually filled become query parameters. */
+function _advancedFilterParams() {
+    const v = id => document.getElementById(id)?.value.trim() || '';
+    const on = id => !!document.getElementById(id)?.checked;
+    const parts = [];
+    // _intOrNull takes the element id, not its value — it reads the field
+    // itself so it can strip the «/» separators the money inputs add
+    const money = id => { const n = _intOrNull(id); return n != null ? n : ''; };
+    const pairs = [
+        ['price_min', money('ff-price-min')], ['price_max', money('ff-price-max')],
+        ['area_min', v('ff-area-min')], ['area_max', v('ff-area-max')],
+        ['rooms_min', v('ff-rooms-min')], ['district', v('ff-district')],
+        ['property_type', v('ff-type')], ['listing_type', v('ff-listing')],
+    ];
+    for (const [k, val] of pairs) if (val !== '' && val != null) parts.push(`${k}=${encodeURIComponent(val)}`);
+    for (const [k, id] of [['has_elevator','ff-elevator'], ['has_parking','ff-parking'], ['has_storage','ff-storage']])
+        if (on(id)) parts.push(`${k}=true`);
+
+    const badge = document.getElementById('filing-filter-count');
+    if (badge) {
+        badge.textContent = formatNumber(parts.length);
+        badge.classList.toggle('d-none', parts.length === 0);
+    }
+    return parts;
+}
+
+function clearAdvancedFilters() {
+    ['ff-price-min','ff-price-max','ff-area-min','ff-area-max','ff-rooms-min','ff-district','ff-type']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    const l = document.getElementById('ff-listing'); if (l) l.value = '';
+    ['ff-elevator','ff-parking','ff-storage']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.checked = false; });
+    loadFilingFiles();
+}
+
+// ── اشتراک‌گذاری امن ────────────────────────────────────────────────
+let _shareText = '';
+
+async function shareFile(propertyId) {
+    try {
+        const card = await apiCall(`/filing/files/${propertyId}/share`);
+        _shareText = card.text || '';
+        document.getElementById('share-text').value = _shareText;
+
+        const FA = { phone_number: 'شماره مالک', seller_name: 'نام مالک',
+                     owner_phone: 'شماره ثبت‌کننده', url: 'لینک آگهی', address: 'آدرس دقیق' };
+        const removed = (card.removed || []).map(k => FA[k] || k);
+        document.getElementById('share-removed').textContent = removed.length
+            ? `از این متن حذف شد: ${removed.join('، ')} — مشتری نمی‌تواند مستقیم با مالک تماس بگیرد.`
+            : 'اطلاعات محرمانه‌ای برای حذف در این فایل نبود.';
+
+        const strip = document.getElementById('share-images');
+        strip.innerHTML = (card.images || []).map(src =>
+            `<div class="lead-photo-thumb" style="width:80px;height:80px;cursor:zoom-in">
+                <img src="${src}" alt="تصویر" onclick="openImageLightbox(this.src)"></div>`).join('');
+
+        const enc = encodeURIComponent(_shareText);
+        document.getElementById('share-whatsapp').href = `https://wa.me/?text=${enc}`;
+        document.getElementById('share-telegram').href = `https://t.me/share/url?url=&text=${enc}`;
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('shareModal')).show();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function copyShareText() {
+    const text = document.getElementById('share-text')?.value || _shareText;
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast('کپی شد', 'متن آمادهٔ ارسال است', 'success');
+    } catch (e) {
+        // clipboard is blocked outside https — fall back to selecting it
+        document.getElementById('share-text')?.select();
+        showToast('انتخاب شد', 'با Ctrl+C کپی کنید', 'info');
+    }
+}
+
+async function shareViaSms() {
+    const to = prompt('شمارهٔ مشتری برای ارسال پیامک:');
+    if (!to || !to.trim()) return;
+    const message = document.getElementById('share-text')?.value || _shareText;
+    try {
+        await apiCall('/crm/sms/send', {
+            method: 'POST', body: JSON.stringify({ to_number: to.trim(), message })
+        });
+        showToast('موفق', 'پیامک ارسال شد', 'success');
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+/** «متقاضیان هم‌خوان» — who was already looking for a file like this. */
+function showCustomersForProperty(propertyId) {
+    _openMatchModal('<i class="bi bi-person-check"></i> متقاضیان هم‌خوان',
+        `/crm/match/property/${propertyId}/customers?limit=12`,
+        'مشتری‌ای با این مشخصات دنبال ملک نبوده است.');
+}
+
+/** A matched customer, rendered in the same modal as matched listings. */
+function _customerMatchCard(m) {
+    const reasons = (m.reasons || []).slice(0, 3)
+        .map(r => `<span class="match-tag">${esc(r)}</span>`).join('');
+    const scoreCls = m.score >= 75 ? 'high' : m.score >= 50 ? 'mid' : 'low';
+    const temp = { hot: ['داغ', 'bg-danger'], warm: ['گرم', 'bg-warning text-dark'],
+                   cold: ['سرد', 'bg-secondary'] }[m.temperature] || ['', ''];
+    const phone = m.mobile1 || m.mobile2;
+    return `
+    <div class="match-card">
+        <div class="match-score ${scoreCls}">${formatNumber(m.score)}<small>٪</small></div>
+        <div class="match-body">
+            <div class="match-title">${esc(m.full_name)}
+                ${temp[0] ? `<span class="badge ${temp[1]}">${temp[0]}</span>` : ''}</div>
+            <div class="match-meta">
+                ${m.desired_district ? esc(m.desired_district) : ''}
+                ${m.desired_specs ? ' · ' + esc(m.desired_specs) : ''}
+                ${m.consultant_name ? ' · مشاور: ' + esc(m.consultant_name) : ''}
+            </div>
+            <div class="match-tags">${reasons}</div>
+        </div>
+        <div class="match-side">
+            <div class="match-price">${m.budget_max ? formatPrice(m.budget_max) : '—'}</div>
+            ${phone ? `<a href="tel:${esc(phone)}" class="btn btn-sm btn-outline-success">
+                <i class="bi bi-telephone"></i> ${esc(phone)}</a>` : ''}
+        </div>
+    </div>`;
 }

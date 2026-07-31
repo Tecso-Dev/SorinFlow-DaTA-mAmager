@@ -439,3 +439,39 @@ async def matches_for_customer(db: AsyncSession, customer, limit: int = 12,
             if r["id"] in reasons and reasons[r["id"]]:
                 r["ai_reason"] = reasons[r["id"]]
     return results
+
+
+async def customers_for_property(db: AsyncSession, prop: Property, limit: int = 12,
+                                 use_llm: bool = True) -> List[Dict[str, Any]]:
+    """The other direction: which of our customers were looking for this?
+
+    A new file arrives and the question is who to ring, not what to show —
+    so this scores the file against every customer's criteria and returns
+    the people, ranked.
+    """
+    from app.models.crm_models import Customer
+
+    customers = (await db.execute(
+        select(Customer).order_by(Customer.id.desc()).limit(CANDIDATE_POOL))).scalars().all()
+
+    scored = []
+    for c in customers:
+        if not customer_wants(c, prop):
+            continue
+        s = score_for_customer(c, prop)
+        if s["score"] > 0:
+            scored.append((s["score"], s["reasons"], c))
+    scored.sort(key=lambda t: t[0], reverse=True)
+
+    results = []
+    for score, reasons, c in scored[:limit]:
+        results.append({
+            "id": c.id, "full_name": c.full_name,
+            "mobile1": c.mobile1, "mobile2": c.mobile2,
+            "temperature": c.temperature, "consultant_name": c.consultant_name,
+            "budget_max": c.budget_max,
+            "desired_district": c.desired_district,
+            "desired_specs": c.desired_specs,
+            "score": score, "reasons": reasons,
+        })
+    return results
