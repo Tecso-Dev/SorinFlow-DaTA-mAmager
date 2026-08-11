@@ -6,6 +6,7 @@ files, and a file is a Property row. Nothing here duplicates property data —
 it only says where a file lives and how it is marked (سنجاق / بایگانی /
 شخصی / برچسب).
 """
+import re
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,7 +14,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth.dependencies import get_current_user, get_current_user_optional
+from app.auth.dependencies import get_current_user
 from app.database import get_db
 from app.models.crm_models import Binder, Cabinet
 from app.models.property import Property
@@ -24,17 +25,80 @@ router = APIRouter()
 VALID_KINDS = set(Binder.KINDS)
 VALID_DEALS = set(Binder.DEAL_TYPES)
 
+# ── برچسب ───────────────────────────────────────────────────────────────
+# Tags live in one VARCHAR(500) column. A consultant typing on a Persian
+# keyboard produces «،», the API contract says «,», and both used to be in
+# play — one writing separator and one reading separator, which merged every
+# tag into one and made untagging a no-op. So: read every separator, write
+# exactly one.
+TAG_SEP = "، "
+_TAG_SPLIT = re.compile(r"[,،؛;]")
+TAGS_MAX = 500          # Property.tags column width
+
+
+def split_tags(blob: Optional[str]) -> List[str]:
+    """Every tag in the column, in order, without repeats."""
+    out: List[str] = []
+    for part in _TAG_SPLIT.split(blob or ""):
+        name = part.strip()
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def join_tags(names: List[str]) -> Optional[str]:
+    """Back into the column, never past the width it can hold."""
+    kept: List[str] = []
+    for name in names:
+        if len(TAG_SEP.join(kept + [name])) > TAGS_MAX:
+            break
+        kept.append(name)
+    return TAG_SEP.join(kept) or None
+
 
 def _actor(user) -> Optional[str]:
     return getattr(user, "full_name", None) or getattr(user, "username", None)
 
 
+def _is_super(user) -> bool:
+    return getattr(user, "role", None) == "super_admin"
+
+
 def _visible_to(query, user):
     """Private files belong to whoever filed them (and to a super_admin)."""
-    if getattr(user, "role", None) == "super_admin":
+    if _is_super(user):
         return query
-    return query.where(or_(Property.is_private == False,          # noqa: E712
-                           Property.created_by == _actor(user)))
+    actor = _actor(user)
+    if not actor:
+        # No name to match on — «شخصی» must mean hidden, not "matches NULL"
+        return query.where(Property.is_private == False)     # noqa: E712
+    return query.where(or_(Property.is_private == False,      # noqa: E712
+                           Property.created_by == actor))
+
+
+def require_filing_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Guards the two destructive structural calls.
+
+    Deleting a cabinet or a binder unfiles every file behind it, so unlike the
+    single-record deletes elsewhere in the CRM it is an admin's call. Phrased
+    in Persian because that is the only language this panel speaks.
+    """
+    if current_user.role not in ("admin", "super_admin"):
+        raise HTTPException(
+            status_code=403,
+            detail="حذف کمد و زونکن فقط با دسترسی مدیر انجام می‌شود")
+    return current_user
+
+
+def _cabinets_visible_to(query, user):
+    """A کمد شخصی belongs to whoever made it; a cabinet with no owner is
+    the agency's and everyone sees it."""
+    if _is_super(user):
+        return query
+    actor = _actor(user)
+    if not actor:
+        return query.where(Cabinet.owner.is_(None))
+    return query.where(or_(Cabinet.owner.is_(None), Cabinet.owner == actor))
 
 
 # ── cabinets ────────────────────────────────────────────────────────────
@@ -42,11 +106,13 @@ def _visible_to(query, user):
 @router.get("/cabinets")
 async def list_cabinets(
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
-    """Every cabinet with its binders and a live file count per binder."""
+    """Every cabinet the caller may see, with its binders and a live file
+    count per binder."""
     cabinets = (await db.execute(
-        select(Cabinet).options(selectinload(Cabinet.binders))
+        _cabinets_visible_to(
+            select(Cabinet).options(selectinload(Cabinet.binders)), current_user)
         .order_by(Cabinet.sort_order, Cabinet.id)
     )).scalars().all()
 
@@ -70,7 +136,7 @@ async def list_cabinets(
 async def create_cabinet(
     data: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     name = (data.get("name") or "").strip()
     if not name:
@@ -90,17 +156,26 @@ async def create_cabinet(
 
 
 @router.patch("/cabinets/{cabinet_id}")
-async def update_cabinet(cabinet_id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    cabinet = (await db.execute(
-        select(Cabinet).where(Cabinet.id == cabinet_id))).scalar_one_or_none()
+async def update_cabinet(
+    cabinet_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cabinet = (await db.execute(_cabinets_visible_to(
+        select(Cabinet).where(Cabinet.id == cabinet_id), current_user))).scalar_one_or_none()
     if not cabinet:
         raise HTTPException(status_code=404, detail="کمد یافت نشد")
     if "name" in data and (data["name"] or "").strip():
         cabinet.name = data["name"].strip()[:120]
-    for field in ("color", "icon"):
-        if data.get(field):
-            cabinet.color = data[field] if field == "color" else cabinet.color
-            cabinet.icon = data[field] if field == "icon" else cabinet.icon
+    if data.get("color"):
+        cabinet.color = data["color"]
+    if data.get("icon"):
+        cabinet.icon = data["icon"]
+    if "personal" in data:
+        # turning it personal stamps the maker, otherwise the cabinet would
+        # be one nobody at all could open
+        cabinet.owner = (cabinet.owner or _actor(current_user)) if data["personal"] else None
     if "sort_order" in data:
         try:
             cabinet.sort_order = int(data["sort_order"])
@@ -112,12 +187,20 @@ async def update_cabinet(cabinet_id: int, data: dict, db: AsyncSession = Depends
 
 
 @router.delete("/cabinets/{cabinet_id}")
-async def delete_cabinet(cabinet_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_cabinet(
+    cabinet_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_filing_admin),
+):
     """Deleting a cabinet deletes its binders; the files inside are only
-    unfiled, never destroyed."""
-    cabinet = (await db.execute(
+    unfiled, never destroyed.
+
+    Admin-only: unlike a single record, this cascades through every binder on
+    the shelf and unfiles the whole agency's paperwork behind it.
+    """
+    cabinet = (await db.execute(_cabinets_visible_to(
         select(Cabinet).options(selectinload(Cabinet.binders))
-        .where(Cabinet.id == cabinet_id))).scalar_one_or_none()
+        .where(Cabinet.id == cabinet_id), current_user))).scalar_one_or_none()
     if not cabinet:
         raise HTTPException(status_code=404, detail="کمد یافت نشد")
     binder_ids = [b.id for b in cabinet.binders]
@@ -136,13 +219,17 @@ async def delete_cabinet(cabinet_id: int, db: AsyncSession = Depends(get_db)):
 # ── binders ─────────────────────────────────────────────────────────────
 
 @router.post("/binders")
-async def create_binder(data: dict, db: AsyncSession = Depends(get_db)):
+async def create_binder(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     name = (data.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="نام زونکن الزامی است")
     cabinet_id = data.get("cabinet_id")
-    cabinet = (await db.execute(
-        select(Cabinet).where(Cabinet.id == cabinet_id))).scalar_one_or_none()
+    cabinet = (await db.execute(_cabinets_visible_to(
+        select(Cabinet).where(Cabinet.id == cabinet_id), current_user))).scalar_one_or_none()
     if not cabinet:
         raise HTTPException(status_code=400, detail="کمد نامعتبر است")
 
@@ -164,9 +251,15 @@ async def create_binder(data: dict, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/binders/{binder_id}")
-async def update_binder(binder_id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    binder = (await db.execute(
-        select(Binder).where(Binder.id == binder_id))).scalar_one_or_none()
+async def update_binder(
+    binder_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    binder = (await db.execute(_cabinets_visible_to(
+        select(Binder).join(Cabinet, Binder.cabinet_id == Cabinet.id)
+        .where(Binder.id == binder_id), current_user))).scalar_one_or_none()
     if not binder:
         raise HTTPException(status_code=404, detail="زونکن یافت نشد")
     if "name" in data and (data["name"] or "").strip():
@@ -180,8 +273,9 @@ async def update_binder(binder_id: int, data: dict, db: AsyncSession = Depends(g
     if "description" in data:
         binder.description = (data["description"] or "")[:300] or None
     if "cabinet_id" in data and data["cabinet_id"]:
-        moved = (await db.execute(
-            select(Cabinet).where(Cabinet.id == data["cabinet_id"]))).scalar_one_or_none()
+        moved = (await db.execute(_cabinets_visible_to(
+            select(Cabinet).where(Cabinet.id == data["cabinet_id"]),
+            current_user))).scalar_one_or_none()
         if not moved:
             raise HTTPException(status_code=400, detail="کمد مقصد یافت نشد")
         binder.cabinet_id = moved.id
@@ -191,9 +285,16 @@ async def update_binder(binder_id: int, data: dict, db: AsyncSession = Depends(g
 
 
 @router.delete("/binders/{binder_id}")
-async def delete_binder(binder_id: int, db: AsyncSession = Depends(get_db)):
-    binder = (await db.execute(
-        select(Binder).where(Binder.id == binder_id))).scalar_one_or_none()
+async def delete_binder(
+    binder_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_filing_admin),
+):
+    """Admin-only, like deleting a cabinet: one click unfiles every file on
+    the binder behind it."""
+    binder = (await db.execute(_cabinets_visible_to(
+        select(Binder).join(Cabinet, Binder.cabinet_id == Cabinet.id)
+        .where(Binder.id == binder_id), current_user))).scalar_one_or_none()
     if not binder:
         raise HTTPException(status_code=404, detail="زونکن یافت نشد")
     props = (await db.execute(
@@ -222,7 +323,7 @@ def _file_brief(p: Property) -> dict:
         "is_pinned": bool(p.is_pinned), "is_archived": bool(p.is_archived),
         "is_private": bool(p.is_private), "is_draft": bool(p.is_draft),
         "created_by": p.created_by,
-        "tags": [t.strip() for t in (p.tags or "").split(",") if t.strip()],
+        "tags": split_tags(p.tags),
         "scraped_at": p.scraped_at.isoformat() if p.scraped_at else None,
     }
 
@@ -250,7 +351,7 @@ async def list_files(
     limit: int = Query(60, ge=1, le=300),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     """Files in a binder — pinned first, then newest."""
     q = select(Property).where(Property.is_active == True)   # noqa: E712
@@ -318,27 +419,36 @@ async def list_files(
 async def bulk_file_action(
     data: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     """Move / pin / archive / mark private / tag a selection of files.
 
     body: {"ids":[…], "action":"move|pin|unpin|archive|unarchive|private|
-                                public|tag|untag|copy", "binder_id":…, "tags":"…"}
+                                public|draft|undraft|tag|untag",
+           "binder_id":…, "tags":"…"}
+
+    The selection is passed through the same visibility gate as every read,
+    so one consultant cannot reach into another's «فایل شخصی» by id — ids run
+    in sequence, which made guessing them trivial. Files that were filtered
+    out come back as `skipped` rather than failing the whole call.
     """
     ids = [int(i) for i in (data.get("ids") or []) if str(i).isdigit()][:500]
     action = data.get("action")
     if not ids:
         raise HTTPException(status_code=400, detail="هیچ فایلی انتخاب نشده است")
 
-    props = (await db.execute(select(Property).where(Property.id.in_(ids)))).scalars().all()
+    props = (await db.execute(_visible_to(
+        select(Property).where(Property.id.in_(ids)), current_user))).scalars().all()
     if not props:
         raise HTTPException(status_code=404, detail="فایلی یافت نشد")
+    skipped = len(set(ids)) - len(props)
 
     if action == "move":
         binder_id = data.get("binder_id")
         if binder_id:
-            exists = (await db.execute(
-                select(Binder.id).where(Binder.id == binder_id))).scalar_one_or_none()
+            exists = (await db.execute(_cabinets_visible_to(
+                select(Binder.id).join(Cabinet, Binder.cabinet_id == Cabinet.id)
+                .where(Binder.id == binder_id), current_user))).scalar_one_or_none()
             if not exists:
                 raise HTTPException(status_code=400, detail="زونکن مقصد یافت نشد")
         for p in props:
@@ -355,28 +465,31 @@ async def bulk_file_action(
             if action == "private" and not p.created_by:
                 # otherwise nobody but a super_admin could ever see it again
                 p.created_by = _actor(current_user)
+    elif action in ("draft", "undraft"):
+        for p in props:
+            p.is_draft = action == "draft"
     elif action in ("tag", "untag"):
-        wanted = [t.strip() for t in (data.get("tags") or "").split(",") if t.strip()]
+        wanted = split_tags(data.get("tags"))
         if not wanted:
             raise HTTPException(status_code=400, detail="برچسبی وارد نشده است")
         for p in props:
-            current = [t.strip() for t in (p.tags or "").split(",") if t.strip()]
+            current = split_tags(p.tags)
             if action == "tag":
                 current += [t for t in wanted if t not in current]
             else:
                 current = [t for t in current if t not in wanted]
-            p.tags = "، ".join(current) or None
+            p.tags = join_tags(current)
     else:
         raise HTTPException(status_code=400, detail="عملیات نامعتبر است")
 
     await db.commit()
-    return {"success": True, "updated": len(props), "action": action}
+    return {"success": True, "updated": len(props), "skipped": skipped, "action": action}
 
 
 @router.get("/tags")
 async def list_tags(
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     """Every tag in use, with how many files carry it — powers the tag filter."""
     rows = (await db.execute(
@@ -385,11 +498,8 @@ async def list_tags(
                     current_user))).scalars().all()
     counts: dict = {}
     for blob in rows:
-        for t in (blob or "").split("،"):
-            for part in t.split(","):
-                name = part.strip()
-                if name:
-                    counts[name] = counts.get(name, 0) + 1
+        for name in split_tags(blob):
+            counts[name] = counts.get(name, 0) + 1
     items = sorted(({"name": k, "count": v} for k, v in counts.items()),
                    key=lambda x: (-x["count"], x["name"]))
     return {"items": items, "total": len(items)}
@@ -398,7 +508,7 @@ async def list_tags(
 @router.get("/overview")
 async def filing_overview(
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     """Counts for the header strip: filed, unfiled, pinned, archived, private."""
     async def count(*where):
@@ -430,7 +540,8 @@ def _fa_price(n: Optional[int]) -> str:
         return (f"{v:.3f}".rstrip("0").rstrip(".")) + " میلیارد تومان"
     if n >= 1_000_000:
         return f"{round(n / 1_000_000)} میلیون تومان"
-    return f"{n:,} تومان"
+    # «/» is the thousands separator this panel uses everywhere for money
+    return f"{n:,}".replace(",", "/") + " تومان"
 
 
 def build_share_card(p: Property, include_area: bool = True) -> dict:
@@ -491,8 +602,8 @@ async def share_file(
     current_user: User = Depends(get_current_user),
 ):
     """The customer-safe version of a file, ready to paste into a chat."""
-    prop = (await db.execute(
-        select(Property).where(Property.id == property_id))).scalar_one_or_none()
+    prop = (await db.execute(_visible_to(
+        select(Property).where(Property.id == property_id), current_user))).scalar_one_or_none()
     if not prop:
         raise HTTPException(status_code=404, detail="فایل یافت نشد")
     return build_share_card(prop)

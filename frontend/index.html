@@ -895,7 +895,7 @@
                         <div class="card">
                             <div class="card-header d-flex flex-wrap gap-2 align-items-center">
                                 <i class="bi bi-folder2-open"></i>
-                                <span id="filing-files-title">فایل‌های بایگانی‌نشده</span>
+                                <span id="filing-files-title">فایل‌های بدون زونکن</span>
                                 <span class="badge bg-secondary" id="filing-files-count">۰</span>
                                 <div class="ms-auto d-flex flex-wrap gap-2">
                                     <input type="text" id="filing-search" class="form-control form-control-sm"
@@ -971,19 +971,32 @@
                             </div>
                             <div id="filing-bulk-bar" class="leads-bulk-bar d-none">
                                 <span><i class="bi bi-check2-square"></i> <b id="filing-bulk-count">۰</b> فایل انتخاب شده</span>
-                                <select class="form-select form-select-sm" style="width:200px"
+                                <select id="filing-move-select" class="form-select form-select-sm" style="width:200px"
                                         onchange="bulkMoveFiles(this.value); this.value='';">
                                     <option value="">انتقال به زونکن...</option>
                                 </select>
                                 <button class="btn btn-sm btn-outline-info" onclick="bulkFileAction('pin')"><i class="bi bi-pin-angle"></i> سنجاق</button>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="bulkFileAction('unpin')">لغو سنجاق</button>
+                                <button class="btn btn-sm btn-outline-primary" onclick="bulkFileAction('tag')"><i class="bi bi-tag"></i> برچسب</button>
                                 <button class="btn btn-sm btn-outline-warning" onclick="bulkFileAction('archive')"><i class="bi bi-archive"></i> بایگانی</button>
-                                <button class="btn btn-sm btn-outline-primary" onclick="bulkTagFiles()"><i class="bi bi-tag"></i> برچسب</button>
-                                <button class="btn btn-sm btn-outline-danger" onclick="bulkFileAction('private')"><i class="bi bi-lock"></i> شخصی</button>
+                                <select class="form-select form-select-sm" style="width:200px"
+                                        onchange="bulkFileAction(this.value); this.value='';">
+                                    <option value="">علامت‌های دیگر...</option>
+                                    <option value="unpin">لغو سنجاق</option>
+                                    <option value="unarchive">خارج کردن از بایگانی</option>
+                                    <option value="untag">برداشتن برچسب</option>
+                                    <option value="private">شخصی کردن</option>
+                                    <option value="public">عمومی کردن</option>
+                                    <option value="draft">پیش‌نویس</option>
+                                    <option value="undraft">لغو پیش‌نویس</option>
+                                </select>
                                 <button class="btn btn-sm btn-outline-secondary" onclick="clearFileSelection()">لغو انتخاب</button>
                             </div>
                             <div class="card-body">
                                 <div id="filing-files" class="filing-files"></div>
+                                <div class="text-center mt-3">
+                                    <button id="filing-load-more" class="btn btn-sm btn-outline-primary d-none"
+                                            onclick="loadMoreFilingFiles()"></button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2046,6 +2059,18 @@
                     <div class="col-12">
                         <label class="form-label">رنگ</label>
                         <div id="cab-colors" class="filing-palette"></div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">نشان کمد</label>
+                        <div id="cab-icons" class="filing-palette"></div>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="cab-personal">
+                            <label class="form-check-label" for="cab-personal">
+                                کمد شخصی — فقط خودم و مدیر ارشد این کمد را می‌بینیم
+                            </label>
+                        </div>
                     </div>
                 </div>
             </div>
