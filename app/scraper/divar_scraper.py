@@ -28,6 +28,7 @@ from app.scraper.parsers import (
     extract_property_details as _parse_property_details,
     extract_price_info as _parse_price_info,
     detect_corner_type as _detect_corner,
+    infer_advertiser_type as _infer_advertiser,
 )
 
 settings = get_settings()
@@ -1990,9 +1991,20 @@ class DivarScraper:
             return None
     
     async def _extract_advertiser_type(self) -> Optional[str]:
-        """Detect whether the seller is personal (شخصی) or an agency (مشاور)."""
+        """Detect whether the seller is personal (شخصی) or an agency (مشاور).
+
+        Divar's own row is the first source, but it is missing on a lot of ads
+        and agencies routinely post under «شخصی». So the same DOM read also
+        hands back the text it looked at, and looks_like_agency() decides in
+        Python — the keyword list lives there, where it can be tested, instead
+        of being duplicated inside this page script.
+        """
         try:
             result = await self.page.evaluate("""() => {
+                const clean = s => (s || '').replace(/\\s+/g, ' ').trim().slice(0, 300);
+                let claimed = null;
+                const seen = [];
+
                 // Check dedicated advertiser-type rows first
                 const rows = document.querySelectorAll('.kt-base-row, .kt-unexpandable-row');
                 for (const row of rows) {
@@ -2000,28 +2012,40 @@ class DivarScraper:
                     const value = row.querySelector('[class*="__value"], [class*="__end"]');
                     if (!title) continue;
                     const tt = title.innerText || '';
+                    // the claim can come from any type-ish row
                     if (tt.includes('آگهی') || tt.includes('فروشنده') || tt.includes('نوع')) {
-                        const vt = value ? value.innerText : '';
-                        if (vt.includes('مشاور') || vt.includes('آژانس') || vt.includes('بنگاه'))
-                            return 'agency';
-                        if (vt.includes('شخصی'))
-                            return 'personal';
+                        const vt = clean(value ? value.innerText : '');
+                        if (!claimed && vt.includes('شخصی')) claimed = 'personal';
+                    }
+                    // ...but only a row that names the *poster* may feed the
+                    // name check. «نوع ملک: برج» is a building, not a business,
+                    // and would otherwise read as an agency.
+                    if (tt.includes('آگهی‌دهنده') || tt.includes('آگهی دهنده') ||
+                        tt.includes('فروشنده') || tt.includes('نام')) {
+                        const vt = clean(value ? value.innerText : '');
+                        if (vt && vt !== 'شخصی') seen.push(vt);
                     }
                 }
-                // Fallback: look for seller badge / chip near contact section
+                // Fallback for the claim only. Deliberately NOT fed to the
+                // keyword check: this block carries Divar's own chrome, and
+                // stray copy like «آگهی‌های مشاوران املاک» in it would mark
+                // every ad an agency.
                 const contact = document.querySelector(
                     '[class*="contact"], [class*="seller"], [class*="advertiser"]'
                 );
-                if (contact) {
-                    const ct = contact.innerText || '';
-                    if (ct.includes('مشاور') || ct.includes('آژانس') || ct.includes('بنگاه'))
-                        return 'agency';
-                    if (ct.includes('شخصی'))
-                        return 'personal';
+                if (contact && !claimed) {
+                    const ct = clean(contact.innerText);
+                    if (ct.includes('شخصی')) claimed = 'personal';
+                    else if (ct.includes('مشاور املاک') || ct.includes('آژانس') ||
+                             ct.includes('بنگاه')) claimed = 'agency';
                 }
-                return null;
+                return { claimed, text: seen.join(' | ') };
             }""")
-            return result
+            if not result:
+                return None
+            # An agency-sounding name outranks both a missing row and a
+            # self-reported «شخصی» — that claim is exactly what was wrong.
+            return _infer_advertiser(result.get("text"), result.get("claimed"))
         except Exception as e:
             logger.debug(f"Could not extract advertiser type: {e}")
             return None
@@ -2159,8 +2183,12 @@ class DivarScraper:
             return False
         self._since_rotation = 0
 
-        if not self._rotation_pool:
-            self._rotation_pool = await self._load_rotation_pool()
+        # Re-read the pool each time rather than caching it for the whole run:
+        # a long job outlives the account list, so an account added or marked
+        # invalid mid-run was previously never seen.
+        pool = await self._load_rotation_pool()
+        if pool:
+            self._rotation_pool = pool
         # nothing to rotate to (single account) — keep going as-is
         if len(self._rotation_pool) < 2:
             return False

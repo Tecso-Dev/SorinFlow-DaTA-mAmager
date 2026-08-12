@@ -86,6 +86,59 @@ def detect_corner_type(*texts: Optional[str]) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# آژانس یا شخصی (advertiser type)
+# ---------------------------------------------------------------------------
+
+# Divar's own «نوع آگهی‌دهنده» row is missing on a lot of ads, and when it is
+# missing the scraper used to leave the type unset or take the ad's word that
+# it is «شخصی». But the posted name gives it away: an individual posts as
+# «رضا محمدی», a shop posts as «املاک آرین» or «مهندس کریمی — دپارتمان فروش».
+# Any of these in the name means we are talking to a business, not an owner.
+#
+# Deliberately excluded: برج، مجتمع، پروژه، مسکن، دفتر. Each describes a
+# *building*, so they turn any «نوع ملک: برج» into a false agency — and none of
+# them says anything about who posted the ad.
+_AGENCY_NAME_HINTS = (
+    "املاک", "املاك", "املاکی", "املاكی", "مشاور", "مشاورین", "مشاوره",
+    "بنگاه", "آژانس", "اژانس", "مهندس", "دپارتمان", "هلدینگ",
+    "ساختمانی", "عمران", "سازان", "انبوه ساز", "انبوه‌ساز",
+    "سرمایه گذاری", "سرمایه‌گذاری",
+    "گروه", "تیم", "شرکت", "موسسه", "مؤسسه", "کانون", "اتحادیه", "استیت",
+    "real estate", "realestate", "agency", "consultant", "consulting",
+    "realtor", "broker", "properties",
+)
+
+
+def looks_like_agency(*texts: Optional[str]) -> bool:
+    """True when a posted seller name reads like a business rather than a person.
+
+    Matched on the normalised string so «مهندس‌ کریمی» (with ZWNJ) and
+    «مهندس کریمی» behave the same.
+    """
+    blob = normalize_persian_digits(" ".join(t for t in texts if t)).lower()
+    if not blob.strip():
+        return False
+    return any(hint.lower() in blob for hint in _AGENCY_NAME_HINTS)
+
+
+def infer_advertiser_type(seller_name: Optional[str],
+                          detected: Optional[str] = None,
+                          *extra: Optional[str]) -> Optional[str]:
+    """Settle on 'agency' or 'personal' for one ad.
+
+    A name that reads like a business wins over both a missing type and an ad
+    that claims «شخصی» — the claim is self-reported and agencies routinely post
+    under it, which is the bug this exists to fix. An explicit 'agency' from
+    the page is kept as-is.
+    """
+    if detected == "agency":
+        return "agency"
+    if looks_like_agency(seller_name, *extra):
+        return "agency"
+    return detected
+
+
 def parse_price_with_unit(text: str) -> Optional[int]:
     """Parse '۹۰۰ میلیون', '۱.۸۰۰ میلیارد', 'رایگان' etc. → int (Tomans)."""
     if not text:

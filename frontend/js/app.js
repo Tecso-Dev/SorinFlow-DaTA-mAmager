@@ -1736,6 +1736,16 @@ async function loadCities() {
             placeholder: 'جستجو...',
         });
 
+        // مخاطب جدید: pick a city off the list instead of spelling it, so the
+        // name matches what every other row stores and stays searchable
+        initCityPicker('contact-city-picker', cities, {
+            valueId:     'contact-city',
+            useSlug:     false,
+            allLabel:    'انتخاب شهر...',
+            allValue:    '',
+            placeholder: 'جستجو در شهرها...',
+        });
+
     } catch (error) {
         console.error('Failed to load cities:', error);
     }
@@ -1864,10 +1874,124 @@ function initMoneyInputs(root = document) {
         el.dataset.moneyBound = '1';
         el.addEventListener('input', () => _formatMoneyInput(el));
         el.addEventListener('blur', () => _formatMoneyInput(el));
+        // keep a slider bound to this input in step with what is typed
+        el.addEventListener('input', () => el._syncRange?.());
+        el.addEventListener('blur', () => el._syncRange?.());
     });
 }
 
 document.addEventListener('DOMContentLoaded', () => initMoneyInputs());
+
+
+// ═══ Draggable price ranges ══════════════════════════════════════
+// Every price band in the panel is both typeable and draggable: the two money
+// inputs stay the source of truth, and a two-handle slider writes into them.
+//
+// Markup: <div class="range-slider" data-min-input="x" data-max-input="y"
+//              data-ceiling="100000000000" data-on-change="loadLeads"></div>
+//
+// The handles run on a cubic curve, not linearly. A band that has to reach
+// ۱۰۰ میلیارد would otherwise spend its first pixel on the entire range a
+// rental actually lives in.
+const RANGE_STEPS = 1000;
+
+function _rangeSnap(v) {
+    if (v <= 0) return 0;
+    // round to ~3 significant figures so a drag lands on a number a person
+    // would actually say out loud
+    const mag = Math.pow(10, Math.max(Math.floor(Math.log10(v)) - 2, 0));
+    return Math.round(v / mag) * mag;
+}
+function _rangePosToValue(pos, ceiling) {
+    if (pos <= 0) return 0;
+    if (pos >= RANGE_STEPS) return ceiling;
+    return _rangeSnap(ceiling * Math.pow(pos / RANGE_STEPS, 3));
+}
+function _rangeValueToPos(v, ceiling) {
+    if (!v || v <= 0) return 0;
+    return Math.round(RANGE_STEPS * Math.pow(Math.min(v, ceiling) / ceiling, 1 / 3));
+}
+
+function _buildRangeSlider(el) {
+    const loInput = document.getElementById(el.dataset.minInput);
+    const hiInput = document.getElementById(el.dataset.maxInput);
+    if (!loInput || !hiInput) return;
+    const ceiling = Number(el.dataset.ceiling) || 100000000000;
+    const onChange = el.dataset.onChange;
+
+    el.innerHTML = `
+        <div class="range-slider__rail"><div class="range-slider__fill"></div></div>
+        <input type="range" class="range-slider__thumb lo" min="0" max="${RANGE_STEPS}" value="0">
+        <input type="range" class="range-slider__thumb hi" min="0" max="${RANGE_STEPS}" value="${RANGE_STEPS}">
+        <div class="range-slider__readout"><span class="lo"></span><span class="hi"></span></div>`;
+
+    const loThumb = el.querySelector('.range-slider__thumb.lo');
+    const hiThumb = el.querySelector('.range-slider__thumb.hi');
+    const fill    = el.querySelector('.range-slider__fill');
+    const loOut   = el.querySelector('.range-slider__readout .lo');
+    const hiOut   = el.querySelector('.range-slider__readout .hi');
+
+    let timer = null;
+    const fireChange = () => {
+        if (!onChange || typeof window[onChange] !== 'function') return;
+        clearTimeout(timer);                       // one call per drag, not per pixel
+        timer = setTimeout(() => window[onChange](), 350);
+    };
+
+    function paint() {
+        const lo = Number(loThumb.value), hi = Number(hiThumb.value);
+        fill.style.right = (lo / RANGE_STEPS * 100) + '%';   // RTL: fill from the right
+        fill.style.width = ((hi - lo) / RANGE_STEPS * 100) + '%';
+        const loVal = _rangePosToValue(lo, ceiling);
+        const hiVal = _rangePosToValue(hi, ceiling);
+        loOut.textContent = lo <= 0 ? 'از هر قیمتی' : formatPrice(loVal);
+        hiOut.textContent = hi >= RANGE_STEPS ? 'بی‌سقف' : formatPrice(hiVal);
+    }
+
+    // slider → inputs. A handle parked at either end means "no bound", so it
+    // clears its input instead of writing 0 or the ceiling into the filter.
+    function pushToInputs() {
+        const lo = Number(loThumb.value), hi = Number(hiThumb.value);
+        loInput.value = lo <= 0 ? '' : _groupMoney(String(_rangePosToValue(lo, ceiling)));
+        hiInput.value = hi >= RANGE_STEPS ? '' : _groupMoney(String(_rangePosToValue(hi, ceiling)));
+        paint();
+        fireChange();
+    }
+
+    // inputs → slider (typing, or a programmatic restore)
+    function pullFromInputs() {
+        const lo = parseInt(_digitsOnly(loInput.value), 10);
+        const hi = parseInt(_digitsOnly(hiInput.value), 10);
+        loThumb.value = isNaN(lo) ? 0 : _rangeValueToPos(lo, ceiling);
+        hiThumb.value = isNaN(hi) ? RANGE_STEPS : _rangeValueToPos(hi, ceiling);
+        paint();
+    }
+
+    loThumb.addEventListener('input', () => {
+        // handles must not cross
+        if (Number(loThumb.value) > Number(hiThumb.value)) loThumb.value = hiThumb.value;
+        pushToInputs();
+    });
+    hiThumb.addEventListener('input', () => {
+        if (Number(hiThumb.value) < Number(loThumb.value)) hiThumb.value = loThumb.value;
+        pushToInputs();
+    });
+
+    loInput._syncRange = pullFromInputs;
+    hiInput._syncRange = pullFromInputs;
+    el._syncRange = pullFromInputs;
+    pullFromInputs();
+}
+
+function initRangeSliders(root = document) {
+    root.querySelectorAll('.range-slider').forEach(el => {
+        if (el.dataset.rangeBound) return;
+        el.dataset.rangeBound = '1';
+        _buildRangeSlider(el);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => initRangeSliders());
 
 
 // ═══ Scraper form memory (last used filters persist across visits) ═══
@@ -2885,7 +3009,11 @@ const CRM_STATUS_LABELS = {
 const DIRECTION_OPTIONS = ['شمالی', 'جنوبی', 'شرقی', 'غربی',
                            'شمالی جنوبی', 'شرقی غربی',
                            'شمالی شرقی', 'شمالی غربی', 'جنوبی شرقی', 'جنوبی غربی'];
-const CORNER_OPTIONS = ['تک‌نبش', 'دونبش', 'سه‌نبش', 'چهارنبش'];
+// Only the two a consultant actually records. The scraper still reads
+// «تک‌نبش» and «چهارنبش» out of ad text when an ad says so, and both inline
+// selects keep an out-of-list value they were given, so nothing already
+// stored disappears — it just cannot be chosen by hand any more.
+const CORNER_OPTIONS = ['دونبش', 'سه‌نبش'];
 
 // ═══ structured fields per property kind (add-lead form) ═══════
 const LEAD_KIND_LABELS = { apartment: 'آپارتمان', villa: 'ویلایی', shop: 'مغازه', office: 'دفتر کار' };
@@ -3344,7 +3472,29 @@ function clearLeadsFilter() {
     if (searchEl) searchEl.value = '';
     const catEl = document.getElementById('crm-filter-category');
     if (catEl) catEl.value = '';
-    clearLeadsDateFilter();
+    _resetLeadsPriceInputs();
+    clearLeadsDateFilter();          // reloads the list
+}
+
+/** Empty both price boxes and put the slider handles back at the ends. */
+function _resetLeadsPriceInputs() {
+    ['crm-filter-price-min', 'crm-filter-price-max'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    document.querySelector('.range-slider[data-min-input="crm-filter-price-min"]')?._syncRange?.();
+}
+
+function clearLeadsPriceFilter() {
+    _resetLeadsPriceInputs();
+    reloadLeadsFromFilter();
+}
+
+/** What the price slider calls: narrowing the band while sitting on page 5
+ *  would otherwise land on a page the smaller result set does not have. */
+function reloadLeadsFromFilter() {
+    _leadsPage = 1;
+    loadLeads();
 }
 
 // ═══ Leads: pagination, quick status change, bulk actions ═══════
@@ -3491,6 +3641,11 @@ async function loadLeads() {
     if (category)        url += `&category=${encodeURIComponent(category)}`;
     if (_leadsDateFrom)  url += `&date_from=${_leadsDateFrom}`;
     if (_leadsDateTo)    url += `&date_to=${_leadsDateTo}`;
+    // _intOrNull reads the field itself so it can strip the «/» separators
+    const priceMin = _intOrNull('crm-filter-price-min');
+    const priceMax = _intOrNull('crm-filter-price-max');
+    if (priceMin != null) url += `&price_min=${priceMin}`;
+    if (priceMax != null) url += `&price_max=${priceMax}`;
 
     try {
         const data = await apiCall(url);
@@ -4762,7 +4917,10 @@ async function openTaskModal(id = null) {
     document.getElementById('task-priority').value = 'medium';
     document.getElementById('task-status').value = 'todo';
     document.getElementById('task-due-date').value = '';
-    document.getElementById('task-assigned').value = '';
+    // a task belongs to whoever opens the form unless they reassign it — the
+    // board only shows a non-super_admin their own rows
+    document.getElementById('task-assigned').value =
+        _currentUser?.full_name || _currentUser?.username || '';
     if (id) {
         try {
             const t = await apiCall(`/crm/tasks/${id}`);
@@ -4849,12 +5007,29 @@ async function loadContacts() {
     } catch(e) { showToast('خطا', e.message, 'danger'); }
 }
 
+/** Drive the contact city picker. A city typed by hand before this form used
+ *  a picker will not be in the list, so it is shown as-is rather than dropped. */
+function _setContactCity(value) {
+    const picker = document.getElementById('contact-city-picker');
+    const hidden = document.getElementById('contact-city');
+    if (hidden) hidden.value = value || '';
+    if (!picker) return;
+    if (value && picker._setCityValue) picker._setCityValue(value);
+    const label = picker.querySelector('.city-picker__label');
+    if (label && (!value || label.textContent !== value)) {
+        label.textContent = value || 'انتخاب شهر...';
+    }
+}
+
 async function openContactModal(id = null) {
     document.getElementById('contact-edit-id').value = id || '';
     document.getElementById('contactModalTitle').textContent = id ? 'ویرایش مخاطب' : 'مخاطب جدید';
     ['name','phone','phone2','email','city','address','tags','notes'].forEach(f => document.getElementById(`contact-${f}`).value = '');
     document.getElementById('contact-type').value = 'owner';
     document.getElementById('contact-category').value = 'normal';
+    // the city is a picker now: its hidden input was cleared above, but the
+    // visible label has to be reset too or it keeps the last contact's city
+    _setContactCity('');
     if (id) {
         try {
             const c = await apiCall(`/crm/contacts/${id}`);
@@ -4864,7 +5039,7 @@ async function openContactModal(id = null) {
             document.getElementById('contact-email').value = c.email || '';
             document.getElementById('contact-type').value = c.contact_type || 'owner';
             document.getElementById('contact-category').value = c.category || 'normal';
-            document.getElementById('contact-city').value = c.city || '';
+            _setContactCity(c.city || '');
             document.getElementById('contact-address').value = c.address || '';
             document.getElementById('contact-tags').value = _tagList(c.tags).join(', ');
             document.getElementById('contact-notes').value = c.notes || '';

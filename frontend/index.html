@@ -465,6 +465,7 @@
                                                 <input type="text" inputmode="numeric" id="scraper-max-price" class="form-control form-control-sm money-input"
                                                        placeholder="تا">
                                             </div>
+<div class="range-slider" data-min-input="scraper-min-price" data-max-input="scraper-max-price" data-ceiling="100000000000"></div>
                                         </div>
                                         <div class="mb-2">
                                             <label class="form-label small text-muted">قیمت هر متر مربع (تومان)</label>
@@ -474,6 +475,7 @@
                                                 <input type="text" inputmode="numeric" id="scraper-max-ppm" class="form-control form-control-sm money-input"
                                                        placeholder="تا">
                                             </div>
+<div class="range-slider" data-min-input="scraper-min-ppm" data-max-input="scraper-max-ppm" data-ceiling="500000000"></div>
                                         </div>
                                     </div>
 
@@ -487,6 +489,7 @@
                                                 <input type="text" inputmode="numeric" id="scraper-max-deposit" class="form-control form-control-sm money-input"
                                                        placeholder="تا">
                                             </div>
+<div class="range-slider" data-min-input="scraper-min-deposit" data-max-input="scraper-max-deposit" data-ceiling="20000000000"></div>
                                         </div>
                                         <div class="mb-2">
                                             <label class="form-label small text-muted">اجاره ماهانه (تومان)</label>
@@ -496,6 +499,7 @@
                                                 <input type="text" inputmode="numeric" id="scraper-max-rent" class="form-control form-control-sm money-input"
                                                        placeholder="تا">
                                             </div>
+<div class="range-slider" data-min-input="scraper-min-rent" data-max-input="scraper-max-rent" data-ceiling="500000000"></div>
                                         </div>
                                     </div>
 
@@ -928,6 +932,10 @@
                                         <label class="form-label">تا</label>
                                         <input type="text" id="ff-price-max" class="form-control form-control-sm money-input" inputmode="numeric" dir="ltr">
                                     </div>
+                                    <div class="col-12 col-md-6">
+                                        <div class="range-slider" data-min-input="ff-price-min" data-max-input="ff-price-max"
+                                             data-ceiling="100000000000" data-on-change="loadFilingFiles"></div>
+                                    </div>
                                     <div class="col-6 col-md-2">
                                         <label class="form-label">متراژ از</label>
                                         <input type="number" id="ff-area-min" class="form-control form-control-sm" dir="ltr">
@@ -1313,6 +1321,30 @@
                                 </div>
                             </div>
 
+                            <!-- Price filter strip: the band a customer states -->
+                            <div class="leads-date-strip px-3 py-2">
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <i class="bi bi-cash-coin text-muted"></i>
+                                    <span class="small fw-semibold text-muted">بازه قیمت:</span>
+                                    <input type="text" inputmode="numeric" dir="ltr" id="crm-filter-price-min"
+                                           class="form-control form-control-sm money-input" style="width:130px"
+                                           placeholder="از (تومان)" onchange="reloadLeadsFromFilter()">
+                                    <span class="text-muted small">←</span>
+                                    <input type="text" inputmode="numeric" dir="ltr" id="crm-filter-price-max"
+                                           class="form-control form-control-sm money-input" style="width:130px"
+                                           placeholder="تا (تومان)" onchange="reloadLeadsFromFilter()">
+                                    <div class="range-slider flex-grow-1" style="min-width:200px;max-width:420px"
+                                         data-min-input="crm-filter-price-min" data-max-input="crm-filter-price-max"
+                                         data-ceiling="100000000000" data-on-change="reloadLeadsFromFilter"></div>
+                                    <button class="btn btn-xs btn-outline-danger" onclick="clearLeadsPriceFilter()" title="پاک کردن قیمت">
+                                        <i class="bi bi-x"></i> پاک
+                                    </button>
+                                    <span class="text-muted" style="font-size:.68rem">
+                                        برای اجاره، ودیعه سنجیده می‌شود
+                                    </span>
+                                </div>
+                            </div>
+
                             <div id="leads-bulk-bar" class="leads-bulk-bar d-none">
                                 <span><i class="bi bi-check2-square"></i> <b id="leads-bulk-count">۰</b> لید انتخاب شده</span>
                                 <select class="form-select form-select-sm" style="width:190px" onchange="bulkLeadStatus(this.value); this.value='';">
@@ -1445,7 +1477,9 @@
                                     <select id="contact-category" class="form-select form-select-sm">
                                         <option value="normal">عادی</option><option value="VIP">VIP</option><option value="cold">سرد</option>
                                     </select></div>
-                                <div class="col-md-4"><label class="form-label">شهر</label><input type="text" id="contact-city" class="form-control form-control-sm"></div>
+                                <div class="col-md-4"><label class="form-label">شهر</label>
+                                    <div id="contact-city-picker" class="city-picker city-picker--sm"></div>
+                                    <input type="hidden" id="contact-city"></div>
                                 <div class="col-12"><label class="form-label">آدرس</label><input type="text" id="contact-address" class="form-control form-control-sm"></div>
                                 <div class="col-md-6"><label class="form-label">تگ‌ها (با کاما جدا کن)</label><input type="text" id="contact-tags" class="form-control form-control-sm" placeholder="VIP, تبریز, سرمایه‌گذار"></div>
                                 <div class="col-md-6"><label class="form-label">یادداشت</label><input type="text" id="contact-notes" class="form-control form-control-sm"></div>

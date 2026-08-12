@@ -206,12 +206,27 @@ class DivarAuth:
             return False
     
     async def apply_cookies(self, cookies: List[Dict]) -> bool:
-        """Apply cookies to current browser context"""
+        """Make this cookie set the context's *only* session.
+
+        add_cookies() merges: same-name cookies get overwritten, but anything
+        the previous account had that this set lacks survives. During account
+        rotation that left the old account's identifiers sitting alongside the
+        new one — so Divar could still tie the two together, which is the whole
+        thing rotation exists to avoid, and a leftover token could fight the
+        new one and read as an expired session. Clearing first makes the swap
+        a real swap.
+        """
         if not self.context:
             logger.error("Browser context not initialized")
             return False
-        
+
         try:
+            try:
+                await self.context.clear_cookies()
+            except Exception as e:
+                # older Playwright builds may not expose it; a merge is still
+                # better than no session at all
+                logger.warning(f"Could not clear cookies before applying: {e}")
             await self.context.add_cookies(cookies)
             logger.info("Cookies applied to browser context")
             return True

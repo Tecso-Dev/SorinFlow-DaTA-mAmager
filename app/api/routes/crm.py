@@ -28,6 +28,7 @@ from app.services.excel_export import xlsx_response, fa_date
 from app.services.match_service import (
     similar_to_property, matches_for_customer, customer_intent, customers_for_property,
 )
+from app.scraper.parsers import infer_advertiser_type
 from app.models.user import User
 
 router = APIRouter()
@@ -78,6 +79,8 @@ async def list_leads(
     notified: Optional[bool] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    price_min: Optional[int] = None,
+    price_max: Optional[int] = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -121,6 +124,12 @@ async def list_leads(
         ))
     if notified is not None:
         query = query.where(Lead.notified == notified)
+    # Lead.price already holds the headline number — the sale price, or the
+    # deposit on a rental — so one band works across both kinds of listing.
+    if price_min is not None:
+        query = query.where(Lead.price >= price_min)
+    if price_max is not None:
+        query = query.where(Lead.price <= price_max)
     if date_from:
         try:
             query = query.where(Lead.created_at >= datetime.fromisoformat(date_from))
@@ -180,6 +189,8 @@ async def create_lead(
         images=images,
         thumbnail_url=images[0] if images else None,
         has_images=bool(images),
+        # «مهندس فلانی» or «املاک آرین» is a shop, whatever the form was told
+        advertiser_type=infer_advertiser_type(data.seller_name),
         extra_attrs=extra_attrs,
         owner_phone=current_user.divar_phone if current_user else None,
         **attr_cols,
@@ -1207,6 +1218,28 @@ async def delete_note(note_id: int, db: AsyncSession = Depends(get_db)):
 # TASKS
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── وظایف: who may see which task ───────────────────────────────────────
+def _task_actor(user) -> Optional[str]:
+    """The name tasks are assigned under — the same string the task form puts
+    in assigned_to."""
+    return getattr(user, "full_name", None) or getattr(user, "username", None)
+
+
+def _tasks_visible_to(query, user):
+    """A super_admin sees the whole board; everyone else sees only their own.
+
+    Tasks with no assignee stay visible to all, because they predate this rule
+    and hiding them would orphan them — new tasks are stamped with their
+    creator on the way in, so the unassigned set only ever shrinks.
+    """
+    if getattr(user, "role", None) == "super_admin":
+        return query
+    actor = _task_actor(user)
+    if not actor:
+        return query.where(Task.assigned_to.is_(None))
+    return query.where(or_(Task.assigned_to.is_(None), Task.assigned_to == actor))
+
+
 @router.get("/tasks")
 async def list_tasks(
     status: Optional[str] = None,
@@ -1216,8 +1249,11 @@ async def list_tasks(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    query = select(Task).order_by(Task.due_date.asc().nullslast(), Task.created_at.desc())
+    query = _tasks_visible_to(
+        select(Task).order_by(Task.due_date.asc().nullslast(), Task.created_at.desc()),
+        current_user)
     if status:
         query = query.where(Task.status == status)
     if priority:
@@ -1232,7 +1268,11 @@ async def list_tasks(
 
 
 @router.post("/tasks")
-async def create_task(data: dict, db: AsyncSession = Depends(get_db)):
+async def create_task(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     due = None
     if data.get("due_date"):
         try:
@@ -1247,7 +1287,8 @@ async def create_task(data: dict, db: AsyncSession = Depends(get_db)):
         status=data.get("status", "todo"),
         contact_id=data.get("contact_id"),
         deal_id=data.get("deal_id"),
-        assigned_to=data.get("assigned_to"),
+        # falls back to the creator, so a task always has someone it belongs to
+        assigned_to=(data.get("assigned_to") or "").strip() or _task_actor(current_user),
     )
     db.add(task)
     await db.commit()
@@ -1255,21 +1296,35 @@ async def create_task(data: dict, db: AsyncSession = Depends(get_db)):
     return task.to_dict()
 
 
-@router.get("/tasks/{task_id}")
-async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
+async def _own_task_or_404(task_id: int, db: AsyncSession, user) -> Task:
+    """One task, but only if this user is allowed to see it. Returns 404 rather
+    than 403 so an id nobody may touch is indistinguishable from one that does
+    not exist."""
+    task = (await db.execute(_tasks_visible_to(
+        select(Task).where(Task.id == task_id), user))).scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+
+@router.get("/tasks/{task_id}")
+async def get_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = await _own_task_or_404(task_id, db, current_user)
     return task.to_dict()
 
 
 @router.put("/tasks/{task_id}")
-async def update_task(task_id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+async def update_task(
+    task_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = await _own_task_or_404(task_id, db, current_user)
     for field in ("title", "description", "priority", "status", "contact_id", "deal_id", "assigned_to"):
         if field in data:
             setattr(task, field, data[field])
@@ -1285,11 +1340,13 @@ async def update_task(task_id: int, data: dict, db: AsyncSession = Depends(get_d
 
 
 @router.patch("/tasks/{task_id}/status")
-async def update_task_status(task_id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+async def update_task_status(
+    task_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = await _own_task_or_404(task_id, db, current_user)
     task.status = data.get("status", task.status)
     task.updated_at = datetime.now()
     await db.commit()
@@ -1297,11 +1354,12 @@ async def update_task_status(task_id: int, data: dict, db: AsyncSession = Depend
 
 
 @router.delete("/tasks/{task_id}")
-async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Task).where(Task.id == task_id))
-    task = result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+async def delete_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = await _own_task_or_404(task_id, db, current_user)
     await db.delete(task)
     await db.commit()
     return {"success": True}

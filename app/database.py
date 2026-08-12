@@ -86,6 +86,7 @@ async def init_db():
         await _migrate_calendar_sms(conn)
         await _migrate_customer_criteria(conn)
         await _migrate_filing(conn)
+        await _migrate_advertiser_type(conn)
 
     await _seed_super_admin()
 
@@ -234,6 +235,39 @@ async def _migrate_property_corner(conn):
             print(f"corner_type backfill: {found}/{len(rows)} rows mentioning نبش matched")
     except Exception as e:
         print(f"property corner migration skipped: {e}")
+
+
+async def _migrate_advertiser_type(conn):
+    """Re-decide آژانس-vs-شخصی for rows whose posted name gives it away.
+
+    Divar's advertiser-type row is absent on many ads and agencies routinely
+    post under «شخصی», so rows landed as personal (or as nothing) that are
+    plainly a shop. Anything with a name is re-run through the same detector
+    the scraper now uses.
+
+    Scraped rows before this change have no seller_name stored at all, so they
+    cannot be recovered here — they get corrected the next time they are
+    scraped. This fixes the rows that do carry a name.
+    """
+    try:
+        from sqlalchemy import text
+        from app.scraper.parsers import looks_like_agency
+        rows = (await conn.execute(text(
+            "SELECT id, seller_name FROM properties "
+            "WHERE seller_name IS NOT NULL AND seller_name <> '' "
+            "AND (advertiser_type IS NULL OR advertiser_type = 'personal')"
+        ))).all()
+        fixed = 0
+        for r in rows:
+            if looks_like_agency(r.seller_name):
+                await conn.execute(
+                    text("UPDATE properties SET advertiser_type = 'agency' WHERE id = :i"),
+                    {"i": r.id})
+                fixed += 1
+        if rows:
+            print(f"advertiser_type backfill: {fixed}/{len(rows)} named rows are agencies")
+    except Exception as e:
+        print(f"advertiser type migration skipped: {e}")
 
 
 async def _migrate_lead_form_v2(conn):
