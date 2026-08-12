@@ -154,7 +154,33 @@ async def log_requests(request: Request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    _apply_panel_cache_policy(request, response)
     return response
+
+
+# The panel's own markup and code must never be served from cache without
+# checking first. Nothing set Cache-Control here, so browsers fell back to
+# heuristic freshness and reused an app.js they already had: a deploy would go
+# out green while the panel in front of the user kept running the previous
+# build. index.html tried to cover that with a hand-written «?v=…» per asset,
+# which only works while someone remembers to bump it — and it had gone stale.
+#
+# «no-cache» does not mean "do not cache", it means "revalidate before reuse".
+# StaticFiles already sends an ETag, so the usual answer is a bodyless 304 and
+# a deploy lands on the next reload. Images stay cacheable; the CDN's own
+# versioned assets are untouched.
+_REVALIDATE_SUFFIXES = (".html", ".js", ".css")
+
+
+def _apply_panel_cache_policy(request: Request, response) -> None:
+    path = request.url.path
+    if not path.startswith("/dashboard"):
+        return
+    # /dashboard and /dashboard/ resolve to index.html, which has no suffix
+    if path.rstrip("/").endswith("/dashboard") or path.endswith(_REVALIDATE_SUFFIXES):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    else:
+        response.headers.setdefault("Cache-Control", "public, max-age=86400")
 
 
 # Include API routes
