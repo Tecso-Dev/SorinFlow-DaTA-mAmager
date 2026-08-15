@@ -96,17 +96,40 @@ def detect_corner_type(*texts: Optional[str]) -> Optional[str]:
 # «رضا محمدی», a shop posts as «املاک آرین» or «مهندس کریمی — دپارتمان فروش».
 # Any of these in the name means we are talking to a business, not an owner.
 #
-# Deliberately excluded: برج، مجتمع، پروژه، مسکن، دفتر. Each describes a
-# *building*, so they turn any «نوع ملک: برج» into a false agency — and none of
-# them says anything about who posted the ad.
+# The list leans towards calling a business a business: a missed agency is an
+# agency dialled as if it were an owner, which is the complaint this exists to
+# answer, while the opposite costs one skipped lead.
+#
+# Two things are still kept out on purpose.
+#   • Words for a *building*: برج، مجتمع، پروژه، دفتر، خانه، مرکز. «نوع ملک:
+#     برج» is not an agency.
+#   • Words that are ordinary Iranian surnames on their own: ملکی، برادران،
+#     سرا (inside سراج). A person must not be filed as a shop for having one.
+# «مسکن» is safe to include: «مسکونی» does not contain it (…س‌ک‌و‌ن… vs …س‌ک‌ن).
+#
+# The known cost: a surname that is a hint word plus «ی» — عمرانی، شرکتی،
+# کانونی، سازمانی — reads as a shop. A word boundary cannot fix it, because
+# املاکی and مشاورین are wanted and are formed the same way. Accepted: one
+# owner filed as an agency is cheaper here than an agency dialled as an owner.
 _AGENCY_NAME_HINTS = (
-    "املاک", "املاك", "املاکی", "املاكی", "مشاور", "مشاورین", "مشاوره",
-    "بنگاه", "آژانس", "اژانس", "مهندس", "دپارتمان", "هلدینگ",
-    "ساختمانی", "عمران", "سازان", "انبوه ساز", "انبوه‌ساز",
-    "سرمایه گذاری", "سرمایه‌گذاری",
-    "گروه", "تیم", "شرکت", "موسسه", "مؤسسه", "کانون", "اتحادیه", "استیت",
-    "real estate", "realestate", "agency", "consultant", "consulting",
-    "realtor", "broker", "properties",
+    # املاک و مستغلات
+    "املاک", "املاك", "املاکی", "املاكی", "مستغلات", "معاملات", "مسکن",
+    "مشاور", "مشاورین", "مشاوره", "بنگاه", "آژانس", "اژانس",
+    "کارگزار", "کارگزاری", "نمایندگی", "سنتر",
+    # عنوان‌هایی که فروشنده جلوی اسمش می‌گذارد
+    "مهندس", "دکتر", "دپارتمان", "هلدینگ", "واحد فروش",
+    # ساخت‌وساز
+    "ساختمانی", "عمران", "سازان", "سازنده", "سازندگان", "سازه", "ابنیه",
+    "انبوه ساز", "انبوه‌ساز", "انبوه سازان", "انبوه‌سازان",
+    "بساز بفروش", "بسازبفروش", "پیمانکار", "پیمانکاری", "توسعه",
+    # شخصیت حقوقی
+    "شرکت", "موسسه", "مؤسسه", "سازمان", "تعاونی", "کانون", "اتحادیه",
+    "گروه", "تیم", "سرمایه گذاری", "سرمایه‌گذاری", "استیت",
+    # لاتین
+    "real estate", "realestate", "realty", "agency", "agencies",
+    "consultant", "consulting", "realtor", "broker", "brokerage",
+    "properties", "property group", "homes", "construction", "builders",
+    "development", "investment", "associates", "partners", "company",
 )
 
 
