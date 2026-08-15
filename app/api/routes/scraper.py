@@ -454,9 +454,14 @@ from pydantic import BaseModel
 
 @router.get("/otp-pending")
 async def get_otp_pending():
-    """Return jobs currently waiting for Divar SMS-OTP code."""
+    """Return jobs currently waiting for Divar SMS-OTP code.
+
+    `timeout` and each entry's `remaining` come from the server so the
+    dashboard's countdown cannot promise more time than the scraper will
+    actually wait.
+    """
     from app.scraper import otp_store
-    return {"pending": otp_store.get_pending()}
+    return {"pending": otp_store.get_pending(), "timeout": otp_store.wait_window()}
 
 
 class OtpSubmitRequest(BaseModel):

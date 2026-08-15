@@ -49,8 +49,12 @@ class Settings(BaseSettings):
     scraper_timeout: int = Field(default=60000, env="SCRAPER_TIMEOUT")
     scraper_delay_min: float = Field(default=2.0, env="SCRAPER_DELAY_MIN")
     scraper_delay_max: float = Field(default=5.0, env="SCRAPER_DELAY_MAX")
-    # Max seconds to wait for a Divar SMS-OTP code before giving up on a phone
-    otp_wait_timeout: int = Field(default=120, env="OTP_WAIT_TIMEOUT")
+    # Max seconds to wait for a Divar SMS-OTP code before giving up on a phone.
+    # 120 was not enough: the SMS itself can take a minute, the dashboard only
+    # polls for the prompt every 4s, and then someone has to read and type it.
+    # The code would be entered against a request the scraper had already
+    # dropped, and come back "no pending OTP request".
+    otp_wait_timeout: int = Field(default=300, env="OTP_WAIT_TIMEOUT")
     # Rotate to another saved Divar account every N scraped listings so a
     # single number isn't hammered (0 = never rotate)
     cookie_rotate_every: int = Field(default=15, env="COOKIE_ROTATE_EVERY")

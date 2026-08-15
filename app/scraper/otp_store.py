@@ -29,12 +29,31 @@ def submit(key: str, code: str) -> bool:
     return True
 
 
+def wait_window() -> int:
+    """How long a request stays open, from the one setting that decides it.
+
+    This used to be hardcoded to 300 here while the scraper actually gave up at
+    otp_wait_timeout (120), so the dashboard kept offering a prompt whose
+    request had already been dropped — the code went in and came back "no
+    pending OTP request for this key".
+    """
+    from app.config import get_settings
+    return int(getattr(get_settings(), "otp_wait_timeout", 300) or 300)
+
+
 def get_pending() -> list:
     now = time.time()
+    window = wait_window()
     return [
-        {"key": k, "phone_hint": v["phone_hint"]}
+        {
+            "key": k,
+            "phone_hint": v["phone_hint"],
+            # the countdown is the server's to state: the browser cannot know
+            # when the request was registered, only when it noticed
+            "remaining": max(int(window - (now - v["ts"])), 0),
+        }
         for k, v in list(_store.items())
-        if not v["event"].is_set() and now - v["ts"] < 300
+        if not v["event"].is_set() and now - v["ts"] < window
     ]
 
 

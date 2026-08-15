@@ -2453,7 +2453,10 @@ const _dismissedOtpKeys = new Set();
 // ═══ OTP v2 — segmented entry, auto-submit, live countdown ═══════
 let _otp2Timer = null;
 let _otp2Deadline = 0;
-const OTP2_WINDOW = 300;   // must match settings.otp_wait_timeout
+// The window is the server's to state — it is the one that gives up on the
+// request. A constant here drifted from settings.otp_wait_timeout and the
+// countdown promised minutes that the scraper had already stopped waiting.
+let _otp2Window = 300;     // replaced by /scraper/otp-pending's «timeout»
 
 function _otp2Els() { return [...document.querySelectorAll('#otp2-boxes .otp2-box')]; }
 function _otp2Code() { return _otp2Els().map(b => b.value).join(''); }
@@ -2473,9 +2476,9 @@ function _otp2Reset() {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check-circle"></i> تأیید و ادامه اسکرپ'; }
 }
 
-function _otp2StartTimer() {
+function _otp2StartTimer(remaining = _otp2Window) {
     _otp2StopTimer();
-    _otp2Deadline = Date.now() + OTP2_WINDOW * 1000;
+    _otp2Deadline = Date.now() + Math.max(remaining, 0) * 1000;
     const tick = () => {
         const left = Math.max(Math.round((_otp2Deadline - Date.now()) / 1000), 0);
         const el = document.getElementById('otp2-timer');
@@ -2530,23 +2533,45 @@ function initOtp2Boxes() {
 async function pollDivarOtp() {
     try {
         const data = await apiCall('/scraper/otp-pending');
-        if (data.pending && data.pending.length > 0) {
-            const item = data.pending.find(p => !_dismissedOtpKeys.has(p.key));
-            if (!item) return;
-            const modal = document.getElementById('divarOtpModal');
-            if (modal && !modal.classList.contains('show')) {
-                document.getElementById('divar-otp-key').value = item.key;
-                const phoneEl = document.getElementById('otp2-phone');
-                if (phoneEl) phoneEl.textContent = item.phone_hint || 'دیوار';
-                initOtp2Boxes();
-                _otp2Reset();
-                _otp2StartTimer();
-                // focus the first box once Bootstrap finished its own focus handling
-                modal.addEventListener('shown.bs.modal', () => _otp2Els()[0]?.focus(), { once: true });
-                new bootstrap.Modal(modal).show();
-            }
+        if (data.timeout) _otp2Window = data.timeout;
+        const pending = data.pending || [];
+        const modal = document.getElementById('divarOtpModal');
+        if (!modal) return;
+
+        const openKey = modal.classList.contains('show')
+            ? document.getElementById('divar-otp-key').value : '';
+        if (openKey) {
+            // The scraper drops a request it has waited out. Saying so beats
+            // leaving a live-looking box that answers "no pending OTP" —
+            // which is what a code typed one second too late used to hit.
+            if (!pending.some(p => p.key === openKey)) _otp2MarkExpired();
+            return;                       // never reopen over an open prompt
         }
+
+        const item = pending.find(p => !_dismissedOtpKeys.has(p.key));
+        if (!item) return;
+        document.getElementById('divar-otp-key').value = item.key;
+        const phoneEl = document.getElementById('otp2-phone');
+        if (phoneEl) phoneEl.textContent = item.phone_hint || 'دیوار';
+        initOtp2Boxes();
+        _otp2Reset();
+        // the request started before the poll saw it — count what is left
+        _otp2StartTimer(item.remaining != null ? item.remaining : _otp2Window);
+        // focus the first box once Bootstrap finished its own focus handling
+        modal.addEventListener('shown.bs.modal', () => _otp2Els()[0]?.focus(), { once: true });
+        new bootstrap.Modal(modal).show();
     } catch(e) { /* silent */ }
+}
+
+/** The request is gone: stop the clock and stop accepting digits for it. */
+function _otp2MarkExpired() {
+    _otp2StopTimer();
+    document.getElementById('otp2-boxes')?.classList.add('error');
+    _otp2SetStatus('مهلت این کد تمام شد — اسکرپر بدون این شماره ادامه داد', 'err');
+    const btn = document.getElementById('otp2-submit');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-x-circle"></i> منقضی شد'; }
+    const t = document.getElementById('otp2-timer');
+    if (t) t.textContent = 'برای شمارهٔ بعدی دوباره پرسیده می‌شود';
 }
 
 async function dismissDivarOtp() {
