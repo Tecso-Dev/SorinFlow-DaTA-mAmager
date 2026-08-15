@@ -248,24 +248,27 @@ async def _migrate_advertiser_type(conn):
     Scraped rows before this change have no seller_name stored at all, so they
     cannot be recovered here — they get corrected the next time they are
     scraped. This fixes the rows that do carry a name.
+
+    One statement, not a row loop. This runs inside startup, and startup is what
+    the readiness probe is waiting on — a per-row UPDATE makes boot time scale
+    with the table and can push a rollout past its deadline.
     """
     try:
         from sqlalchemy import text
-        from app.scraper.parsers import looks_like_agency
-        rows = (await conn.execute(text(
-            "SELECT id, seller_name FROM properties "
+        from app.scraper.parsers import _AGENCY_NAME_HINTS
+        # the hints are module constants, but bind them anyway rather than
+        # pasting Persian text into SQL
+        clauses = " OR ".join(f"LOWER(seller_name) LIKE :p{i}"
+                              for i in range(len(_AGENCY_NAME_HINTS)))
+        params = {f"p{i}": f"%{h.lower()}%" for i, h in enumerate(_AGENCY_NAME_HINTS)}
+        result = await conn.execute(text(
+            "UPDATE properties SET advertiser_type = 'agency' "
             "WHERE seller_name IS NOT NULL AND seller_name <> '' "
-            "AND (advertiser_type IS NULL OR advertiser_type = 'personal')"
-        ))).all()
-        fixed = 0
-        for r in rows:
-            if looks_like_agency(r.seller_name):
-                await conn.execute(
-                    text("UPDATE properties SET advertiser_type = 'agency' WHERE id = :i"),
-                    {"i": r.id})
-                fixed += 1
-        if rows:
-            print(f"advertiser_type backfill: {fixed}/{len(rows)} named rows are agencies")
+            "AND (advertiser_type IS NULL OR advertiser_type = 'personal') "
+            f"AND ({clauses})"
+        ), params)
+        if result.rowcount:
+            print(f"advertiser_type backfill: {result.rowcount} named rows re-filed as agency")
     except Exception as e:
         print(f"advertiser type migration skipped: {e}")
 
