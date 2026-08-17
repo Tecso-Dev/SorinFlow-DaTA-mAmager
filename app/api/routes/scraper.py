@@ -400,34 +400,52 @@ async def get_scraping_job(
     )
 
 
+# A job that has already stopped has nothing left to cancel. Everything else —
+# including «paused», which is what waiting for an SMS-OTP code looks like —
+# must be cancellable: that state can last minutes and the dashboard offers the
+# stop button for it, so refusing anything but "running" left the user pressing
+# a button that answered "Job is not running".
+_FINISHED_JOB_STATUSES = {"completed", "cancelled", "failed"}
+_STATUS_FA = {"completed": "تکمیل شده", "cancelled": "لغو شده", "failed": "ناموفق"}
+
+
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_scraping_job(
     job_id: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """Cancel a running scraping job"""
+    """Cancel a scraping job that has not finished yet."""
     result = await db.execute(
         select(ScrapingJob).where(ScrapingJob.job_id == job_id)
     )
     job = result.scalar_one_or_none()
-    
+
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    if job.status != "running":
-        raise HTTPException(status_code=400, detail="Job is not running")
-    
+        raise HTTPException(status_code=404, detail="تسک یافت نشد")
+
+    if job.status in _FINISHED_JOB_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"این تسک قبلاً تمام شده است ({_STATUS_FA.get(job.status, job.status)})")
+
+    was = job.status
     job.status = "cancelled"
     job.completed_at = datetime.now()
     await db.commit()
-    
+
+    # If it was blocked on an SMS-OTP code, drop the request: the scraper wakes
+    # out of its wait on the cancelled status, and the prompt in the dashboard
+    # would otherwise sit there collecting a code nobody is listening for.
+    from app.scraper import otp_store
+    freed = otp_store.clear_job(job_id)
+
     # Remove from active tasks tracking
     # The scraper will check job status in the database and stop
     if job_id in active_tasks:
         del active_tasks[job_id]
-        logger.info(f"Job {job_id} marked for cancellation")
-    
-    return {"message": "Job cancelled successfully"}
+    logger.info(f"Job {job_id} marked for cancellation (was {was}, otp cleared={freed})")
+
+    return {"message": "Job cancelled successfully", "was": was, "otp_cleared": freed}
 
 
 @router.get("/cities")

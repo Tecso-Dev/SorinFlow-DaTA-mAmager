@@ -2153,10 +2153,16 @@ async function loadJobs() {
 
 async function cancelJob(jobId) {
     if (!confirm('آیا از لغو این تسک اطمینان دارید؟')) return;
-    
+
     try {
-        await apiCall(`/scraper/jobs/${jobId}/cancel`, { method: 'POST' });
-        showToast('موفق', 'تسک لغو شد', 'success');
+        const r = await apiCall(`/scraper/jobs/${jobId}/cancel`, { method: 'POST' });
+        // cancelling while it waited for a code also closes that prompt
+        if (r.otp_cleared) {
+            _otp2StopTimer();
+            bootstrap.Modal.getInstance(document.getElementById('divarOtpModal'))?.hide();
+        }
+        showToast('موفق', r.was === 'paused'
+            ? 'تسک متوقف‌شده لغو شد' : 'تسک لغو شد', 'success');
         loadJobs();
     } catch (error) {
         showToast('خطا', error.message, 'danger');
@@ -2436,8 +2442,9 @@ function _renderJobsTable(items) {
             <td>${job.new_items} / ${job.updated_items}</td>
             <td>${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
             <td>
-                ${(job.status === 'running' || job.status === 'paused') ? `
-                    <button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.job_id}')">
+                ${['running', 'paused', 'pending'].includes(job.status) ? `
+                    <button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.job_id}')"
+                            title="لغو تسک">
                         <i class="bi bi-stop-fill"></i>
                     </button>
                 ` : ''}

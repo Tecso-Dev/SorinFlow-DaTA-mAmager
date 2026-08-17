@@ -66,6 +66,19 @@ def clear(key: str) -> None:
     _store.pop(key, None)
 
 
+def clear_job(job_id: str) -> int:
+    """Drop every request belonging to one job; returns how many.
+
+    Keys are «{job_id}:{divar_id}», so cancelling a job takes its prompts with
+    it instead of leaving one open against a scrape that has stopped.
+    """
+    prefix = f"{job_id}:"
+    keys = [k for k in list(_store) if k.startswith(prefix)]
+    for k in keys:
+        _store.pop(k, None)
+    return len(keys)
+
+
 def cancel_all() -> None:
     """User declined OTP: clear pending and suppress new prompts for a while."""
     global _cancelled_until

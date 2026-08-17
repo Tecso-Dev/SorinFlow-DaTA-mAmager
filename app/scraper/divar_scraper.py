@@ -2354,6 +2354,12 @@ class DivarScraper:
             job = result.scalar_one_or_none()
             if not job:
                 raise ValueError(f"Job {job_id} not found")
+            # A job can be cancelled while still «pending» — the background task
+            # starts a moment later, and claiming "running" here would bring a
+            # job the user already stopped back to life.
+            if job.status == "cancelled":
+                logger.info(f"Job {job_id} was cancelled before it started — not running it")
+                return job
             job.status = "running"
             job.started_at = datetime.now()
         else:
