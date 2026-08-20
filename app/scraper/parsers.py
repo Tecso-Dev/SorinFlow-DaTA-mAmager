@@ -145,6 +145,79 @@ def looks_like_agency(*texts: Optional[str]) -> bool:
     return any(hint.lower() in blob for hint in _AGENCY_NAME_HINTS)
 
 
+# Divar's «نوع آگهی‌دهنده» row carries one of two values: «شخصی» or «مشاور
+# املاک». Row titles that label the advertiser's *type*…
+_TYPE_ROW_LABELS = ("نوع آگهی", "نوع آگهي", "نوع فروشنده", "آگهی‌دهنده",
+                    "آگهی دهنده", "اگهی دهنده", "فروشنده")
+# …and titles that label who posted it, by name.
+_NAME_ROW_LABELS = ("نام", "آگهی‌دهنده", "آگهی دهنده", "فروشنده", "مشاور", "املاک")
+
+# A type row saying any of these means a business.
+_AGENCY_VALUE_HINTS = ("مشاور املاک", "مشاور املاك", "مشاورین املاک",
+                       "آژانس", "اژانس", "بنگاه", "املاک")
+# …and these mean the owner posted it themselves.
+_PERSONAL_VALUES = {"شخصی", "شخصي", "مالک", "مالك", "شخصی/مالک"}
+
+_WS = re.compile(r"\s+")
+
+
+def _norm_value(text: Optional[str]) -> str:
+    """Collapse a cell's text so «شخصی » and «شخصی» compare equal."""
+    v = normalize_persian_digits(text or "").replace("‌", " ")
+    return _WS.sub(" ", v).strip(" :،.-\u200F\u200E")
+
+
+def is_personal_value(text: Optional[str]) -> bool:
+    """True only when the cell *is* the word, never when prose merely contains it.
+
+    A substring test cannot be used here: Persian property ads are full of
+    «پارکینگ شخصی», «حیاط شخصی», «ورودی شخصی». Reading one of those as an
+    advertiser type marks an agency's ad as owner-posted, and it then sails
+    through a «شخصی» filter — which is exactly the complaint.
+    """
+    return _norm_value(text) in _PERSONAL_VALUES
+
+
+def decide_advertiser_type(rows, contact_text: Optional[str] = None) -> Optional[str]:
+    """Read (title, value) pairs off an ad page and settle on agency/personal.
+
+    All of the judgement lives here rather than inside a page script, so it can
+    be tested without a browser. Returns None when the page does not say —
+    None means "unknown", and a caller filtering on advertiser type must treat
+    it as a miss, not as a match.
+
+    Order matters. Agency evidence outranks a «شخصی» claim, because agencies
+    routinely post under it and the posted name gives them away.
+    """
+    pairs = [(_norm_value(t), (v or "")) for t, v in (rows or [])]
+
+    # 1. a type row naming a business
+    for title, value in pairs:
+        if any(lbl in title for lbl in _TYPE_ROW_LABELS):
+            if any(h in _norm_value(value) for h in _AGENCY_VALUE_HINTS):
+                return "agency"
+
+    # 2. a poster name that reads like a business
+    for title, value in pairs:
+        if any(lbl in title for lbl in _NAME_ROW_LABELS):
+            if not is_personal_value(value) and looks_like_agency(value):
+                return "agency"
+
+    # 3. an agency phrase in the contact block. Only agency: «شخصی» is never
+    #    trusted from free text, see is_personal_value().
+    contact = _norm_value(contact_text)
+    if contact and any(h in contact for h in ("مشاور املاک", "مشاور املاك",
+                                              "آژانس", "اژانس", "بنگاه")):
+        return "agency"
+
+    # 4. an explicit personal value, as the whole cell
+    for title, value in pairs:
+        if any(lbl in title for lbl in _TYPE_ROW_LABELS) and is_personal_value(value):
+            return "personal"
+
+    return None
+
+
 def infer_advertiser_type(seller_name: Optional[str],
                           detected: Optional[str] = None,
                           *extra: Optional[str]) -> Optional[str]:

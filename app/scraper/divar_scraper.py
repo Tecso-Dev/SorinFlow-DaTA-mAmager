@@ -28,7 +28,7 @@ from app.scraper.parsers import (
     extract_property_details as _parse_property_details,
     extract_price_info as _parse_price_info,
     detect_corner_type as _detect_corner,
-    infer_advertiser_type as _infer_advertiser,
+    decide_advertiser_type as _decide_advertiser,
 )
 
 settings = get_settings()
@@ -2001,51 +2001,26 @@ class DivarScraper:
         """
         try:
             result = await self.page.evaluate("""() => {
-                const clean = s => (s || '').replace(/\\s+/g, ' ').trim().slice(0, 300);
-                let claimed = null;
-                const seen = [];
-
-                // Check dedicated advertiser-type rows first
-                const rows = document.querySelectorAll('.kt-base-row, .kt-unexpandable-row');
-                for (const row of rows) {
+                const clean = s => (s || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
+                const rows = [];
+                // Harvest only — no judgement here. Every label and keyword
+                // decision lives in decide_advertiser_type(), where it can be
+                // tested without a browser.
+                for (const row of document.querySelectorAll(
+                        '.kt-base-row, .kt-unexpandable-row')) {
                     const title = row.querySelector('[class*="__title"]');
-                    const value = row.querySelector('[class*="__value"], [class*="__end"]');
                     if (!title) continue;
-                    const tt = title.innerText || '';
-                    // the claim can come from any type-ish row
-                    if (tt.includes('آگهی') || tt.includes('فروشنده') || tt.includes('نوع')) {
-                        const vt = clean(value ? value.innerText : '');
-                        if (!claimed && vt.includes('شخصی')) claimed = 'personal';
-                    }
-                    // ...but only a row that names the *poster* may feed the
-                    // name check. «نوع ملک: برج» is a building, not a business,
-                    // and would otherwise read as an agency.
-                    if (tt.includes('آگهی‌دهنده') || tt.includes('آگهی دهنده') ||
-                        tt.includes('فروشنده') || tt.includes('نام')) {
-                        const vt = clean(value ? value.innerText : '');
-                        if (vt && vt !== 'شخصی') seen.push(vt);
-                    }
+                    const value = row.querySelector('[class*="__value"], [class*="__end"]');
+                    rows.push([clean(title.innerText), clean(value ? value.innerText : '')]);
                 }
-                // Fallback for the claim only. Deliberately NOT fed to the
-                // keyword check: this block carries Divar's own chrome, and
-                // stray copy like «آگهی‌های مشاوران املاک» in it would mark
-                // every ad an agency.
                 const contact = document.querySelector(
                     '[class*="contact"], [class*="seller"], [class*="advertiser"]'
                 );
-                if (contact && !claimed) {
-                    const ct = clean(contact.innerText);
-                    if (ct.includes('شخصی')) claimed = 'personal';
-                    else if (ct.includes('مشاور املاک') || ct.includes('آژانس') ||
-                             ct.includes('بنگاه')) claimed = 'agency';
-                }
-                return { claimed, text: seen.join(' | ') };
+                return { rows, contact: clean(contact ? contact.innerText : '') };
             }""")
             if not result:
                 return None
-            # An agency-sounding name outranks both a missing row and a
-            # self-reported «شخصی» — that claim is exactly what was wrong.
-            return _infer_advertiser(result.get("text"), result.get("claimed"))
+            return _decide_advertiser(result.get("rows") or [], result.get("contact"))
         except Exception as e:
             logger.debug(f"Could not extract advertiser type: {e}")
             return None
@@ -2539,9 +2514,17 @@ class DivarScraper:
                                     skip = _skip(f"{field} must be absent")
 
                         # ── Advertiser type filter ─────────────────────────────────
+                        # An undetermined type is a miss, not a match. Letting it
+                        # through is what put agency ads in the results of a
+                        # «شخصی» scrape: every ad whose type could not be read
+                        # satisfied the filter by default. The publish-date
+                        # filter below has always treated unknown this way.
                         if not skip and advertiser_type:
                             actual_type = detail.get('advertiser_type')
-                            if actual_type and actual_type != advertiser_type:
+                            if not actual_type:
+                                skip = _skip(
+                                    f"advertiser_type unknown; {advertiser_type} filter active")
+                            elif actual_type != advertiser_type:
                                 skip = _skip(f"advertiser_type {actual_type} != {advertiser_type}")
 
                         # ── Age filter ─────────────────────────────────────────────
