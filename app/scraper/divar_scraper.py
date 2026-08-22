@@ -2016,11 +2016,43 @@ class DivarScraper:
                 const contact = document.querySelector(
                     '[class*="contact"], [class*="seller"], [class*="advertiser"]'
                 );
-                return { rows, contact: clean(contact ? contact.innerText : '') };
+
+                // Short standalone lines and link labels only. Divar's agency
+                // panel sits under the map — «مشاور املاک | فعالیت از تیر ۱۴۰۴»,
+                // a «پروفایل مشاور املاک» link, the agency's own row — and none
+                // of it exists on an ad an owner posted. The description is
+                // deliberately out of reach: an owner writing «مشاورین املاک
+                // تماس نگیرند» must not be read as one.
+                // textContent, not innerText: innerText forces a layout pass
+                // per element, and this walks every leaf on the page once per
+                // ad. The scan is never cut short — the agency block sits at
+                // the bottom of the page, under the map, so stopping early
+                // would miss exactly what is being looked for. Only the payload
+                // is bounded, and a Set keeps the de-dupe off the hot path.
+                const seen = new Set();
+                const push = t => {
+                    t = clean(t);
+                    if (t && t.length <= 80) seen.add(t);
+                };
+                for (const a of document.querySelectorAll('a')) push(a.textContent);
+                for (const el of document.querySelectorAll('p, span, h1, h2, h3, h4, div')) {
+                    if (el.children.length) continue;      // leaf nodes only
+                    push(el.textContent);
+                }
+                const panel = [...seen].slice(0, 400);
+                return {
+                    rows,
+                    contact: clean(contact ? contact.innerText : ''),
+                    panel,
+                };
             }""")
             if not result:
                 return None
-            return _decide_advertiser(result.get("rows") or [], result.get("contact"))
+            return _decide_advertiser(
+                result.get("rows") or [],
+                result.get("contact"),
+                result.get("panel") or [],
+            )
         except Exception as e:
             logger.debug(f"Could not extract advertiser type: {e}")
             return None

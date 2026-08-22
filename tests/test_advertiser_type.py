@@ -18,6 +18,7 @@ from app.scraper.parsers import (
     decide_advertiser_type,
     looks_like_agency,
     infer_advertiser_type,
+    panel_says_agency,
 )
 
 
@@ -240,3 +241,80 @@ class TestEndToEndPersonalScrape:
             detected = decide_advertiser_type(rows, contact)
             if not advertiser_filter_skips("agency", detected):
                 assert detected == "agency", f"{label} leaked into an agency scrape"
+
+
+# ── Divar's agency-panel block ───────────────────────────────────────────────
+
+class TestAgencyPanel:
+    """The block Divar renders under the map when an ad comes from an agency
+    panel. Taken verbatim from real ads: an agent line, a profile link, and the
+    agency's own row. This is the surest agency signal on the page."""
+
+    # each entry is the short lines harvested off one real ad
+    REAL_PANELS = [
+        # «۲۵۰ متر تک واحدی ۳ خ…» — قربانی / آژانس محمد امین
+        ["قربانی", "مشاور املاک | فعالیت از تیر ۱۴۰۴", "پروفایل مشاور املاک",
+         "آژانس محمد امین", "همه آگهی‌ها", "اطلاعات تماس", "چت"],
+        # «اجاره تک واحدی امین م…» — وحید کاتب / املاک مسکن شهر
+        ["وحید کاتب", "مشاور املاک | فعالیت از فروردین ۱۴۰۴", "پروفایل مشاور املاک",
+         "املاک مسکن شهر", "همه آگهی‌ها", "اطلاعات تماس"],
+        # «اجاره اپارتمانی۱۸۰ متر…» — ولیزاده / مشاور املاک۱۱۸ارومیه
+        ["ولیزاده", "مشاور املاک | فعالیت از مهر ۱۴۰۰", "پروفایل مشاور املاک",
+         "مشاور املاک۱۱۸ارومیه", "همه آگهی‌ها"],
+        # «خانه ویلایی ۱۰۳ متری» — مونا نعمت زاده / هلدینگ آراد حقوقی و املاک
+        ["مونا نعمت زاده", "مشاور املاک | فعالیت از اردیبهشت ۱۴۰۵",
+         "پروفایل مشاور املاک", "هلدینگ آراد حقوقی و املاک", "همه آگهی‌ها"],
+        # «فروش آپارتمان 90متری» — مشاور املاک مظلومی
+        ["مشاور املاک مظلومی", "مشاور املاک | فعالیت از فروردین ۱۴۰۴",
+         "پروفایل مشاور املاک", "مشاور املاک", "همه آگهی‌ها"],
+    ]
+
+    @pytest.mark.parametrize("lines", REAL_PANELS)
+    def test_every_real_agency_ad_is_detected(self, lines):
+        assert panel_says_agency(lines) is True
+        assert decide_advertiser_type([], None, lines) == "agency"
+
+    def test_it_beats_a_personal_claim(self):
+        """An agency panel outranks «نوع آگهی‌دهنده: شخصی»."""
+        rows = [("نوع آگهی‌دهنده", "شخصی")]
+        assert decide_advertiser_type(rows, None, self.REAL_PANELS[0]) == "agency"
+
+    def test_the_profile_link_alone_is_enough(self):
+        assert panel_says_agency(["پروفایل مشاور املاک"]) is True
+
+    def test_the_role_needs_the_join_line(self):
+        """«مشاور املاک» alone is not conclusive — it appears in ad prose."""
+        assert panel_says_agency(["مشاور املاک"]) is False
+        assert panel_says_agency(["مشاور املاک | فعالیت از تیر ۱۴۰۴"]) is True
+
+    @pytest.mark.parametrize("line", [
+        "مشاورین املاک تماس نگیرند",
+        "لطفا مشاور املاک تماس نگیرد",
+        "خواهشمندم مشاورین املاک مزاحم نشوند",
+        "بدون واسطه و مشاور املاک",
+    ])
+    def test_an_owner_warning_off_agents_is_not_an_agency(self, line):
+        """The exact thing an owner writes, and the reason prose is out of reach."""
+        assert panel_says_agency([line]) is False
+
+    def test_long_prose_is_ignored_even_if_it_says_the_words(self):
+        prose = ("این ملک توسط مالک آگهی شده است و پروفایل مشاور املاک ندارد، "
+                 "لطفا مشاورین املاک تماس نگیرند چون قصد فروش مستقیم داریم")
+        assert len(prose) > 80
+        assert panel_says_agency([prose]) is False
+
+    def test_an_owner_posted_ad_has_no_panel(self):
+        lines = ["فروش آپارتمان ۸۵ متری", "اطلاعات تماس", "چت", "ارومیه",
+                 "نردبان شده", "گزارش آگهی"]
+        assert panel_says_agency(lines) is False
+        assert decide_advertiser_type([("نوع آگهی‌دهنده", "شخصی")], None, lines) == "personal"
+
+    def test_empty_and_none(self):
+        assert panel_says_agency([]) is False
+        assert panel_says_agency(None) is False
+
+    def test_a_personal_scrape_drops_every_one_of_them(self):
+        """Both فروش and اجاره ads from the report."""
+        for lines in self.REAL_PANELS:
+            detected = decide_advertiser_type([], None, lines)
+            assert advertiser_filter_skips("personal", detected) is True

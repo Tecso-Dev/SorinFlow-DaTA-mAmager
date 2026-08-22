@@ -158,6 +158,42 @@ _AGENCY_VALUE_HINTS = ("مشاور املاک", "مشاور املاك", "مشا
 # …and these mean the owner posted it themselves.
 _PERSONAL_VALUES = {"شخصی", "شخصي", "مالک", "مالك", "شخصی/مالک"}
 
+# Divar renders a block under the map on any ad posted from an agency's own
+# panel: the agent's «مشاور املاک | فعالیت از تیر ۱۴۰۴» line, a link reading
+# «پروفایل مشاور املاک», and the agency's own row. An owner posting for
+# themselves gets none of it, so these are the surest agency signal on the page
+# — surer than the «نوع آگهی‌دهنده» row, which is often absent.
+#
+# They are only ever matched against short, standalone lines and link text.
+# «مشاورین املاک تماس نگیرند» is a normal thing for an owner to write in a
+# description, and matching prose would turn every one of those into an agency.
+_AGENCY_PANEL_MARKERS = (
+    "پروفایل مشاور املاک",
+    "پروفایل مشاور املاك",
+)
+# «مشاور املاک» on its own is only conclusive next to the panel's join line.
+_PANEL_ROLE = ("مشاور املاک", "مشاور املاك")
+_PANEL_SINCE = ("فعالیت از",)
+# A line longer than this is prose, not a label.
+_PANEL_LINE_MAX = 80
+
+
+def panel_says_agency(lines) -> bool:
+    """True when the page carries Divar's agency-panel block.
+
+    `lines` are short standalone texts and link labels harvested off the ad —
+    never the description, for the reason above.
+    """
+    for raw in (lines or []):
+        line = _norm_value(raw)
+        if not line or len(line) > _PANEL_LINE_MAX:
+            continue
+        if any(m in line for m in _AGENCY_PANEL_MARKERS):
+            return True
+        if any(r in line for r in _PANEL_ROLE) and any(x in line for x in _PANEL_SINCE):
+            return True
+    return False
+
 _WS = re.compile(r"\s+")
 
 
@@ -178,7 +214,8 @@ def is_personal_value(text: Optional[str]) -> bool:
     return _norm_value(text) in _PERSONAL_VALUES
 
 
-def decide_advertiser_type(rows, contact_text: Optional[str] = None) -> Optional[str]:
+def decide_advertiser_type(rows, contact_text: Optional[str] = None,
+                           panel_lines=None) -> Optional[str]:
     """Read (title, value) pairs off an ad page and settle on agency/personal.
 
     All of the judgement lives here rather than inside a page script, so it can
@@ -190,6 +227,11 @@ def decide_advertiser_type(rows, contact_text: Optional[str] = None) -> Optional
     routinely post under it and the posted name gives them away.
     """
     pairs = [(_norm_value(t), (v or "")) for t, v in (rows or [])]
+
+    # 0. the agency panel block — the strongest signal there is, and present on
+    #    exactly the ads that should never reach a «شخصی» scrape
+    if panel_says_agency(panel_lines):
+        return "agency"
 
     # 1. a type row naming a business
     for title, value in pairs:
