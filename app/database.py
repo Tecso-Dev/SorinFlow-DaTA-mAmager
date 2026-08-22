@@ -87,6 +87,7 @@ async def init_db():
         await _migrate_customer_criteria(conn)
         await _migrate_filing(conn)
         await _migrate_advertiser_type(conn)
+        await _seed_reference_data(conn)
 
     await _seed_super_admin()
 
@@ -235,6 +236,62 @@ async def _migrate_property_corner(conn):
             print(f"corner_type backfill: {found}/{len(rows)} rows mentioning نبش matched")
     except Exception as e:
         print(f"property corner migration skipped: {e}")
+
+
+async def _seed_reference_data(conn):
+    """Make sure every city and category the panel offers exists as a row.
+
+    The dropdowns are built from CITIES/CATEGORIES in app/config.py, but these
+    tables were only ever populated by the database's own init script, which
+    seeds a much shorter list — 20 of 174 cities and 7 of 17 categories in the
+    deployed one. Anything missing had two consequences: a scrape in that city
+    or category saved its job with a NULL foreign key, so the dashboard showed
+    «—» for it, and filtering the job list by that category could not resolve
+    a row to filter on.
+
+    is_active is set explicitly rather than left to the column default: the
+    model declares default=True on the Python side only, so a table built by
+    create_all() has no server default and these rows would land NULL — and
+    /properties/cities/list filters on is_active == True, which would hide
+    exactly the rows this is adding.
+
+    Idempotent and cheap: two multi-row INSERTs with a bare ON CONFLICT DO
+    NOTHING — untargeted on purpose, so it also absorbs a clash on cities.name,
+    which the init script declares UNIQUE but the model does not. A conflict
+    that raised here would abort the transaction every other migration in
+    init_db() shares.
+    This runs inside startup and the readiness probe is waiting on it, so it
+    stays at two statements no matter how long the lists get.
+    """
+    try:
+        from sqlalchemy import text
+        from app.config import CITIES, CATEGORIES
+
+        if CITIES:
+            values, params = [], {}
+            for i, (slug, info) in enumerate(CITIES.items()):
+                values.append(f"(:cn{i}, :cs{i}, :cp{i}, TRUE)")
+                params[f"cn{i}"] = info.get("name")
+                params[f"cs{i}"] = slug
+                params[f"cp{i}"] = info.get("province")
+            await conn.execute(text(
+                "INSERT INTO cities (name, slug, province, is_active) VALUES "
+                + ", ".join(values)
+                + " ON CONFLICT DO NOTHING"), params)
+
+        if CATEGORIES:
+            values, params = [], {}
+            for i, (slug, info) in enumerate(CATEGORIES.items()):
+                values.append(f"(:gn{i}, :gs{i}, :gu{i}, TRUE)")
+                params[f"gn{i}"] = info.get("name")
+                params[f"gs{i}"] = slug
+                params[f"gu{i}"] = "/s/{city}/" + slug
+            await conn.execute(text(
+                "INSERT INTO categories (name, slug, url_path, is_active) VALUES "
+                + ", ".join(values)
+                + " ON CONFLICT DO NOTHING"), params)
+    except Exception as e:
+        print(f"reference data seed skipped: {e}")
 
 
 async def _migrate_advertiser_type(conn):

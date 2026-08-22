@@ -3,7 +3,7 @@ SorinFlow Divar Scraper - Scraper API Routes
 """
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, false
 from typing import Optional, List
 from datetime import datetime
 import asyncio
@@ -308,9 +308,14 @@ async def get_scraping_jobs(
     if status:
         query = query.where(ScrapingJob.status == status)
     if category:
-        cat_row = (await db.execute(select(Category).where(Category.name == category))).scalar_one_or_none()
-        if cat_row:
-            query = query.where(ScrapingJob.category_id == cat_row.id)
+        # Match nothing when the name does not resolve, rather than dropping the
+        # filter. Silently dropping it returned every job of every category —
+        # which is what «اجاره ویلا» did, because that category was missing from
+        # the table while the dropdown offered it. Collecting ids also handles a
+        # duplicate name, where scalar_one_or_none() would have raised.
+        cat_ids = (await db.execute(
+            select(Category.id).where(Category.name == category))).scalars().all()
+        query = query.where(ScrapingJob.category_id.in_(cat_ids) if cat_ids else false())
 
     # Isolate jobs by the user's linked Divar phone (admins see all jobs)
     is_privileged = current_user and current_user.role in ("super_admin", "admin")
