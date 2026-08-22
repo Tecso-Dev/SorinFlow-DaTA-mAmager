@@ -629,6 +629,10 @@
                                     <select id="jobs-filter-category" class="form-select form-select-sm" style="width:190px;" onchange="loadJobs()">
                                         <option value="">همه دسته‌بندی‌ها</option>
                                     </select>
+                                    <button class="btn btn-outline-info btn-sm" onclick="openScraperLog()"
+                                            title="ببینید اسکرپر روی هر آگهی چه تصمیمی گرفته">
+                                        <i class="bi bi-journal-text"></i> لاگ اسکرپر
+                                    </button>
                                     <button class="btn btn-outline-secondary btn-sm" onclick="loadJobs()">
                                         <i class="bi bi-arrow-clockwise"></i> بروزرسانی
                                     </button>
@@ -2518,6 +2522,42 @@
 <!-- 2FA Management Modal -->
 <!-- ═══ Divar SMS-OTP Modal ══════════════════════════════════════════════════ -->
 <!-- OTP v2 — segmented code entry with live status -->
+<div class="modal fade" id="scraperLogModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content" style="background:var(--surface);border:1px solid var(--border);color:var(--text);">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-journal-text"></i> لاگ اسکرپر</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                    <select id="scraper-log-preset" class="form-select form-select-sm" style="width:230px"
+                            onchange="document.getElementById('scraper-log-grep').value = this.value; loadScraperLog();">
+                        <option value="">همهٔ خطوط</option>
+                        <option value="Skipping">فقط آگهی‌های ردشده و دلیلش</option>
+                        <option value="advertiser_type">فقط فیلتر آگهی‌دهنده</option>
+                        <option value="SMS-OTP">فقط کد تأیید</option>
+                        <option value="rotate">فقط چرخش شماره</option>
+                        <option value="ERROR">فقط خطاها</option>
+                    </select>
+                    <input type="text" id="scraper-log-grep" class="form-control form-control-sm"
+                           style="width:200px" placeholder="جستجو در لاگ..."
+                           onkeydown="if(event.key==='Enter')loadScraperLog()">
+                    <button class="btn btn-sm btn-primary" onclick="loadScraperLog()">
+                        <i class="bi bi-arrow-clockwise"></i> بروزرسانی
+                    </button>
+                    <span class="text-muted" style="font-size:.7rem">
+                        اگر اسکرپ چیزی ذخیره نکرد، دلیلش اینجاست
+                    </span>
+                </div>
+                <pre id="scraper-log-body" dir="ltr" style="direction:ltr;text-align:left;max-height:60vh;overflow:auto;
+                     background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+                     padding:.7rem;font-size:.68rem;line-height:1.6;white-space:pre-wrap"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade otp2" id="divarOtpModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered" style="max-width:420px">
         <div class="modal-content otp2-card">

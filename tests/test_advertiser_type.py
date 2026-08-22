@@ -318,3 +318,63 @@ class TestAgencyPanel:
         for lines in self.REAL_PANELS:
             detected = decide_advertiser_type([], None, lines)
             assert advertiser_filter_skips("personal", detected) is True
+
+
+# ── a rendered page with no agency block ─────────────────────────────────────
+
+class TestAbsenceOfPanelMeansPersonal:
+    """Divar puts its agency block on every ad posted from an agency panel, so
+    on a page that plainly rendered, not having one is the answer.
+
+    This is what makes a «شخصی» scrape return anything at all. Demanding proof
+    of «شخصی» sounds safer but most ads carry no «نوع آگهی‌دهنده» row, so it
+    rejected nearly every listing and the scrape looked broken.
+    """
+
+    # what a real owner-posted ad's harvest looks like
+    OWNER_PAGE = ["فروش آپارتمان ۸۵ متری", "ارومیه", "اطلاعات تماس", "چت",
+                  "گزارش آگهی", "نردبان", "۲ روز پیش"]
+    OWNER_ROWS = [("متراژ", "۸۵ متر"), ("اتاق", "۲"), ("سال ساخت", "۱۳۹۵")]
+
+    def test_a_rendered_page_with_no_agency_block_is_personal(self):
+        assert decide_advertiser_type(self.OWNER_ROWS, None, self.OWNER_PAGE) == "personal"
+
+    def test_it_survives_a_personal_scrape(self):
+        detected = decide_advertiser_type(self.OWNER_ROWS, None, self.OWNER_PAGE)
+        assert advertiser_filter_skips("personal", detected) is False
+
+    def test_an_agency_page_still_loses_to_the_panel(self):
+        lines = self.OWNER_PAGE + ["پروفایل مشاور املاک"]
+        assert decide_advertiser_type(self.OWNER_ROWS, None, lines) == "agency"
+
+    def test_a_page_that_did_not_render_stays_unknown(self):
+        """The guard: without this, a failed page read would turn every agency
+        ad into a personal one — the original complaint, back again."""
+        assert decide_advertiser_type([], None, []) is None
+        assert decide_advertiser_type([], None, ["فقط یک خط"]) is None
+        assert decide_advertiser_type([("متراژ", "۸۵")], None, ["یک", "دو"]) is None
+
+    def test_rows_alone_are_not_enough(self):
+        """Spec rows without any page text means the harvest half-failed."""
+        assert decide_advertiser_type(self.OWNER_ROWS, None, []) is None
+
+    def test_an_owner_warning_agents_off_still_reads_personal(self):
+        lines = self.OWNER_PAGE + ["مشاورین املاک تماس نگیرند"]
+        assert decide_advertiser_type(self.OWNER_ROWS, None, lines) == "personal"
+
+    def test_a_business_name_row_still_wins(self):
+        rows = self.OWNER_ROWS + [("نام آگهی‌دهنده", "املاک آرین")]
+        assert decide_advertiser_type(rows, None, self.OWNER_PAGE) == "agency"
+
+    def test_yield_on_a_mixed_page_set(self):
+        """Five agency-panel ads and three owner ads: a «شخصی» scrape keeps
+        exactly the three."""
+        agency = [TestAgencyPanel.REAL_PANELS[i] for i in range(5)]
+        owners = [self.OWNER_PAGE, self.OWNER_PAGE + ["حیاط شخصی"],
+                  self.OWNER_PAGE + ["پارکینگ شخصی"]]
+        kept = 0
+        for lines in agency + owners:
+            det = decide_advertiser_type(self.OWNER_ROWS, None, lines)
+            if not advertiser_filter_skips("personal", det):
+                kept += 1
+        assert kept == 3

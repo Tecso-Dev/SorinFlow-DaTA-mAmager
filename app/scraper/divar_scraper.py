@@ -2444,6 +2444,9 @@ class DivarScraper:
                    else f"will keep scraping until {max_items} are saved")
             )
             older_streak = 0  # consecutive listings older than target_day
+            # why listings were dropped, tallied by reason. A scrape that
+            # saves nothing is otherwise indistinguishable from a broken one.
+            skip_tally: Dict[str, int] = {}
             
             # Scrape each property detail
             for i, listing in enumerate(all_listings):
@@ -2485,6 +2488,8 @@ class DivarScraper:
 
                         def _skip(reason: str) -> bool:
                             logger.info(f"Skipping {did}: {reason}")
+                            bucket = reason.split()[0] if reason else "other"
+                            skip_tally[bucket] = skip_tally.get(bucket, 0) + 1
                             return True
 
                         skip = False
@@ -2644,6 +2649,14 @@ class DivarScraper:
             await self.db_session.commit()
             
             logger.info(f"Scraping job completed. New: {job.new_items}, Updated: {job.updated_items}, Failed: {job.failed_items}")
+            if skip_tally:
+                breakdown = ", ".join(f"{k}={v}" for k, v in
+                                      sorted(skip_tally.items(), key=lambda kv: -kv[1]))
+                logger.info(f"Filters dropped {sum(skip_tally.values())} listings — {breakdown}")
+                if not job.new_items:
+                    logger.warning(
+                        "Job saved nothing: every candidate was dropped by a filter. "
+                        f"Loosen whichever of these is doing it — {breakdown}")
             
         except Exception as e:
             job.status = "failed"

@@ -2151,6 +2151,39 @@ async function loadJobs() {
     }
 }
 
+// ─── Scraper log viewer ───────────────────────────────────────────────────────
+// The scraper explains every decision it makes — which listing it skipped and
+// why — but until now that only ever went to a file on the server. A scrape
+// that saved nothing was indistinguishable from a scrape that was broken.
+function openScraperLog() {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('scraperLogModal')).show();
+    loadScraperLog();
+}
+
+async function loadScraperLog() {
+    const body = document.getElementById('scraper-log-body');
+    if (!body) return;
+    const grep = document.getElementById('scraper-log-grep')?.value.trim() || '';
+    body.textContent = 'در حال بارگیری...';
+    try {
+        const data = await apiCall(
+            `/stats/logs?lines=300${grep ? '&grep=' + encodeURIComponent(grep) : ''}`);
+        const lines = data.lines || [];
+        if (data.note) { body.textContent = data.note; return; }
+        if (!lines.length) {
+            body.textContent = grep
+                ? 'خطی با این عبارت پیدا نشد.'
+                : 'لاگی ثبت نشده است.';
+            return;
+        }
+        // newest last is how a log reads; scroll there
+        body.textContent = lines.join('\n');
+        body.scrollTop = body.scrollHeight;
+    } catch (e) {
+        body.textContent = 'خطا در خواندن لاگ: ' + (e?.message || '');
+    }
+}
+
 async function cancelJob(jobId) {
     if (!confirm('آیا از لغو این تسک اطمینان دارید؟')) return;
 

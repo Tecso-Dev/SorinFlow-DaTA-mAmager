@@ -176,6 +176,9 @@ _PANEL_ROLE = ("مشاور املاک", "مشاور املاك")
 _PANEL_SINCE = ("فعالیت از",)
 # A line longer than this is prose, not a label.
 _PANEL_LINE_MAX = 80
+# Below this many harvested lines the page did not really render, and its
+# silence about the advertiser means nothing.
+_PAGE_RENDERED_LINES = 5
 
 
 def panel_says_agency(lines) -> bool:
@@ -257,6 +260,20 @@ def decide_advertiser_type(rows, contact_text: Optional[str] = None,
         if any(lbl in title for lbl in _TYPE_ROW_LABELS) and is_personal_value(value):
             return "personal"
 
+    # 5. Nothing on the page says agency, and the page plainly rendered: spec
+    #    rows came back and so did a page's worth of text. Divar puts its agency
+    #    block on every ad posted from an agency panel, so its absence here is
+    #    the answer — an owner posted this one.
+    #
+    #    This is the difference between a «شخصی» scrape that returns something
+    #    and one that returns nothing. Requiring proof of «شخصی» sounds safer,
+    #    but most ads carry no «نوع آگهی‌دهنده» row at all, so it rejected
+    #    almost every listing. An agent posting from a personal panel does read
+    #    as personal here — Divar itself offers nothing to contradict that.
+    if len(pairs) >= 1 and len(panel_lines or []) >= _PAGE_RENDERED_LINES:
+        return "personal"
+
+    # Nothing came back — a page that did not load says nothing about anyone.
     return None
 
 
