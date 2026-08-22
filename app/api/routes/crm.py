@@ -7,7 +7,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, and_, not_
 import io
 from loguru import logger
 
@@ -29,6 +29,7 @@ from app.services.match_service import (
     similar_to_property, matches_for_customer, customer_intent, customers_for_property,
 )
 from app.scraper.parsers import infer_advertiser_type
+from app.services.property_kind import PROPERTY_KINDS, kind_options
 from app.models.user import User
 
 router = APIRouter()
@@ -70,26 +71,20 @@ def _split_lead_attrs(attrs: Optional[dict]):
     return cols, extra
 
 
-@router.get("/leads", response_model=LeadList)
-async def list_leads(
-    status: Optional[str] = None,
-    city: Optional[str] = None,
-    category: Optional[str] = None,
-    search: Optional[str] = None,
-    notified: Optional[bool] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    price_min: Optional[int] = None,
-    price_max: Optional[int] = None,
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+def _apply_lead_filters(
+    query,
+    *,
+    status=None, city=None, category=None, search=None, notified=None,
+    date_from=None, date_to=None, price_min=None, price_max=None,
+    property_kind=None,
 ):
-    from datetime import datetime
-    query = select(Lead).order_by(Lead.created_at.desc())
+    """Every filter the leads list understands, in one place.
 
-    # All roles share the same lead pool (no per-user isolation)
+    The Excel export used to re-implement only «status», so exporting a
+    filtered view handed back rows the screen was not showing. Both callers go
+    through this now, and neither can drift from the other.
+    """
+    from datetime import datetime, timedelta
 
     if status:
         query = query.where(Lead.status == status)
@@ -130,6 +125,25 @@ async def list_leads(
         query = query.where(Lead.price >= price_min)
     if price_max is not None:
         query = query.where(Lead.price <= price_max)
+    # ── نوع ملک ──────────────────────────────────────────────────────────
+    # «خرید مسکونی» on Divar holds apartments, villas and کلنگی together, so
+    # the category alone cannot separate them. The kind lives on the linked
+    # property: as Persian text when the scraper read it off the breadcrumb, as
+    # an English slug when the lead was entered by hand, and sometimes not at
+    # all — in which case the ad's own title is the only thing left to go on.
+    spec = PROPERTY_KINDS.get((property_kind or "").strip())
+    if spec:
+        stored = [Property.property_type.ilike(v) for v in spec["values"]]
+        title_any = [Property.title.ilike(f"%{w}%") for w in spec["title_any"]]
+        title_no = [Property.title.ilike(f"%{w}%") for w in spec["title_none"]]
+        by_title = and_(Property.property_type.is_(None), or_(*title_any))
+        if title_no:
+            by_title = and_(by_title, not_(or_(*title_no)))
+        query = query.where(
+            select(Property.id)
+            .where(Property.id == Lead.property_id, or_(or_(*stored), by_title))
+            .correlate(Lead).exists()
+        )
     if date_from:
         try:
             query = query.where(Lead.created_at >= datetime.fromisoformat(date_from))
@@ -140,11 +154,37 @@ async def list_leads(
             dt_to = datetime.fromisoformat(date_to)
             # include the full end day
             if len(date_to) == 10:
-                from datetime import timedelta
                 dt_to = dt_to + timedelta(days=1)
             query = query.where(Lead.created_at < dt_to)
         except ValueError:
             pass
+
+    return query
+
+
+@router.get("/leads", response_model=LeadList)
+async def list_leads(
+    status: Optional[str] = None,
+    city: Optional[str] = None,
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+    notified: Optional[bool] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    price_min: Optional[int] = None,
+    price_max: Optional[int] = None,
+    property_kind: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    query = _apply_lead_filters(
+        select(Lead).order_by(Lead.created_at.desc()),
+        status=status, city=city, category=category, search=search,
+        notified=notified, date_from=date_from, date_to=date_to,
+        price_min=price_min, price_max=price_max, property_kind=property_kind,
+    )
 
     count_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = count_result.scalar_one()
@@ -325,13 +365,29 @@ async def _lead_with_property(db: AsyncSession, lead: Lead) -> LeadResponse:
 @router.get("/leads/export/excel")
 async def export_leads_excel(
     status: Optional[str] = None,
+    city: Optional[str] = None,
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+    notified: Optional[bool] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    price_min: Optional[int] = None,
+    price_max: Optional[int] = None,
+    property_kind: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Excel counterpart of the leads list (respects the status filter)."""
-    query = select(Lead).order_by(Lead.created_at.desc())
-    if status:
-        query = query.where(Lead.status == status)
+    """Excel counterpart of the leads list — same filters, same rows.
+
+    It used to honour «status» alone, so exporting a narrowed view silently
+    handed back everything else too.
+    """
+    query = _apply_lead_filters(
+        select(Lead).order_by(Lead.created_at.desc()),
+        status=status, city=city, category=category, search=search,
+        notified=notified, date_from=date_from, date_to=date_to,
+        price_min=price_min, price_max=price_max, property_kind=property_kind,
+    )
     items = (await db.execute(query.limit(5000))).scalars().all()
 
     status_fa = {

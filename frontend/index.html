@@ -1267,6 +1267,18 @@
                                     <select id="crm-filter-category" class="form-select form-select-sm" style="width:170px;">
                                         <option value="">همه دسته‌بندی‌ها</option>
                                     </select>
+                                    <!-- «خرید مسکونی» شامل آپارتمان و ویلایی و کلنگی است،
+                                         پس نوع ملک جدا از دسته‌بندی فیلتر می‌شود -->
+                                    <select id="crm-filter-kind" class="form-select form-select-sm" style="width:150px;"
+                                            onchange="reloadLeadsFromFilter()">
+                                        <option value="">همه نوع ملک</option>
+                                        <option value="apartment">آپارتمان</option>
+                                        <option value="villa">ویلایی</option>
+                                        <option value="old_house">کلنگی</option>
+                                        <option value="land">زمین</option>
+                                        <option value="shop">مغازه</option>
+                                        <option value="office">دفتر کار</option>
+                                    </select>
                                     <select id="crm-filter-status" class="form-select form-select-sm" style="width:140px;">
                                         <option value="">همه وضعیت‌ها</option>
                                         <option value="new">جدید</option>

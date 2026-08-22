@@ -3504,6 +3504,8 @@ function clearLeadsFilter() {
     if (searchEl) searchEl.value = '';
     const catEl = document.getElementById('crm-filter-category');
     if (catEl) catEl.value = '';
+    const kindEl = document.getElementById('crm-filter-kind');
+    if (kindEl) kindEl.value = '';
     _resetLeadsPriceInputs();
     clearLeadsDateFilter();          // reloads the list
 }
@@ -3660,24 +3662,36 @@ function _leadSpecChips(lead) {
         : '<span class="text-muted">---</span>';
 }
 
-async function loadLeads() {
-    const status   = document.getElementById('crm-filter-status').value;
-    const notified = document.getElementById('crm-filter-notified').value;
+/** Every active leads filter as a query string — no paging.
+ *  The list and the Excel export both build on this, so the file you download
+ *  is the view you were looking at. */
+function _leadsQueryString() {
+    const status   = document.getElementById('crm-filter-status')?.value || '';
+    const notified = document.getElementById('crm-filter-notified')?.value ?? '';
     const search   = document.getElementById('crm-filter-search')?.value.trim() || '';
     const category = document.getElementById('crm-filter-category')?.value || '';
-
-    let url = `/crm/leads?limit=${LEADS_PAGE_SIZE}&offset=${(_leadsPage - 1) * LEADS_PAGE_SIZE}`;
-    if (status)          url += `&status=${status}`;
-    if (notified !== '') url += `&notified=${notified}`;
-    if (search)          url += `&search=${encodeURIComponent(search)}`;
-    if (category)        url += `&category=${encodeURIComponent(category)}`;
-    if (_leadsDateFrom)  url += `&date_from=${_leadsDateFrom}`;
-    if (_leadsDateTo)    url += `&date_to=${_leadsDateTo}`;
+    const kind     = document.getElementById('crm-filter-kind')?.value || '';
     // _intOrNull reads the field itself so it can strip the «/» separators
     const priceMin = _intOrNull('crm-filter-price-min');
     const priceMax = _intOrNull('crm-filter-price-max');
-    if (priceMin != null) url += `&price_min=${priceMin}`;
-    if (priceMax != null) url += `&price_max=${priceMax}`;
+
+    const parts = [];
+    if (status)           parts.push(`status=${encodeURIComponent(status)}`);
+    if (notified !== '')  parts.push(`notified=${notified}`);
+    if (search)           parts.push(`search=${encodeURIComponent(search)}`);
+    if (category)         parts.push(`category=${encodeURIComponent(category)}`);
+    if (kind)             parts.push(`property_kind=${encodeURIComponent(kind)}`);
+    if (_leadsDateFrom)   parts.push(`date_from=${_leadsDateFrom}`);
+    if (_leadsDateTo)     parts.push(`date_to=${_leadsDateTo}`);
+    if (priceMin != null) parts.push(`price_min=${priceMin}`);
+    if (priceMax != null) parts.push(`price_max=${priceMax}`);
+    return parts.join('&');
+}
+
+async function loadLeads() {
+    const filters = _leadsQueryString();
+    let url = `/crm/leads?limit=${LEADS_PAGE_SIZE}&offset=${(_leadsPage - 1) * LEADS_PAGE_SIZE}`;
+    if (filters) url += '&' + filters;
 
     try {
         const data = await apiCall(url);
@@ -5456,9 +5470,10 @@ function exportCalendarExcel() {
 }
 
 function exportLeadsExcel() {
-    const status = document.getElementById('crm-filter-status')?.value || '';
-    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
-    _downloadExport(`${API_BASE}/crm/leads/export/excel${qs}`, 'leads.xlsx');
+    // the export takes the same filters as the list, so the file matches the
+    // screen — reuse the very query string the list was built with
+    const filters = _leadsQueryString();
+    _downloadExport(`${API_BASE}/crm/leads/export/excel${filters ? '?' + filters : ''}`, 'leads.xlsx');
 }
 
 function exportJson(type) {
