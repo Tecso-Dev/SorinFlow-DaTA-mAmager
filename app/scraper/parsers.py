@@ -217,6 +217,40 @@ def is_personal_value(text: Optional[str]) -> bool:
     return _norm_value(text) in _PERSONAL_VALUES
 
 
+def agency_name_from_panel(lines) -> Optional[str]:
+    """The agency's own name out of Divar's panel block, e.g. «آژانس محمد امین».
+
+    Nothing stored a seller name for scraped ads, so the CRM column, the
+    matching engine and the share card all had an empty field to work with —
+    even though the name is right there on the page.
+
+    Picks the most specific business-sounding line: «مشاور املاک | فعالیت از
+    تیر ۱۴۰۴» is the role, not a name, and is skipped; between «مشاور املاک»
+    and «آژانس محمد امین» the longer one is the actual shop.
+    """
+    best = None
+    for raw in (lines or []):
+        # match on the normalised form, keep the original: normalising turns
+        # «مشاور املاک۱۱۸ارومیه» into «…118…» and drops the ZWNJ, and this is a
+        # name that gets stored and shown, not just compared
+        original = _WS.sub(" ", (raw or "")).strip()
+        line = _norm_value(raw)
+        if not line or len(line) > _PANEL_LINE_MAX:
+            continue
+        # the role line and the profile link are labels, not names
+        if any(m in line for m in _AGENCY_PANEL_MARKERS):
+            continue
+        if any(x in line for x in _PANEL_SINCE):
+            continue
+        if line in ("همه آگهی‌ها", "همه آگهی ها", "اطلاعات تماس", "چت"):
+            continue
+        if not looks_like_agency(line):
+            continue
+        if best is None or len(original) > len(best):
+            best = original
+    return best
+
+
 def decide_advertiser_type(rows, contact_text: Optional[str] = None,
                            panel_lines=None) -> Optional[str]:
     """Read (title, value) pairs off an ad page and settle on agency/personal.

@@ -19,6 +19,7 @@ from app.scraper.parsers import (
     looks_like_agency,
     infer_advertiser_type,
     panel_says_agency,
+    agency_name_from_panel,
 )
 
 
@@ -378,3 +379,52 @@ class TestAbsenceOfPanelMeansPersonal:
             if not advertiser_filter_skips("personal", det):
                 kept += 1
         assert kept == 3
+
+
+# ── the shop's own name ──────────────────────────────────────────────────────
+
+class TestAgencyNameFromPanel:
+    """seller_name was never filled for scraped ads even though the agency's
+    name is printed on the page."""
+
+    @pytest.mark.parametrize("lines,expected", [
+        (["قربانی", "مشاور املاک | فعالیت از تیر ۱۴۰۴", "پروفایل مشاور املاک",
+          "آژانس محمد امین", "همه آگهی‌ها"], "آژانس محمد امین"),
+        (["وحید کاتب", "مشاور املاک | فعالیت از فروردین ۱۴۰۴",
+          "پروفایل مشاور املاک", "املاک مسکن شهر"], "املاک مسکن شهر"),
+        (["ولیزاده", "مشاور املاک | فعالیت از مهر ۱۴۰۰",
+          "پروفایل مشاور املاک", "مشاور املاک۱۱۸ارومیه"], "مشاور املاک۱۱۸ارومیه"),
+        (["مونا نعمت زاده", "مشاور املاک | فعالیت از اردیبهشت ۱۴۰۵",
+          "پروفایل مشاور املاک", "هلدینگ آراد حقوقی و املاک"],
+         "هلدینگ آراد حقوقی و املاک"),
+        (["مشاور املاک مظلومی", "مشاور املاک | فعالیت از فروردین ۱۴۰۴",
+          "پروفایل مشاور املاک", "مشاور املاک"], "مشاور املاک مظلومی"),
+    ])
+    def test_real_agency_names(self, lines, expected):
+        assert agency_name_from_panel(lines) == expected
+
+    def test_persian_digits_and_zwnj_survive(self):
+        """The name is stored and shown, so it keeps the form it was written in
+        — normalising would turn «۱۱۸» into «118»."""
+        got = agency_name_from_panel(["مشاور املاک | فعالیت از مهر ۱۴۰۰",
+                                      "مشاور املاک۱۱۸ارومیه"])
+        assert "۱۱۸" in got and "118" not in got
+
+    def test_the_role_line_is_not_a_name(self):
+        assert agency_name_from_panel(["مشاور املاک | فعالیت از تیر ۱۴۰۴"]) is None
+
+    def test_the_profile_link_is_not_a_name(self):
+        assert agency_name_from_panel(["پروفایل مشاور املاک"]) is None
+
+    def test_owner_page_has_no_agency_name(self):
+        assert agency_name_from_panel(
+            ["فروش آپارتمان ۸۵ متری", "ارومیه", "اطلاعات تماس", "چت"]) is None
+
+    def test_the_longer_name_wins(self):
+        """Between the generic role and the actual shop, take the shop."""
+        assert agency_name_from_panel(
+            ["مشاور املاک", "املاک برادران رضایی"]) == "املاک برادران رضایی"
+
+    def test_empty(self):
+        assert agency_name_from_panel([]) is None
+        assert agency_name_from_panel(None) is None

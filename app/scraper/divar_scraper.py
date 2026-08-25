@@ -29,6 +29,7 @@ from app.scraper.parsers import (
     extract_price_info as _parse_price_info,
     detect_corner_type as _detect_corner,
     decide_advertiser_type as _decide_advertiser,
+    agency_name_from_panel as _agency_name,
 )
 
 settings = get_settings()
@@ -38,6 +39,9 @@ class DivarScraper:
     """Main scraper class for Divar.ir real estate listings"""
 
     BASE_URL = "https://divar.ir"
+    # How many listings the browser-scroll phase may gather before the
+    # cheaper API pagination takes over.
+    DOM_COLLECT_CAP = 200
 
     # Maps our category slug → substrings expected in the Divar detail-page URL.
     # Divar builds URLs from the listing *title*, not the category name, so we
@@ -786,14 +790,19 @@ class DivarScraper:
         all_listings: List[Dict[str, Any]] = []
         seen_ids: set = set()
 
-        # Strategy 1: live DOM extraction (independent of API response format)
+        # Strategy 1: live DOM extraction (independent of API response format).
+        # Bounded on purpose: this phase scrolls a real browser and its cost
+        # grows with the target (max_scrolls = target/2), while the API phase
+        # below pages through the same feed over plain HTTP. Depth is the API's
+        # job; the DOM is here because it does not depend on a response shape.
+        dom_target = min(target_count, self.DOM_COLLECT_CAP)
         try:
-            dom_listings = await self._collect_from_browser_dom(city, category, target_count)
+            dom_listings = await self._collect_from_browser_dom(city, category, dom_target)
             for lst in dom_listings:
                 if lst['divar_id'] not in seen_ids:
                     seen_ids.add(lst['divar_id'])
                     all_listings.append(lst)
-            logger.info(f"[robust] DOM strategy: {len(all_listings)}/{target_count}")
+            logger.info(f"[robust] DOM strategy: {len(all_listings)}/{dom_target} (pool target {target_count})")
         except Exception as e:
             logger.error(f"[robust] DOM strategy failed: {e}")
 
@@ -1227,9 +1236,13 @@ class DivarScraper:
                 property_data["has_images"] = True
             
             # Extract advertiser type and posting time
-            advertiser_type = await self._extract_advertiser_type()
+            advertiser_type, agency_name = await self._extract_advertiser_type()
             if advertiser_type:
                 property_data["advertiser_type"] = advertiser_type
+            if agency_name:
+                # nothing populated seller_name for scraped ads, so the CRM
+                # column, the matcher and the share card all had an empty field
+                property_data["seller_name"] = agency_name[:200]
 
             posted_at = await self._extract_posted_at()
             if posted_at:
@@ -1990,7 +2003,8 @@ class DivarScraper:
             logger.warning(f"Failed to get phone number: {e}")
             return None
     
-    async def _extract_advertiser_type(self) -> Optional[str]:
+    async def _extract_advertiser_type(self):
+        """Returns (advertiser_type, agency_name); either may be None."""
         """Detect whether the seller is personal (شخصی) or an agency (مشاور).
 
         Divar's own row is the first source, but it is missing on a lot of ads
@@ -2047,15 +2061,14 @@ class DivarScraper:
                 };
             }""")
             if not result:
-                return None
-            return _decide_advertiser(
-                result.get("rows") or [],
-                result.get("contact"),
-                result.get("panel") or [],
-            )
+                return None, None
+            panel = result.get("panel") or []
+            kind = _decide_advertiser(result.get("rows") or [], result.get("contact"), panel)
+            # the shop's own name, for the seller_name column nothing ever filled
+            return kind, (_agency_name(panel) if kind == "agency" else None)
         except Exception as e:
             logger.debug(f"Could not extract advertiser type: {e}")
-            return None
+            return None, None
 
     def _parse_relative_time(self, text: str) -> Optional[datetime]:
         """Convert Persian relative time strings (e.g. '۱۲ ساعت پیش') to datetime."""
@@ -2423,8 +2436,13 @@ class DivarScraper:
                 logger.info(f"Target: {cap_label} listings posted on {target_day}")
                 collect_target = 400  # DOM-phase batch; API phase is date-driven
             else:
-                logger.info(f"Target: {max_items} saved listings")
-                collect_target = min(max(max_items * 4, max_items + 50), 200)
+                logger.info(f"Target: {max_items} NEW listings")
+                # The target counts new listings only — anything already in the
+                # database is an update and does not advance it. A pool the size
+                # of the target could therefore only satisfy it on a city that
+                # had never been scraped, and this was additionally capped at
+                # 200, so asking for 200 new could never return 200 new.
+                collect_target = min(max(max_items * 5, max_items + 100), 1500)
 
             all_listings = await self._collect_listings_robust(
                 city, category, collect_target,
@@ -2649,6 +2667,14 @@ class DivarScraper:
             await self.db_session.commit()
             
             logger.info(f"Scraping job completed. New: {job.new_items}, Updated: {job.updated_items}, Failed: {job.failed_items}")
+            # Say so when the feed ran dry before the target was met, rather
+            # than completing at «۴۰ / ۲۰۰» with no explanation.
+            if max_items and job.new_items < max_items and not date_mode:
+                logger.warning(
+                    f"Ran out of candidates: {job.new_items}/{max_items} new from a pool of "
+                    f"{len(all_listings)}. {job.updated_items} were already in the database. "
+                    "Divar has no more matching listings, or the filters are too tight."
+                )
             if skip_tally:
                 breakdown = ", ".join(f"{k}={v}" for k, v in
                                       sorted(skip_tally.items(), key=lambda kv: -kv[1]))
