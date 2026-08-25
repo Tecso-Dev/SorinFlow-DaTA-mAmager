@@ -584,7 +584,9 @@ function showSection(sectionName) {
     switch (sectionName) {
         case 'dashboard':  loadDashboard(); break;
         case 'properties': loadProperties(); break;
-        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); _initScraperDatePicker(); setTimeout(restoreScraperForm, 200); break;
+        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling();
+                           _initScraperDatePicker(); refreshDivarSessionCount();
+                           setTimeout(restoreScraperForm, 200); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
@@ -2212,6 +2214,53 @@ async function loadJobs() {
     } catch (error) {
         showToast('خطا', 'بارگیری تسک‌ها ناموفق بود', 'danger');
     }
+}
+
+// ─── چرخش شماره: what the number actually does ───────────────────────────────
+// It is «how many ads before switching accounts», so a bigger value rotates
+// less often and leans harder on one account — which is what triggers Divar's
+// verification SMS. Setting it to the maximum does the opposite of what the
+// name suggests, and rotation does nothing at all below two valid sessions.
+let _validDivarSessions = null;
+
+async function refreshDivarSessionCount() {
+    try {
+        const r = await apiCall('/auth/cookies');
+        _validDivarSessions = (r.cookies || []).filter(c => c.is_valid).length;
+    } catch (e) {
+        _validDivarSessions = null;
+    }
+    renderRotationHint();
+}
+
+function renderRotationHint() {
+    const box = document.getElementById('rotate-hint');
+    if (!box) return;
+    const raw = document.getElementById('scraper-rotate-every')?.value.trim();
+    const n = raw === '' ? 15 : parseInt(_digitsOnly(raw), 10);   // empty = server default
+    const parts = [];
+
+    if (_validDivarSessions === 0 || _validDivarSessions === 1) {
+        parts.push(`<span class="text-danger">با ${formatNumber(_validDivarSessions)} حساب فعال،
+            چرخش هیچ کاری نمی‌کند — هر عددی بگذارید فرقی ندارد. برای اینکه کار کند،
+            در «احراز هویت دیوار» حساب دوم اضافه کنید.</span>`);
+    } else if (_validDivarSessions > 1) {
+        parts.push(`<span class="text-success">${formatNumber(_validDivarSessions)} حساب فعال دارید،
+            پس چرخش کار می‌کند.</span>`);
+    }
+
+    if (!isNaN(n)) {
+        if (n === 0) {
+            parts.push('<span class="text-warning">۰ یعنی بدون چرخش — همهٔ بار روی یک شماره، بیشترین پیامک.</span>');
+        } else if (n >= 50) {
+            parts.push(`<span class="text-warning">هر ${formatNumber(n)} آگهی یک بار سوییچ می‌کند —
+                یعنی چرخش <b>کم</b>. برای کم شدن پیامک، عدد را <b>پایین</b> بیاورید نه بالا.</span>`);
+        } else if (n <= 10) {
+            parts.push(`<span class="text-muted">هر ${formatNumber(n)} آگهی سوییچ می‌کند —
+                کمترین پیامک، ولی هر سوییچ چند ثانیه به هر اسکرپ اضافه می‌کند.</span>`);
+        }
+    }
+    box.innerHTML = parts.join('<br>');
 }
 
 // ─── Scraper log viewer ───────────────────────────────────────────────────────

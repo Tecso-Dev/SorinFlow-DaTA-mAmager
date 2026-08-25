@@ -586,10 +586,17 @@
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">چرخش شماره دیوار (هر چند آگهی)</label>
-                                        <input type="number" id="scraper-rotate-every" class="form-control" min="0" max="200" placeholder="۱۵">
+                                        <input type="number" id="scraper-rotate-every" class="form-control"
+                                               min="0" max="200" placeholder="۱۵" oninput="renderRotationHint()">
+                                        <!-- The number is «how many ads before switching», so a bigger
+                                             value rotates LESS and asks one account for more codes.
+                                             Saying so, because «set it to maximum» is the natural
+                                             reading and it is backwards. -->
+                                        <div id="rotate-hint" class="mt-1" style="font-size:.7rem;line-height:1.7"></div>
                                         <small class="text-muted d-block mt-1">
-                                            برای کم شدن پیامک احراز هویت، هر این تعداد آگهی به شماره بعدیِ ذخیره‌شده سوییچ می‌کند.
-                                            ۰ = بدون چرخش. (نیازمند بیش از یک نشست فعال در «احراز هویت دیوار»)
+                                            هر این تعداد آگهی، به شمارهٔ بعدیِ ذخیره‌شده سوییچ می‌کند.
+                                            <b>عدد کمتر = چرخش بیشتر = پیامک احراز هویت کمتر.</b>
+                                            ۰ = بدون چرخش.
                                         </small>
                                     </div>
                                     <div class="mb-3 form-check">
