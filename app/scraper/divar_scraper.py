@@ -2619,6 +2619,15 @@ class DivarScraper:
                         if skip:
                             job.scraped_items = (i + 1) if pool_progress else min(job.new_items, max_items)
                             await self.db_session.commit()
+                            # A dropped listing still cost this account a page
+                            # open and a contact-info request — which is what
+                            # Divar counts before demanding a code. Skipping the
+                            # rotation here let one number carry hundreds of
+                            # requests while the counter barely moved, so the
+                            # setting looked like it was being ignored. It is
+                            # the requests that must be spread, not the saves.
+                            await self.maybe_rotate_account()
+                            await self._human_like_delay()
                             continue
 
                         # Download images if enabled — replace the Divar (webp)
