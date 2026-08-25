@@ -21,10 +21,15 @@ class ContactExtractor:
     """Extracts phone numbers from a Divar listing page."""
 
     def __init__(self, page, images_dir: Path, otp_key: Optional[str] = None,
-                 on_pause=None, on_resume=None, should_cancel=None):
+                 on_pause=None, on_resume=None, should_cancel=None,
+                 account_phone: Optional[str] = None):
         self.page = page
         self.images_dir = images_dir
         self.otp_key = otp_key  # key into otp_store; set by scraper when a job is running
+        # Which saved Divar account is logged in right now. The SMS goes to this
+        # number, and with rotation on it is not necessarily the one the user
+        # started the job with — so the prompt has to name it.
+        self.account_phone = account_phone
         # async callbacks fired when the scraper pauses (OTP requested) and
         # resumes (code entered / wait ended) — used to flip the job status
         self.on_pause = on_pause
@@ -289,6 +294,38 @@ class ContactExtractor:
                 continue
         logger.info("No captcha refresh button found; relying on auto-refresh")
 
+    async def _request_otp_resend(self) -> bool:
+        """Click Divar's resend control if it is offering one.
+
+        Matched on visible text, not class names: the wording is stable and the
+        markup is not. A disabled button means Divar is still counting down from
+        a send that did happen, so it is left alone.
+        """
+        WORDS = ("ارسال مجدد", "ارسال دوباره", "دریافت مجدد", "ارسال کد",
+                 "دریافت کد", "کد را دوباره")
+        try:
+            for el in await self.page.query_selector_all(
+                    'button, a, [role="button"]'):
+                try:
+                    if not await el.is_visible():
+                        continue
+                    text = ((await el.inner_text()) or "").strip()
+                    if not text or not any(w in text for w in WORDS):
+                        continue
+                    if not await el.is_enabled():
+                        logger.info(f"OTP resend still counting down ({text!r}) — a code was sent")
+                        return False
+                    await el.click(force=True, timeout=3000)
+                    logger.info(f"Asked Divar to send the OTP again via {text!r}")
+                    await asyncio.sleep(1.0)
+                    return True
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.debug(f"OTP resend lookup failed: {e}")
+        logger.info("No OTP resend control on the page — relying on Divar's own send")
+        return False
+
     async def _handle_sms_otp_if_present(self) -> None:
         """Detect Divar's SMS OTP verification for contact info, wait for user code."""
         try:
@@ -329,7 +366,13 @@ class ContactExtractor:
                 logger.info("SMS-OTP suppressed (user dismissed earlier) — skipping phone")
                 return
 
-            event = otp_store.request(self.otp_key)
+            # A modal can be on screen without Divar having sent anything — the
+            # previous code was consumed, or the first send was rate-limited and
+            # the form is sitting there with a «ارسال مجدد» control. Waiting on
+            # that is waiting for an SMS nobody asked for.
+            await self._request_otp_resend()
+
+            event = otp_store.request(self.otp_key, self.account_phone or "")
             timeout = getattr(settings, "otp_wait_timeout", 300)
             logger.info(f"SMS-OTP required — PAUSING scrape, waiting up to {timeout}s for code (key={self.otp_key})")
 

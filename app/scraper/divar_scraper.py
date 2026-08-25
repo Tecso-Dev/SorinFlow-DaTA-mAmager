@@ -1318,6 +1318,9 @@ class DivarScraper:
                 self.page, self.images_dir, otp_key=_otp_key,
                 on_pause=_pause_job, on_resume=_resume_job,
                 should_cancel=_job_cancelled,
+                # the code goes to whichever account is logged in *now*, which
+                # rotation may have changed since the job started
+                account_phone=self.active_phone,
             )
             phone_number = await contact_extractor.get_phone_number()
             if phone_number:
