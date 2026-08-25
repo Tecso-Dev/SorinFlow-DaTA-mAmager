@@ -2038,6 +2038,69 @@ function restoreScraperForm() {
     }
 }
 
+// ─── «چند آگهی با این فیلترها هست؟» ──────────────────────────────────────────
+// Divar prints this above its own results («۳۴۳ آگهی در این محدوده») and its
+// search API carries the same number. One request answers what would otherwise
+// take opening every ad in the city.
+async function estimateScrape() {
+    const box = document.getElementById('scraper-estimate');
+    const btn = document.getElementById('scraper-estimate-btn');
+    const city = document.getElementById('scraper-city').value;
+    if (!city) { showToast('خطا', 'اول شهر را انتخاب کنید', 'warning'); return; }
+
+    const p = new URLSearchParams({ city });
+    const cat = document.getElementById('scraper-category')?.value;
+    if (cat) p.set('category', cat);
+    const adv = document.getElementById('scraper-advertiser-type')?.value;
+    if (adv) p.set('advertiser_type', adv);
+    // «دارای عکس» is the filter; «scraper-images» is the download-images
+    // toggle and has nothing to do with what Divar returns
+    if (document.getElementById('scraper-has-images')?.checked) p.set('has_images', 'true');
+    const nums = {
+        min_price: 'scraper-min-price', max_price: 'scraper-max-price',
+        min_deposit: 'scraper-min-deposit', max_deposit: 'scraper-max-deposit',
+        min_rent: 'scraper-min-rent', max_rent: 'scraper-max-rent',
+        min_area: 'scraper-min-area', max_area: 'scraper-max-area',
+        min_rooms: 'scraper-min-rooms', max_rooms: 'scraper-max-rooms',
+        min_price_per_meter: 'scraper-min-ppm', max_price_per_meter: 'scraper-max-ppm',
+    };
+    for (const [key, id] of Object.entries(nums)) {
+        const v = _intOrNull(id);
+        if (v != null) p.set(key, v);
+    }
+    for (const [key, id] of [['has_elevator','scraper-has-elevator'],
+                             ['has_parking','scraper-has-parking'],
+                             ['has_storage','scraper-has-storage']]) {
+        if (document.getElementById(id)?.checked) p.set(key, 'true');
+    }
+
+    box.classList.remove('d-none');
+    box.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm"></span> در حال پرسیدن از دیوار...</div>';
+    if (btn) btn.disabled = true;
+    try {
+        const r = await apiCall(`/scraper/estimate?${p.toString()}`);
+        if (r.count == null) {
+            box.innerHTML = `<div class="alert alert-warning py-2 mb-0" style="font-size:.75rem">
+                ${esc(r.error || 'تعداد را نتوانستم بگیرم')}</div>`;
+            return;
+        }
+        // Divar cannot narrow on some of our filters; the scraper applies those
+        // itself after opening each ad, so the real yield is at most this.
+        const rest = r.applied_after_scrape || [];
+        box.innerHTML = `
+            <div class="alert alert-info py-2 mb-0" style="font-size:.8rem">
+                <b style="font-size:1.05rem">${formatNumber(r.count)}</b> آگهی با این فیلترها در دیوار هست.
+                ${rest.length ? `<div class="mt-1" style="font-size:.7rem">
+                    ${esc(rest.join('، '))} را دیوار فیلتر نمی‌کند — اسکرپر خودش بعد از باز کردن هر آگهی
+                    اعمالش می‌کند، پس نتیجهٔ نهایی از این عدد کمتر می‌شود.</div>` : ''}
+            </div>`;
+    } catch (e) {
+        box.innerHTML = `<div class="alert alert-danger py-2 mb-0" style="font-size:.75rem">${esc(e.message)}</div>`;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 async function startScraping(e) {
     e.preventDefault();
 

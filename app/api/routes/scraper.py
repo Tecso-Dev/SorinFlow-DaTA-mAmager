@@ -453,6 +453,55 @@ async def cancel_scraping_job(
     return {"message": "Job cancelled successfully", "was": was, "otp_cleared": freed}
 
 
+@router.get("/estimate")
+async def estimate_matching_posts(
+    city: str,
+    category: Optional[str] = None,
+    advertiser_type: Optional[str] = None,
+    has_images: Optional[bool] = None,
+    min_price: Optional[int] = None,
+    max_price: Optional[int] = None,
+    min_deposit: Optional[int] = None,
+    max_deposit: Optional[int] = None,
+    min_rent: Optional[int] = None,
+    max_rent: Optional[int] = None,
+    min_area: Optional[int] = None,
+    max_area: Optional[int] = None,
+    min_rooms: Optional[int] = None,
+    max_rooms: Optional[int] = None,
+    has_elevator: Optional[bool] = None,
+    has_parking: Optional[bool] = None,
+    has_storage: Optional[bool] = None,
+    min_price_per_meter: Optional[int] = None,
+    max_price_per_meter: Optional[int] = None,
+):
+    """How many ads Divar has for these filters, before scraping any of them.
+
+    The same number Divar prints above its own results. Costs one request,
+    where finding out by scraping costs opening every ad in the city.
+    """
+    from app.services import divar_count as dc
+
+    form = dc.build_form_data(
+        category,
+        advertiser_type=advertiser_type, has_images=has_images,
+        min_price=min_price, max_price=max_price,
+        min_deposit=min_deposit, max_deposit=max_deposit,
+        min_rent=min_rent, max_rent=max_rent,
+        min_area=min_area, max_area=max_area,
+    )
+    count, error = await dc.fetch_post_count(city, form)
+    # Filters Divar will not narrow on are still applied by the scraper after
+    # it opens each ad, so the real yield is at most this number.
+    ignored = dc.unsupported_filters(
+        min_rooms=min_rooms, max_rooms=max_rooms,
+        has_elevator=has_elevator, has_parking=has_parking, has_storage=has_storage,
+        min_price_per_meter=min_price_per_meter, max_price_per_meter=max_price_per_meter,
+    )
+    return {"count": count, "error": error, "applied_by_divar": sorted(form),
+            "applied_after_scrape": ignored}
+
+
 @router.get("/cities")
 async def get_available_cities():
     """Get list of available cities for scraping"""
