@@ -220,7 +220,13 @@ async def maintenance_middleware(request: Request, call_next):
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
     public_paths = {"/health", "/", "/favicon.svg", "/favicon.ico", "/api/public/stats", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info", "/api/config",
-                    "/api/users/token", "/api/users/token/verify-totp", "/api/users/me"}
+                    "/api/users/token", "/api/users/token/verify-totp", "/api/users/me",
+                    # حالت تعمیر: this middleware runs outside the maintenance
+                    # one, so anything it rejects never reaches that logic at
+                    # all — including the link meant to get back in. The POST
+                    # to /api/maintenance is still super_admin-only by its own
+                    # dependency; it is only exempt from the API-key check.
+                    "/api/maintenance", "/maintenance-access"}
     is_dashboard = request.url.path.startswith("/dashboard") or request.url.path.startswith("/images")
     is_public = request.url.path in public_paths or is_dashboard
 
