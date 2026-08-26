@@ -1037,9 +1037,69 @@ class DivarScraper:
             logger.warning(f"Failed to parse card: {e}")
             return None
     
+    def pre_contact_skip(self, detail: Dict[str, Any], listing_type: str,
+                         f: Dict[str, Any]) -> Optional[str]:
+        """Why this ad would be dropped, judged from the page alone.
+
+        Only filters that need nothing beyond what the ad page already gave us.
+        The phone is deliberately not among them: deciding this *before* asking
+        for it is the whole point. The full filter set still runs afterwards in
+        the scrape loop and remains the authority — this only avoids paying for
+        an answer we are going to discard.
+        """
+        adv = f.get("advertiser_type")
+        if adv:
+            actual = detail.get("advertiser_type")
+            if not actual:
+                return f"advertiser_type unknown; {adv} filter active"
+            if actual != adv:
+                return f"advertiser_type {actual} != {adv}"
+
+        if listing_type == "rent":
+            bands = (("deposit", f.get("min_deposit"), f.get("max_deposit")),
+                     ("rent_price", f.get("min_rent"), f.get("max_rent")))
+        else:
+            bands = (("__price__", f.get("min_price"), f.get("max_price")),
+                     ("price_per_meter", f.get("min_price_per_meter"),
+                      f.get("max_price_per_meter")))
+        for field, lo, hi in bands:
+            value = (detail.get("total_price") or detail.get("price")
+                     if field == "__price__" else detail.get(field))
+            if value is None:
+                continue
+            if lo and value < lo:
+                return f"{field} {value} < min {lo}"
+            if hi and value > hi:
+                return f"{field} {value} > max {hi}"
+
+        for field, lo, hi in (("area", f.get("min_area"), f.get("max_area")),
+                              ("rooms", f.get("min_rooms"), f.get("max_rooms"))):
+            value = detail.get(field)
+            if value is None:
+                continue
+            if lo is not None and value < lo:
+                return f"{field} {value} < min {lo}"
+            if hi is not None and value > hi:
+                return f"{field} {value} > max {hi}"
+
+        for key, wanted in (("has_elevator", f.get("has_elevator")),
+                            ("has_parking", f.get("has_parking")),
+                            ("has_storage", f.get("has_storage")),
+                            ("has_balcony", f.get("has_balcony")),
+                            ("has_images", f.get("has_images"))):
+            if wanted is None:
+                continue
+            actual = bool(detail.get(key))
+            if wanted and not actual:
+                return f"{key} required but not present"
+            if not wanted and actual:
+                return f"{key} must be absent"
+        return None
+
     async def scrape_property_detail(
         self, url: str, target_category: Optional[str] = None,
         source_title: Optional[str] = None,
+        wants_contact=None,
     ) -> Optional[Dict[str, Any]]:
         """Scrape detailed information from a property page.
 
@@ -1313,6 +1373,19 @@ class DivarScraper:
                     return False
                 await self.db_session.refresh(self.current_job)
                 return self.current_job.status == "cancelled"
+
+            # Everything above came free with the page. Contact info does not:
+            # it clicks «اطلاعات تماس», solves a captcha, and spends one of the
+            # account's requests — which is the budget Divar counts before it
+            # demands a code. Asking for it on an ad the filters are about to
+            # throw away spent that budget for nothing, and it is why a filtered
+            # scrape was both slow and forever being asked to verify.
+            if wants_contact is not None:
+                reason = wants_contact(property_data)
+                if reason:
+                    logger.info(
+                        f"Not requesting contact info for {property_data.get('divar_id')}: {reason}")
+                    return property_data
 
             contact_extractor = ContactExtractor(
                 self.page, self.images_dir, otp_key=_otp_key,
@@ -2468,6 +2541,22 @@ class DivarScraper:
             # why listings were dropped, tallied by reason. A scrape that
             # saves nothing is otherwise indistinguishable from a broken one.
             skip_tally: Dict[str, int] = {}
+            # Handed to each detail scrape so it can tell, before asking Divar
+            # for contact info, whether this ad is going to be discarded anyway.
+            _listing_type = CATEGORIES.get(category, {}).get('type', 'unknown')
+            _pre_filters = {
+                'advertiser_type': advertiser_type,
+                'min_price': min_price, 'max_price': max_price,
+                'min_deposit': min_deposit, 'max_deposit': max_deposit,
+                'min_rent': min_rent, 'max_rent': max_rent,
+                'min_price_per_meter': min_price_per_meter,
+                'max_price_per_meter': max_price_per_meter,
+                'min_area': min_area, 'max_area': max_area,
+                'min_rooms': min_rooms, 'max_rooms': max_rooms,
+                'has_elevator': has_elevator, 'has_parking': has_parking,
+                'has_storage': has_storage, 'has_balcony': has_balcony,
+                'has_images': has_images,
+            }
             
             # Scrape each property detail
             for i, listing in enumerate(all_listings):
@@ -2495,6 +2584,8 @@ class DivarScraper:
                     detail = await self.scrape_property_detail(
                         listing['url'], target_category=category,
                         source_title=listing.get('title'),
+                        wants_contact=lambda pd: self.pre_contact_skip(
+                            pd, _listing_type, _pre_filters),
                     )
                     
                     if detail:
