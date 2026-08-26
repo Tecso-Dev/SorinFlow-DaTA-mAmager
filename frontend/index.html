@@ -1632,6 +1632,34 @@
 
             <!-- ═══ USERS ═════════════════════════ -->
             <div id="section-users" class="section-content" style="display:none;">
+                <!-- حالت تعمیر: closing the whole site while it is updated -->
+                <div class="card mb-3" id="maintenance-card">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <i class="bi bi-cone-striped"></i> حالت تعمیر سایت
+                        <span id="maintenance-badge" class="badge bg-secondary">در حال بررسی...</span>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-2">
+                            وقتی روشن باشد، هر بازدیدکننده‌ای صفحهٔ «در حال بروزرسانی» را می‌بیند و
+                            پنل و API برای همه بسته می‌شود — به‌جز شما. تا وقتی خودتان خاموشش نکنید
+                            روشن می‌ماند، حتی اگر سرور دوباره راه‌اندازی شود.
+                        </p>
+                        <div class="mb-2">
+                            <label class="form-label small">متن نمایش‌داده‌شده</label>
+                            <input type="text" id="maintenance-message" class="form-control form-control-sm"
+                                   maxlength="200" placeholder="سایت در حال بروزرسانی می‌باشد">
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-danger btn-sm" onclick="setMaintenance(true)">
+                                <i class="bi bi-lock"></i> بستن سایت
+                            </button>
+                            <button class="btn btn-success btn-sm" onclick="setMaintenance(false)">
+                                <i class="bi bi-unlock"></i> باز کردن سایت
+                            </button>
+                        </div>
+                        <div id="maintenance-bypass" class="d-none mt-3"></div>
+                    </div>
+                </div>
                 <div class="row g-3">
                     <div class="col-md-4">
                         <div class="card">

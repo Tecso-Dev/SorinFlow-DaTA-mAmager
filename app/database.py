@@ -73,7 +73,7 @@ async def close_redis():
 async def init_db():
     """Initialize database tables and seed default super_admin if needed."""
     async with engine.begin() as conn:
-        from app.models import property, cookie, scraping_job, lead, user, crm_models
+        from app.models import property, cookie, scraping_job, lead, user, crm_models, app_setting
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_users_totp(conn)
         await _migrate_users_divar_phone(conn)

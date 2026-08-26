@@ -123,6 +123,99 @@ app.add_middleware(
 )
 
 
+# ─── حالت تعمیر ──────────────────────────────────────────────────────────────
+# Starlette runs the last-registered middleware first, so this one sits closest
+# to the routes — which is all it needs: it answers before any handler does.
+MAINTENANCE_PAGE = """<!doctype html><html lang="fa" dir="rtl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>سورین‌فلو — در حال بروزرسانی</title><style>
+:root{color-scheme:dark}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+ background:#0b1020;color:#e6e9f2;font-family:Vazirmatn,Tahoma,system-ui,sans-serif;padding:1.5rem}
+.card{max-width:520px;text-align:center;background:#141a2e;border:1px solid #26304d;
+ border-radius:20px;padding:2.5rem 2rem;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.ring{width:74px;height:74px;margin:0 auto 1.2rem;border-radius:50%;display:flex;
+ align-items:center;justify-content:center;font-size:2rem;
+ background:linear-gradient(135deg,#a78bfa,#38bdf8)}
+h1{font-size:1.35rem;margin:0 0 .7rem}
+p{margin:.35rem 0;color:#9aa4c0;font-size:.95rem;line-height:2}
+.foot{margin-top:1.6rem;font-size:.75rem;color:#5f6b8c}
+</style></head><body><div class="card">
+<div class="ring">🛠</div><h1>__MESSAGE__</h1>
+<p>در حال بهبود سامانه هستیم و به‌زودی برمی‌گردیم.</p>
+<p>از شکیبایی شما سپاسگزاریم.</p>
+<div class="foot">املاک سورین — سورین‌فلو</div>
+</div></body></html>"""
+
+
+async def _maintenance_allows(request: Request) -> bool:
+    """Whether this particular request gets through a closed site.
+
+    Three ways in, and only three: a path that must never close, the bypass
+    cookie, or a bearer token belonging to a super_admin.
+    """
+    from app.services import maintenance as mt
+
+    if mt.is_open_path(request.url.path) or request.method == "OPTIONS":
+        return True
+
+    from app.database import async_session_maker
+    async with async_session_maker() as db:
+        enabled, _message, bypass = await mt.get_state(db)
+        if not enabled:
+            return True
+        if bypass and request.cookies.get(mt.BYPASS_COOKIE) == bypass:
+            return True
+
+        token = request.headers.get("Authorization", "")
+        if token.startswith("Bearer "):
+            try:
+                from app.auth.jwt import decode_token
+                from app.models.user import User
+                from sqlalchemy import select
+                username = decode_token(token[7:]).get("sub")
+                if username:
+                    user = (await db.execute(select(User).where(
+                        User.username == username))).scalar_one_or_none()
+                    if user and user.is_active and user.role == "super_admin":
+                        return True
+            except Exception:
+                pass
+    return False
+
+
+@app.middleware("http")
+async def maintenance_middleware(request: Request, call_next):
+    try:
+        if await _maintenance_allows(request):
+            return await call_next(request)
+    except Exception as e:
+        # Never let a fault here close a site that was not put into maintenance.
+        logger.warning(f"[maintenance] check failed, letting the request through: {e}")
+        return await call_next(request)
+
+    from app.services import maintenance as mt
+    from app.database import async_session_maker
+    message = mt.DEFAULT_MESSAGE
+    try:
+        async with async_session_maker() as db:
+            _enabled, message, _bypass = await mt.get_state(db)
+    except Exception:
+        pass
+
+    # 503 so crawlers treat it as temporary; Retry-After keeps them off.
+    # no-store matters more than it looks: a cached maintenance page would keep
+    # showing after the site reopens, and the reopening is the part nobody would
+    # think to debug.
+    head = {"Retry-After": "3600", "Cache-Control": "no-store, must-revalidate"}
+    if request.url.path.startswith("/api"):
+        return JSONResponse(status_code=503,
+                            content={"detail": message, "maintenance": True},
+                            headers=head)
+    return HTMLResponse(MAINTENANCE_PAGE.replace("__MESSAGE__", message),
+                        status_code=503, headers=head)
+
+
 # API Key authentication middleware
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
@@ -398,6 +491,71 @@ async def public_stats():
 
 # Root: public landing page (dashboard lives at /dashboard)
 _landing_cache = {"mtime": 0.0, "html": ""}
+
+
+@app.get("/api/maintenance", tags=["Maintenance"])
+async def maintenance_status(request: Request):
+    """Whether the site is closed. Readable by anyone — the login page needs it."""
+    from app.services import maintenance as mt
+    from app.database import async_session_maker
+    async with async_session_maker() as db:
+        enabled, message, bypass = await mt.get_state(db, fresh=True)
+    holds_bypass = bool(bypass and request.cookies.get(mt.BYPASS_COOKIE) == bypass)
+    return {"enabled": enabled, "message": message, "bypass_active": holds_bypass}
+
+
+@app.post("/api/maintenance", tags=["Maintenance"])
+async def set_maintenance(payload: dict, request: Request,
+                          current_user=_require_super_admin):
+    """Close or reopen the site. Super-admin only.
+
+    Turning it on returns a bypass link. Opening that link in any browser marks
+    it as allowed through — which is how a phone or a second machine gets in
+    without signing in first.
+    """
+    from app.services import maintenance as mt
+    from app.database import async_session_maker
+
+    enabled = bool(payload.get("enabled"))
+    message = payload.get("message")
+    async with async_session_maker() as db:
+        enabled, message, bypass = await mt.set_state(
+            db, enabled=enabled, message=message,
+            actor=getattr(current_user, "username", None))
+
+    base = str(request.base_url).rstrip("/")
+    body = {"enabled": enabled, "message": message,
+            "bypass_url": f"{base}/maintenance-access?key={bypass}" if bypass else None}
+    response = JSONResponse(body)
+    if enabled and bypass:
+        # the admin who threw the switch should not lock themselves out
+        response.set_cookie(mt.BYPASS_COOKIE, bypass, max_age=30 * 24 * 3600,
+                            httponly=True, samesite="lax")
+    else:
+        response.delete_cookie(mt.BYPASS_COOKIE)
+    return response
+
+
+@app.get("/maintenance-access", response_class=HTMLResponse, include_in_schema=False)
+async def maintenance_access(key: str = ""):
+    """Trade a valid bypass key for the cookie that gets a browser through."""
+    from app.services import maintenance as mt
+    from app.database import async_session_maker
+    async with async_session_maker() as db:
+        enabled, _message, bypass = await mt.get_state(db, fresh=True)
+
+    if not enabled:
+        return HTMLResponse('<meta http-equiv="refresh" content="0; url=/dashboard" />')
+    if not key or not bypass or key != bypass:
+        return HTMLResponse(
+            MAINTENANCE_PAGE.replace("__MESSAGE__", "لینک دسترسی معتبر نیست"),
+            status_code=403, headers={"Cache-Control": "no-store"})
+
+    response = HTMLResponse('<meta http-equiv="refresh" content="0; url=/dashboard" />',
+                            headers={"Cache-Control": "no-store"})
+    response.set_cookie(mt.BYPASS_COOKIE, bypass, max_age=30 * 24 * 3600,
+                        httponly=True, samesite="lax")
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)

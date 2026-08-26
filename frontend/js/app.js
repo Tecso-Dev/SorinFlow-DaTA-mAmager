@@ -590,7 +590,7 @@ function showSection(sectionName) {
         case 'auth':       checkAuthStatus(); loadCookies(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
-        case 'users':      if (_currentUser?.role === 'super_admin') loadUsers(); break;
+        case 'users':      if (_currentUser?.role === 'super_admin') { loadUsers(); loadMaintenance(); } break;
     }
 }
 
@@ -2261,6 +2261,69 @@ function renderRotationHint() {
         }
     }
     box.innerHTML = parts.join('<br>');
+}
+
+// ─── حالت تعمیر ──────────────────────────────────────────────────────────────
+async function loadMaintenance() {
+    const badge = document.getElementById('maintenance-badge');
+    if (!badge) return;
+    try {
+        const r = await apiCall('/maintenance');
+        badge.textContent = r.enabled ? 'روشن — سایت بسته است' : 'خاموش — سایت باز است';
+        badge.className = 'badge ' + (r.enabled ? 'bg-danger' : 'bg-success');
+        const msg = document.getElementById('maintenance-message');
+        if (msg && !msg.value) msg.value = r.message || '';
+    } catch (e) {
+        badge.textContent = 'نامشخص';
+        badge.className = 'badge bg-secondary';
+    }
+}
+
+async function setMaintenance(enabled) {
+    if (enabled && !confirm('سایت برای همه بسته شود؟ فقط خودتان دسترسی خواهید داشت.')) return;
+    const message = document.getElementById('maintenance-message')?.value.trim() || null;
+    const box = document.getElementById('maintenance-bypass');
+    try {
+        const r = await apiCall('/maintenance', {
+            method: 'POST', body: JSON.stringify({ enabled, message }),
+        });
+        await loadMaintenance();
+        if (r.enabled && r.bypass_url) {
+            // The panel itself is now closed. This link is how another browser
+            // or phone gets back in, so it has to be kept somewhere safe.
+            box.classList.remove('d-none');
+            box.innerHTML = `
+                <div class="alert alert-warning mb-0" style="font-size:.8rem">
+                    <b>سایت بسته شد.</b> این مرورگر دسترسی دارد.
+                    برای ورود از دستگاه دیگر، این لینک را باز کنید — <b>جای امنی ذخیره‌اش کنید</b>،
+                    چون با هر بار بستن سایت لینک تازه‌ای ساخته می‌شود:
+                    <div class="input-group input-group-sm mt-2">
+                        <input type="text" class="form-control" id="maintenance-bypass-url"
+                               value="${esc(r.bypass_url)}" readonly dir="ltr">
+                        <button class="btn btn-outline-secondary" onclick="copyMaintenanceLink()">کپی</button>
+                    </div>
+                </div>`;
+            showToast('سایت بسته شد', 'فقط شما دسترسی دارید', 'warning');
+        } else {
+            box.classList.add('d-none');
+            box.innerHTML = '';
+            showToast('سایت باز شد', 'دسترسی برای همه برقرار است', 'success');
+        }
+    } catch (e) {
+        showToast('خطا', e.message, 'danger');
+    }
+}
+
+async function copyMaintenanceLink() {
+    const el = document.getElementById('maintenance-bypass-url');
+    if (!el) return;
+    try {
+        await navigator.clipboard.writeText(el.value);
+        showToast('کپی شد', 'لینک دسترسی کپی شد', 'success');
+    } catch (_) {
+        el.select();
+        showToast('انتخاب شد', 'با Ctrl+C کپی کنید', 'info');
+    }
 }
 
 // ─── Scraper log viewer ───────────────────────────────────────────────────────
