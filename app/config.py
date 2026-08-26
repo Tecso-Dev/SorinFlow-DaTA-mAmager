@@ -55,9 +55,11 @@ class Settings(BaseSettings):
     # The code would be entered against a request the scraper had already
     # dropped, and come back "no pending OTP request".
     otp_wait_timeout: int = Field(default=300, env="OTP_WAIT_TIMEOUT")
-    # Rotate to another saved Divar account every N scraped listings so a
-    # single number isn't hammered (0 = never rotate)
-    cookie_rotate_every: int = Field(default=15, env="COOKIE_ROTATE_EVERY")
+    # How many listings one saved Divar account handles before the scraper
+    # switches to the next. Counted per listing *opened*, not per listing
+    # saved, so a filtered-out ad costs the account the same as a kept one.
+    # 0 = never rotate.
+    cookie_rotate_every: int = Field(default=100, env="COOKIE_ROTATE_EVERY")
     
     # Proxy Settings
     proxy_enabled: bool = Field(default=False, env="PROXY_ENABLED")

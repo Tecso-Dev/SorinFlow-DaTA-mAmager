@@ -2237,7 +2237,7 @@ function renderRotationHint() {
     const box = document.getElementById('rotate-hint');
     if (!box) return;
     const raw = document.getElementById('scraper-rotate-every')?.value.trim();
-    const n = raw === '' ? 15 : parseInt(_digitsOnly(raw), 10);   // empty = server default
+    const n = raw === '' ? 100 : parseInt(_digitsOnly(raw), 10);  // empty = server default
     const parts = [];
 
     if (_validDivarSessions === 0 || _validDivarSessions === 1) {
@@ -2252,9 +2252,13 @@ function renderRotationHint() {
     if (!isNaN(n)) {
         if (n === 0) {
             parts.push('<span class="text-warning">۰ یعنی بدون چرخش — همهٔ بار روی یک شماره، بیشترین پیامک.</span>');
-        } else if (n >= 50) {
+        } else if (n > 150) {
             parts.push(`<span class="text-warning">هر ${formatNumber(n)} آگهی یک بار سوییچ می‌کند —
-                یعنی چرخش <b>کم</b>. برای کم شدن پیامک، عدد را <b>پایین</b> بیاورید نه بالا.</span>`);
+                چرخش خیلی کم. اگر پیامک احراز هویت زیاد شد، عدد را <b>پایین</b> بیاورید نه بالا.</span>`);
+        } else if (n >= 40) {
+            parts.push(`<span class="text-muted">هر ${formatNumber(n)} آگهی سوییچ می‌کند —
+                هر شماره ${formatNumber(n)} درخواست پشت‌سرهم می‌دهد. اگر دیوار زیاد کد خواست،
+                عدد را پایین بیاورید.</span>`);
         } else if (n <= 10) {
             parts.push(`<span class="text-muted">هر ${formatNumber(n)} آگهی سوییچ می‌کند —
                 کمترین پیامک، ولی هر سوییچ چند ثانیه به هر اسکرپ اضافه می‌کند.</span>`);
