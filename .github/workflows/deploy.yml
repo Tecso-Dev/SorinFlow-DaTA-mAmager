@@ -83,7 +83,15 @@ jobs:
       - name: Apply ingress manifests
         env:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-        run: kubectl apply -f k8s/05-ingress.yaml
+        # --validate=false skips the client-side schema check, which downloads
+        # the OpenAPI document from the API server first. That download keeps
+        # timing out on this node and failing deploys whose manifests had not
+        # even changed. The apiserver still validates on admission, so the
+        # manifest is not going in unchecked — only the local pre-check is
+        # dropped. Retried once, because the same node hiccup can hit the apply.
+        run: |
+          kubectl apply --validate=false -f k8s/05-ingress.yaml ||
+            { sleep 10; kubectl apply --validate=false -f k8s/05-ingress.yaml; }
 
       - name: Roll out new image
         env:
