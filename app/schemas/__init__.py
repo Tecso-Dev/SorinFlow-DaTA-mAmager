@@ -345,7 +345,9 @@ class LeadList(BaseModel):
 
 # ============== User / Auth Schemas ==============
 
-VALID_ROLES = {"super_admin", "admin", "user"}
+# Single source of truth lives in app/auth/permissions.py so a role added
+# there cannot drift from what the schemas will accept.
+from app.auth.permissions import VALID_ROLES, ASSIGNABLE_BY_SUPER_ADMIN  # noqa: E402
 
 
 class TokenResponse(BaseModel):
@@ -367,6 +369,10 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     divar_phone: Optional[str] = None
+    phone: Optional[str] = None
+    phone_verified: bool = False
+    marketing_opt_in: bool = False
+    permissions: List[str] = Field(default_factory=list)
     last_login: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
@@ -379,8 +385,9 @@ class UserCreate(BaseModel):
     email: Optional[str] = None
     full_name: Optional[str] = None
     password: str = Field(..., min_length=6)
-    role: str = Field(default="user")
+    role: str = Field(default="admin")
     divar_phone: Optional[str] = None
+    permissions: Optional[List[str]] = None
 
     def model_post_init(self, __context: Any) -> None:
         if self.role not in VALID_ROLES:
@@ -388,7 +395,11 @@ class UserCreate(BaseModel):
 
 
 class UserRegister(BaseModel):
-    """Public self-registration — always creates a 'user' role account."""
+    """Staff account created by a super_admin — not public sign-up.
+
+    Public sign-up lives in app/api/routes/public_auth.py and always produces a
+    visitor; this schema is only reachable behind require_super_admin.
+    """
     username: str = Field(..., min_length=3, max_length=100)
     full_name: Optional[str] = None
     email: Optional[str] = None
@@ -402,6 +413,8 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     divar_phone: Optional[str] = None
+    phone: Optional[str] = None
+    permissions: Optional[List[str]] = None
 
     def model_post_init(self, __context: Any) -> None:
         if self.role and self.role not in VALID_ROLES:
@@ -436,3 +449,97 @@ class TotpDisableRequest(BaseModel):
 class TotpLoginRequest(BaseModel):
     totp_session: str
     code: str = Field(..., min_length=6, max_length=6)
+
+
+# ============== Portal / public auth Schemas ==============
+
+PHONE_RE = r'^09\d{9}$'
+# Deliberately loose but anchored: enough to stop a "username-shaped" value like
+# "admin" being stored as an email, which would otherwise collide with a staff
+# account in the portal login lookup.
+EMAIL_RE = r'^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$'
+
+
+class PortalRegisterRequest(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=200)
+    phone: str = Field(..., pattern=PHONE_RE)
+    password: str = Field(..., min_length=6, max_length=128)
+    email: Optional[str] = Field(None, max_length=200, pattern=EMAIL_RE)
+    marketing_opt_in: bool = False
+
+
+class PortalVerifyRequest(BaseModel):
+    phone: str = Field(..., pattern=PHONE_RE)
+    code: str = Field(..., min_length=4, max_length=8)
+
+
+class PortalResendRequest(BaseModel):
+    phone: str = Field(..., pattern=PHONE_RE)
+
+
+class PortalLoginRequest(BaseModel):
+    """identifier is a phone or an email — visitors may have registered with
+    either on screen, and asking them which one they used is friction."""
+    identifier: str = Field(..., min_length=3, max_length=200)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class PortalPendingResponse(BaseModel):
+    pending: bool = True
+    channel: str = "sms"
+    ttl: int
+    cooldown: int
+    message: str
+    # Which number the code went to. Needed by the login path: someone who
+    # signed in with their email has no idea what to send to /verify, and the
+    # verify endpoint keys on the phone. Only ever filled in after the password
+    # has been checked, so it tells an anonymous caller nothing.
+    phone: Optional[str] = None
+    debug_code: Optional[str] = None
+
+
+class PropertyRequestCreate(BaseModel):
+    deal_type: str = Field(default="buy")
+    property_kind: Optional[str] = Field(None, max_length=30)
+    city: Optional[str] = Field(None, max_length=100)
+    districts: Optional[str] = Field(None, max_length=500)
+    budget_min: Optional[int] = Field(None, ge=0)
+    budget_max: Optional[int] = Field(None, ge=0)
+    deposit_max: Optional[int] = Field(None, ge=0)
+    rent_max: Optional[int] = Field(None, ge=0)
+    area_min: Optional[int] = Field(None, ge=0, le=100000)
+    area_max: Optional[int] = Field(None, ge=0, le=100000)
+    rooms_min: Optional[int] = Field(None, ge=0, le=50)
+    year_built_min: Optional[int] = Field(None, ge=1300, le=1500)
+    needs_elevator: bool = False
+    needs_parking: bool = False
+    needs_storage: bool = False
+    description: Optional[str] = Field(None, max_length=2000)
+    contact_name: Optional[str] = Field(None, max_length=200)
+    contact_phone: Optional[str] = Field(None, pattern=r'^(09\d{9})?$')
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.deal_type not in {"buy", "rent"}:
+            raise ValueError("deal_type must be 'buy' or 'rent'")
+
+
+class PropertyRequestUpdate(BaseModel):
+    status: Optional[str] = None
+    admin_note: Optional[str] = Field(None, max_length=2000)
+    matched_property_id: Optional[int] = None
+
+    def model_post_init(self, __context: Any) -> None:
+        allowed = {"new", "in_review", "matched", "contacted", "closed"}
+        if self.status and self.status not in allowed:
+            raise ValueError(f"status must be one of {allowed}")
+
+
+class UpgradeTicketCreate(BaseModel):
+    message: Optional[str] = Field(None, max_length=2000)
+    contact_phone: Optional[str] = Field(None, pattern=r'^(09\d{9})?$')
+
+
+class UpgradeTicketDecision(BaseModel):
+    approve: bool
+    decision_note: Optional[str] = Field(None, max_length=2000)
+    permissions: Optional[List[str]] = None

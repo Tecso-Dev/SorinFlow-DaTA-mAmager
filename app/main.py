@@ -25,13 +25,20 @@ logger.add(
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     level="INFO"
 )
-logger.add(
-    "/app/logs/scraper.log",
-    rotation="10 MB",
-    retention="7 days",
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-    level="DEBUG"
-)
+# File logging is best-effort. The path used to be hardcoded to the container's
+# /app/logs, so importing the app anywhere else — a test run, a shell, a
+# read-only root filesystem — died at import time before a single line of the
+# application ran. Stdout logging above is the one that must always work.
+try:
+    logger.add(
+        str(Path(get_settings().logs_path) / "scraper.log"),
+        rotation="10 MB",
+        retention="7 days",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+        level="DEBUG"
+    )
+except Exception as _log_err:  # pragma: no cover - environment dependent
+    logger.warning(f"file logging disabled ({_log_err})")
 
 settings = get_settings()
 
@@ -152,7 +159,7 @@ async def _maintenance_allows(request: Request) -> bool:
     """Whether this particular request gets through a closed site.
 
     Three ways in, and only three: a path that must never close, the bypass
-    cookie, or a bearer token belonging to a super_admin.
+    cookie, or a bearer token belonging to a super_admin (or root).
     """
     from app.services import maintenance as mt
 
@@ -170,14 +177,17 @@ async def _maintenance_allows(request: Request) -> bool:
         token = request.headers.get("Authorization", "")
         if token.startswith("Bearer "):
             try:
-                from app.auth.jwt import decode_token
+                from app.auth.jwt import decode_token, is_access_token
                 from app.models.user import User
                 from sqlalchemy import select
-                username = decode_token(token[7:]).get("sub")
+                payload = decode_token(token[7:])
+                # A token issued before the TOTP step is not a login yet, so it
+                # must not open a site that has been deliberately closed.
+                username = payload.get("sub") if is_access_token(payload) else None
                 if username:
                     user = (await db.execute(select(User).where(
                         User.username == username))).scalar_one_or_none()
-                    if user and user.is_active and user.role == "super_admin":
+                    if user and user.is_active and user.role in ("root", "super_admin"):
                         return True
             except Exception:
                 pass
@@ -219,15 +229,24 @@ async def maintenance_middleware(request: Request, call_next):
 # API Key authentication middleware
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    public_paths = {"/health", "/", "/favicon.svg", "/favicon.ico", "/api/public/stats", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info", "/api/config",
+    public_paths = {"/health", "/", "/favicon.svg", "/favicon.ico", "/api/public/stats", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info",
                     "/api/users/token", "/api/users/token/verify-totp", "/api/users/me",
+                    # Visitor sign-up. Unauthenticated by nature, so the API key
+                    # cannot gate it — each of these is rate-limited in
+                    # app/services/verification.py instead, and the whole group
+                    # 404s while PUBLIC_AUTH_ENABLED is off.
+                    "/api/public/auth/register", "/api/public/auth/verify",
+                    "/api/public/auth/resend", "/api/public/auth/login",
+                    "/api/public/auth/status",
                     # حالت تعمیر: this middleware runs outside the maintenance
                     # one, so anything it rejects never reaches that logic at
                     # all — including the link meant to get back in. The POST
                     # to /api/maintenance is still super_admin-only by its own
                     # dependency; it is only exempt from the API-key check.
                     "/api/maintenance", "/maintenance-access"}
-    is_dashboard = request.url.path.startswith("/dashboard") or request.url.path.startswith("/images")
+    is_dashboard = (request.url.path.startswith("/dashboard")
+                    or request.url.path.startswith("/images")
+                    or request.url.path == "/portal")
     is_public = request.url.path in public_paths or is_dashboard
 
     is_preflight = request.method == "OPTIONS"
@@ -583,6 +602,19 @@ async def root():
 _FAVICON_HEADERS = {"Cache-Control": "public, max-age=86400"}
 
 
+@app.get("/portal", response_class=HTMLResponse, include_in_schema=False)
+async def portal_page():
+    """The visitor-facing page. 404 while public auth is off, so a closed
+    sign-up does not sit there half-alive for the public to poke at."""
+    if not settings.public_auth_enabled:
+        return HTMLResponse('<meta http-equiv="refresh" content="0; url=/dashboard" />')
+    page = Path("frontend/portal.html")
+    if page.exists():
+        return HTMLResponse(page.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-cache, must-revalidate"})
+    return HTMLResponse("portal not found", status_code=404)
+
+
 @app.get("/favicon.svg", include_in_schema=False)
 async def favicon_svg():
     return FileResponse("frontend/favicon.svg", media_type="image/svg+xml", headers=_FAVICON_HEADERS)
@@ -621,10 +653,10 @@ except Exception:
     logger.warning("Frontend directory not found, skipping static file mount")
 
 
-# Frontend config endpoint
-@app.get("/api/config")
-async def frontend_config():
-    return {"api_key": settings.api_key}
+# The old /api/config returned {"api_key": ...} to anonymous callers, which
+# handed out the very secret the api_key middleware exists to check. The panel
+# never used it — it authenticates with a bearer token — so it is gone rather
+# than protected.
 
 
 # API information endpoint

@@ -2382,3 +2382,11 @@ select.status-quick {
   background: color-mix(in srgb, var(--accent) 5%, var(--surface2));
 }
 .filing-advanced .form-label { font-size: .7rem; margin-bottom: .15rem; color: var(--text-muted); }
+
+/* ── Permission toggles (super_admin user editor) ─────────────────────────── */
+.perm-box{display:grid;grid-template-columns:1fr 1fr;gap:.35rem;
+ border:1px solid var(--border,#2a2a2e);border-radius:8px;padding:.55rem;max-height:220px;overflow:auto}
+.perm-box label{display:flex;align-items:center;gap:.4rem;margin:0;
+ font-size:.8rem;font-weight:400;cursor:pointer}
+.perm-box input{margin:0;flex:none}
+@media(max-width:520px){.perm-box{grid-template-columns:1fr}}

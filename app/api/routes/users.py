@@ -25,8 +25,15 @@ import pyotp
 
 from app.database import get_db
 from app.models.user import User
-from app.auth.jwt import verify_password, get_password_hash, create_access_token, decode_token
+from app.auth.jwt import (
+    verify_password, get_password_hash, create_access_token, decode_token,
+    TOKEN_TOTP_PENDING,
+)
 from app.auth.dependencies import get_current_user, _role_dep
+from app.auth.permissions import (
+    PERMISSIONS, ALL_PERMISSIONS, ROLE_ROOT, ASSIGNABLE_BY_SUPER_ADMIN,
+    DEFAULT_ADMIN_PERMISSIONS, normalize_permissions, user_permissions,
+)
 from app.schemas import (
     UserResponse, UserCreate, UserRegister, UserUpdate, UserPasswordReset, TokenResponse, UserList,
     TotpSetupResponse, TotpEnableRequest, TotpDisableRequest, TotpLoginRequest,
@@ -34,7 +41,30 @@ from app.schemas import (
 
 router = APIRouter()
 
-_super_admin = Depends(_role_dep("super_admin"))
+_super_admin = Depends(_role_dep(ROLE_ROOT, "super_admin"))
+
+
+def _guard_root_target(actor: User, target: User) -> None:
+    """Only root may touch a root account.
+
+    Without this, super_admin — who can already edit any row — could reset the
+    developer's password or delete the account that oversees them.
+    """
+    if target.role == ROLE_ROOT and actor.role != ROLE_ROOT:
+        raise HTTPException(status_code=403, detail="دسترسی به این حساب مجاز نیست")
+
+
+def _guard_role_assignment(actor: User, role: str | None) -> None:
+    """root is never handed out from the panel; super_admin may only assign the
+    roles it is allowed to supervise."""
+    if role is None:
+        return
+    if actor.role == ROLE_ROOT:
+        return
+    if role not in ASSIGNABLE_BY_SUPER_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail=f"اختصاص نقش «{role}» از پنل مجاز نیست")
 
 
 # ── Public ────────────────────────────────────────────────────────────────────
@@ -58,9 +88,13 @@ async def login(
 
     if user.totp_enabled and user.totp_secret:
         # Return a short-lived TOTP session token — no full JWT yet
+        # typ marks this as a half-finished login. get_current_user refuses
+        # any token that is not an access token, which is what stops this one
+        # from being replayed as a full credential without the second factor.
         totp_session = create_access_token(
             {"sub": user.username, "totp_pending": True},
             expires_minutes=5,
+            token_type=TOKEN_TOTP_PENDING,
         )
         return TokenResponse(requires_totp=True, totp_session=totp_session)
 
@@ -139,7 +173,12 @@ async def register_user(
         email=data.email,
         full_name=data.full_name,
         hashed_password=get_password_hash(data.password),
-        role="user",
+        # 'user' was retired when the four roles landed. An account created with
+        # it would pass no staff check and be locked out of the whole panel, so
+        # this creates an admin with the starter permission set instead; the
+        # owner narrows it from the user editor.
+        role="admin",
+        permissions=list(DEFAULT_ADMIN_PERMISSIONS),
         divar_phone=data.divar_phone or None,
         is_active=True,
     )
@@ -153,7 +192,18 @@ async def register_user(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
-    return current_user
+    # Serialise through the effective list, so root/super_admin report the full
+    # set instead of the empty column they actually store.
+    data = UserResponse.model_validate(current_user, from_attributes=True)
+    data.permissions = user_permissions(current_user)
+    return data
+
+
+@router.get("/permissions/catalog")
+async def permissions_catalog(_: User = _super_admin):
+    """key -> Persian label, for rendering the toggle list."""
+    return {"items": [{"key": k, "label": v} for k, v in PERMISSIONS.items()],
+            "defaults": DEFAULT_ADMIN_PERMISSIONS}
 
 
 @router.get("/me/totp/status")
@@ -236,8 +286,15 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(User).order_by(User.created_at))
-    users = result.scalars().all()
-    return UserList(items=users, total=len(users))
+    users = list(result.scalars().all())
+    if _.role != ROLE_ROOT:
+        users = [u for u in users if u.role != ROLE_ROOT]
+    items = []
+    for u in users:
+        row = UserResponse.model_validate(u, from_attributes=True)
+        row.permissions = user_permissions(u)
+        items.append(row)
+    return UserList(items=items, total=len(items))
 
 
 @router.post("", response_model=UserResponse, status_code=201)
@@ -246,6 +303,7 @@ async def create_user(
     _: User = _super_admin,
     db: AsyncSession = Depends(get_db),
 ):
+    _guard_role_assignment(_, data.role)
     # Check duplicate username / email
     existing = await db.execute(select(User).where(User.username == data.username))
     if existing.scalar_one_or_none():
@@ -263,6 +321,7 @@ async def create_user(
         hashed_password=get_password_hash(data.password),
         role=data.role,
         divar_phone=data.divar_phone or None,
+        permissions=normalize_permissions(data.permissions),
         is_active=True,
     )
     db.add(user)
@@ -282,6 +341,8 @@ async def update_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    _guard_root_target(_, user)
+    _guard_role_assignment(_, data.role)
 
     if data.email is not None:
         user.email = data.email
@@ -293,6 +354,10 @@ async def update_user(
         user.is_active = data.is_active
     if data.divar_phone is not None:
         user.divar_phone = data.divar_phone or None
+    if data.phone is not None:
+        user.phone = data.phone or None
+    if data.permissions is not None:
+        user.permissions = normalize_permissions(data.permissions)
 
     await db.commit()
     await db.refresh(user)
@@ -310,6 +375,7 @@ async def reset_password(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    _guard_root_target(_, user)
 
     user.hashed_password = get_password_hash(data.new_password)
     await db.commit()
@@ -329,6 +395,7 @@ async def delete_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    _guard_root_target(current_user, user)
 
     await db.delete(user)
     await db.commit()
@@ -345,6 +412,7 @@ async def admin_disable_totp(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    _guard_root_target(_, user)
 
     user.totp_enabled = False
     user.totp_secret = None

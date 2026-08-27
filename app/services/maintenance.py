@@ -108,7 +108,6 @@ OPEN_PREFIXES = (
                             # unreachable; the POST is still super_admin-only
     "/maintenance-access",  # the bypass link would be blocked by the very
                             # middleware it exists to get past
-    "/api/config",
     "/favicon",
 )
 

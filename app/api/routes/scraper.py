@@ -318,7 +318,9 @@ async def get_scraping_jobs(
         query = query.where(ScrapingJob.category_id.in_(cat_ids) if cat_ids else false())
 
     # Isolate jobs by the user's linked Divar phone (admins see all jobs)
-    is_privileged = current_user and current_user.role in ("super_admin", "admin")
+    # root included — it outranks super_admin everywhere else, so it must not
+    # be the one account that gets its job list filtered down to a phone.
+    is_privileged = current_user and current_user.role in ("root", "super_admin", "admin")
     if not is_privileged and current_user and current_user.divar_phone:
         query = query.where(ScrapingJob.divar_phone == current_user.divar_phone)
 

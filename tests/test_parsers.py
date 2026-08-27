@@ -115,8 +115,22 @@ class TestParsePriceWithUnit:
     def test_none_returns_none(self):
         assert parse_price_with_unit(None) is None
 
-    def test_mixed_persian_million(self):
-        assert parse_price_with_unit("۱.۸۰۰ میلیارد") == 1_800_000_000_000
+    def test_mixed_persian_billion_with_decimal(self):
+        """«۱.۸۰۰ میلیارد» is "1.800 billion" — one billion eight hundred
+        million, i.e. a normal apartment price.
+
+        This expected 1_800_000_000_000 and had been failing ever since it was
+        written, reading the dot as a thousands separator (1800 billion). That
+        is 1.8 trillion tomans — roughly thirty million dollars — which is not a
+        price that appears on Divar, and parse_price_with_unit's own docstring
+        lists this very string as an example it handles. The parser was right;
+        the assertion was not. Renamed too: it said «million» while testing
+        میلیارد.
+        """
+        assert parse_price_with_unit("۱.۸۰۰ میلیارد") == 1_800_000_000
+        # the unambiguous spellings must agree with it
+        assert parse_price_with_unit("۱.۸ میلیارد") == 1_800_000_000
+        assert parse_price_with_unit("۱۸۰۰ میلیون") == 1_800_000_000
 
 
 # ── extract_divar_id ─────────────────────────────────────────────────────────

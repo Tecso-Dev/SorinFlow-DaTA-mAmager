@@ -73,7 +73,7 @@ async def close_redis():
 async def init_db():
     """Initialize database tables and seed default super_admin if needed."""
     async with engine.begin() as conn:
-        from app.models import property, cookie, scraping_job, lead, user, crm_models, app_setting
+        from app.models import property, cookie, scraping_job, lead, user, crm_models, app_setting, portal
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_users_totp(conn)
         await _migrate_users_divar_phone(conn)
@@ -87,9 +87,11 @@ async def init_db():
         await _migrate_customer_criteria(conn)
         await _migrate_filing(conn)
         await _migrate_advertiser_type(conn)
+        await _migrate_auth_v2(conn)
         await _seed_reference_data(conn)
 
     await _seed_super_admin()
+    await _seed_root()
 
 
 async def _migrate_dpa_activities(conn):
@@ -442,6 +444,156 @@ async def _seed_super_admin():
         logger.info(
             f"Default super_admin created: username='{cfg.super_admin_username}'"
         )
+
+
+async def _migrate_auth_v2(conn):
+    """Portal sign-up columns, plus the move from three roles to four.
+
+    Additive only — this runs against a live database while the previous image
+    is still serving, so every statement has to be safe for a pod that has not
+    restarted yet. New columns are nullable or defaulted; nothing is dropped.
+
+    The backfill exists so the rollout does not quietly take access away from
+    anyone. Two rules:
+      * the old 'user' role becomes 'admin', keeping exactly the two areas it
+        could already see (dashboard + properties) — a conversion must not
+        widen access either;
+      * an admin that predates the permission column gets the full set, because
+        that is what it effectively had when the routers only checked for a
+        valid token.
+    A later edit by super_admin is what narrows anyone down.
+    """
+    try:
+        import json
+        from sqlalchemy import text
+        from app.auth.permissions import ALL_PERMISSIONS, LEGACY_USER_PERMISSIONS
+
+        await conn.execute(text(
+            "ALTER TABLE users "
+            "ADD COLUMN IF NOT EXISTS phone VARCHAR(20), "
+            "ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS marketing_opt_in BOOLEAN NOT NULL DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS permissions JSON"))
+        # Partial index: many staff rows have no portal phone at all, and a
+        # plain UNIQUE would collapse them onto a single NULL slot in some
+        # engines. Postgres allows repeated NULLs anyway; the WHERE clause
+        # keeps the index small and says the intent out loud.
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_phone_unique "
+            "ON users (phone) WHERE phone IS NOT NULL"))
+
+        legacy = json.dumps(LEGACY_USER_PERMISSIONS)
+        full = json.dumps(ALL_PERMISSIONS)
+
+        # Order matters: tag the legacy rows while they still say 'user'.
+        res = await conn.execute(text(
+            "UPDATE users SET permissions = CAST(:p AS JSON) "
+            "WHERE role = 'user' AND permissions IS NULL"), {"p": legacy})
+        tagged = res.rowcount or 0
+
+        res = await conn.execute(text(
+            "UPDATE users SET role = 'admin' WHERE role = 'user'"))
+        converted = res.rowcount or 0
+
+        res = await conn.execute(text(
+            "UPDATE users SET permissions = CAST(:p AS JSON) "
+            "WHERE role = 'admin' AND permissions IS NULL"), {"p": full})
+        widened = res.rowcount or 0
+
+        # Anything left without a list (super_admin, root, visitor) gets an
+        # empty one so the column is never NULL for the app to reason about.
+        await conn.execute(text(
+            "UPDATE users SET permissions = CAST('[]' AS JSON) WHERE permissions IS NULL"))
+
+        if converted or widened:
+            print(f"auth v2: {converted} 'user' account(s) -> admin "
+                  f"({tagged} kept their previous two areas), "
+                  f"{widened} existing admin(s) given the full permission set")
+    except Exception as e:
+        # Swallowed like its siblings — but see the verification below, which
+        # is what actually decides whether this boot may continue.
+        print(f"auth v2 migration statements failed: {e}")
+
+    await _verify_auth_v2(conn)
+
+
+async def _verify_auth_v2(conn):
+    """Refuse to boot if the users table is missing a column the model needs.
+
+    Every other migration here swallows its errors, which is right for them:
+    they add a column some feature reads, and a feature degrades. These four
+    are different. The User model selects them on every single query, so a
+    silently-skipped ALTER does not degrade one screen — it breaks login, the
+    dashboard and the API at once, on a deploy that reported success.
+
+    Raising is the safer failure. The rollout is `kubectl set image` against a
+    Deployment, so a pod that dies during startup never becomes ready and the
+    previous pod keeps serving traffic: a failed deploy instead of an outage.
+    """
+    from sqlalchemy import text
+
+    required = {"phone", "phone_verified", "marketing_opt_in", "permissions"}
+    dialect = conn.engine.dialect.name
+
+    if dialect == "postgresql":
+        # Scoped to the active schema: information_schema.columns spans every
+        # schema the role can see, so an unrelated "users" table in another one
+        # could satisfy this check while the table the app actually writes to is
+        # still missing its columns — the exact failure this guard exists to catch.
+        rows = (await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'users' AND table_schema = current_schema()"))).all()
+        present = {r[0] for r in rows}
+    elif dialect == "sqlite":
+        rows = (await conn.execute(text("PRAGMA table_info(users)"))).all()
+        present = {r[1] for r in rows}
+    else:
+        return  # unknown engine: nothing reliable to check against
+
+    missing = required - present
+    if missing:
+        raise RuntimeError(
+            "auth v2 migration did not apply — users table is missing "
+            f"{sorted(missing)}. Refusing to start: the User model reads these "
+            "on every query, so serving now would fail every request. "
+            "Apply the ALTER manually and restart."
+        )
+
+
+async def _seed_root():
+    """Create the developer's root account if ROOT_PASSWORD is configured.
+
+    Idempotent by username. Never touches an existing row: if the account is
+    already there the password stays whatever it was rotated to, so putting the
+    variable back in the environment cannot silently reset it.
+    """
+    from sqlalchemy import select
+    from app.models.user import User
+    from app.auth.jwt import get_password_hash
+    from app.config import get_settings
+    from loguru import logger
+
+    cfg = get_settings()
+    if not cfg.root_password:
+        return
+
+    async with async_session_maker() as session:
+        existing = await session.execute(
+            select(User).where(User.username == cfg.root_username))
+        if existing.scalars().first():
+            return
+
+        session.add(User(
+            username=cfg.root_username,
+            email=cfg.root_email or None,
+            full_name="Root",
+            hashed_password=get_password_hash(cfg.root_password),
+            role="root",
+            is_active=True,
+            permissions=[],
+        ))
+        await session.commit()
+        logger.info(f"Root account created: username='{cfg.root_username}'")
 
 
 async def close_db():

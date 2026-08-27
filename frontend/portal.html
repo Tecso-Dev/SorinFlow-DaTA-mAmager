@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
+<title>سورین‌فلو — پورتال مشتریان</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<!--
+  Deliberately self-contained: no CDN stylesheet, no icon font, no framework.
+  The panel's own pages depend on jsDelivr, which is one outage away from an
+  unusable login screen and, without SRI, one compromise away from reading the
+  token out of localStorage. A page whose whole job is to take a password
+  should not import a third party to do it.
+-->
+<style>
+:root{
+  --bg:#0b1020; --surface:#141a2e; --surface-2:#1a2138; --line:#26304d;
+  --text:#e6e9f2; --muted:#8f9fb6; --brand:#4f8cff; --brand-2:#3a6fd8;
+  --ok:#2fbf71; --err:#ff6b6b; --warn:#f0a92c; --radius:14px;
+}
+:root[data-theme="light"]{
+  --bg:#f4f6fb; --surface:#ffffff; --surface-2:#eef2f9; --line:#d9e0ee;
+  --text:#111827; --muted:#5b6880;
+}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);
+ font-family:Vazirmatn,Tahoma,system-ui,-apple-system,sans-serif;line-height:1.8}
+a{color:var(--brand);text-decoration:none}
+.wrap{max-width:920px;margin:0 auto;padding:1.25rem}
+.center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.25rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+ padding:1.5rem;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.card+.card{margin-top:1.25rem}
+.auth-card{width:100%;max-width:430px}
+h1,h2,h3{margin:0 0 .75rem;font-weight:700}
+h1{font-size:1.4rem} h2{font-size:1.1rem} h3{font-size:.95rem}
+.muted{color:var(--muted);font-size:.85rem}
+.brand{text-align:center;margin-bottom:1.25rem}
+.brand .logo{font-size:1.5rem;font-weight:800;color:var(--brand)}
+label{display:block;font-size:.83rem;color:var(--muted);margin:.7rem 0 .3rem}
+input,select,textarea{width:100%;padding:.7rem .85rem;background:var(--surface-2);
+ border:1px solid var(--line);border-radius:10px;color:var(--text);
+ font-family:inherit;font-size:.92rem}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brand)}
+textarea{min-height:90px;resize:vertical}
+/* Latin-only fields read backwards in an RTL container; force their direction
+   without flipping the label beside them. */
+input[dir="ltr"]{direction:ltr;text-align:left}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;
+ width:100%;padding:.75rem 1rem;border:0;border-radius:10px;cursor:pointer;
+ background:var(--brand);color:#fff;font-family:inherit;font-size:.95rem;font-weight:600;
+ margin-top:1rem;transition:background .15s}
+.btn:hover:not(:disabled){background:var(--brand-2)}
+.btn:disabled{opacity:.6;cursor:not-allowed}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+.btn.danger{background:transparent;border:1px solid var(--err);color:var(--err)}
+.btn.sm{width:auto;padding:.4rem .8rem;font-size:.82rem;margin:0}
+.tabs{display:flex;gap:.5rem;margin-bottom:1rem}
+.tabs button{flex:1;padding:.6rem;background:transparent;border:1px solid var(--line);
+ border-radius:10px;color:var(--muted);cursor:pointer;font-family:inherit;font-size:.9rem}
+.tabs button.on{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600}
+.msg{padding:.7rem .9rem;border-radius:10px;font-size:.85rem;margin-top:1rem}
+.msg.err{background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.35);color:var(--err)}
+.msg.ok{background:rgba(47,191,113,.12);border:1px solid rgba(47,191,113,.35);color:var(--ok)}
+.hide{display:none !important}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+@media(max-width:640px){.row{grid-template-columns:1fr}}
+.check{display:flex;align-items:flex-start;gap:.5rem;margin-top:.8rem}
+.check input{width:auto;margin-top:.35rem}
+.check label{margin:0;color:var(--text);font-size:.85rem}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:1rem;
+ padding:1rem 1.25rem;background:var(--surface);border:1px solid var(--line);
+ border-radius:var(--radius);margin-bottom:1.25rem;flex-wrap:wrap}
+.badge{display:inline-block;padding:.2rem .6rem;border-radius:999px;font-size:.75rem;font-weight:600}
+.b-new{background:rgba(79,140,255,.15);color:var(--brand)}
+.b-review{background:rgba(240,169,44,.15);color:var(--warn)}
+.b-ok{background:rgba(47,191,113,.15);color:var(--ok)}
+.b-off{background:rgba(143,159,182,.15);color:var(--muted)}
+.item{border:1px solid var(--line);border-radius:12px;padding:.9rem;margin-top:.75rem;background:var(--surface-2)}
+.item .head{display:flex;justify-content:space-between;align-items:center;gap:.75rem;flex-wrap:wrap}
+.code-input{letter-spacing:.5rem;text-align:center;font-size:1.3rem;direction:ltr}
+.otp-timer{text-align:center;font-size:.82rem;color:var(--muted);margin-top:.6rem}
+.spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.35);
+ border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.spinner{animation-duration:2s}}
+</style>
+<script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
+</head>
+<body>
+
+<!-- ═══════════ AUTH ═══════════ -->
+<div id="auth-view" class="center">
+  <div class="card auth-card">
+    <div class="brand">
+      <div class="logo">سورین‌فلو</div>
+      <div class="muted">پورتال مشتریان املاک</div>
+    </div>
+
+    <div class="tabs" id="auth-tabs">
+      <button id="tab-login" class="on" onclick="switchTab('login')">ورود</button>
+      <button id="tab-register" onclick="switchTab('register')">ثبت‌نام</button>
+    </div>
+
+    <!-- login -->
+    <form id="pane-login" onsubmit="event.preventDefault();doPortalLogin()">
+      <label for="li-id">شماره موبایل یا ایمیل</label>
+      <input id="li-id" dir="ltr" autocomplete="username" placeholder="09123456789">
+      <label for="li-pass">رمز عبور</label>
+      <input id="li-pass" type="password" autocomplete="current-password">
+      <button class="btn" id="li-btn" type="submit">ورود</button>
+    </form>
+
+    <!-- register -->
+    <form id="pane-register" class="hide" onsubmit="event.preventDefault();doPortalRegister()">
+      <label for="rg-name">نام و نام خانوادگی</label>
+      <input id="rg-name" autocomplete="name">
+      <label for="rg-phone">شماره موبایل</label>
+      <input id="rg-phone" dir="ltr" inputmode="tel" maxlength="11" placeholder="09123456789" autocomplete="tel">
+      <label for="rg-email">ایمیل <span class="muted">(اختیاری)</span></label>
+      <input id="rg-email" type="email" dir="ltr" autocomplete="email">
+      <label for="rg-pass">رمز عبور <span class="muted">(حداقل ۶ کاراکتر)</span></label>
+      <input id="rg-pass" type="password" autocomplete="new-password">
+      <div class="check">
+        <input type="checkbox" id="rg-optin">
+        <label for="rg-optin">مایلم آگهی‌ها و پیشنهادهای ملکی برایم ایمیل شود</label>
+      </div>
+      <button class="btn" id="rg-btn" type="submit">ثبت‌نام و دریافت کد</button>
+    </form>
+
+    <!-- verify -->
+    <form id="pane-verify" class="hide" onsubmit="event.preventDefault();doPortalVerify()">
+      <h2>کد تأیید</h2>
+      <p class="muted" id="vf-hint">کد ارسال‌شده به شماره شما را وارد کنید.</p>
+      <input id="vf-code" class="code-input" dir="ltr" inputmode="numeric" maxlength="8"
+             autocomplete="one-time-code" aria-label="کد تأیید">
+      <button class="btn" id="vf-btn" type="submit">تأیید و ورود</button>
+      <div class="otp-timer" id="vf-timer"></div>
+      <button class="btn ghost" type="button" id="vf-resend" onclick="doPortalResend()">ارسال دوباره کد</button>
+      <button class="btn ghost" type="button" onclick="switchTab('login')">بازگشت</button>
+    </form>
+
+    <div id="auth-msg" class="msg err hide" role="alert" aria-live="polite"></div>
+
+    <p class="muted" style="text-align:center;margin-top:1.25rem">
+      کاربر پنل هستید؟ <a href="/dashboard">ورود به پنل مدیریت</a>
+    </p>
+  </div>
+</div>
+
+<!-- ═══════════ PORTAL ═══════════ -->
+<div id="portal-view" class="hide">
+  <div class="wrap">
+    <div class="topbar">
+      <div>
+        <strong id="pt-name"></strong>
+        <div class="muted" id="pt-phone" dir="ltr"></div>
+      </div>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn sm ghost" onclick="toggleTheme()">تغییر پوسته</button>
+        <button class="btn sm ghost" onclick="portalLogout()">خروج</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>دنبال چه ملکی هستید؟</h2>
+      <p class="muted">هرچه دقیق‌تر بنویسید، کارشناسان ما سریع‌تر مورد مناسب را پیدا می‌کنند.</p>
+      <form id="req-form" onsubmit="event.preventDefault();submitRequest()">
+        <div class="row">
+          <div>
+            <label for="rq-deal">نوع معامله</label>
+            <select id="rq-deal" onchange="syncDealFields()">
+              <option value="buy">خرید</option>
+              <option value="rent">اجاره</option>
+            </select>
+          </div>
+          <div>
+            <label for="rq-kind">نوع ملک</label>
+            <select id="rq-kind">
+              <option value="">فرقی ندارد</option>
+              <option value="apartment">آپارتمان</option>
+              <option value="villa">ویلایی / خانه</option>
+              <option value="land">زمین / کلنگی</option>
+              <option value="office">دفتر کار</option>
+              <option value="store">مغازه</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div><label for="rq-city">شهر</label><input id="rq-city" placeholder="مثلاً ارومیه"></div>
+          <div><label for="rq-districts">محله‌های مورد نظر</label><input id="rq-districts" placeholder="با ویرگول جدا کنید"></div>
+        </div>
+
+        <div id="buy-fields">
+          <div class="row">
+            <div><label for="rq-bmin">حداقل بودجه (تومان)</label><input id="rq-bmin" dir="ltr" inputmode="numeric"></div>
+            <div><label for="rq-bmax">حداکثر بودجه (تومان)</label><input id="rq-bmax" dir="ltr" inputmode="numeric"></div>
+          </div>
+        </div>
+        <div id="rent-fields" class="hide">
+          <div class="row">
+            <div><label for="rq-dep">حداکثر ودیعه (تومان)</label><input id="rq-dep" dir="ltr" inputmode="numeric"></div>
+            <div><label for="rq-rent">حداکثر اجاره ماهانه (تومان)</label><input id="rq-rent" dir="ltr" inputmode="numeric"></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div><label for="rq-amin">حداقل متراژ</label><input id="rq-amin" dir="ltr" inputmode="numeric"></div>
+          <div><label for="rq-amax">حداکثر متراژ</label><input id="rq-amax" dir="ltr" inputmode="numeric"></div>
+        </div>
+        <div class="row">
+          <div><label for="rq-rooms">حداقل تعداد خواب</label><input id="rq-rooms" dir="ltr" inputmode="numeric"></div>
+          <div><label for="rq-year">حداقل سال ساخت (شمسی)</label><input id="rq-year" dir="ltr" inputmode="numeric" placeholder="۱۳۹۰"></div>
+        </div>
+
+        <div class="check"><input type="checkbox" id="rq-elev"><label for="rq-elev">آسانسور داشته باشد</label></div>
+        <div class="check"><input type="checkbox" id="rq-park"><label for="rq-park">پارکینگ داشته باشد</label></div>
+        <div class="check"><input type="checkbox" id="rq-store"><label for="rq-store">انباری داشته باشد</label></div>
+
+        <label for="rq-desc">توضیحات بیشتر</label>
+        <textarea id="rq-desc" placeholder="هر نکته‌ای که برایتان مهم است…"></textarea>
+
+        <button class="btn" id="rq-btn" type="submit">ثبت درخواست</button>
+      </form>
+      <div id="req-msg" class="msg ok hide" role="status" aria-live="polite"></div>
+    </div>
+
+    <div class="card">
+      <h2>درخواست‌های من</h2>
+      <div id="req-list"><p class="muted">در حال بارگذاری…</p></div>
+    </div>
+
+    <div class="card">
+      <h2>دسترسی به پنل مدیریت</h2>
+      <p class="muted">اگر مشاور املاک هستید و می‌خواهید به پنل مدیریت دسترسی داشته باشید،
+        درخواست خود را ثبت کنید تا مدیر بررسی کند.</p>
+      <div id="ticket-box"><p class="muted">در حال بارگذاری…</p></div>
+    </div>
+
+    <p class="muted" style="text-align:center;padding:1rem 0">سورین‌فلو</p>
+  </div>
+</div>
+
+<!-- Absolute path on purpose. The page is served at /portal but the static
+     mount lives under /dashboard, so a relative "js/portal.js" resolves to
+     /js/portal.js — which nothing serves, leaving the page with no script at
+     all and every button dead. -->
+<script src="/dashboard/js/portal.js?v=1"></script>
+</body>
+</html>

@@ -14,6 +14,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.auth.permissions import STAFF_ROLES
 from app.auth.dependencies import get_current_user
 from app.database import get_db
 from app.models.crm_models import Binder, Cabinet
@@ -83,7 +84,10 @@ def require_filing_admin(current_user: User = Depends(get_current_user)) -> User
     single-record deletes elsewhere in the CRM it is an admin's call. Phrased
     in Persian because that is the only language this panel speaks.
     """
-    if current_user.role not in ("admin", "super_admin"):
+    # STAFF_ROLES rather than a literal tuple: root was silently excluded when
+    # the fourth role landed, so the developer's own account got a 403 on the
+    # one action nobody else can undo.
+    if current_user.role not in STAFF_ROLES:
         raise HTTPException(
             status_code=403,
             detail="حذف کمد و زونکن فقط با دسترسی مدیر انجام می‌شود")

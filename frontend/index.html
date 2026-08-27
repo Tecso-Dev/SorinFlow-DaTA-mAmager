@@ -162,6 +162,10 @@
                 <span class="nav-icon"><i class="bi bi-shield-check"></i></span>
                 پراکسی‌ها
             </a>
+            <a class="nav-item-link" onclick="showSection('portal')" id="nav-link-portal">
+                <span class="nav-icon"><i class="bi bi-inbox"></i></span>
+                درخواست‌های مشتریان
+            </a>
             <a class="nav-item-link d-none" onclick="showSection('users')" id="nav-users">
                 <span class="nav-icon"><i class="bi bi-person-gear"></i></span>
                 کاربران
@@ -1631,7 +1635,53 @@
             </div>
 
             <!-- ═══ USERS ═════════════════════════ -->
+            <div id="section-portal" class="section-content" style="display:none;">
+                <div class="card mb-3">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-inbox"></i> درخواست‌های مشتریان
+                        <select id="portal-status-filter" class="form-select form-select-sm ms-auto"
+                                style="width:auto" onchange="loadPortalRequests()">
+                            <option value="">همه وضعیت‌ها</option>
+                            <option value="new">ثبت شده</option>
+                            <option value="in_review">در حال بررسی</option>
+                            <option value="matched">مورد پیدا شد</option>
+                            <option value="contacted">تماس گرفته شد</option>
+                            <option value="closed">بسته شده</option>
+                        </select>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadPortalRequests()">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0 align-middle">
+                                <thead><tr>
+                                    <th>مشتری</th><th>خواسته</th><th>بودجه</th>
+                                    <th>وضعیت</th><th>تاریخ</th><th></th>
+                                </tr></thead>
+                                <tbody id="portal-requests-body">
+                                    <tr><td colspan="6" class="text-center text-muted p-4">در حال بارگذاری…</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div id="section-users" class="section-content" style="display:none;">
+                <!-- Upgrade tickets: visitors asking for panel access -->
+                <div class="card mb-3" id="tickets-card">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <i class="bi bi-ticket-perforated"></i> درخواست‌های دسترسی به پنل
+                        <span id="tickets-count" class="badge bg-secondary">۰</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadTickets()">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="card-body" id="tickets-box">
+                        <p class="text-muted small mb-0">در حال بارگذاری…</p>
+                    </div>
+                </div>
                 <!-- حالت تعمیر: closing the whole site while it is updated -->
                 <div class="card mb-3" id="maintenance-card">
                     <div class="card-header d-flex align-items-center gap-2">
@@ -1686,11 +1736,14 @@
                                     </div>
                                     <div class="mb-2">
                                         <label class="form-label">نقش</label>
-                                        <select id="new-role" class="form-select form-select-sm">
-                                            <option value="user">User — فقط خواندن</option>
-                                            <option value="admin">Admin — مدیریت کامل</option>
-                                            <option value="super_admin">Super Admin</option>
+                                        <select id="new-role" class="form-select form-select-sm" onchange="syncNewUserPerms()">
+                                            <option value="admin">مدیر — دسترسی‌های انتخابی</option>
+                                            <option value="visitor">بازدیدکننده — فقط پورتال</option>
                                         </select>
+                                    </div>
+                                    <div class="mb-2" id="new-perms-wrap">
+                                        <label class="form-label">دسترسی‌ها</label>
+                                        <div id="new-perms-box" class="perm-box"></div>
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">شماره دیوار <small class="text-muted">(اختیاری)</small></label>
@@ -1719,6 +1772,7 @@
                                             <th>نام کاربری</th>
                                             <th>نام کامل</th>
                                             <th>نقش</th>
+                                            <th>دسترسی‌ها</th>
                                             <th>شماره دیوار</th>
                                             <th>وضعیت</th>
                                             <th>آخرین ورود</th>
@@ -2745,5 +2799,23 @@
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
 <script src="js/app.js?v=20260812a"></script>
+
+<!-- Role / permission editor (super_admin) -->
+<div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="permsEditorLabel">دسترسی‌های کاربر</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="بستن"></button>
+      </div>
+      <div class="modal-body" id="perms-editor-body"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">انصراف</button>
+        <button type="button" class="btn btn-primary btn-sm" id="perms-editor-save">ذخیره</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

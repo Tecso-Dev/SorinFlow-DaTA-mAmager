@@ -102,6 +102,29 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", env="TELEGRAM_CHAT_ID")
 
+    # ── Public portal auth (visitor sign-up) ──────────────────────────────
+    # OFF until the Iranian SMS panel is provisioned. While it is off the
+    # public endpoints answer 404, so the live panel is untouched and no user
+    # can reach a sign-up whose verification code would never arrive.
+    public_auth_enabled: bool = Field(default=False, env="PUBLIC_AUTH_ENABLED")
+    # Which SMS provider carries the login/registration code.
+    auth_sms_provider: str = Field(default="kavenegar", env="AUTH_SMS_PROVIDER")
+    # Verification code: length, lifetime, resend cooldown, and how many wrong
+    # guesses a single code tolerates before it is burned.
+    auth_code_length: int = Field(default=5, env="AUTH_CODE_LENGTH")
+    auth_code_ttl_seconds: int = Field(default=180, env="AUTH_CODE_TTL_SECONDS")
+    auth_code_resend_cooldown: int = Field(default=90, env="AUTH_CODE_RESEND_COOLDOWN")
+    auth_code_max_attempts: int = Field(default=5, env="AUTH_CODE_MAX_ATTEMPTS")
+    auth_code_max_sends_per_hour: int = Field(default=5, env="AUTH_CODE_MAX_SENDS_PER_HOUR")
+    # Failed password attempts per identifier per 15 minutes before lockout.
+    auth_login_max_attempts: int = Field(default=10, env="AUTH_LOGIN_MAX_ATTEMPTS")
+
+    # Root account — the developer's own access. Seeded on boot, never
+    # creatable from the panel. Leave the password empty to skip seeding.
+    root_username: str = Field(default="root", env="ROOT_USERNAME")
+    root_password: str = Field(default="", env="ROOT_PASSWORD")
+    root_email: str = Field(default="", env="ROOT_EMAIL")
+
     # CRN — Email (SMTP) notification
     smtp_host: str = Field(default="", env="SMTP_HOST")
     smtp_port: int = Field(default=587, env="SMTP_PORT")

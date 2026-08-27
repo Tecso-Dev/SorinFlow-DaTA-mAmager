@@ -21,7 +21,6 @@ class TestOpenPaths:
         "/api/users/token/verify-totp",
         "/api/maintenance",
         "/maintenance-access",
-        "/api/config",
         "/favicon.svg",
         "/favicon.ico",
     ])

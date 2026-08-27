@@ -113,7 +113,7 @@ async function doLogin() {
             return;
         }
 
-        _finishLogin(data);
+        await _finishLogin(data);
 
     } catch (err) {
         errEl.textContent = err.message;
@@ -143,7 +143,7 @@ async function verifyTotpLogin() {
         });
         const data = await resp.json();
         if (!resp.ok) { throw new Error(data.detail || 'کد اشتباه است'); }
-        _finishLogin(data);
+        await _finishLogin(data);
     } catch (err) {
         errEl.textContent = err.message;
         errEl.classList.remove('d-none');
@@ -217,7 +217,7 @@ async function doRegister() {
         });
         const loginData = await loginResp.json();
         if (!loginResp.ok) throw new Error(loginData.detail || 'ثبت نام موفق، لطفاً وارد شوید');
-        _finishLogin(loginData);
+        await _finishLogin(loginData);
 
     } catch (err) {
         errEl.textContent = err.message;
@@ -228,9 +228,21 @@ async function doRegister() {
     }
 }
 
-function _finishLogin(data) {
+async function _finishLogin(data) {
     setToken(data.access_token);
-    _currentUser = { username: data.username, role: data.role, full_name: data.full_name };
+    // A visitor has no dashboard at all — send them to their own page rather
+    // than rendering a shell with every nav item hidden.
+    if (data.role === 'visitor') { window.location.href = '/portal'; return; }
+    _currentUser = { username: data.username, role: data.role, full_name: data.full_name, permissions: [] };
+    // The token says who you are; /me says what you may open. Nav is built from
+    // the second, so it always matches what the routers will allow.
+    try {
+        const me = await apiCall('/users/me');
+        if (me) _currentUser = {
+            username: me.username, role: me.role,
+            full_name: me.full_name, permissions: me.permissions || [],
+        };
+    } catch (_) { /* fall back to an empty permission set */ }
     showMainApp();
 }
 
@@ -416,65 +428,91 @@ function showMainApp() {
     showSection(target);
 }
 
-// Which nav items are visible per role
-const ROLE_NAV_VISIBILITY = {
-    super_admin: ['nav-link-dashboard', 'nav-link-properties', 'nav-link-scraper', 'nav-link-crm', 'nav-link-auth', 'nav-link-proxies', 'nav-users'],
-    admin:       ['nav-link-dashboard', 'nav-link-properties', 'nav-link-scraper', 'nav-link-crm', 'nav-link-auth', 'nav-link-proxies'],
-    user:        ['nav-link-dashboard', 'nav-link-properties'],
+// Nav visibility follows the permissions the server reports for this account,
+// not the role name. The role alone stopped being enough once admins could be
+// given different areas — and the server enforces the same keys on the routers,
+// so hiding a link and refusing the request can no longer disagree.
+const NAV_PERMISSION = {
+    'nav-link-dashboard':  'stats',
+    'nav-link-properties': 'properties',
+    'nav-link-scraper':    'scraper',
+    'nav-link-crm':        'crm',
+    'nav-link-auth':       'divar_auth',
+    'nav-link-proxies':    'proxies',
+    'nav-link-portal':     'portal',
 };
+// Sections that are not permission-gated but role-gated.
+const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'] };
+
+const SECTION_PERMISSION = {
+    dashboard: 'stats', properties: 'properties', scraper: 'scraper',
+    crm: 'crm', auth: 'divar_auth', proxies: 'proxies', portal: 'portal',
+};
+
+function _perms() { return (_currentUser && _currentUser.permissions) || []; }
+function _hasPerm(p) { return _perms().includes(p); }
 
 function applyRoleUI() {
     if (!_currentUser) return;
     const { role, username, full_name } = _currentUser;
 
-    // Sidebar user card
     const elName = document.getElementById('sidebar-username');
-    const elRole = document.getElementById('sidebar-role');
-    const roleMap = { super_admin: 'Super Admin', admin: 'مدیر', user: 'کاربر' };
     if (elName) elName.textContent = full_name || username;
+    const elRole = document.getElementById('sidebar-role');
+    const roleMap = { root: 'Root', super_admin: 'مدیر ارشد', admin: 'مدیر', visitor: 'بازدیدکننده' };
     if (elRole) elRole.textContent = roleMap[role] || role;
 
-    // Show / hide nav items based on role
-    const allowed = ROLE_NAV_VISIBILITY[role] || ROLE_NAV_VISIBILITY['user'];
-    const allNavIds = ['nav-link-dashboard', 'nav-link-properties', 'nav-link-scraper',
-                       'nav-link-crm', 'nav-link-auth', 'nav-link-proxies', 'nav-users'];
-    allNavIds.forEach(id => {
+    Object.entries(NAV_PERMISSION).forEach(([id, perm]) => {
         const el = document.getElementById(id);
-        if (el) el.classList.toggle('d-none', !allowed.includes(id));
+        if (el) el.classList.toggle('d-none', !_hasPerm(perm));
+    });
+    Object.entries(NAV_ROLE_ONLY).forEach(([id, roles]) => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('d-none', !roles.includes(role));
     });
 }
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     const token = getToken();
-    if (token) {
-        _authToken = token;
-        // Verify token by fetching /me
-        fetch(`${API_BASE}/users/me`, { headers: { 'Authorization': `Bearer ${token}` } })
-            .then(r => {
-                if (!r.ok) throw new Error('invalid');
-                return r.json();
-            })
-            .then(user => {
-                _currentUser = { username: user.username, role: user.role, full_name: user.full_name };
-                showMainApp();
-            })
-            .catch(() => {
-                clearToken();
-                _intendedRoute = _hashToSection(location.hash);
-                showLoginPage();
-            });
-    } else {
+    if (!token) {
         _intendedRoute = _hashToSection(location.hash);
         showLoginPage();
+        return;
     }
+    _authToken = token;
+    // Verify the token by fetching /me — which also tells us what this account
+    // may open, so the nav is built from the server's answer rather than from
+    // whatever the token happens to claim.
+    fetch(`${API_BASE}/users/me`, { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => {
+            if (!r.ok) throw new Error('invalid');
+            return r.json();
+        })
+        .then(user => {
+            if (user.role === 'visitor') { window.location.href = '/portal'; return; }
+            _currentUser = {
+                username: user.username, role: user.role,
+                full_name: user.full_name, permissions: user.permissions || [],
+            };
+            showMainApp();
+        })
+        .catch(() => {
+            clearToken();
+            _intendedRoute = _hashToSection(location.hash);
+            showLoginPage();
+        });
 });
 
+
 function initApp() {
-    loadDashboard();
-    loadCities();
-    loadCategories();
-    checkCookieStatus();
+    // Only preload what this account may actually fetch. These four call
+    // routers that are now permission-gated, so firing them unconditionally
+    // greets an admin with a row of 403 toasts for areas they were never
+    // given — the request fails and the panel looks broken on every login.
+    if (_hasPerm('stats')) loadDashboard();
+    if (_hasPerm('properties')) { loadCities(); loadCategories(); }
+    if (_hasPerm('divar_auth')) checkCookieStatus();
     initOtpBoxes();
 
     document.getElementById('scraper-form').addEventListener('submit', startScraping);
@@ -492,9 +530,9 @@ function initApp() {
 
     setInterval(() => {
         const dash = document.getElementById('section-dashboard');
-        if (dash && dash.style.display !== 'none') loadDashboard();
+        if (dash && dash.style.display !== 'none' && _hasPerm('stats')) loadDashboard();
     }, 60000);
-    setInterval(checkCookieStatus, 300000);
+    setInterval(() => { if (_hasPerm('divar_auth')) checkCookieStatus(); }, 300000);
 }
 
 // Section titles for the topbar
@@ -505,27 +543,26 @@ const SECTION_META = {
     crm:        { title: 'CRM — مدیریت لیدها',  subtitle: 'سیستم CRM و اطلاع‌رسانی' },
     auth:       { title: 'احراز هویت دیوار',     subtitle: 'مدیریت نشست و کوکی حساب دیوار' },
     proxies:    { title: 'مدیریت پراکسی‌ها',     subtitle: 'افزودن، تست و مدیریت پراکسی‌ها' },
-    users:      { title: 'مدیریت کاربران',       subtitle: 'حساب‌های کاربری (فقط Super Admin)' },
+    portal:     { title: 'درخواست‌های مشتریان',  subtitle: 'ملک‌هایی که بازدیدکنندگان سایت دنبالش هستند' },
+    users:      { title: 'مدیریت کاربران',       subtitle: 'حساب‌ها، دسترسی‌ها و درخواست‌های ارتقا' },
 };
 
 // Section Navigation
 function _defaultSection() {
-    // 'user' role lands on properties; others land on dashboard
-    return (_currentUser?.role === 'user') ? 'properties' : 'dashboard';
+    // Land on the first area this account may actually open, so an admin
+    // without the dashboard permission does not arrive on a blocked screen.
+    if (_hasPerm('stats')) return 'dashboard';
+    const first = Object.entries(SECTION_PERMISSION).find(([, p]) => _hasPerm(p));
+    return first ? first[0] : 'dashboard';
 }
 
 function _isSectionAllowed(sectionName) {
-    const role = _currentUser?.role || 'user';
-    const allowed = ROLE_NAV_VISIBILITY[role] || ROLE_NAV_VISIBILITY['user'];
-    // Map section names to nav IDs
-    const sectionNavMap = {
-        dashboard: 'nav-link-dashboard', properties: 'nav-link-properties',
-        scraper: 'nav-link-scraper', crm: 'nav-link-crm',
-        auth: 'nav-link-auth', proxies: 'nav-link-proxies', users: 'nav-users',
-    };
-    const navId = sectionNavMap[sectionName];
-    return !navId || allowed.includes(navId);
+    const role = _currentUser?.role || 'visitor';
+    if (sectionName === 'users') return ['root', 'super_admin'].includes(role);
+    const perm = SECTION_PERMISSION[sectionName];
+    return perm ? _hasPerm(perm) : true;
 }
+
 
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
@@ -590,7 +627,10 @@ function showSection(sectionName) {
         case 'auth':       checkAuthStatus(); loadCookies(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
-        case 'users':      if (_currentUser?.role === 'super_admin') { loadUsers(); loadMaintenance(); } break;
+        case 'portal':     loadPortalRequests(); break;
+        case 'users':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
+                               loadUsers(); loadMaintenance(); initPermsUI(); loadTickets();
+                           } break;
     }
 }
 
@@ -4974,33 +5014,57 @@ async function submitAddLead() {
 // ==================== Users (super_admin) ====================
 
 const ROLE_LABELS = {
-    super_admin: { label: '👑 Super Admin', cls: 'bg-danger' },
-    admin:       { label: '🛠 Admin',        cls: 'bg-primary' },
-    user:        { label: '👤 User',          cls: 'bg-secondary' },
+    root:        { label: '🔧 Root',          cls: 'bg-dark' },
+    super_admin: { label: '👑 مدیر ارشد',     cls: 'bg-danger' },
+    admin:       { label: '🛠 مدیر',           cls: 'bg-primary' },
+    visitor:     { label: '👤 بازدیدکننده',   cls: 'bg-secondary' },
+    // 'user' no longer exists — the migration converted those accounts to
+    // admin. Kept so a row written before the rollout still renders a label.
+    user:        { label: '👤 کاربر (قدیمی)', cls: 'bg-secondary' },
 };
+
+let _usersById = {};
 
 async function loadUsers() {
     try {
         const data = await apiCall('/users');
         const tbody = document.getElementById('users-table');
         tbody.innerHTML = '';
+        _usersById = {};
+        await loadPermCatalog();
 
         data.items.forEach(u => {
+            _usersById[u.id] = u;
             const rl = ROLE_LABELS[u.role] || { label: u.role, cls: 'bg-dark' };
             const lastLogin = u.last_login
                 ? new Date(u.last_login).toLocaleDateString('fa-IR')
                 : '---';
             const isSelf = u.username === _currentUser?.username;
 
+            // Every field below is attacker-reachable: a visitor picks their own
+            // full_name at public sign-up and it lands in this table the moment a
+            // super_admin opens the page. Unescaped, an <img onerror> here runs in
+            // the panel origin and the bearer token is in localStorage — so the
+            // whole row goes through esc(), and the phone is read from
+            // _usersById by id rather than interpolated into an onclick where a
+            // single quote would break out of the attribute.
+            const perms = (u.role === 'admin')
+                ? (u.permissions || []).map(k => {
+                    const c = (_permCatalog || []).find(x => x.key === k);
+                    return `<span class="badge bg-secondary-subtle text-body-secondary me-1">${esc(c ? c.label : k)}</span>`;
+                  }).join('') || '<span class="text-muted small">—</span>'
+                : '<span class="text-muted small">—</span>';
+
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${u.id}</td>
-                <td><strong>${u.username}</strong> ${isSelf ? '<span class="badge bg-info">شما</span>' : ''}</td>
-                <td>${u.full_name || '---'}</td>
-                <td><span class="badge ${rl.cls}">${rl.label}</span></td>
+                <td>${esc(u.id)}</td>
+                <td><strong>${esc(u.username)}</strong> ${isSelf ? '<span class="badge bg-info">شما</span>' : ''}</td>
+                <td>${esc(u.full_name || '---')}</td>
+                <td><span class="badge ${rl.cls}">${esc(rl.label)}</span></td>
+                <td>${perms}</td>
                 <td>
-                    <span class="text-monospace small">${u.divar_phone || '---'}</span>
-                    <button class="btn btn-sm btn-link p-0 ms-1" onclick="promptSetDivarPhone(${u.id}, '${u.divar_phone || ''}')" title="ویرایش شماره دیوار">
+                    <span class="text-monospace small" dir="ltr">${esc(u.divar_phone || '---')}</span>
+                    <button class="btn btn-sm btn-link p-0 ms-1" onclick="promptSetDivarPhone(${esc(u.id)})" title="ویرایش شماره دیوار">
                         <i class="bi bi-pencil-square"></i>
                     </button>
                 </td>
@@ -5009,16 +5073,20 @@ async function loadUsers() {
                         ${u.is_active ? 'فعال' : 'غیرفعال'}
                     </span>
                 </td>
-                <td>${lastLogin}</td>
+                <td>${esc(lastLogin)}</td>
                 <td>
-                    ${!isSelf ? `
-                    <button class="btn btn-sm btn-outline-warning" onclick="toggleUserActive(${u.id}, ${u.is_active})" title="${u.is_active ? 'غیرفعال' : 'فعال'} کردن">
+                    ${u.role !== 'root' ? `
+                    <button class="btn btn-sm btn-outline-primary" onclick="openPermsEditor(${esc(u.id)})" title="دسترسی‌ها">
+                        <i class="bi bi-sliders"></i>
+                    </button>` : ''}
+                    ${!isSelf && u.role !== 'root' ? `
+                    <button class="btn btn-sm btn-outline-warning" onclick="toggleUserActive(${esc(u.id)}, ${!!u.is_active})" title="${u.is_active ? 'غیرفعال' : 'فعال'} کردن">
                         <i class="bi bi-toggle-${u.is_active ? 'on' : 'off'}"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-info" onclick="promptResetPassword(${u.id})" title="تغییر رمز">
+                    <button class="btn btn-sm btn-outline-info" onclick="promptResetPassword(${esc(u.id)})" title="تغییر رمز">
                         <i class="bi bi-key"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${u.id})" title="حذف">
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${esc(u.id)})" title="حذف">
                         <i class="bi bi-trash"></i>
                     </button>
                     ` : ''}
@@ -5031,59 +5099,63 @@ async function loadUsers() {
     }
 }
 
-async function createUser(e) {
-    e.preventDefault();
-    const username    = document.getElementById('new-username').value.trim();
-    const full_name   = document.getElementById('new-fullname').value.trim();
-    const email       = document.getElementById('new-email').value.trim();
-    const password    = document.getElementById('new-password').value;
-    const role        = document.getElementById('new-role').value;
-    const divar_phone = document.getElementById('new-divar-phone').value.trim() || null;
 
-    try {
-        await apiCall('/users', {
-            method: 'POST',
-            body: JSON.stringify({ username, full_name, email, password, role, divar_phone })
-        });
-        showToast('موفق', 'کاربر ساخته شد', 'success');
-        e.target.reset();
-        loadUsers();
-    } catch (error) {
-        showToast('خطا', error.message, 'danger');
-    }
+// Change an existing account's role and, for an admin, exactly which areas it
+// may open. This is the control the owner uses day to day — approving a ticket
+// only sets the starting point.
+async function openPermsEditor(userId) {
+    const u = _usersById[userId];
+    if (!u) return;
+    await loadPermCatalog();
+
+    const body = document.getElementById('perms-editor-body');
+    body.innerHTML = `
+        <p class="small text-muted mb-2">
+            <strong>${esc(u.full_name || u.username)}</strong>
+            <span dir="ltr">${esc(u.phone || '')}</span>
+        </p>
+        <label class="form-label small">نقش</label>
+        <select id="pe-role" class="form-select form-select-sm mb-2" onchange="syncPermsEditor()">
+            <option value="admin">مدیر — دسترسی‌های انتخابی</option>
+            <option value="visitor">بازدیدکننده — فقط پورتال</option>
+            <option value="super_admin">مدیر ارشد — دسترسی کامل</option>
+        </select>
+        <div id="pe-perms-wrap">
+            <label class="form-label small">دسترسی‌ها</label>
+            <div id="pe-perms-box" class="perm-box"></div>
+        </div>`;
+    document.getElementById('pe-role').value =
+        ['admin', 'visitor', 'super_admin'].includes(u.role) ? u.role : 'admin';
+    renderPermBox('pe-perms-box', u.permissions || [], 'pe');
+    syncPermsEditor();
+    document.getElementById('perms-editor-save').onclick = () => savePermsEditor(userId);
+    new bootstrap.Modal(document.getElementById('permsEditorModal')).show();
 }
 
-async function toggleUserActive(id, currentlyActive) {
+function syncPermsEditor() {
+    const role = document.getElementById('pe-role')?.value;
+    const wrap = document.getElementById('pe-perms-wrap');
+    if (wrap) wrap.style.display = role === 'admin' ? '' : 'none';
+}
+
+async function savePermsEditor(userId) {
+    const role = document.getElementById('pe-role').value;
     try {
-        await apiCall(`/users/${id}`, {
+        await apiCall(`/users/${userId}`, {
             method: 'PATCH',
-            body: JSON.stringify({ is_active: !currentlyActive })
+            body: JSON.stringify({
+                role,
+                permissions: role === 'admin' ? readPermBox('pe-perms-box') : [],
+            }),
         });
-        showToast('موفق', `کاربر ${currentlyActive ? 'غیرفعال' : 'فعال'} شد`, 'success');
+        showToast('موفق', 'دسترسی‌ها بروزرسانی شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('permsEditorModal'))?.hide();
         loadUsers();
-    } catch (error) {
-        showToast('خطا', error.message, 'danger');
-    }
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
-async function promptResetPassword(id) {
-    const newPass = prompt('رمز عبور جدید را وارد کنید (حداقل ۶ کاراکتر):');
-    if (!newPass || newPass.length < 6) {
-        showToast('خطا', 'رمز عبور باید حداقل ۶ کاراکتر باشد', 'warning');
-        return;
-    }
-    try {
-        await apiCall(`/users/${id}/password`, {
-            method: 'POST',
-            body: JSON.stringify({ new_password: newPass })
-        });
-        showToast('موفق', 'رمز عبور تغییر کرد', 'success');
-    } catch (error) {
-        showToast('خطا', error.message, 'danger');
-    }
-}
-
-async function promptSetDivarPhone(id, currentPhone) {
+async function promptSetDivarPhone(id) {
+    const currentPhone = (_usersById[id] || {}).divar_phone || '';
     const newPhone = prompt(`شماره دیوار مرتبط با این کاربر را وارد کنید:\n(برای پاک کردن، خالی بگذارید)`, currentPhone);
     if (newPhone === null) return; // cancelled
     try {
@@ -5693,7 +5765,7 @@ function exportJson(type) {
 }
 
 function _applyCrmRoleVisibility() {
-    const isSuperAdmin = _currentUser?.role === 'super_admin';
+    const isSuperAdmin = ['root', 'super_admin'].includes(_currentUser?.role);
     document.querySelectorAll('.crm-superadmin-only').forEach(el => {
         el.style.display = isSuperAdmin ? '' : 'none';
     });
@@ -6559,7 +6631,7 @@ function _allBinders() { return _cabinets.flatMap(c => c.binders || []); }
 /** Deleting a cabinet or binder unfiles everything behind it, so the server
  *  restricts it to an admin — hide the button rather than let it 403. */
 function _canManageFiling() {
-    return _currentUser?.role === 'admin' || _currentUser?.role === 'super_admin';
+    return ['root', 'super_admin', 'admin'].includes(_currentUser?.role);
 }
 
 /** State and the button's lit/unlit look, always set together. */
@@ -6963,4 +7035,166 @@ function _customerMatchCard(m) {
                 <i class="bi bi-telephone"></i> ${esc(phone)}</a>` : ''}
         </div>
     </div>`;
+}
+
+// ══════════ Portal: visitor requests + upgrade tickets (super_admin/admin) ══════════
+// Server data is written through esc() before it reaches innerHTML. Everything
+// here is user-supplied — a visitor types it and staff render it — which is
+// exactly the shape that turns into stored XSS when it is skipped.
+
+let _permCatalog = null;
+
+async function loadPermCatalog() {
+    if (_permCatalog) return _permCatalog;
+    try {
+        const data = await apiCall('/users/permissions/catalog');
+        _permCatalog = data.items || [];
+    } catch (_) { _permCatalog = []; }
+    return _permCatalog;
+}
+
+function renderPermBox(containerId, selected, namePrefix) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    const chosen = new Set(selected || []);
+    box.innerHTML = (_permCatalog || []).map(p => `
+        <label>
+            <input type="checkbox" value="${esc(p.key)}" id="${esc(namePrefix)}-${esc(p.key)}"
+                   ${chosen.has(p.key) ? 'checked' : ''}>
+            <span>${esc(p.label)}</span>
+        </label>`).join('');
+}
+
+function readPermBox(containerId) {
+    const box = document.getElementById(containerId);
+    if (!box) return [];
+    return Array.from(box.querySelectorAll('input[type=checkbox]:checked')).map(i => i.value);
+}
+
+function syncNewUserPerms() {
+    const role = document.getElementById('new-role')?.value;
+    const wrap = document.getElementById('new-perms-wrap');
+    if (wrap) wrap.style.display = role === 'admin' ? '' : 'none';
+}
+
+async function initPermsUI() {
+    await loadPermCatalog();
+    renderPermBox('new-perms-box', (await loadPermCatalog()).length ? [] : [], 'np');
+    syncNewUserPerms();
+}
+
+// ── upgrade tickets ──────────────────────────────────────────────────────────
+async function loadTickets() {
+    const box = document.getElementById('tickets-box');
+    const countEl = document.getElementById('tickets-count');
+    if (!box) return;
+    try {
+        await loadPermCatalog();
+        const { items } = await apiCall('/portal/admin/tickets?status=pending');
+        if (countEl) countEl.textContent = _faNum ? _faNum(items.length) : String(items.length);
+        if (!items.length) {
+            box.innerHTML = '<p class="text-muted small mb-0">درخواست جدیدی وجود ندارد.</p>';
+            return;
+        }
+        box.innerHTML = items.map(t => `
+            <div class="border rounded p-2 mb-2">
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                  <strong>${esc(t.user?.full_name || '—')}</strong>
+                  <span class="text-muted small" dir="ltr">${esc(t.user?.phone || '')}</span>
+                </div>
+                <span class="badge bg-warning text-dark">در انتظار بررسی</span>
+              </div>
+              ${t.message ? `<div class="small mt-1">${esc(t.message)}</div>` : ''}
+              <div class="mt-2">
+                <label class="form-label small mb-1">دسترسی‌هایی که داده می‌شود</label>
+                <div id="tk-perms-${t.id}" class="perm-box"></div>
+              </div>
+              <div class="d-flex gap-2 mt-2">
+                <button class="btn btn-success btn-sm" onclick="decideTicket(${t.id}, true)">
+                  <i class="bi bi-check-lg"></i> تأیید و ارتقا به مدیر
+                </button>
+                <button class="btn btn-outline-danger btn-sm" onclick="decideTicket(${t.id}, false)">
+                  <i class="bi bi-x-lg"></i> رد
+                </button>
+              </div>
+            </div>`).join('');
+        items.forEach(t => renderPermBox(`tk-perms-${t.id}`, [], `tk${t.id}`));
+    } catch (e) {
+        box.innerHTML = `<p class="text-danger small mb-0">${esc(e.message)}</p>`;
+    }
+}
+
+async function decideTicket(id, approve) {
+    if (!confirm(approve ? 'این کاربر به مدیر ارتقا یابد؟' : 'این درخواست رد شود؟')) return;
+    try {
+        await apiCall(`/portal/admin/tickets/${id}/decide`, {
+            method: 'POST',
+            body: JSON.stringify({ approve, permissions: approve ? readPermBox(`tk-perms-${id}`) : null }),
+        });
+        showToast('انجام شد', approve ? 'کاربر به مدیر ارتقا یافت' : 'درخواست رد شد', 'success');
+        await loadTickets();
+        if (typeof loadUsers === 'function') loadUsers();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// ── visitor property requests ────────────────────────────────────────────────
+const PORTAL_STATUS = {
+    new:       { label: 'ثبت شده',        cls: 'bg-primary' },
+    in_review: { label: 'در حال بررسی',   cls: 'bg-warning text-dark' },
+    matched:   { label: 'مورد پیدا شد',   cls: 'bg-success' },
+    contacted: { label: 'تماس گرفته شد',  cls: 'bg-info text-dark' },
+    closed:    { label: 'بسته شده',       cls: 'bg-secondary' },
+};
+
+function _money(n) {
+    if (!n) return '—';
+    return (typeof _faNum === 'function' ? _faNum(Number(n).toLocaleString('en-US')) : Number(n).toLocaleString('fa-IR'));
+}
+
+async function loadPortalRequests() {
+    const body = document.getElementById('portal-requests-body');
+    if (!body) return;
+    const status = document.getElementById('portal-status-filter')?.value || '';
+    body.innerHTML = '<tr><td colspan="6" class="text-center text-muted p-4">در حال بارگذاری…</td></tr>';
+    try {
+        const { items } = await apiCall(`/portal/admin/requests${status ? '?status=' + encodeURIComponent(status) : ''}`);
+        if (!items.length) {
+            body.innerHTML = '<tr><td colspan="6" class="text-center text-muted p-4">درخواستی ثبت نشده است.</td></tr>';
+            return;
+        }
+        body.innerHTML = items.map(r => {
+            const st = PORTAL_STATUS[r.status] || { label: r.status, cls: 'bg-secondary' };
+            const want = [r.deal_type === 'rent' ? 'اجاره' : 'خرید', r.city, r.districts]
+                .filter(Boolean).map(esc).join(' • ');
+            const budget = r.deal_type === 'rent'
+                ? `ودیعه تا ${_money(r.deposit_max)} / اجاره تا ${_money(r.rent_max)}`
+                : `${_money(r.budget_min)} تا ${_money(r.budget_max)}`;
+            return `<tr>
+                <td><div>${esc(r.contact_name || r.user?.full_name || '—')}</div>
+                    <a class="small text-muted" dir="ltr" href="tel:${esc(r.contact_phone || '')}">${esc(r.contact_phone || '')}</a></td>
+                <td>${want}${r.description ? `<div class="small text-muted">${esc(r.description.slice(0, 90))}</div>` : ''}</td>
+                <td class="small">${esc(budget)}</td>
+                <td><span class="badge ${st.cls}">${esc(st.label)}</span></td>
+                <td class="small">${esc((r.created_at || '').slice(0, 10))}</td>
+                <td>
+                  <select class="form-select form-select-sm" style="width:auto"
+                          onchange="updatePortalRequest(${r.id}, this.value)">
+                    ${Object.entries(PORTAL_STATUS).map(([k, v]) =>
+                        `<option value="${esc(k)}" ${k === r.status ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}
+                  </select>
+                </td></tr>`;
+        }).join('');
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="6" class="text-danger text-center p-3">${esc(e.message)}</td></tr>`;
+    }
+}
+
+async function updatePortalRequest(id, status) {
+    try {
+        await apiCall(`/portal/admin/requests/${id}`, {
+            method: 'PATCH', body: JSON.stringify({ status }),
+        });
+        showToast('انجام شد', 'وضعیت درخواست بروزرسانی شد', 'success');
+    } catch (e) { showToast('خطا', e.message, 'danger'); await loadPortalRequests(); }
 }
