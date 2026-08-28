@@ -2263,6 +2263,30 @@ class DivarScraper:
             logger.warning(f"[rotate] could not load cookie pool: {e}")
             return []
 
+    async def _persist_active_session(self) -> None:
+        """Write the current account's live cookies back before leaving it.
+
+        The saved set is a snapshot from the day that account logged in. Divar
+        keeps updating a session as it is used, so restoring the snapshot every
+        time we come back replays an old session and discards everything the
+        account had built up — and a browser whose identity resets on a cycle is
+        exactly what gets asked to verify itself. Rotation was creating the
+        challenges it exists to avoid.
+        """
+        if not self.active_phone or not self.auth:
+            return
+        try:
+            cookies = await self.auth.get_current_cookies()
+            if not cookies:
+                return
+            token = next((c.get("value") for c in cookies if c.get("name") == "token"), None)
+            await self.auth.save_cookies_to_file(self.active_phone, cookies)
+            if self.db_session:
+                await self.auth.save_cookies_to_db(self.active_phone, cookies, token)
+            logger.info(f"[rotate] saved {len(cookies)} live cookies for {self.active_phone}")
+        except Exception as e:
+            logger.warning(f"[rotate] could not save session for {self.active_phone}: {e}")
+
     async def maybe_rotate_account(self) -> bool:
         """Every `cookie_rotate_every` listings, switch to the next saved Divar
         account so Divar sees the load spread across numbers (fewer SMS checks).
@@ -2294,6 +2318,10 @@ class DivarScraper:
             idx = self._rotation_pool.index(self.active_phone) if self.active_phone in self._rotation_pool else -1
         except ValueError:
             idx = -1
+        # Carry the current account's session forward before leaving it, so
+        # returning later resumes it instead of replaying a stale snapshot.
+        await self._persist_active_session()
+
         for offset in range(1, len(self._rotation_pool) + 1):
             candidate = self._rotation_pool[(idx + offset) % len(self._rotation_pool)]
             if candidate == self.active_phone:
@@ -2307,6 +2335,10 @@ class DivarScraper:
                 previous = self.active_phone
                 self.active_phone = candidate
                 logger.info(f"[rotate] switched Divar account {previous} → {candidate}")
+                # Let the restored session settle before it starts opening ads.
+                # A switch followed instantly by a page load is the part that
+                # reads as automated, not the overall pace.
+                await self._human_like_delay(3.0, 6.0)
                 return True
             logger.warning(f"[rotate] session for {candidate} not usable — trying next")
         logger.info("[rotate] no alternative account could be restored; staying on current")
@@ -2769,6 +2801,10 @@ class DivarScraper:
             job.completed_at = datetime.now()
             await self.db_session.commit()
             
+            # The account that finished the job has the freshest session of all;
+            # losing it would make the next job start from a stale snapshot.
+            await self._persist_active_session()
+
             logger.info(f"Scraping job completed. New: {job.new_items}, Updated: {job.updated_items}, Failed: {job.failed_items}")
             # Say so when the feed ran dry before the target was met, rather
             # than completing at «۴۰ / ۲۰۰» with no explanation.
