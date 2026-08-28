@@ -73,3 +73,8 @@ k8s/01-secrets.yaml
 # Deploy SSH keys (never commit)
 scripts/.deploy_keys/
 Downloads/
+
+# Local development stack (local/start.sh): database cluster, logs, scraped
+# images and a local-only .env. None of it belongs in the repo — pgdata alone
+# is a whole Postgres data directory.
+local/

@@ -261,6 +261,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// Show the «customers sign up here» link on the panel login only when public
+// sign-up is actually on. The portal redirects to /dashboard while the feature
+// is off, so an unconditional link would loop a visitor back to a form they
+// cannot use.
+document.addEventListener('DOMContentLoaded', () => {
+    fetch(`${API_BASE}/public/auth/status`)
+        .then(r => r.json())
+        .then(s => {
+            if (s && s.enabled) {
+                document.getElementById('login-portal-link')?.classList.remove('d-none');
+            }
+        })
+        .catch(() => {});
+});
+
 // ═══ 2FA Management ════════════════════════════════════════════
 let _totpQRInstance = null;
 

@@ -102,9 +102,15 @@
             </button>
         </div>
 
-        <!-- Public sign-up is disabled — only a super admin can create accounts -->
+        <!-- Panel accounts are made by a super admin. Members of the public sign
+             up on /portal instead — the link appears only when that is enabled,
+             so it never leads to a page that bounces them straight back here. -->
         <div id="login-toggle-link" style="text-align:center;margin-top:1rem;font-size:.8rem;color:var(--text-muted,#aaa);">
-            برای ساخت حساب کاربری با مدیر سیستم هماهنگ کنید
+            <span id="login-help-staff">برای ساخت حساب کاربری با مدیر سیستم هماهنگ کنید</span>
+            <div id="login-portal-link" class="d-none" style="margin-top:.5rem">
+                دنبال ملک می‌گردید؟
+                <a href="/portal">ثبت‌نام و ورود مشتریان</a>
+            </div>
         </div>
         <div id="register-toggle-link" style="display:none;">
             <a href="#" onclick="showLoginForm();return false;">ورود</a>
