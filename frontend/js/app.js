@@ -5154,6 +5154,64 @@ async function savePermsEditor(userId) {
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
+
+// Restored: these three were lost when loadUsers was rewritten. initApp binds
+// createUser to the new-user form, so losing it threw during login and left
+// showMainApp() short of showSection() — the panel kept whatever section the
+// previous session was on.
+async function createUser(e) {
+    e.preventDefault();
+    const username    = document.getElementById('new-username').value.trim();
+    const full_name   = document.getElementById('new-fullname').value.trim();
+    const email       = document.getElementById('new-email').value.trim();
+    const password    = document.getElementById('new-password').value;
+    const role        = document.getElementById('new-role').value;
+    const divar_phone = document.getElementById('new-divar-phone').value.trim() || null;
+
+    try {
+        await apiCall('/users', {
+            method: 'POST',
+            body: JSON.stringify({ username, full_name, email, password, role, divar_phone,
+                                   permissions: role === 'admin' ? readPermBox('new-perms-box') : [] })
+        });
+        showToast('موفق', 'کاربر ساخته شد', 'success');
+        e.target.reset();
+        loadUsers();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function toggleUserActive(id, currentlyActive) {
+    try {
+        await apiCall(`/users/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ is_active: !currentlyActive })
+        });
+        showToast('موفق', `کاربر ${currentlyActive ? 'غیرفعال' : 'فعال'} شد`, 'success');
+        loadUsers();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
+async function promptResetPassword(id) {
+    const newPass = prompt('رمز عبور جدید را وارد کنید (حداقل ۶ کاراکتر):');
+    if (!newPass || newPass.length < 6) {
+        showToast('خطا', 'رمز عبور باید حداقل ۶ کاراکتر باشد', 'warning');
+        return;
+    }
+    try {
+        await apiCall(`/users/${id}/password`, {
+            method: 'POST',
+            body: JSON.stringify({ new_password: newPass })
+        });
+        showToast('موفق', 'رمز عبور تغییر کرد', 'success');
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
 async function promptSetDivarPhone(id) {
     const currentPhone = (_usersById[id] || {}).divar_phone || '';
     const newPhone = prompt(`شماره دیوار مرتبط با این کاربر را وارد کنید:\n(برای پاک کردن، خالی بگذارید)`, currentPhone);

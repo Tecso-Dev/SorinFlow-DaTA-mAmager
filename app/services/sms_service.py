@@ -14,9 +14,31 @@ async def send_sms(to_number: str, message: str, provider: str = "kavenegar") ->
     Send an SMS via the chosen provider.
     Returns {"success": bool, "provider": str, "response": str}
     """
+    if provider == "console":
+        return await _send_console(to_number, message)
     if provider == "melipayamak":
         return await _send_melipayamak(to_number, message)
     return await _send_kavenegar(to_number, message)
+
+
+async def _send_console(to_number: str, message: str) -> dict:
+    """Development only — write the message to the log instead of sending it.
+
+    Without this there is no way to exercise the portal sign-up locally: the
+    verification flow deliberately fails closed when delivery fails, so every
+    registration 503s until a paid SMS account exists.
+
+    Refuses outright in production. A login code printed into the log of a live
+    server is a credential in plain text, and AUTH_SMS_PROVIDER is exactly the
+    kind of variable that gets copied between environments by accident — so the
+    guard is here, not only in the config.
+    """
+    if settings.environment == "production":
+        logger.error("[sms] console provider requested in production — refusing")
+        return {"success": False, "provider": "console",
+                "response": "console provider is disabled in production"}
+    logger.warning(f"[sms:console] to={to_number} :: {message}")
+    return {"success": True, "provider": "console", "response": "logged, not sent"}
 
 
 async def _send_kavenegar(to_number: str, message: str) -> dict:

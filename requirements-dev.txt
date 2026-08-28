@@ -1,0 +1,19 @@
+# Test-only dependencies.
+#
+# requirements.txt is what the container installs to RUN the app; it has never
+# carried what the suite needs to exercise it, so `pip install -r
+# requirements.txt && pytest` fails on an import nobody expects. CI installs
+# this file too, which is what keeps a local run and the deploy gate honest
+# about being the same thing.
+-r requirements.txt
+
+pytest==7.4.4
+pytest-asyncio==0.23.3
+
+# The app is async SQLAlchemy over Postgres. The suite runs against SQLite so it
+# needs no database service, which needs the async SQLite driver.
+aiosqlite==0.19.0
+
+# Verification codes and login throttling live in Redis. fakeredis keeps those
+# tests hermetic without standing a server up.
+fakeredis==2.21.0

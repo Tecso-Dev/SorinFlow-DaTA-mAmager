@@ -16,6 +16,36 @@ jobs:
   # scraper fleet on every push to main.
   test:
     runs-on: ubuntu-latest
+
+    # A real Postgres, not SQLite. The models are Postgres-specific — scraping_jobs
+    # .job_id is a postgresql UUID column — so a SQLite run either fails to build
+    # the schema or quietly exercises a different dialect than production. Redis
+    # is here for the same reason: verification codes and login throttling live in
+    # it, and a fake would not prove the real client works.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sorinflow
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: sorinflow_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,29 +56,33 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install test dependencies
-        # Deliberately not the full requirements.txt: playwright/opencv pull
-        # hundreds of MB and a browser download for a suite that never opens
-        # one. This is the set the tests actually import.
+      - name: Install dependencies
+        # requirements-dev.txt pulls requirements.txt plus the test-only
+        # packages, so this gate installs exactly what a developer installs —
+        # a hand-kept list here would drift from what the app actually needs.
         run: |
           python -m pip install --upgrade pip
-          pip install fastapi "sqlalchemy[asyncio]" pydantic-settings \
-                      "python-jose[cryptography]" redis bcrypt pyotp loguru \
-                      httpx aiosqlite python-multipart beautifulsoup4 \
-                      openpyxl python-dateutil qrcode pillow numpy \
-                      opencv-python-headless playwright \
-                      pytest pytest-asyncio fakeredis
+          pip install -r requirements-dev.txt
 
       - name: Run tests
         env:
-          # SQLite keeps the gate self-contained; the same suite is also run
-          # against Postgres locally before release.
-          DATABASE_URL: sqlite+aiosqlite:///./ci.db
+          DATABASE_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_test
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: ci-only-not-a-real-secret-0123456789
           LOGS_PATH: /tmp
           IMAGES_PATH: /tmp
         run: pytest tests/ -q
+
+      - name: Verify the auth migration against a live Postgres
+        # Skipped without PG_TEST_URL, so it only runs where a database exists.
+        # This is the half SQLite can never cover: ALTER ... IF NOT EXISTS is a
+        # no-op there, so the DDL production runs would go untested.
+        env:
+          PG_TEST_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_test
+          SECRET_KEY: ci-only-not-a-real-secret-0123456789
+          LOGS_PATH: /tmp
+          IMAGES_PATH: /tmp
+        run: pytest tests/test_pg_migration.py -q
 
   # Build on a GitHub-hosted runner (plenty of RAM, outbound to ghcr works).
   build:

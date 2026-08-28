@@ -66,14 +66,37 @@ def client():
     (cfg.public_auth_enabled, cfg.environment, cfg.api_key) = saved
 
 
+def _db_url():
+    return os.environ["DATABASE_URL"]
+
+
+def _in_fresh_loop(coro_factory):
+    """Run a coroutine on its own loop with its own engine.
+
+    asyncio.run() creates a new event loop every call. Handing it the app's
+    shared engine works under aiosqlite but asyncpg refuses outright — its
+    connection pool is pinned to the loop that made it. Each helper therefore
+    builds and disposes an engine inside the loop that uses it.
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+    async def _go():
+        eng = create_async_engine(_db_url())
+        maker = async_sessionmaker(eng, expire_on_commit=False)
+        try:
+            return await coro_factory(maker)
+        finally:
+            await eng.dispose()
+    return asyncio.run(_go())
+
+
 def _mk_user(username, role, permissions=None, password="pw123456", **kw):
-    """Insert a user straight into the DB and return it."""
-    from app.database import async_session_maker
+    """Insert a user straight into the DB and return its id."""
     from app.models.user import User
     from app.auth.jwt import get_password_hash
 
-    async def _go():
-        async with async_session_maker() as s:
+    async def _go(maker):
+        async with maker() as s:
             u = User(username=username, full_name=username, role=role,
                      hashed_password=get_password_hash(password),
                      permissions=permissions or [], is_active=True, **kw)
@@ -81,7 +104,7 @@ def _mk_user(username, role, permissions=None, password="pw123456", **kw):
             await s.commit()
             await s.refresh(u)
             return u.id
-    return asyncio.run(_go())
+    return _in_fresh_loop(_go)
 
 
 def _token(client, username, password="pw123456"):
@@ -188,15 +211,14 @@ def test_super_admin_cannot_create_or_become_root(client):
     # cannot edit / delete / reset / disable-2FA on an existing root.
     # The id is taken from the DB, not from the listing — the listing hides root,
     # so reading it from there would have made these assertions vacuous.
-    from app.database import async_session_maker
     from app.models.user import User as U
     from sqlalchemy import select as sel
 
-    async def _root_id():
-        async with async_session_maker() as db:
+    async def _root_id(maker):
+        async with maker() as db:
             r = await db.execute(sel(U).where(U.username == "rootuser"))
             return r.scalars().first().id
-    rid = asyncio.run(_root_id())
+    rid = _in_fresh_loop(_root_id)
 
     assert client.patch(f"/api/users/{rid}", headers=_auth(tok),
                         json={"full_name": "hijacked"}).status_code == 403
@@ -446,27 +468,20 @@ def test_portal_login_does_not_match_on_username(client):
 def test_pending_response_carries_the_phone_for_email_login(client, monkeypatch):
     """Someone who signs in with their email must still be able to verify: the
     code goes to their phone, and /verify keys on the phone, so the response has
-    to tell the page which number to use."""
+    to tell the page which number to use.
+
+    The account is created directly rather than through /register — registering
+    would start the resend cooldown and this test would measure the throttle
+    (covered separately) instead of the email-login path.
+    """
     async def fake_sms(to, msg, provider="kavenegar"):
         return {"success": True, "provider": "test", "response": "ok"}
     import app.services.verification as v
     monkeypatch.setattr(v, "send_sms", fake_sms)
 
-    r = client.post("/api/public/auth/register", json={
-        "full_name": "مریم", "phone": "09125554433",
-        "password": "pw123456", "email": "maryam@example.com"})
-    assert r.status_code == 200
+    _mk_user("09125554433", "visitor", password="pw123456",
+             phone="09125554433", phone_verified=False, email="maryam@example.com")
 
-    # Registering started the resend cooldown. Clear it so this test exercises
-    # the email-login path and not the throttle (covered separately).
-    import app.services.verification as _v
-
-    async def _clear_cooldown():
-        r = await _v.get_redis()
-        await r.delete(_v._keys("signup", "09125554433")["cooldown"])
-    asyncio.run(_clear_cooldown())
-
-    # log in by EMAIL without having verified yet
     lr = client.post("/api/public/auth/login",
                      json={"identifier": "maryam@example.com", "password": "pw123456"})
     assert lr.status_code == 200, lr.text
@@ -477,7 +492,7 @@ def test_pending_response_carries_the_phone_for_email_login(client, monkeypatch)
     ok = client.post("/api/public/auth/verify",
                      json={"phone": body["phone"], "code": body["debug_code"]})
     assert ok.status_code == 200, ok.text
-
+    assert ok.json()["role"] == "visitor"
 
 def test_root_is_not_excluded_by_any_role_literal():
     """root outranks super_admin, so no check may list the lower roles and omit
