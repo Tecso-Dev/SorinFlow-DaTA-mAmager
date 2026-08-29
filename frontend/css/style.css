@@ -10,6 +10,10 @@
   --bg:          #000000;
   --surface:     #0a0a0c;
   --surface2:    #131316;
+  /* what a themed input actually renders as: the translucent fill
+     flattened onto the surface behind it, so an autofilled field
+     and an empty one are the same colour */
+  --input-bg-solid: color-mix(in srgb, #fff 5%, #0a0a0c);
   --surface3:    #1c1c21;
 
   --accent:      #6366f1;
@@ -772,7 +776,16 @@ pre {
   transition: var(--trans); width: 100%;
   outline: none;
 }
-.form-control::placeholder { color: var(--text-muted); }
+.form-control::placeholder,
+.form-select::placeholder,
+textarea.form-control::placeholder { color: var(--text-muted); }
+/* Chrome lets an !important -webkit-text-fill-color on the field win over the
+   placeholder's own colour, which is what made hint text read as white. */
+.form-control::placeholder,
+textarea.form-control::placeholder {
+  -webkit-text-fill-color: var(--text-muted) !important;
+  opacity: 1;
+}
 
 /* Fix browser autofill overriding the theme.
    Chrome paints an autofilled field itself and ignores background-color, so
@@ -795,8 +808,8 @@ input:autofill,
 select:autofill,
 textarea:autofill {
   -webkit-text-fill-color: var(--text) !important;
-  -webkit-box-shadow: 0 0 0 1000px var(--surface2) inset !important;
-  box-shadow: 0 0 0 1000px var(--surface2) inset !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--input-bg-solid) inset !important;
+  box-shadow: 0 0 0 1000px var(--input-bg-solid) inset !important;
   caret-color: var(--text);
   border-color: var(--border) !important;
 }
@@ -1353,6 +1366,7 @@ textarea.form-control { resize: vertical; }
   --bg:          #eef1f8;
   --surface:     #ffffff;
   --surface2:    #f4f6fb;
+  --input-bg-solid: #f4f6fb;
   --surface3:    #e6eaf4;
 
   --accent-glow: rgba(99,102,241,.16);
