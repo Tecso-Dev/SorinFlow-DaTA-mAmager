@@ -194,3 +194,34 @@ class TestReachability:
         from app.api.routes import monitoring as mon
         src = inspect.getsource(mon._check_reachability)
         assert "except Exception" in src and "timeout" in src
+
+
+class TestConnectivityProbe:
+    def test_the_target_is_never_taken_from_the_caller(self):
+        """An admin-triggered prober that accepts arbitrary hosts is an SSRF
+        tool and a port scanner with a dashboard button — and it runs inside
+        the cluster, where it can reach things the internet cannot."""
+        import inspect
+        from app.api.routes import monitoring as mon
+        src = inspect.getsource(mon.connectivity_test)
+        assert "_PROBE_TARGETS" in src
+        assert "divar" in mon._PROBE_TARGETS
+        # the caller supplies a key, and an unknown key is refused
+        assert "unknown target" in src
+
+    def test_http_stage_uses_head_not_get(self):
+        """A GET times the whole homepage arriving. That reported ~1400ms on a
+        link whose real round trip was under 2ms, and made a healthy connection
+        look broken."""
+        import inspect
+        from app.api.routes import monitoring as mon
+        src = inspect.getsource(mon._probe_stages)
+        assert "client.head(" in src and "client.get(" not in src
+
+    def test_tcp_is_measured_as_best_of_three(self):
+        """One sample catches whatever the scheduler was doing. The minimum is
+        the closest thing to a real round trip."""
+        import inspect
+        from app.api.routes import monitoring as mon
+        src = inspect.getsource(mon._probe_stages)
+        assert "for _ in range(3)" in src and "min(best" in src

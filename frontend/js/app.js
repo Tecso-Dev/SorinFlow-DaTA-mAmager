@@ -7450,7 +7450,8 @@ async function loadMonitoring() {
         if (dv) {
             dvEl.innerHTML = dv.up
                 ? `<span class="text-success">در دسترس</span>
-                   <span class="text-muted small" dir="ltr"> ${esc(dv.latency_ms)} ms</span>`
+                   <span class="text-muted small" dir="ltr"> ${esc(dv.setup_ms ?? dv.latency_ms)} ms</span>
+                   <span class="text-muted" style="font-size:.68rem"> (برقراری اتصال)</span>`
                 : `<span class="text-danger">در دسترس نیست</span>
                    <span class="text-muted small">${esc(dv.error || dv.status || '')}</span>`;
         }
@@ -7709,5 +7710,82 @@ function toggleLive() {
         btn.textContent = 'ادامه';
         badge.className = 'badge bg-secondary d-inline-flex align-items-center gap-1';
         stopLive();
+    }
+}
+
+
+// ── real connectivity test ────────────────────────────────────────────────
+// Four timed stages rather than one boolean. "Divar is unreachable" leaves you
+// guessing; DNS / TCP / TLS / HTTP tells you which layer broke, and those are
+// four different fixes — a resolver problem on the box, a blocked route, TLS
+// interception, or Divar itself being down.
+
+const PROBE_STAGE_FA = {
+    DNS:  'نام دامنه (DNS)',
+    TCP:  'اتصال TCP',
+    TLS:  'گواهی امن (TLS)',
+    HTTP: 'پاسخ HTTP',
+};
+
+async function runConnectivityTest() {
+    const btn = document.getElementById('probe-btn');
+    const row = document.getElementById('probe-row');
+    const box = document.getElementById('probe-result');
+    if (!btn || !box) return;
+
+    const label = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال تست…';
+    row.classList.remove('d-none');
+    box.innerHTML = '<span class="text-muted small">در حال اجرای تست واقعی…</span>';
+
+    try {
+        const d = await apiCall('/monitoring/connectivity-test?target=divar', { method: 'POST' });
+
+        const rows = (d.stages || []).map(st => {
+            const icon = st.ok
+                ? '<i class="bi bi-check-circle-fill text-success"></i>'
+                : '<i class="bi bi-x-circle-fill text-danger"></i>';
+            return `<div class="d-flex align-items-center gap-2 py-1"
+                         style="border-bottom:1px solid rgba(255,255,255,.05)">
+                      ${icon}
+                      <span style="min-width:120px">${esc(PROBE_STAGE_FA[st.stage] || st.stage)}</span>
+                      <span dir="ltr" class="text-muted small" style="min-width:70px">${esc(st.ms)} ms</span>
+                      <span class="small text-muted" dir="ltr">${esc(st.detail || '')}</span>
+                    </div>`;
+        }).join('');
+
+        // Name the first failing stage: it is the one that matters, and the
+        // ones after it did not run or are meaningless once it failed.
+        const failed = (d.stages || []).find(st => !st.ok);
+        // Lead with the round trip. The total is the sum of DNS, TLS handshake
+        // and a request on a cold client — useful, but it is not latency, and
+        // showing it as one number made a 1ms link look like a 2-second one.
+        const verdict = d.ok
+            ? `<div class="text-success fw-bold mb-1">
+                 <i class="bi bi-check2-circle"></i> اتصال سالم است —
+                 <span dir="ltr">${esc(d.ip || '')}</span>
+                 <span class="text-muted small" dir="ltr">
+                   (رفت‌وبرگشت ${esc(d.rtt_ms)} ms · مجموع با برقراری اتصال ${esc(d.total_ms)} ms)
+                 </span></div>`
+            : `<div class="text-danger fw-bold mb-1">
+                 <i class="bi bi-exclamation-triangle"></i>
+                 مشکل در مرحلهٔ «${esc(PROBE_STAGE_FA[failed?.stage] || failed?.stage || '—')}»
+                 <span class="text-muted small" dir="ltr">${esc(failed?.detail || '')}</span></div>`;
+
+        box.innerHTML = verdict + rows;
+        loadGcpStatus();                       // the tile shares the cache this refreshed
+        const el = document.getElementById('net-divar');
+        if (el) {
+            el.innerHTML = d.ok
+                ? `<span class="text-success">در دسترس</span>
+                   <span class="text-muted small" dir="ltr"> ${esc(d.rtt_ms)} ms</span>`
+                : '<span class="text-danger">در دسترس نیست</span>';
+        }
+    } catch (e) {
+        box.innerHTML = `<span class="text-danger small">${esc(e.message)}</span>`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = label;
     }
 }

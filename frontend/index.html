@@ -1726,7 +1726,18 @@
                                         <tr><td class="text-muted">اسکرپر</td>
                                             <td id="up-scraper">—</td></tr>
                                         <tr><td class="text-muted">اتصال به دیوار</td>
-                                            <td id="net-divar">—</td></tr>
+                                            <td>
+                                                <span id="net-divar">—</span>
+                                                <button class="btn btn-sm btn-outline-primary ms-2"
+                                                        id="probe-btn" onclick="runConnectivityTest()">
+                                                    <i class="bi bi-activity"></i> تست واقعی
+                                                </button>
+                                            </td></tr>
+                                        <tr id="probe-row" class="d-none">
+                                            <td colspan="2" class="p-0">
+                                                <div id="probe-result" class="p-2"
+                                                     style="background:rgba(127,146,255,.06);border-radius:8px"></div>
+                                            </td></tr>
                                     </tbody>
                                 </table>
                             </div>

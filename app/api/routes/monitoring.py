@@ -14,7 +14,7 @@ import time
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,9 +84,12 @@ async def _check_reachability() -> dict:
     try:
         async with httpx.AsyncClient(timeout=6.0, follow_redirects=False) as client:
             r = await client.head("https://divar.ir/", headers={"User-Agent": "SorinFlow-HealthCheck"})
+        # This is full connection setup — DNS, TCP, TLS and a request — on a
+        # cold client, not a round trip. The staged test is what to read when
+        # the number looks wrong.
         result = {"divar": {"up": r.status_code < 500,
                             "status": r.status_code,
-                            "latency_ms": round((time.perf_counter() - started) * 1000, 1)}}
+                            "setup_ms": round((time.perf_counter() - started) * 1000, 1)}}
     except Exception as e:
         result = {"divar": {"up": False, "error": type(e).__name__,
                             "latency_ms": round((time.perf_counter() - started) * 1000, 1)}}
@@ -198,6 +201,143 @@ def _read_resources() -> dict:
 # kept for callers that only wanted the two memory facts
 def _read_container_limits() -> dict:
     return _read_resources()
+
+
+# Fixed targets. This endpoint must never take a host from the caller: an
+# admin-triggered prober that accepts arbitrary addresses is an SSRF tool and a
+# port scanner wearing a dashboard button, and it would run from inside the
+# cluster where it can see things the internet cannot.
+_PROBE_TARGETS = {
+    "divar": ("divar.ir", 443),
+}
+
+
+async def _probe_stages(host: str, port: int) -> dict:
+    """DNS, TCP, TLS and HTTP as four separate timed stages.
+
+    One boolean says "Divar is down" and leaves you guessing. These four say
+    which layer failed, which is the difference between a DNS problem on the
+    box, a blocked route, a TLS interception, and Divar actually being down —
+    four different fixes.
+    """
+    import asyncio
+    import socket
+    import ssl
+
+    stages, ip = [], None
+
+    def add(name, ok, ms, detail=""):
+        stages.append({"stage": name, "ok": ok, "ms": round(ms * 1000, 1), "detail": detail})
+
+    loop = asyncio.get_running_loop()
+
+    # ── DNS ──
+    t = time.perf_counter()
+    try:
+        infos = await asyncio.wait_for(
+            loop.getaddrinfo(host, port, proto=socket.IPPROTO_TCP), timeout=5)
+        ip = infos[0][4][0]
+        add("DNS", True, time.perf_counter() - t, ip)
+    except Exception as e:
+        add("DNS", False, time.perf_counter() - t, type(e).__name__)
+        return {"host": host, "port": port, "stages": stages, "ok": False}
+
+    # ── TCP ── three connects, best of. A single sample catches whatever the
+    # scheduler and the first-packet path happened to be doing; the minimum is
+    # the closest thing to the real round trip, and it is the only figure here
+    # that means "network latency" in the way people expect from ping.
+    best, tcp_error = None, None
+    for _ in range(3):
+        t = time.perf_counter()
+        writer = None
+        try:
+            _, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=6)
+            elapsed = time.perf_counter() - t
+            best = elapsed if best is None else min(best, elapsed)
+        except Exception as e:
+            tcp_error = type(e).__name__
+            break
+        finally:
+            if writer:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+    if best is None:
+        add("TCP", False, 0, tcp_error or "failed")
+        return {"host": host, "port": port, "ip": ip, "stages": stages, "ok": False}
+    add("TCP", True, best, f"{ip}:{port} — بهترین از ۳")
+
+    # ── TLS ── the certificate is worth seeing: an unexpected issuer is what
+    # interception looks like, and an expiring one explains a sudden failure
+    t = time.perf_counter()
+    tls_writer = None
+    try:
+        ctx = ssl.create_default_context()
+        _, tls_writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, port, ssl=ctx, server_hostname=host), timeout=8)
+        cert = tls_writer.get_extra_info("peercert") or {}
+        issuer = dict(x[0] for x in cert.get("issuer", ())).get("organizationName", "?")
+        add("TLS", True, time.perf_counter() - t,
+            f"{issuer} · تا {cert.get('notAfter', '?')}")
+    except Exception as e:
+        add("TLS", False, time.perf_counter() - t, f"{type(e).__name__}: {str(e)[:60]}")
+    finally:
+        if tls_writer:
+            tls_writer.close()
+            try:
+                await tls_writer.wait_closed()
+            except Exception:
+                pass
+
+    # ── HTTP ── HEAD, so this is time-to-response and not time-to-download.
+    # The first version issued a GET and timed the whole homepage arriving,
+    # which reported ~1400ms on a link whose actual round trip was under 2ms
+    # and made a healthy connection look broken.
+    import httpx
+    t = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=False) as client:
+            r = await client.head(f"https://{host}/",
+                                  headers={"User-Agent": "SorinFlow-HealthCheck"})
+        add("HTTP", r.status_code < 500, time.perf_counter() - t,
+            f"HTTP {r.status_code} (بدون بدنه)")
+    except Exception as e:
+        add("HTTP", False, time.perf_counter() - t, type(e).__name__)
+
+    rtt = next((st["ms"] for st in stages if st["stage"] == "TCP"), None)
+    return {"host": host, "port": port, "ip": ip, "stages": stages,
+            # the headline number: network round trip, not the sum of every
+            # setup cost, which is what a total would be
+            "rtt_ms": rtt,
+            "ok": all(st["ok"] for st in stages)}
+
+
+@router.post("/connectivity-test")
+async def connectivity_test(target: str = "divar"):
+    """Run a real connection test on demand, stage by stage.
+
+    POST because it does outbound work rather than reading state, and because a
+    GET would be re-run by every refresh and preload. The target is a key into
+    a fixed table, never a host — see _PROBE_TARGETS.
+    """
+    if target not in _PROBE_TARGETS:
+        raise HTTPException(status_code=400,
+                            detail=f"unknown target; choose one of {sorted(_PROBE_TARGETS)}")
+    host, port = _PROBE_TARGETS[target]
+    started = time.perf_counter()
+    result = await _probe_stages(host, port)
+    result["total_ms"] = round((time.perf_counter() - started) * 1000, 1)
+    result["target"] = target
+    # a fresh manual test should update the cached tile too
+    _reach_cache.update({"at": time.time(),
+                         "value": {"divar": {"up": result["ok"],
+                                             "latency_ms": result.get("rtt_ms")
+                                                           or result["total_ms"]}}})
+    logger.info(f"[probe] {target}: {'ok' if result['ok'] else 'FAILED'} "
+                f"in {result['total_ms']}ms")
+    return result
 
 
 @router.get("/live")
