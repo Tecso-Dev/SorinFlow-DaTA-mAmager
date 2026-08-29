@@ -172,6 +172,10 @@
                 <span class="nav-icon"><i class="bi bi-inbox"></i></span>
                 درخواست‌های مشتریان
             </a>
+            <a class="nav-item-link" onclick="showSection('monitoring')" id="nav-link-monitoring">
+                <span class="nav-icon"><i class="bi bi-activity"></i></span>
+                پایش سامانه
+            </a>
             <a class="nav-item-link d-none" onclick="showSection('users')" id="nav-users">
                 <span class="nav-icon"><i class="bi bi-person-gear"></i></span>
                 کاربران
@@ -1641,6 +1645,106 @@
             </div>
 
             <!-- ═══ USERS ═════════════════════════ -->
+            <div id="section-monitoring" class="section-content" style="display:none;">
+                <!-- Health tiles. Values arrive from /api/monitoring/overview and are
+                     written with textContent, never innerHTML — everything here comes
+                     from the server or the logs. -->
+                <!-- Same stat-card pattern as the dashboard's KPI row, so this screen reads
+                     as part of the panel rather than a bolted-on admin page. -->
+                <div class="row g-3 mb-4" id="mon-tiles">
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-purple">
+                            <div class="stat-icon"><i class="bi bi-database-check"></i></div>
+                            <div class="stat-value" id="mon-pg-state">—</div>
+                            <div class="stat-label">پایگاه داده <span dir="ltr" id="mon-pg-ms"></span></div>
+                            <i class="bi bi-database-check stat-bg-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-cyan">
+                            <div class="stat-icon"><i class="bi bi-lightning-charge"></i></div>
+                            <div class="stat-value" id="mon-redis-state">—</div>
+                            <div class="stat-label">Redis <span dir="ltr" id="mon-redis-ms"></span></div>
+                            <i class="bi bi-lightning-charge stat-bg-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-green">
+                            <div class="stat-icon"><i class="bi bi-hdd"></i></div>
+                            <div class="stat-value" id="mon-disk">—</div>
+                            <div class="stat-label">فضای اشغال‌شدهٔ دیسک</div>
+                            <div class="progress mt-2" style="height:4px;background:rgba(255,255,255,.08)">
+                                <div class="progress-bar" id="mon-disk-bar" style="width:0%"></div>
+                            </div>
+                            <i class="bi bi-hdd stat-bg-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-orange">
+                            <div class="stat-icon"><i class="bi bi-clock-history"></i></div>
+                            <div class="stat-value" id="mon-uptime">—</div>
+                            <div class="stat-label">مدت کارکرد <span id="mon-mem"></span></div>
+                            <i class="bi bi-clock-history stat-bg-icon"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-lg-7">
+                        <div class="card h-100">
+                            <div class="card-header d-flex align-items-center gap-2">
+                                <i class="bi bi-robot"></i> وضعیت تسک‌های اسکرپر
+                                <span class="badge bg-danger d-none ms-auto" id="mon-stale"></span>
+                            </div>
+                            <div class="card-body">
+                                <div id="mon-jobs" class="d-flex flex-wrap gap-2"></div>
+                                <div class="small text-muted mt-2" id="mon-lastjob"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-5">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="bi bi-cloud"></i> Google Cloud</div>
+                            <div class="card-body">
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <span class="badge" id="mon-gcp-state">—</span>
+                                    <span class="small text-muted" id="mon-gcp-note"></span>
+                                </div>
+                                <div class="small text-muted" id="mon-gcp-detail"></div>
+                                <button class="btn btn-sm btn-outline-secondary mt-2 d-none"
+                                        id="mon-gcp-test" onclick="testGcp()">
+                                    <i class="bi bi-plug"></i> تست اتصال
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-journal-text"></i> لاگ سامانه
+                        <select id="mon-log-level" class="form-select form-select-sm ms-auto"
+                                style="width:auto" onchange="loadMonitoringLogs()">
+                            <option value="">همه سطوح</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="WARNING">WARNING</option>
+                            <option value="INFO">INFO</option>
+                        </select>
+                        <input type="text" id="mon-log-grep" class="form-control form-control-sm"
+                               style="width:180px" placeholder="جستجو در متن…"
+                               onkeydown="if(event.key==='Enter')loadMonitoringLogs()">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadMonitoringLogs()">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <pre id="mon-logs" dir="ltr" style="margin:0;padding:1rem;max-height:420px;
+                             overflow:auto;font-size:.74rem;line-height:1.7;white-space:pre-wrap;
+                             word-break:break-word">در حال بارگذاری…</pre>
+                    </div>
+                </div>
+            </div>
+
             <div id="section-portal" class="section-content" style="display:none;">
                 <div class="card mb-3">
                     <div class="card-header d-flex align-items-center gap-2 flex-wrap">

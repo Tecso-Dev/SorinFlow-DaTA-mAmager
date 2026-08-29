@@ -455,6 +455,7 @@ const NAV_PERMISSION = {
     'nav-link-auth':       'divar_auth',
     'nav-link-proxies':    'proxies',
     'nav-link-portal':     'portal',
+    'nav-link-monitoring': 'monitoring',
 };
 // Sections that are not permission-gated but role-gated.
 const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'] };
@@ -462,6 +463,7 @@ const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'] };
 const SECTION_PERMISSION = {
     dashboard: 'stats', properties: 'properties', scraper: 'scraper',
     crm: 'crm', auth: 'divar_auth', proxies: 'proxies', portal: 'portal',
+    monitoring: 'monitoring',
 };
 
 function _perms() { return (_currentUser && _currentUser.permissions) || []; }
@@ -559,6 +561,7 @@ const SECTION_META = {
     auth:       { title: 'احراز هویت دیوار',     subtitle: 'مدیریت نشست و کوکی حساب دیوار' },
     proxies:    { title: 'مدیریت پراکسی‌ها',     subtitle: 'افزودن، تست و مدیریت پراکسی‌ها' },
     portal:     { title: 'درخواست‌های مشتریان',  subtitle: 'ملک‌هایی که بازدیدکنندگان سایت دنبالش هستند' },
+    monitoring: { title: 'پایش سامانه',          subtitle: 'سلامت سرویس‌ها، منابع و لاگ زندهٔ سامانه' },
     users:      { title: 'مدیریت کاربران',       subtitle: 'حساب‌ها، دسترسی‌ها و درخواست‌های ارتقا' },
 };
 
@@ -643,6 +646,7 @@ function showSection(sectionName) {
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
         case 'portal':     loadPortalRequests(); break;
+        case 'monitoring': loadMonitoring(); break;
         case 'users':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
                                loadUsers(); loadMaintenance(); initPermsUI(); loadTickets();
                            } break;
@@ -7329,4 +7333,166 @@ async function updatePortalRequest(id, status) {
         });
         showToast('انجام شد', 'وضعیت درخواست بروزرسانی شد', 'success');
     } catch (e) { showToast('خطا', e.message, 'danger'); await loadPortalRequests(); }
+}
+
+
+// ══════════ پایش سامانه ══════════════════════════════════════════════════
+// Reads /api/monitoring/overview, /api/gcp/status and /api/stats/logs. Every
+// value here comes from the server or from a log line, so it is written with
+// textContent or through esc() — a log line is the least trustworthy string in
+// the product, and this screen is only ever opened by an admin.
+
+let _monTimer = null;
+
+function _fmtBytes(n) {
+    if (!n && n !== 0) return '—';
+    const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return `${formatNumber(Math.round(n * 10) / 10)} ${u[i]}`;
+}
+
+function _fmtUptime(sec) {
+    if (!sec && sec !== 0) return '—';
+    const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600),
+          m = Math.floor(sec % 3600 / 60);
+    if (d) return `${formatNumber(d)} روز و ${formatNumber(h)} ساعت`;
+    if (h) return `${formatNumber(h)} ساعت و ${formatNumber(m)} دقیقه`;
+    return `${formatNumber(m)} دقیقه`;
+}
+
+function _setTile(id, text, cls) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;                       // textContent: no markup path
+    if (cls) el.className = cls;
+}
+
+const JOB_STATUS_FA = {
+    completed: 'تکمیل‌شده', running: 'در حال اجرا', failed: 'ناموفق',
+    pending: 'در صف', paused: 'متوقف', cancelled: 'لغو شده',
+};
+
+async function loadMonitoring() {
+    try {
+        const d = await apiCall('/monitoring/overview');
+
+        const pg = d.services?.postgres || {}, rd = d.services?.redis || {};
+        // keep the stat-value class the panel styles; only tint the text
+        _setTile('mon-pg-state', pg.up ? 'سالم' : 'قطع',
+                 'stat-value ' + (pg.up ? '' : 'text-danger'));
+        _setTile('mon-pg-ms', pg.up ? `— ${pg.latency_ms} ms` : (pg.error || ''));
+        _setTile('mon-redis-state', rd.up ? 'سالم' : 'قطع',
+                 'stat-value ' + (rd.up ? '' : 'text-danger'));
+        _setTile('mon-redis-ms', rd.up ? `— ${rd.latency_ms} ms` : (rd.error || ''));
+
+        const st = d.resources?.storage || {};
+        _setTile('mon-disk', st.used_percent != null
+            ? `${formatNumber(st.used_percent)}٪` : '—', 'stat-value');
+        const bar = document.getElementById('mon-disk-bar');
+        if (bar) {
+            bar.style.width = (st.used_percent || 0) + '%';
+            // amber past 75, red past 90 — the volume filling stops the scraper
+            // saving anything, and it arrives without warning
+            bar.className = 'progress-bar ' + (st.used_percent > 90 ? 'bg-danger'
+                : st.used_percent > 75 ? 'bg-warning' : 'bg-success');
+        }
+        _setTile('mon-uptime', _fmtUptime(d.uptime_seconds), 'stat-value');
+        const mem = d.resources?.memory_used_bytes;
+        _setTile('mon-mem', mem ? `— حافظه ${_fmtBytes(mem)}` : '');
+
+        // scraper jobs
+        const jobsBox = document.getElementById('mon-jobs');
+        const jobs = d.scraper?.jobs_by_status || {};
+        jobsBox.innerHTML = Object.keys(jobs).length
+            ? Object.entries(jobs).map(([k, v]) =>
+                `<span class="badge bg-secondary-subtle text-body-secondary">
+                   ${esc(JOB_STATUS_FA[k] || k)}: ${esc(formatNumber(v))}</span>`).join('')
+            : '<span class="text-muted small">تسکی ثبت نشده است</span>';
+        const stale = document.getElementById('mon-stale');
+        if (d.scraper?.stale_running > 0) {
+            stale.textContent = `${formatNumber(d.scraper.stale_running)} تسک بیش از ۶ ساعت در حال اجرا`;
+            stale.classList.remove('d-none');
+        } else { stale.classList.add('d-none'); }
+        _setTile('mon-lastjob', d.scraper?.last_completed_at
+            ? 'آخرین تسک موفق: ' + new Date(d.scraper.last_completed_at).toLocaleString('fa-IR')
+            : 'هنوز تسک موفقی ثبت نشده');
+
+        await Promise.all([loadGcpStatus(), loadMonitoringLogs()]);
+    } catch (e) {
+        showToast('خطا', 'خواندن وضعیت سامانه ناموفق بود', 'danger');
+    }
+
+    // Refresh only while this screen is open. An interval that keeps polling
+    // after you navigate away is load on a single-replica box for nothing.
+    clearInterval(_monTimer);
+    _monTimer = setInterval(() => {
+        const sec = document.getElementById('section-monitoring');
+        if (sec && sec.style.display !== 'none') loadMonitoring();
+        else clearInterval(_monTimer);
+    }, 30000);
+}
+
+const GCP_STATE_FA = {
+    disabled:     ['خاموش', 'bg-secondary'],
+    unconfigured: ['تنظیم نشده', 'bg-warning text-dark'],
+    unreachable:  ['در دسترس نیست', 'bg-danger'],
+    connected:    ['متصل', 'bg-success'],
+    starting:     ['در حال شروع', 'bg-info text-dark'],
+};
+
+async function loadGcpStatus() {
+    try {
+        const g = await apiCall('/gcp/status');
+        const [label, cls] = GCP_STATE_FA[g.state] || [g.state, 'bg-secondary'];
+        const badge = document.getElementById('mon-gcp-state');
+        badge.textContent = label;
+        badge.className = 'badge ' + cls;
+        _setTile('mon-gcp-note', g.project_id ? `پروژه: ${g.project_id}` : 'پروژه‌ای تنظیم نشده');
+        const detail = [];
+        if (g.buffer_size != null) detail.push(`صف: ${formatNumber(g.buffer_size)}`);
+        if (g.exported_logs) detail.push(`ارسال‌شده: ${formatNumber(g.exported_logs)}`);
+        if (g.dropped) detail.push(`رهاشده: ${formatNumber(g.dropped)}`);
+        const box = document.getElementById('mon-gcp-detail');
+        box.innerHTML = detail.map(esc).join(' • ')
+            + (g.last_error ? `<div class="text-danger mt-1">${esc(g.last_error)}</div>` : '');
+        document.getElementById('mon-gcp-test')
+            .classList.toggle('d-none', g.state === 'disabled');
+    } catch (_) { /* GCP is optional; its absence is not a page error */ }
+}
+
+async function testGcp() {
+    try {
+        const r = await apiCall('/gcp/test', { method: 'POST' });
+        showToast(r.ok ? 'موفق' : 'ناموفق', r.detail || '', r.ok ? 'success' : 'warning');
+        loadGcpStatus();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function loadMonitoringLogs() {
+    const box = document.getElementById('mon-logs');
+    if (!box) return;
+    const level = document.getElementById('mon-log-level')?.value || '';
+    const grep = document.getElementById('mon-log-grep')?.value.trim() || '';
+    try {
+        const qs = new URLSearchParams({ lines: '200' });
+        if (level) qs.set('level', level);
+        if (grep) qs.set('grep', grep);
+        const d = await apiCall('/stats/logs?' + qs.toString());
+        if (!d.lines?.length) {
+            box.textContent = d.note || 'چیزی مطابق این فیلتر پیدا نشد.';
+            return;
+        }
+        // Colour by level, and esc() every line — a log line is the least
+        // trustworthy string in the product.
+        box.innerHTML = d.lines.map(l => {
+            const cls = /\| ERROR/.test(l) ? 'text-danger'
+                      : /\| WARNING/.test(l) ? 'text-warning'
+                      : /\| SUCCESS/.test(l) ? 'text-success' : '';
+            return `<span class="${cls}">${esc(l)}</span>`;
+        }).join('\n');
+        box.scrollTop = box.scrollHeight;
+    } catch (e) {
+        box.textContent = 'خواندن لاگ ناموفق بود: ' + e.message;
+    }
 }

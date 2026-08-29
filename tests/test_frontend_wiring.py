@@ -128,3 +128,40 @@ def test_note_content_is_escaped():
     timeline that everyone opens."""
     js = _app_js()
     assert "${n.content}" not in js, "note body is interpolated without esc()"
+
+
+# ── the monitoring section must be registered in all five places ────────────
+
+def test_monitoring_section_is_fully_registered():
+    """A section needs an entry in five places that must agree. Miss one and it
+    either never appears, appears for the wrong role, or shows an empty div —
+    which is how the monitoring backend sat finished but invisible."""
+    js = _app_js()
+    with open(INDEX, encoding="utf-8") as fh:
+        html = fh.read()
+
+    assert 'id="nav-link-monitoring"' in html, "no nav entry"
+    assert 'id="section-monitoring"' in html, "no section container"
+    assert "'nav-link-monitoring': 'monitoring'" in js, "not in NAV_PERMISSION"
+    assert "monitoring: 'monitoring'" in js, "not in SECTION_PERMISSION"
+    assert "monitoring: { title:" in js, "not in SECTION_META"
+    assert "case 'monitoring':" in js, "showSection has no case, so it renders empty"
+
+
+def test_monitoring_uses_the_panels_own_card_styles():
+    """It should look like the rest of the dashboard, not like a bolted-on
+    admin page — same stat-card pattern as the KPI row."""
+    with open(INDEX, encoding="utf-8") as fh:
+        html = fh.read()
+    section = html[html.index('id="section-monitoring"'):html.index('id="section-portal"')]
+    for cls in ("stat-card", "stat-icon", "stat-value", "stat-label", "stat-bg-icon"):
+        assert cls in section, f"monitoring tiles do not use {cls}"
+
+
+def test_log_lines_are_escaped_before_rendering():
+    """A log line is the least trustworthy string in the product, and this view
+    renders it straight into the page."""
+    js = _app_js()
+    fn = js[js.index("async function loadMonitoringLogs"):]
+    fn = fn[:fn.index("\n}")]
+    assert "esc(l)" in fn, "log lines reach innerHTML without esc()"

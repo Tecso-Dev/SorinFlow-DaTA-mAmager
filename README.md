@@ -152,7 +152,29 @@ The source uses Python 3.10+ syntax. No authoritative Python version file is che
 
 ## Quick start
 
-### Requirements
+### Local development — the short way
+
+No Docker needed. `./local/start.sh` brings up PostgreSQL, Redis and the API,
+creates the database on first run, and prints the logins:
+
+```bash
+./local/start.sh          # http://127.0.0.1:8010
+./local/stop.sh           # stops all three, keeps your data
+```
+
+It is idempotent and safe to re-run. Local values live in `local/local.env`,
+which git ignores and which never shares credentials with production — real
+environment variables take precedence over `.env`, so a local run cannot pick
+up a production value by accident.
+
+Set `AUTH_SMS_PROVIDER=console` to have portal verification codes written to the
+log instead of sent by SMS (refused when `ENVIRONMENT=production`):
+
+```bash
+grep sms:console local/server.log | tail -1
+```
+
+### Requirements for the Docker path
 
 - Git
 - Docker Engine or Docker Desktop
@@ -241,22 +263,49 @@ Change it immediately from the user-management screen. Bootstrap credentials are
 
 ## Authentication model
 
-SorinFlow has two separate authentication systems:
+Three separate authentication paths:
 
-| System | Purpose | Main endpoints |
+| Path | Who | Main endpoints |
 |---|---|---|
-| SorinFlow dashboard auth | Protects the dashboard and API with JWT; optionally requires TOTP | `/api/users/token`, `/api/users/token/verify-totp`, `/api/users/me` |
-| Divar session auth | Gives the scraper an authenticated Divar browser session for contact extraction | `/api/auth/login`, `/api/auth/verify`, `/api/auth/status`, `/api/auth/cookies` |
+| Dashboard | staff — `root`, `super_admin`, `admin` | `/api/users/token`, `/api/users/token/verify-totp`, `/api/users/me` |
+| Customer portal | `visitor`, public sign-up by SMS | `/api/public/auth/register`, `/verify`, `/login` |
+| Divar session | the scraper's own browser session for contact extraction | `/api/auth/login`, `/api/auth/verify`, `/api/auth/cookies` |
 
-Dashboard JWTs expire after 24 hours by default. Public self-registration is disabled; a super admin creates accounts. The frontend presents these roles:
+Dashboard JWTs last 24 hours and carry a `typ` claim. Only a finished access
+token authenticates: the half-token issued between password and TOTP is
+refused, so the second factor cannot be skipped.
 
-- `super_admin`: all dashboard sections, user administration, and protected administrative actions.
-- `admin`: operational sections without user administration.
-- `user`: dashboard and shared property inventory.
+### Roles
 
-Server-side role checks are narrower than the dashboard navigation: most scraper, proxy, property, and CRM routes require any valid user, while user administration, manual backup, and selected exports require a super admin.
+| Role | What it is |
+|---|---|
+| `root` | The developer. Everything, always. Seeded from `ROOT_PASSWORD`, never creatable from the panel, hidden from the super admin's user list, and protected from being edited, deleted or password-reset by anyone but another root. |
+| `super_admin` | The agency owner. Runs the business — staff, permissions, upgrade tickets, visitor requests. Cannot create or become a root. |
+| `admin` | An employee. Reaches only the areas ticked in `users.permissions`. |
+| `visitor` | A public sign-up. No dashboard at all — the portal only. |
 
-`API_KEY` is supplemental middleware, not a replacement for JWT. Protected route groups still require a Bearer token. The current `/api/config` endpoint returns the configured API key publicly, so do not treat that value as an independent secret boundary.
+`root` and `super_admin` bypass permission checks; a permission list is only
+ever consulted for an `admin`. Permission keys are defined in
+[`app/auth/permissions.py`](app/auth/permissions.py) and gate the routers in
+[`app/api/routes/__init__.py`](app/api/routes/__init__.py): `properties`,
+`scraper`, `crm`, `filing`, `divar_auth`, `proxies`, `stats`, `portal`,
+`monitoring`.
+
+Enforcement is server-side at the router, not just hidden in the UI — the panel
+builds its navigation from the permissions `/api/users/me` reports, so the menu
+and the API cannot disagree.
+
+### Public sign-up
+
+Off by default (`PUBLIC_AUTH_ENABLED=false`): `/portal` redirects to the
+dashboard and every `/api/public/auth/*` endpoint answers 404. When enabled, a
+visitor registers with a phone number, verifies by SMS, and can describe the
+property they are looking for and request an upgrade to `admin`, which a super
+admin approves with a chosen set of permissions.
+
+`API_KEY` is supplemental middleware, not a replacement for JWT. It is a
+separate value from `METRICS_TOKEN`, which guards `/metrics` alone so a
+monitoring scraper never needs the key that opens the rest of the API.
 
 ## API overview
 
@@ -395,6 +444,57 @@ leak is usually a process rather than an accident — `renew-ssl.sh` used to cop
 the TLS private key into `nginx/ssl/` on every renewal, so it reappeared no
 matter how often the file was deleted.
 
+## Monitoring and observability
+
+Everything is computed on the box. Nothing leaves the server, which is the only
+design that works from Iran and also the cheapest.
+
+| Surface | What it gives you |
+|---|---|
+| **پایش سامانه** (panel) | Postgres and Redis latency, disk usage, uptime, memory, scraper jobs by status, stale-job detection, live log viewer with level and text filters, Google Cloud status |
+| `GET /metrics` | Prometheus text — HTTP rate and latency by route group, scraper counters (contact reveals, rotations by reason, OTP challenges, image outcomes), process CPU/memory, disk. Guarded by `METRICS_TOKEN`; empty disables it and the path 404s |
+| `GET /api/monitoring/overview` | The same health data as JSON, for the panel |
+| `GET /api/stats/logs` | Windowed reverse scan over the rotating log, filterable by level and text |
+
+Logs are written through a redaction filter on **both** sinks
+([`app/log_redaction.py`](app/log_redaction.py)) — Iranian mobile numbers in
+ASCII and Persian digits, URL credentials, JWTs and bearer tokens are masked
+before anything reaches stdout or disk. Container stdout is persisted to the
+node by containerd, so a log line is at rest on the server.
+
+### Google Cloud
+
+[`app/services/gcp/`](app/services/gcp/) exports to Cloud Logging (structured
+`jsonPayload`), Cloud Monitoring (custom time series), and optionally Pub/Sub,
+and reads platform metrics for Compute Engine, Cloud Run, Cloud Functions and
+Cloud SQL. REST over `httpx` with a service-account JWT rather than the SDKs,
+which would add over a hundred megabytes to an image that already carries
+Chromium.
+
+**Ships disabled** (`GCP_ENABLED=false`). Google's endpoints are not reachable
+from an Iranian IP, so it is useful behind a VPN, after a migration, or pointed
+at a client's project. It fails soft by design: a bounded buffer that drops
+oldest rather than growing, backoff on repeated failure, and
+`/api/gcp/status` distinguishing *disabled* from *unconfigured* from
+*unreachable*. No request path or scrape ever waits on Google.
+
+## Public pages
+
+`/`, the maintenance page, 404 and 500 share one design system
+([`app/error_pages.py`](app/error_pages.py)) — the landing page's palette,
+gradient and infinity mark. Self-contained: no CDN stylesheet, no webfont
+request, no external script, because two of them exist precisely when something
+is already broken.
+
+Error responses negotiate: anything under `/api` returns JSON, everything else
+follows `Accept`, so a browser gets a page and a script still gets something
+parseable. The 500 page carries a reference id that is also in the log.
+
+Maintenance mode is stored in the database, so it survives deploys and pod
+restarts. It supports a countdown, emergency contact details, and a bypass link
+for whoever is allowed through — all editable from the panel while the site is
+closed.
+
 ## Repository map
 
 | Path | Purpose |
@@ -450,6 +550,22 @@ matter how often the file was deleted.
 - Recent history follows scoped Conventional Commit-style subjects such as `feat(properties):`, `fix(crm):`, and `perf(scraper):`.
 
 ## Development
+
+### Tests
+
+```bash
+DATABASE_URL=postgresql+asyncpg://user@host/db pytest tests/ -q
+```
+
+The suite needs PostgreSQL: `scraping_jobs.job_id` is a `postgresql.UUID`
+column the pinned SQLAlchemy cannot render on SQLite, so schema-building tests
+skip with a message rather than failing cryptically. Add `PG_TEST_URL` to also
+run the migration DDL tests — the half SQLite can never cover, because
+`ALTER ... IF NOT EXISTS` is a no-op there.
+
+CI runs both against real Postgres and Redis services on every push **and every
+pull request**, and nothing reaches the registry unless they pass.
+
 
 The frontend has no package manager or build step. `frontend/index.html`, `frontend/css/style.css`, and `frontend/js/app.js` are served directly. The dashboard loads several libraries from CDNs, including Bootstrap RTL, Chart.js, QRCode.js, jQuery, and Persian date-picker assets.
 
