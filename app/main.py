@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 import hmac
 import time
+import uuid
 from html import escape as html_escape
 from pathlib import Path
 from loguru import logger
@@ -170,247 +171,15 @@ app.add_middleware(
 # ─── حالت تعمیر ──────────────────────────────────────────────────────────────
 # Starlette runs the last-registered middleware first, so this one sits closest
 # to the routes — which is all it needs: it answers before any handler does.
-MAINTENANCE_PAGE = r"""<!doctype html><html lang="fa" dir="rtl"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex">
-<title>سورین‌فلو — در حال بروزرسانی</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<!--
-  One file, no external request of any kind: no CDN script, no webfont, no
-  Lottie player. This is the page that shows when something is already wrong,
-  so every dependency is one more thing that can be down at the moment it is
-  needed. The blobs and the illustration are inline SVG; they weigh a couple of
-  kilobytes and cannot fail to load.
--->
-<style>
-:root{
-  --ink:#2b2350; --muted:#7c7596; --card:#fff; --line:#efeaf7;
-  --p1:#7c3aed; --p2:#c026d3; --p3:#fb7185; --p4:#fb923c;
-}
-*{box-sizing:border-box}
-html,body{height:100%}
-body{margin:0;display:flex;align-items:center;justify-content:center;padding:2vmin;
- font-family:Vazirmatn,Tahoma,system-ui,-apple-system,sans-serif;color:var(--ink);
- line-height:1.9;overflow:hidden;
- background:linear-gradient(135deg,#2b1055 0%,#7c3aed 38%,#c026d3 68%,#fb7185 100%)}
-
-/* the soft organic shapes drifting behind the card */
-.blobs{position:fixed;inset:0;z-index:0;filter:blur(0.5px)}
-.blob{position:absolute;border-radius:46% 54% 58% 42%/47% 43% 57% 53%;opacity:.55;
- animation:drift 22s ease-in-out infinite}
-.b1{width:46vmax;height:46vmax;left:-16vmax;top:-18vmax;background:#8b5cf6}
-.b2{width:34vmax;height:34vmax;right:-12vmax;top:-8vmax;background:#fb923c;opacity:.45;animation-duration:27s;animation-direction:reverse}
-.b3{width:40vmax;height:40vmax;right:-14vmax;bottom:-18vmax;background:#f472b6;animation-duration:31s}
-.b4{width:28vmax;height:28vmax;left:-8vmax;bottom:-12vmax;background:#a855f7;opacity:.5;animation-duration:25s;animation-direction:reverse}
-@keyframes drift{
-  0%,100%{transform:translate(0,0) rotate(0deg) scale(1)}
-  33%{transform:translate(2.5vmax,-2vmax) rotate(12deg) scale(1.05)}
-  66%{transform:translate(-2vmax,2.5vmax) rotate(-9deg) scale(.97)}
-}
-
-.card{position:relative;z-index:1;width:100%;max-width:620px;background:var(--card);
- border-radius:26px;padding:2.4rem 1.9rem 1.8rem;text-align:center;
- box-shadow:0 30px 90px rgba(43,16,85,.42);max-height:96vh;overflow:auto}
-h1{margin:.2rem 0 .5rem;font-size:1.55rem;font-weight:800;letter-spacing:-.01em}
-p{margin:.3rem 0;color:var(--muted);font-size:.93rem}
-
-/* the illustration sits in its own blob, as in the reference */
-.scene{width:min(320px,78%);margin:0 auto .4rem;display:block}
-.tick{transform-origin:214px 92px;animation:tick 3s steps(8) infinite}
-.beam{animation:beam 2.8s ease-in-out infinite}
-.bob{animation:bob 4.5s ease-in-out infinite}
-@keyframes tick{to{transform:rotate(360deg)}}
-@keyframes beam{0%,100%{opacity:.25}50%{opacity:.9}}
-@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
-
-.count{display:flex;gap:.55rem;justify-content:center;margin:1.35rem 0 .3rem;direction:ltr}
-.unit{min-width:70px;border-radius:16px;padding:.6rem .3rem;color:#fff;
- background:linear-gradient(160deg,var(--p1),var(--p2));
- box-shadow:0 8px 22px rgba(124,58,237,.32)}
-.unit:nth-child(3){background:linear-gradient(160deg,var(--p2),var(--p3))}
-.unit:nth-child(4){background:linear-gradient(160deg,var(--p3),var(--p4));
- box-shadow:0 8px 22px rgba(251,146,60,.32)}
-.unit b{display:block;font-size:1.6rem;font-weight:800;line-height:1.2;
- font-variant-numeric:tabular-nums}
-.unit span{display:block;font-size:.66rem;opacity:.9}
-.bar{height:7px;border-radius:99px;background:var(--line);overflow:hidden;margin:1rem 0 .25rem}
-.bar>i{display:block;height:100%;width:0;border-radius:99px;transition:width .6s ease;
- background:linear-gradient(90deg,var(--p1),var(--p2),var(--p3),var(--p4))}
-
-.contact{margin-top:1.5rem;padding-top:1.15rem;border-top:1px solid var(--line)}
-.contact .lead{font-size:.79rem;color:var(--muted);margin-bottom:.65rem}
-.links{display:flex;gap:.55rem;justify-content:center;flex-wrap:wrap}
-.links a{display:inline-flex;align-items:center;gap:.45rem;padding:.55rem 1.05rem;
- border-radius:13px;text-decoration:none;font-size:.86rem;color:#fff;
- background:linear-gradient(135deg,var(--p1),var(--p2));
- box-shadow:0 8px 20px rgba(124,58,237,.28);transition:transform .15s,box-shadow .15s}
-.links a:last-child{background:linear-gradient(135deg,var(--p3),var(--p4));
- box-shadow:0 8px 20px rgba(251,113,133,.28)}
-.links a:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(124,58,237,.36)}
-.links a b{direction:ltr;font-weight:700}
-.foot{margin-top:1.4rem;font-size:.71rem;color:var(--muted)}
-
-@media (prefers-reduced-motion: reduce){
-  .blob,.tick,.beam,.bob{animation:none}
-  .bar>i{transition:none}
-}
-@media (max-width:420px){
-  .card{padding:1.7rem 1.1rem 1.4rem}
-  .unit{min-width:60px}.unit b{font-size:1.3rem}
-}
-</style></head><body>
-<div class="blobs" aria-hidden="true">
-  <div class="blob b1"></div><div class="blob b2"></div>
-  <div class="blob b3"></div><div class="blob b4"></div>
-</div>
-
-<div class="card">
-  <svg class="scene" viewBox="0 0 300 210" fill="none" aria-hidden="true">
-    <defs>
-      <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#7c3aed"/><stop offset=".55" stop-color="#c026d3"/>
-        <stop offset="1" stop-color="#fb7185"/>
-      </linearGradient>
-      <linearGradient id="scr" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#60a5fa"/>
-      </linearGradient>
-      <linearGradient id="warm" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#fb923c"/><stop offset="1" stop-color="#fb7185"/>
-      </linearGradient>
-      <clipPath id="blobClip">
-        <path d="M150 10c46 0 92 14 112 48s6 78-18 104-64 38-100 38-76-10-100-36S18 96 30 62 104 10 150 10Z"/>
-      </clipPath>
-    </defs>
-
-    <!-- the organic frame the scene sits inside -->
-    <path d="M150 10c46 0 92 14 112 48s6 78-18 104-64 38-100 38-76-10-100-36S18 96 30 62 104 10 150 10Z"
-          fill="url(#bg)" opacity=".14"/>
-    <g clip-path="url(#blobClip)">
-      <path d="M150 10c46 0 92 14 112 48s6 78-18 104-64 38-100 38-76-10-100-36S18 96 30 62 104 10 150 10Z"
-            fill="url(#bg)" opacity=".9"/>
-
-      <!-- desk -->
-      <rect x="52" y="150" width="196" height="8" rx="4" fill="#2b1055" opacity=".55"/>
-      <!-- monitor -->
-      <g class="bob">
-        <rect x="96" y="86" width="98" height="62" rx="7" fill="#2b1055" opacity=".5"/>
-        <rect x="101" y="91" width="88" height="52" rx="5" fill="url(#scr)"/>
-        <rect x="109" y="101" width="42" height="4" rx="2" fill="#fff" opacity=".85"/>
-        <rect x="109" y="111" width="62" height="4" rx="2" fill="#fff" opacity=".6"/>
-        <rect x="109" y="121" width="30" height="4" rx="2" fill="#fff" opacity=".45"/>
-        <rect x="132" y="148" width="26" height="4" rx="2" fill="#2b1055" opacity=".55"/>
-      </g>
-      <!-- server rack, gently lit -->
-      <rect x="206" y="66" width="52" height="84" rx="8" fill="#2b1055" opacity=".45"/>
-      <g class="beam">
-        <rect x="214" y="78" width="36" height="5" rx="2.5" fill="#4ade80"/>
-        <rect x="214" y="90" width="36" height="5" rx="2.5" fill="#fbbf24"/>
-        <rect x="214" y="102" width="36" height="5" rx="2.5" fill="#60a5fa"/>
-      </g>
-      <circle cx="232" cy="126" r="11" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="3"/>
-      <!-- a wrench-ish tool leaning on the desk -->
-      <g transform="rotate(-24 70 132)">
-        <rect x="62" y="104" width="9" height="44" rx="4.5" fill="url(#warm)"/>
-        <circle cx="66.5" cy="100" r="10" fill="none" stroke="url(#warm)" stroke-width="6"/>
-      </g>
-      <!-- clock face, hand sweeping -->
-      <circle cx="214" cy="92" r="0" fill="none"/>
-      <g class="tick"><rect x="212.5" y="76" width="3" height="17" rx="1.5" fill="#fff" opacity=".0"/></g>
-      <!-- plant, because every one of these has a plant -->
-      <path d="M72 150c0-12 5-20 12-24-2 9 0 17 4 24Z" fill="#4ade80" opacity=".8"/>
-      <rect x="66" y="150" width="26" height="10" rx="3" fill="url(#warm)"/>
-    </g>
-  </svg>
-
-  <h1>__MESSAGE__</h1>
-  <p>در حال بهبود سامانه هستیم و به‌زودی برمی‌گردیم.</p>
-
-  <div id="cd" style="display:none">
-    <div class="count">
-      <div class="unit"><b id="d">۰</b><span>روز</span></div>
-      <div class="unit"><b id="h">۰</b><span>ساعت</span></div>
-      <div class="unit"><b id="m">۰</b><span>دقیقه</span></div>
-      <div class="unit"><b id="s">۰</b><span>ثانیه</span></div>
-    </div>
-    <div class="bar"><i id="pb"></i></div>
-    <p id="eta" style="font-size:.77rem"></p>
-  </div>
-
-  <div class="contact" id="contact" style="display:none">
-    <div class="lead">در موارد فوری با ما تماس بگیرید</div>
-    <div class="links" id="links"></div>
-  </div>
-
-  <div class="foot">© <span id="yr">۱۴۰۴</span> املاک سورین — سورین‌فلو</div>
-</div>
-
-<script>
-const FA = n => String(n).padStart(2,'0').replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d]);
-try {
-  document.getElementById('yr').textContent =
-    new Intl.DateTimeFormat('fa-IR-u-ca-persian',{year:'numeric'}).format(new Date())
-      .replace(/[^۰-۹]/g,'');
-} catch (_) {}
-
-// Injected as JSON the script reads, never interpolated into markup: an
-// operator-typed phone number is untrusted like any other input.
-const CFG = __CONFIG__;
-
-if (CFG.phone || CFG.email) {
-  const box = document.getElementById('links');
-  const add = (href, label, value) => {
-    const a = document.createElement('a');
-    a.href = href;
-    const b = document.createElement('b');
-    b.textContent = value;                 // textContent: nothing can inject
-    a.append(document.createTextNode(label + ' '), b);
-    box.appendChild(a);
-  };
-  if (CFG.phone) add('tel:' + CFG.phone.replace(/[^\d+]/g,''), '☎', CFG.phone);
-  if (CFG.email) add('mailto:' + encodeURIComponent(CFG.email), '✉', CFG.email);
-  document.getElementById('contact').style.display = '';
-}
-
-if (CFG.seconds_left && CFG.seconds_left > 0) {
-  document.getElementById('cd').style.display = '';
-  const total = CFG.seconds_left, end = Date.now() + total * 1000;
-  const eta = document.getElementById('eta');
-  try {
-    eta.textContent = 'زمان تخمینی بازگشت: ' + new Intl.DateTimeFormat(
-      'fa-IR-u-ca-persian', {dateStyle:'full', timeStyle:'short'}).format(new Date(end));
-  } catch (_) {}
-
-  const tick = () => {
-    const left = Math.max(Math.floor((end - Date.now())/1000), 0);
-    document.getElementById('d').textContent = FA(Math.floor(left/86400));
-    document.getElementById('h').textContent = FA(Math.floor(left%86400/3600));
-    document.getElementById('m').textContent = FA(Math.floor(left%3600/60));
-    document.getElementById('s').textContent = FA(left%60);
-    document.getElementById('pb').style.width = (100 - (left/total)*100).toFixed(1) + '%';
-    if (left <= 0) {
-      clearInterval(timer);
-      // The deadline passing reopens nothing — only a person does. Say
-      // "finishing up" rather than counting into negatives, and reload
-      // periodically so a site coming back is noticed without a refresh.
-      eta.textContent = 'در حال نهایی‌سازی — به‌زودی باز می‌شویم';
-      setTimeout(() => location.reload(), 60000);
-    }
-  };
-  tick();
-  const timer = setInterval(tick, 1000);
-}
-</script>
-</body></html>"""
-
-
 def render_maintenance_page(state=None, message: str = None) -> str:
-    """Fill the closed-site template.
+    """Fill the closed-site page.
 
-    The contact details go in as a JSON blob the script reads, not as markup:
-    an operator-typed phone number or address is untrusted like anything else,
-    and json.dumps escaping is what keeps it from becoming part of the page.
+    Contact details go in as a JSON blob the script reads, not as markup: an
+    operator-typed phone number or address is untrusted like anything else, and
+    json.dumps escaping is what keeps it from becoming part of the page.
     """
     import json
+    from app import error_pages
     from app.services import maintenance as mt
 
     text = message or (state.message if state else mt.DEFAULT_MESSAGE)
@@ -419,12 +188,10 @@ def render_maintenance_page(state=None, message: str = None) -> str:
         "phone": (state.phone if state else None),
         "email": (state.email if state else None),
     }
-    # </script> inside a JSON string would end the block early; the escape keeps
-    # the payload inert wherever it lands.
+    # </script> inside a JSON string would end the block early; escaping the
+    # slash keeps the payload inert wherever it lands.
     blob = json.dumps(cfg, ensure_ascii=False).replace("</", "<\\/")
-    return (MAINTENANCE_PAGE
-            .replace("__MESSAGE__", html_escape(text))
-            .replace("__CONFIG__", blob))
+    return error_pages.render_maintenance(text, blob)
 
 
 async def _maintenance_allows(request: Request) -> bool:
@@ -989,21 +756,38 @@ async def favicon_ico():
 
 
 # Error handlers
+def _wants_html(request: Request) -> bool:
+    """Whether this caller should get a page rather than JSON.
+
+    An /api path always gets JSON — the dashboard and any script call those and
+    would break on HTML. Everything else follows the Accept header, so a browser
+    gets the page and curl still gets something parseable.
+    """
+    if request.url.path.startswith("/api"):
+        return False
+    return "text/html" in request.headers.get("accept", "")
+
+
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
-    return JSONResponse(
-        status_code=404,
-        content={"detail": "Resource not found"}
-    )
+    from app import error_pages
+    if _wants_html(request):
+        return HTMLResponse(error_pages.render_not_found(request.url.path),
+                            status_code=404)
+    return JSONResponse(status_code=404, content={"detail": "Resource not found"})
 
 
 @app.exception_handler(500)
 async def internal_error_handler(request: Request, exc):
-    logger.error(f"Internal error: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"}
-    )
+    from app import error_pages
+    # A short id, logged next to the traceback and shown on the page, so a
+    # report of "the site broke" can be matched to a specific line.
+    ref = uuid.uuid4().hex[:8]
+    logger.error(f"[{ref}] Internal error on {request.url.path}: {exc}")
+    if _wants_html(request):
+        return HTMLResponse(error_pages.render_server_error(ref), status_code=500)
+    return JSONResponse(status_code=500,
+                        content={"detail": "Internal server error", "ref": ref})
 
 
 # Mount static files for frontend

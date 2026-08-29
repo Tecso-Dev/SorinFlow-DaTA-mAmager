@@ -129,7 +129,6 @@ class TestMaintenancePage:
     @pytest.mark.parametrize("name", [
         "_maintenance_allows",       # decides who gets through
         "render_maintenance_page",   # builds the page
-        "MAINTENANCE_PAGE",          # the template itself
     ])
     def test_the_closed_site_path_is_intact(self, name):
         """Every piece the closed-site path needs.
@@ -179,13 +178,26 @@ class TestMaintenancePage:
         html = m.render_maintenance_page(State(enabled=True, message="x"))
         assert '"seconds_left": null' in html or '"seconds_left":null' in html
 
-    def test_the_page_makes_no_external_requests(self):
-        """It is shown when something is already wrong, so every dependency is
-        another thing that can be down exactly when it is needed."""
+    @pytest.mark.parametrize("render,arg", [
+        ("render_not_found", "/nope"),
+        ("render_server_error", "abc123"),
+    ])
+    def test_no_public_page_makes_an_external_request(self, render, arg):
+        """Two of these three exist because something is already broken, so a
+        dependency that must load before the page renders is a way for the error
+        page to fail too."""
+        import re
+        from app import error_pages
+        html = getattr(error_pages, render)(arg)
+        found = re.findall(r'(?:src|href)="(https?://[^"]+)"', html)
+        assert not found, f"{render} loads an external resource: {found}"
+
+    def test_the_maintenance_page_makes_no_external_request(self):
         import re
         import app.main as m
-        for url in re.findall(r'(?:src|href)="(https?://[^"]+)"', m.MAINTENANCE_PAGE):
-            raise AssertionError(f"closed-site page loads an external resource: {url}")
+        html = m.render_maintenance_page(message="x")
+        found = re.findall(r'(?:src|href)="(https?://[^"]+)"', html)
+        assert not found, f"closed-site page loads an external resource: {found}"
 
 
 class TestMaintenanceStateObject:
@@ -204,3 +216,62 @@ class TestMaintenanceStateObject:
     def test_a_malformed_deadline_is_ignored_rather_than_raising(self):
         from app.services.maintenance import State
         assert State(until="not-a-date").seconds_left is None
+
+
+class TestErrorPages:
+    """404 and 500 as pages, not raw JSON.
+
+    A visitor who mistyped a URL used to get {"detail":"Resource not found"} on
+    a white page. API callers still need JSON, so the handlers negotiate.
+    """
+
+    def test_a_browser_gets_html_for_404(self):
+        from fastapi.testclient import TestClient
+        import app.main as m
+        with TestClient(m.app, raise_server_exceptions=False) as c:
+            r = c.get("/definitely-not-a-page", headers={"Accept": "text/html"})
+        assert r.status_code == 404
+        assert "text/html" in r.headers["content-type"]
+        assert "۴۰۴" in r.text
+
+    def test_an_api_caller_still_gets_json_for_404(self):
+        """The dashboard and every script call /api — HTML there would break
+        them, whatever the Accept header says."""
+        from fastapi.testclient import TestClient
+        import app.main as m
+        with TestClient(m.app, raise_server_exceptions=False) as c:
+            r = c.get("/api/not-a-route", headers={"Accept": "text/html"})
+        assert r.status_code == 404
+        assert r.headers["content-type"].startswith("application/json")
+        assert r.json()["detail"]
+
+    def test_the_500_page_carries_a_reference(self):
+        """The same id is in the server log, which turns "the site broke" into
+        a line somebody can find."""
+        from app import error_pages
+        html = error_pages.render_server_error("deadbeef")
+        assert "deadbeef" in html and "۵۰۰" in html
+
+    def test_the_500_reference_is_escaped(self):
+        from app import error_pages
+        html = error_pages.render_server_error("<script>alert(1)</script>")
+        assert "<script>alert(1)</script>" not in html
+
+    @pytest.mark.parametrize("render,arg", [
+        ("render_not_found", "/x"), ("render_server_error", "ref1"),
+    ])
+    def test_error_pages_use_the_landing_palette(self, render, arg):
+        """Same tokens as frontend/landing.html, so the three read as one
+        product rather than three separate accidents."""
+        from app import error_pages
+        html = getattr(error_pages, render)(arg)
+        for token in ("#030305", "--grad", "Vazirmatn", "backdrop-filter"):
+            assert token in html, f"{render} is missing the landing token {token}"
+
+    def test_all_three_pages_are_rtl_and_persian(self):
+        from app import error_pages
+        import app.main as m
+        for html in (error_pages.render_not_found("/x"),
+                     error_pages.render_server_error("r"),
+                     m.render_maintenance_page(message="تست")):
+            assert 'dir="rtl"' in html and 'lang="fa"' in html
