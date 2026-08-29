@@ -673,7 +673,13 @@ async def export_dpa_excel(
 
 def _log_activity(db: AsyncSession, entity_type: str, entity_id: int,
                   action: str, detail: str, actor: Optional[str] = None) -> None:
-    """Append a timeline entry. Fire-and-forget: never breaks the caller."""
+    """Append a timeline entry. Fire-and-forget: never breaks the caller.
+
+    Deliberately synchronous — it only stages a row, and get_db commits it when
+    the request returns. Do not `await` it: three call sites did, and since
+    `await None` raises TypeError the caller 500'd on work that had already been
+    committed. test_crm_calendar.py asserts this stays sync.
+    """
     try:
         db.add(ActivityLog(entity_type=entity_type, entity_id=entity_id,
                            action=action, detail=detail[:500], actor=actor))
@@ -2042,12 +2048,16 @@ async def create_event(
     await db.commit()
     await db.refresh(event)
 
+    # Not awaited: _log_activity is a plain def. `await` on its None return
+    # raised TypeError *after* the event had already been committed above, so
+    # the caller saw a 500 for a visit that had in fact been saved — and then
+    # booked it again. The other four call sites in this file get this right.
     if event.lead_id:
-        await _log_activity(db, "lead", event.lead_id, "event",
-                            f"{event.type_label} ثبت شد: {event.title}", event.created_by)
+        _log_activity(db, "lead", event.lead_id, "event",
+                      f"{event.type_label} ثبت شد: {event.title}", event.created_by)
     if event.customer_id:
-        await _log_activity(db, "customer", event.customer_id, "event",
-                            f"{event.type_label} ثبت شد: {event.title}", event.created_by)
+        _log_activity(db, "customer", event.customer_id, "event",
+                      f"{event.type_label} ثبت شد: {event.title}", event.created_by)
     await _attach_event_serials(db, [event])
     return event.to_dict()
 
@@ -2085,8 +2095,8 @@ async def update_event(
     if event.status != old_status and event.lead_id:
         status_fa = {"scheduled": "برنامه‌ریزی‌شده", "done": "انجام شد", "canceled": "لغو شد"}
         actor = getattr(current_user, "full_name", None) or getattr(current_user, "username", None)
-        await _log_activity(db, "lead", event.lead_id, "event",
-                            f"{event.type_label} «{event.title}» → {status_fa.get(event.status)}", actor)
+        _log_activity(db, "lead", event.lead_id, "event",
+                      f"{event.type_label} «{event.title}» → {status_fa.get(event.status)}", actor)
     await _attach_event_serials(db, [event])
     return event.to_dict()
 
