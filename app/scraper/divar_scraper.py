@@ -1996,35 +1996,38 @@ class DivarScraper:
         record would let the next job pick that same account as if it were
         rested.
         """
-        if not self.active_phone or not self.db_session:
+        # built with __new__ in the rotation tests, so nothing here is assumed
+        db = getattr(self, "db_session", None)
+        if not getattr(self, "active_phone", None) or db is None:
             return 0
         try:
             from app.models.cookie import Cookie as CookieModel
-            row = (await self.db_session.execute(
+            row = (await db.execute(
                 select(CookieModel).where(
                     CookieModel.phone_number == self.active_phone))).scalars().first()
             if not row:
                 return 0
             row.reveals = (row.reveals or 0) + 1
             row.last_used_at = datetime.now()
-            await self.db_session.commit()
+            await db.commit()
             return row.reveals
         except Exception as e:
             logger.warning(f"[rotate] could not charge a reveal to {self.active_phone}: {e}")
             try:
-                await self.db_session.rollback()
+                await db.rollback()
             except Exception:
                 pass
             return 0
 
     async def _account_reveals(self, phone: Optional[str] = None) -> int:
         """What this account has already spent, across every job."""
-        phone = phone or self.active_phone
-        if not phone or not self.db_session:
+        phone = phone or getattr(self, "active_phone", None)
+        db = getattr(self, "db_session", None)
+        if not phone or db is None:
             return 0
         try:
             from app.models.cookie import Cookie as CookieModel
-            row = (await self.db_session.execute(
+            row = (await db.execute(
                 select(CookieModel).where(
                     CookieModel.phone_number == phone))).scalars().first()
             return (row.reveals or 0) if row else 0
@@ -2037,23 +2040,24 @@ class DivarScraper:
         Used when Divar challenges it: the challenge is the account telling us
         it is spent, and that beats whatever our own count had reached.
         """
-        if not phone or not self.db_session:
+        db = getattr(self, "db_session", None)
+        if not phone or db is None:
             return
         try:
             from app.models.cookie import Cookie as CookieModel
-            row = (await self.db_session.execute(
+            row = (await db.execute(
                 select(CookieModel).where(
                     CookieModel.phone_number == phone))).scalars().first()
             if not row:
                 return
             row.reveals = max(row.reveals or 0, budget)
             row.last_used_at = datetime.now()
-            await self.db_session.commit()
+            await db.commit()
             logger.info(f"[rotate] {phone} marked spent after a Divar challenge")
         except Exception as e:
             logger.warning(f"[rotate] could not mark {phone} spent: {e}")
             try:
-                await self.db_session.rollback()
+                await db.rollback()
             except Exception:
                 pass
 
@@ -2063,15 +2067,16 @@ class DivarScraper:
         Divar's own tolerance recovers with time; without this the pool would
         stay permanently exhausted and rotation would stop meaning anything.
         """
-        if not self.db_session:
+        db = getattr(self, "db_session", None)
+        if db is None:
             return
         try:
             from app.models.cookie import Cookie as CookieModel
-            rows = (await self.db_session.execute(
+            rows = (await db.execute(
                 select(CookieModel).where(CookieModel.is_valid == True))).scalars().all()  # noqa: E712
             for r in rows:
                 r.reveals = 0
-            await self.db_session.commit()
+            await db.commit()
             logger.info(f"[rotate] every account had spent its budget — new round for {len(rows)}")
         except Exception as e:
             logger.warning(f"[rotate] could not start a new round: {e}")
@@ -2086,7 +2091,9 @@ class DivarScraper:
         exactly what gets asked to verify itself. Rotation was creating the
         challenges it exists to avoid.
         """
-        if not self.active_phone or not self.auth:
+        # built with __new__ in the rotation tests — assume nothing
+        db = getattr(self, "db_session", None)
+        if not getattr(self, "active_phone", None) or not getattr(self, "auth", None):
             return
         try:
             cookies = await self.auth.get_current_cookies()
@@ -2094,7 +2101,7 @@ class DivarScraper:
                 return
             token = next((c.get("value") for c in cookies if c.get("name") == "token"), None)
             await self.auth.save_cookies_to_file(self.active_phone, cookies)
-            if self.db_session:
+            if db is not None:
                 await self.auth.save_cookies_to_db(self.active_phone, cookies, token)
             logger.info(f"[rotate] saved {len(cookies)} live cookies for {self.active_phone}")
         except Exception as e:
