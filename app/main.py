@@ -72,14 +72,29 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     logger.info("Starting SorinFlow Divar Scraper...")
 
+    # Startup warnings, in the order they matter. Each says what is actually at
+    # risk — a warning that overstates the danger gets ignored, and then so do
+    # the ones that do not.
     if settings.secret_key == "your-super-secret-key-change-in-production":
-        logger.warning("SECRET_KEY is using the insecure default — set a strong value in .env")
-    if not settings.api_key:
-        logger.warning("API_KEY is not set — all API endpoints are unprotected")
+        logger.warning(
+            "SECRET_KEY is the published default — anyone can forge a "
+            "super-admin token. Set a strong value before serving traffic.")
     if "CHANGE_ME" in settings.database_url:
         logger.warning("DATABASE_URL still holds the placeholder password — set it for real")
-    if settings.super_admin_password == "CHANGE_ME":
+    if settings.super_admin_password == "CHANGE_ME" and settings.environment == "production":
         logger.warning("SUPER_ADMIN_PASSWORD is the placeholder — set it before first boot")
+    if not settings.api_key:
+        # This used to read "all API endpoints are unprotected", which was
+        # false and is the kind of false that trains people to skim warnings.
+        # Every dashboard router sits behind require_permission(), so a request
+        # without a valid JWT is refused whether or not this key is set. The
+        # key is an outer gate in front of that, not the thing holding the door.
+        logger.info(
+            "API_KEY is not set — the supplemental API-key gate is off. "
+            "Routes still require a JWT and their permission; set API_KEY to "
+            "add the outer layer.")
+    if not settings.metrics_token:
+        logger.info("METRICS_TOKEN is not set — /metrics is disabled and answers 404")
 
     # Initialize database
     await init_db()
