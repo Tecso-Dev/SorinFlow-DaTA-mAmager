@@ -8,9 +8,10 @@ on:
   # and the suite only ran after merging — which is the one moment it is too
   # late to learn something is broken. build and deploy stay push-only below,
   # so a pull request is tested and never shipped.
+  # No branch filter: stacked PRs target another PR's branch rather than main,
+  # and those are exactly the ones that most need testing before they are
+  # chained together.
   pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 env:
