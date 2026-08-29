@@ -664,6 +664,23 @@ function showToast(title, message, type = 'info') {
     bsToast.show();
 }
 
+
+// A URL from the database is not safe to put in href just because it is
+// escaped: «javascript:alert(1)» contains nothing that needs escaping, and
+// clicking the link runs it in the panel's origin — where the token lives.
+// Only http(s) survives; anything else becomes an inert '#'.
+function safeUrl(u) {
+    const raw = String(u ?? '').trim();
+    if (!/^https?:\/\//i.test(raw)) return '#';
+    return esc(raw);
+}
+
+// tel: has the same problem in a smaller way. Phone numbers here come from
+// scraped ads and hand-typed forms, so reduce to what a dialler can use.
+function safeTel(p) {
+    return esc(String(p ?? '').replace(/[^\d+]/g, ''));
+}
+
 // Format Numbers (Persian) — 0 is a real value, only null/undefined mean "no data"
 function formatNumber(num) {
     if (num === null || num === undefined || isNaN(num)) return '---';
@@ -1102,7 +1119,7 @@ async function loadProperties() {
                 </td>
                 <td>
                     ${property.phone_number 
-                        ? `<a href="tel:${property.phone_number}" class="text-success">${property.phone_number}</a>`
+                        ? `<a href="tel:${safeTel(property.phone_number)}" class="text-success">${property.phone_number}</a>`
                         : '<span class="text-muted">---</span>'
                     }
                 </td>
@@ -1110,7 +1127,7 @@ async function loadProperties() {
                     <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${property.id})">
                         <i class="bi bi-eye"></i>
                     </button>
-                    <a href="${property.url}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                    <a href="${safeUrl(property.url)}" target="_blank" class="btn btn-sm btn-outline-secondary">
                         <i class="bi bi-box-arrow-up-left"></i>
                     </a>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteProperty(${property.id})">
@@ -1415,7 +1432,7 @@ async function viewProperty(id) {
                                 <label class="text-muted small">شماره تماس</label>
                                 <div class="h5 mb-0">
                                     ${property.phone_number 
-                                        ? `<a href="tel:${property.phone_number}" class="text-success">${property.phone_number}</a>` 
+                                        ? `<a href="tel:${safeTel(property.phone_number)}" class="text-success">${property.phone_number}</a>` 
                                         : '<span class="text-muted">---</span>'}
                                 </div>
                             </div>
@@ -1443,7 +1460,7 @@ async function viewProperty(id) {
                 
                 <!-- Actions -->
                 <div class="d-flex gap-2">
-                    <a href="${property.url}" target="_blank" class="btn btn-primary flex-grow-1">
+                    <a href="${safeUrl(property.url)}" target="_blank" class="btn btn-primary flex-grow-1">
                         <i class="bi bi-box-arrow-up-right"></i> مشاهده در دیوار
                     </a>
                     <button class="btn btn-match" onclick="showSimilarForProperty(${property.id})">
@@ -4014,7 +4031,7 @@ async function loadLeads() {
                 <td>${_leadSpecChips(lead)}</td>
                 <td>
                     ${lead.phone_number
-                        ? `<a href="tel:${lead.phone_number}" class="text-success fw-bold">${lead.phone_number}</a>`
+                        ? `<a href="tel:${safeTel(lead.phone_number)}" class="text-success fw-bold">${lead.phone_number}</a>`
                         : '<span class="text-muted">---</span>'}
                 </td>
                 <td>
@@ -4038,7 +4055,7 @@ async function loadLeads() {
                     <button class="btn btn-sm btn-outline-success" onclick="notifyLead(${lead.id})" title="ارسال اطلاع">
                         <i class="bi bi-bell"></i>
                     </button>` : ''}
-                    <a href="${lead.property_url}" target="_blank" class="btn btn-sm btn-outline-secondary" title="باز کردن آگهی">
+                    <a href="${safeUrl(lead.property_url)}" target="_blank" class="btn btn-sm btn-outline-secondary" title="باز کردن آگهی">
                         <i class="bi bi-box-arrow-up-left"></i>
                     </a>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteLead(${lead.id})" title="حذف لید">
@@ -4252,7 +4269,7 @@ function _matchCard(m) {
             <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${m.id})">
                 <i class="bi bi-eye"></i> جزئیات
             </button>
-            ${m.phone_number ? `<a href="tel:${m.phone_number}" class="btn btn-sm btn-outline-success">
+            ${m.phone_number ? `<a href="tel:${safeTel(m.phone_number)}" class="btn btn-sm btn-outline-success">
                 <i class="bi bi-telephone"></i> ${m.phone_number}</a>` : ''}
         </div>
     </div>`;
@@ -4336,7 +4353,7 @@ async function viewLead(id) {
                 <div class="col-md-6">
                     <label class="text-muted small">لینک</label>
                     <div class="d-flex gap-2 flex-wrap">
-                        <a href="${lead.property_url}" target="_blank" class="btn btn-sm btn-outline-primary">
+                        <a href="${safeUrl(lead.property_url)}" target="_blank" class="btn btn-sm btn-outline-primary">
                             <i class="bi bi-box-arrow-up-right"></i> مشاهده آگهی
                         </a>
                         <button class="btn btn-sm btn-match" onclick="showSimilarForLead(${lead.id})">
@@ -4354,7 +4371,7 @@ async function viewLead(id) {
                     <label class="text-muted small">شماره تماس</label>
                     <div class="h5 text-success mb-0">
                         ${lead.phone_number
-                            ? `<a href="tel:${lead.phone_number}">${lead.phone_number}</a>`
+                            ? `<a href="tel:${safeTel(lead.phone_number)}">${lead.phone_number}</a>`
                             : '---'}
                     </div>
                 </div>
@@ -4770,7 +4787,7 @@ async function loadCustomers() {
             row.innerHTML = `
                 <td>${c.id}</td>
                 <td class="fw-bold">${esc(c.full_name)}${isNew ? ' <span class="badge bg-success" style="font-size:.6rem;vertical-align:middle">جدید</span>' : ''}</td>
-                <td>${c.mobile1 ? `<a href="tel:${c.mobile1}" class="text-success">${c.mobile1}</a>` : '---'}</td>
+                <td>${c.mobile1 ? `<a href="tel:${safeTel(c.mobile1)}" class="text-success">${c.mobile1}</a>` : '---'}</td>
                 <td><span class="badge ${t.cls}">${t.label}</span></td>
                 <td>${CUSTOMER_SOURCE_LABELS[c.source] || '---'}</td>
                 <td>${c.budget_max ? formatPrice(c.budget_max) : '---'}</td>
@@ -5605,7 +5622,7 @@ async function loadNotes() {
             const date = n.created_at ? new Date(n.created_at).toLocaleString('fa-IR') : '';
             return `<div class="note-card mb-2 p-3 rounded" style="background:var(--bg-secondary);border-right:3px solid var(--accent);">
                 <div class="d-flex justify-content-between align-items-start">
-                    <p class="mb-1" style="white-space:pre-wrap;">${n.content}</p>
+                    <p class="mb-1" style="white-space:pre-wrap;">${esc(n.content)}</p>
                     <button class="btn btn-xs btn-outline-danger ms-2" onclick="deleteNote(${n.id})"><i class="bi bi-trash"></i></button>
                 </div>
                 <small class="text-muted">${date}${n.created_by ? ' — ' + n.created_by : ''}</small>

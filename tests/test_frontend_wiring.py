@@ -96,3 +96,35 @@ def test_user_management_functions_survive():
                "savePermsEditor", "renderPermBox", "readPermBox",
                "loadTickets", "decideTicket", "loadPortalRequests"):
         assert fn in defined, f"{fn} is missing from app.js"
+
+
+# ── URLs from the database must not become script ───────────────────────────
+
+def _app_js() -> str:
+    with open(APP_JS, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_listing_urls_go_through_safeUrl():
+    """A stored «javascript:…» URL contains nothing that needs escaping, so
+    esc() does not help: clicking the link runs it in the panel's origin, where
+    the token lives. property_url is free text on the add-lead form."""
+    import re
+    js = _app_js()
+    bad = re.findall(r'href="\$\{\s*(?:property\.url|lead\.property_url)\s*\}"', js)
+    assert not bad, f"{len(bad)} listing link(s) interpolate a stored URL straight into href"
+    assert "function safeUrl(" in js
+
+
+def test_tel_links_go_through_safeTel():
+    import re
+    js = _app_js()
+    bad = re.findall(r'href="tel:\$\{\s*(?!safeTel|esc)[a-z]', js)
+    assert not bad, f"{len(bad)} tel: link(s) interpolate a raw phone number"
+
+
+def test_note_content_is_escaped():
+    """Notes are free text any staff member can write, rendered into the lead
+    timeline that everyone opens."""
+    js = _app_js()
+    assert "${n.content}" not in js, "note body is interpolated without esc()"
