@@ -1,6 +1,7 @@
 """
 SorinFlow Divar Scraper - Authentication API Routes
 """
+import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -20,6 +21,8 @@ from app.schemas import (
     CookieStatusResponse,
     AuthResponse
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 settings = get_settings()
@@ -312,17 +315,47 @@ async def delete_cookie(
     cookie_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete a stored cookie session"""
-    
+    """Delete a stored cookie session, in the database and on disk.
+
+    Every session is stored twice: a row here and a cookies_<phone>.json
+    file on the data volume. Dropping only the row left the file behind,
+    holding the Divar session token in plain text -- so a session deleted
+    from the panel was not actually gone. Remove both.
+    """
+
     result = await db.execute(
         select(Cookie).where(Cookie.id == cookie_id)
     )
     cookie = result.scalar_one_or_none()
-    
+
     if not cookie:
         raise HTTPException(status_code=404, detail="Cookie not found")
-    
+
+    phone = cookie.phone_number
+    file_removed = False
+    file_error = None
+    try:
+        cookie_file = DivarAuth(db).get_cookie_file_path(phone)
+        if cookie_file.exists():
+            cookie_file.unlink()
+        file_removed = True
+    except Exception as e:
+        # Report it rather than swallowing it: the caller is deleting this
+        # session on purpose, and a file left behind still holds the token.
+        file_error = str(e)
+        logger.error(f"Failed to remove cookie file for {phone}: {e}")
+
     await db.delete(cookie)
     await db.commit()
-    
-    return {"success": True, "message": "Cookie deleted successfully"}
+
+    if not file_removed:
+        return {
+            "success": True,
+            "file_removed": False,
+            "message": (
+                "نشست از پایگاه داده حذف شد، اما فایل کوکی روی سرور باقی ماند "
+                f"و باید دستی پاک شود: {file_error}"
+            ),
+        }
+
+    return {"success": True, "file_removed": True, "message": "Cookie deleted successfully"}
