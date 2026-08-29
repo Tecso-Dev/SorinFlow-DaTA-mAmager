@@ -218,6 +218,13 @@ class TestMaintenanceStateObject:
         assert State(until="not-a-date").seconds_left is None
 
 
+def _needs_postgres():
+    """These build the whole schema through TestClient, and scraping_jobs.job_id
+    is a postgresql.UUID column the pinned SQLAlchemy cannot render on SQLite."""
+    import app.database as db
+    return not str(db.engine.url).startswith("postgresql")
+
+
 class TestErrorPages:
     """404 and 500 as pages, not raw JSON.
 
@@ -225,6 +232,8 @@ class TestErrorPages:
     a white page. API callers still need JSON, so the handlers negotiate.
     """
 
+    @pytest.mark.skipif(_needs_postgres(),
+                        reason="needs Postgres — set DATABASE_URL=postgresql+asyncpg://…")
     def test_a_browser_gets_html_for_404(self):
         from fastapi.testclient import TestClient
         import app.main as m
@@ -234,6 +243,8 @@ class TestErrorPages:
         assert "text/html" in r.headers["content-type"]
         assert "۴۰۴" in r.text
 
+    @pytest.mark.skipif(_needs_postgres(),
+                        reason="needs Postgres — set DATABASE_URL=postgresql+asyncpg://…")
     def test_an_api_caller_still_gets_json_for_404(self):
         """The dashboard and every script call /api — HTML there would break
         them, whatever the Accept header says."""
@@ -275,3 +286,43 @@ class TestErrorPages:
                      error_pages.render_server_error("r"),
                      m.render_maintenance_page(message="تست")):
             assert 'dir="rtl"' in html and 'lang="fa"' in html
+
+
+class TestBrandConsistency:
+    """All three public pages must read as the same product as the landing page.
+
+    The first version was correctly dark and still looked like a different site:
+    a small card in dead space with no brand mark. Matching a palette is not the
+    same as matching an identity.
+    """
+
+    def _pages(self):
+        from app import error_pages as ep
+        import app.main as m
+        return {
+            "404": ep.render_not_found("/x"),
+            "500": ep.render_server_error("ref1"),
+            "maintenance": m.render_maintenance_page(message="تست"),
+        }
+
+    @pytest.mark.parametrize("token,why", [
+        ("C 14 22, 27 22", "the infinity mark from landing.html"),
+        ("--grad", "the violet→pink→cyan gradient"),
+        ("#030305", "the landing page's ground colour"),
+        ("backdrop-filter", "the glass panel treatment"),
+        ("سورین‌فلو", "the product name"),
+    ])
+    def test_every_public_page_carries_the_brand(self, token, why):
+        for name, html in self._pages().items():
+            assert token in html, f"{name} is missing {why}"
+
+    def test_the_api_key_gate_cannot_hide_the_404_page(self):
+        """The bug that made the styled 404 unreachable in production: the
+        API-key middleware answered 401 JSON before routing, and it only looked
+        right locally because API_KEY is empty there."""
+        import app.main as m
+        src = open(m.__file__, encoding="utf-8").read()
+        gate = src[src.index("async def api_key_middleware"):src.index("# Request logging")]
+        assert "render_not_found" in gate, (
+            "api_key_middleware rejects browser page requests with JSON, so the "
+            "styled 404 can never be reached once API_KEY is set")

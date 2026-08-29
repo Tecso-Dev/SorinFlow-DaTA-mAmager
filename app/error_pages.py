@@ -39,14 +39,21 @@ body{margin:0;background:var(--bg);color:var(--text);
 /* the cosmos behind the glass — the landing page does this with WebGL; here it
    is three blurred gradients, which costs nothing and cannot fail to load */
 .sky{position:fixed;inset:0;z-index:0;overflow:hidden}
-.orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;
+.orb{position:absolute;border-radius:50%;filter:blur(80px);
  animation:float 26s ease-in-out infinite}
-.o1{width:46vmax;height:46vmax;left:-14vmax;top:-16vmax;
- background:radial-gradient(circle,var(--violet),transparent 65%)}
-.o2{width:38vmax;height:38vmax;right:-12vmax;top:-6vmax;
- background:radial-gradient(circle,var(--cyan),transparent 65%);animation-duration:32s;animation-direction:reverse;opacity:.35}
-.o3{width:42vmax;height:42vmax;right:-10vmax;bottom:-18vmax;
- background:radial-gradient(circle,var(--pink),transparent 65%);animation-duration:29s;opacity:.4}
+.o1{width:52vmax;height:52vmax;left:-16vmax;top:-18vmax;opacity:.75;
+ background:radial-gradient(circle,var(--violet),transparent 62%)}
+.o2{width:42vmax;height:42vmax;right:-13vmax;top:-8vmax;opacity:.55;
+ background:radial-gradient(circle,var(--cyan),transparent 62%);animation-duration:32s;animation-direction:reverse}
+.o3{width:48vmax;height:48vmax;right:-12vmax;bottom:-20vmax;opacity:.6;
+ background:radial-gradient(circle,var(--pink),transparent 62%);animation-duration:29s}
+/* the same faint grid the landing page rules over its hero */
+.grid{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.35;
+ background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),
+   linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
+ background-size:64px 64px;
+ mask-image:radial-gradient(ellipse 70% 60% at 50% 45%,#000 30%,transparent 75%);
+ -webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 45%,#000 30%,transparent 75%)}
 .vignette{position:fixed;inset:0;z-index:0;pointer-events:none;
  background:radial-gradient(ellipse 90% 75% at 50% 45%,transparent 55%,rgba(0,0,0,.78) 100%)}
 @keyframes float{
@@ -55,11 +62,22 @@ body{margin:0;background:var(--bg);color:var(--text);
   66%{transform:translate(-2vmax,3vmax) scale(.96)}
 }
 
-.card{position:relative;z-index:1;width:100%;max-width:560px;text-align:center;
- background:rgba(10,10,16,.55);border:1px solid var(--line);border-radius:26px;
- backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
- padding:2.6rem 1.9rem 1.9rem;box-shadow:0 30px 90px rgba(0,0,0,.55);
- max-height:95vh;overflow:auto}
+/* the same infinity mark the landing page opens with — the strongest thing
+   tying these pages to the product, and it costs one inline path */
+.brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:1.3rem}
+.brand svg{width:34px;height:34px}
+.brand span{font-size:1.02rem;font-weight:800;letter-spacing:-.01em;
+ background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+.card{position:relative;z-index:1;width:100%;max-width:580px;text-align:center;
+ background:rgba(10,10,16,.62);border:1px solid var(--line);border-radius:28px;
+ backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+ padding:2.4rem 2rem 1.9rem;
+ box-shadow:0 40px 110px rgba(0,0,0,.6),0 0 0 1px rgba(167,139,250,.07) inset;
+ max-height:94vh;overflow:auto}
+/* a hairline of brand gradient along the top edge, like the landing cards */
+.card::before{content:'';position:absolute;inset-inline:12%;top:0;height:1px;
+ background:linear-gradient(90deg,transparent,var(--violet),var(--pink),transparent)}
 
 .eyebrow{display:inline-flex;align-items:center;gap:10px;font-size:.72rem;
  letter-spacing:.14em;color:var(--dim);margin-bottom:.6rem}
@@ -107,6 +125,7 @@ p{margin:.3rem 0;color:var(--dim);font-size:.93rem}
  background:var(--glass);border:1px solid var(--line);transition:border-color .15s,transform .15s}
 .links a:hover{border-color:var(--violet);transform:translateY(-1px)}
 .links a b{direction:ltr;font-weight:600}
+.tagline{margin-top:.9rem;font-size:.76rem;color:var(--dim);opacity:.75}
 .foot{margin-top:1.5rem;font-size:.7rem;color:var(--dim)}
 .ref{margin-top:.5rem;font-size:.66rem;color:var(--dim);opacity:.7;direction:ltr}
 
@@ -118,8 +137,20 @@ p{margin:.3rem 0;color:var(--dim);font-size:.93rem}
 <div class="sky" aria-hidden="true">
   <div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
 </div>
+<div class="grid" aria-hidden="true"></div>
 <div class="vignette" aria-hidden="true"></div>
-<div class="card">__BODY__</div>
+<div class="card">
+  <div class="brand">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><defs>
+      <linearGradient id="bl" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#a78bfa"/><stop offset="50%" stop-color="#f0a6ff"/>
+        <stop offset="100%" stop-color="#67e8f9"/></linearGradient></defs>
+      <path d="M 14 32 C 14 22, 27 22, 32 32 C 37 42, 50 42, 50 32 C 50 22, 37 22, 32 32 C 27 42, 14 42, 14 32 Z"
+            fill="none" stroke="url(#bl)" stroke-width="6" stroke-linecap="round"/></svg>
+    <span>سورین‌فلو</span>
+  </div>
+  __BODY__
+</div>
 __SCRIPT__
 </body></html>"""
 
@@ -223,6 +254,7 @@ def render_maintenance(message: str, config_json: str) -> str:
     </svg>
     <h1>{escape(message)}</h1>
     <p>در حال بهبود سامانه هستیم و به‌زودی برمی‌گردیم.</p>
+    <div class="tagline">اسکرپر هوشمند دیوار، CRM مدیریت لید و ارزیابی عملکرد مشاوران املاک</div>
 
     <div id="cd" style="display:none">
       <div class="count">

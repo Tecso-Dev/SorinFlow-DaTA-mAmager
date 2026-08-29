@@ -337,6 +337,19 @@ async def api_key_middleware(request: Request, call_next):
             or request.query_params.get("api_key")
         )
         if provided != settings.api_key:
+            # A browser asking for a page it mistyped is not an authentication
+            # problem — it is a missing page, and answering 401 JSON is how the
+            # styled 404 became unreachable in production. Locally API_KEY is
+            # empty so this branch never ran and the page looked fine.
+            #
+            # 404 rather than 401 on purpose: for a path outside /api there is
+            # nothing here to authenticate against, and saying "not found"
+            # reveals less than "you guessed a real path but lack the key".
+            if not request.url.path.startswith("/api") and \
+                    "text/html" in request.headers.get("accept", ""):
+                from app import error_pages
+                return HTMLResponse(error_pages.render_not_found(request.url.path),
+                                    status_code=404)
             return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
 
     return await call_next(request)
