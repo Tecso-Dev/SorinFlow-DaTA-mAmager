@@ -123,6 +123,10 @@ class DivarScraper:
         self.session_start = datetime.now()
         # Captured /postlist/w/search POST request, replayed for cursor pagination
         self._search_req_template: Optional[Dict[str, Any]] = None
+        # One pooled HTTP client for the whole run. Each call site used to build
+        # its own, so every image and every API request paid a fresh TCP and TLS
+        # handshake to a host we talk to thousands of times per job.
+        self._http: Optional[httpx.AsyncClient] = None
     
     async def initialize(self, restore_session: bool = True, phone_number: str = None) -> bool:
         """Initialize scraper with browser and optional session restoration"""
@@ -218,9 +222,17 @@ class DivarScraper:
             logger.error(f"Failed to initialize scraper: {e}")
             return False
     
+    def _client(self) -> httpx.AsyncClient:
+        """The shared HTTP client, created on first use and closed in close()."""
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+        return self._http
+
     async def close(self):
         """Close browser and cleanup resources"""
         try:
+            if self._http is not None and not self._http.is_closed:
+                await self._http.aclose()
             if self.page:
                 await self.page.close()
             if self.context:
@@ -2227,27 +2239,78 @@ class DivarScraper:
             
             import io as _io
             from PIL import Image as _Image
-            async with httpx.AsyncClient() as client:
+
+            # Pillow warns above MAX_IMAGE_PIXELS and only errors at twice that,
+            # so the default lets a bomb through with a log line. Halving our
+            # ceiling here makes our real limit the erroring one.
+            _prev_bomb_limit = _Image.MAX_IMAGE_PIXELS
+            _Image.MAX_IMAGE_PIXELS = max(int(settings.max_image_pixels) // 2, 1)
+
+            max_count = max(int(settings.max_images_per_property), 0)
+            max_bytes = max(int(settings.max_image_bytes), 1)
+            if max_count and len(images) > max_count:
+                logger.info(
+                    f"{divar_id}: {len(images)} images offered, keeping the first {max_count}")
+                images = images[:max_count]
+
+            try:
+                client = self._client()
                 for i, url in enumerate(images):
                     try:
-                        response = await client.get(url, timeout=30)
-                        if response.status_code == 200:
-                            # Always convert (webp/png/...) to JPEG so every stored
-                            # image is a browser-universal .jpg
-                            filename = f"img_{i+1}.jpg"
-                            filepath = property_dir / filename
-                            try:
-                                im = _Image.open(_io.BytesIO(response.content)).convert("RGB")
-                                im.save(filepath, format="JPEG", quality=85)
-                            except Exception:
-                                # not a decodable image — skip
+                        # Streamed with a running byte cap. client.get() reads
+                        # the whole body first, so a single oversized file was
+                        # already in memory by the time anyone could object.
+                        raw = bytearray()
+                        too_big = False
+                        async with client.stream("GET", url, timeout=30) as response:
+                            if response.status_code != 200:
                                 continue
-                            # served URL (see /images static mount)
-                            local_paths.append(f"/images/{divar_id}/{filename}")
-                            logger.debug(f"Downloaded+converted image: {filename}")
-                            await asyncio.sleep(0.3)  # Rate limit downloads
+                            declared = response.headers.get("content-length")
+                            if declared and declared.isdigit() and int(declared) > max_bytes:
+                                logger.warning(
+                                    f"{divar_id}: image {i+1} declares "
+                                    f"{int(declared)}B > {max_bytes}B cap — skipped")
+                                continue
+                            async for chunk in response.aiter_bytes():
+                                raw.extend(chunk)
+                                if len(raw) > max_bytes:
+                                    too_big = True
+                                    break
+                        if too_big:
+                            logger.warning(
+                                f"{divar_id}: image {i+1} exceeded the "
+                                f"{max_bytes}B cap mid-download — skipped")
+                            continue
+
+                        # Always convert (webp/png/...) to JPEG so every stored
+                        # image is a browser-universal .jpg
+                        filename = f"img_{i+1}.jpg"
+                        filepath = property_dir / filename
+                        try:
+                            im = _Image.open(_io.BytesIO(bytes(raw)))
+                            # Checked before decoding: .size is read from the
+                            # header, so this rejects a bomb without ever
+                            # allocating the bitmap it describes.
+                            pixels = (im.size[0] or 0) * (im.size[1] or 0)
+                            if pixels > settings.max_image_pixels:
+                                logger.warning(
+                                    f"{divar_id}: image {i+1} decodes to {pixels} "
+                                    f"pixels — over the cap, skipped")
+                                continue
+                            im = im.convert("RGB")
+                            im.save(filepath, format="JPEG", quality=85)
+                        except Exception as decode_err:
+                            # not a decodable image, or a decompression bomb
+                            logger.debug(f"{divar_id}: image {i+1} not usable: {decode_err}")
+                            continue
+                        # served URL (see /images static mount)
+                        local_paths.append(f"/images/{divar_id}/{filename}")
+                        logger.debug(f"Downloaded+converted image: {filename}")
+                        await asyncio.sleep(0.3)  # Rate limit downloads
                     except Exception as e:
                         logger.warning(f"Failed to download image {i+1}: {e}")
+            finally:
+                _Image.MAX_IMAGE_PIXELS = _prev_bomb_limit
 
         except Exception as e:
             logger.error(f"Failed to download images: {e}")
@@ -2820,8 +2883,26 @@ class DivarScraper:
                         if saved:
                             job.new_items += 1
                         else:
-                            # save_property rolled back the session; refresh job to avoid lazy-load errors
-                            await self.db_session.refresh(job)
+                            # save_property rolled back the shared session, which
+                            # expires `job`. Refreshing re-reads it so the counter
+                            # below does not touch an expired object — but the
+                            # refresh is itself a query on a session that just
+                            # failed, so it can raise too. Losing the whole run
+                            # over a failed bookkeeping read would turn one bad
+                            # listing into a dead job.
+                            try:
+                                await self.db_session.refresh(job)
+                            except Exception as refresh_err:
+                                logger.warning(
+                                    f"could not refresh job after a failed save: {refresh_err}")
+                                try:
+                                    await self.db_session.rollback()
+                                    await self.db_session.refresh(job)
+                                except Exception:
+                                    logger.error(
+                                        "job row unreadable after a failed save — "
+                                        "stopping this run rather than writing nonsense counters")
+                                    raise
                             job.failed_items += 1
                     elif detail is None:
                         # None = real scrape error (network failure, parse error, etc.)

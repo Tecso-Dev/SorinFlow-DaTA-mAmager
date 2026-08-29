@@ -8,10 +8,20 @@ from typing import Optional, Dict, Any
 
 _store: Dict[str, Any] = {}
 
-# When the user dismisses an OTP prompt, we stop asking for the rest of the
+# When the user dismisses an OTP prompt, we stop asking for the rest of that
 # run so the scraper doesn't block ~300s on every phone that needs a code.
-_cancelled_until: float = 0.0
+#
+# Per job, not global. Up to three scrapes run at once, and a single shared
+# flag meant dismissing one prompt silently suppressed phone extraction on
+# every other running job for fifteen minutes — with nothing on screen to say
+# why those jobs suddenly stopped collecting numbers.
+_cancelled_until: Dict[str, float] = {}
 _CANCEL_WINDOW = 900  # 15 min
+
+
+def job_of(key: str) -> str:
+    """The job a request key belongs to. Keys are «{job_id}:{divar_id}»."""
+    return (key or "").split(":", 1)[0]
 
 
 def request(key: str, phone_hint: str = "") -> asyncio.Event:
@@ -79,19 +89,52 @@ def clear_job(job_id: str) -> int:
     return len(keys)
 
 
-def cancel_all() -> None:
-    """User declined OTP: clear pending and suppress new prompts for a while."""
-    global _cancelled_until
-    _cancelled_until = time.time() + _CANCEL_WINDOW
-    _store.clear()
+def cancel_all(job_id: Optional[str] = None) -> int:
+    """User declined OTP: drop that job's pending prompts and stop asking it for
+    codes for a while. Returns how many pending requests were dropped.
+
+    With no job_id this still suppresses everything, because the dashboard's
+    «close» button is not always able to say which job it meant — but the
+    caller should pass one whenever it can.
+    """
+    now = time.time()
+    if job_id is None:
+        jobs = {job_of(k) for k in _store}
+        dropped = len(_store)
+        _store.clear()
+        for j in jobs:
+            _cancelled_until[j] = now + _CANCEL_WINDOW
+        return dropped
+
+    prefix = f"{job_id}:"
+    keys = [k for k in list(_store) if k.startswith(prefix)]
+    for k in keys:
+        _store.pop(k, None)
+    _cancelled_until[job_id] = now + _CANCEL_WINDOW
+    return len(keys)
 
 
-def is_cancelled() -> bool:
-    """True while OTP prompts are suppressed (user recently dismissed one)."""
-    return time.time() < _cancelled_until
+def is_cancelled(key_or_job: Optional[str] = None) -> bool:
+    """True while OTP prompts are suppressed for this job.
+
+    Accepts either a full request key or a bare job id, so callers holding an
+    otp_key do not have to split it themselves.
+    """
+    if not key_or_job:
+        return False
+    job = job_of(key_or_job)
+    until = _cancelled_until.get(job, 0.0)
+    if until and time.time() >= until:
+        # expired — drop it rather than letting the dict grow for the life of
+        # the process
+        _cancelled_until.pop(job, None)
+        return False
+    return time.time() < until
 
 
-def reset_cancel() -> None:
+def reset_cancel(job_id: Optional[str] = None) -> None:
     """Clear the suppression — called when a fresh scrape job starts."""
-    global _cancelled_until
-    _cancelled_until = 0.0
+    if job_id is None:
+        _cancelled_until.clear()
+    else:
+        _cancelled_until.pop(job_id, None)

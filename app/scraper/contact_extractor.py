@@ -376,8 +376,8 @@ class ContactExtractor:
             from app.scraper import otp_store
             # If the user already dismissed an OTP prompt this run, don't block
             # every subsequent phone for the full timeout — skip straight away.
-            if otp_store.is_cancelled():
-                logger.info("SMS-OTP suppressed (user dismissed earlier) — skipping phone")
+            if otp_store.is_cancelled(self.otp_key):
+                logger.info("SMS-OTP suppressed for this job (dismissed earlier) — skipping phone")
                 return
 
             # A modal can be on screen without Divar having sent anything — the
@@ -405,7 +405,7 @@ class ContactExtractor:
                 waited = 0.0
                 slice_s = 2.0
                 while waited < timeout:
-                    if otp_store.is_cancelled():
+                    if otp_store.is_cancelled(self.otp_key):
                         logger.info("SMS-OTP wait cancelled by user")
                         otp_store.clear(self.otp_key)
                         break
@@ -423,7 +423,7 @@ class ContactExtractor:
                         break
                     except asyncio.TimeoutError:
                         waited += slice_s
-                if not got_code and not otp_store.is_cancelled():
+                if not got_code and not otp_store.is_cancelled(self.otp_key):
                     logger.warning(f"SMS-OTP timeout — no code in {timeout}s")
                     otp_store.clear(self.otp_key)
             finally:

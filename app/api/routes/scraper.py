@@ -241,10 +241,12 @@ async def start_scraping_job(
     job_id = str(job.job_id)
     logger.info(f"Created scraping job: {job_id} (divar_phone={job_config.divar_phone or 'auto'})")
 
-    # A fresh job re-enables OTP prompts (a previous dismissal shouldn't
-    # silently suppress phone extraction on the next run).
+    # A fresh job re-enables OTP prompts for itself (a previous dismissal
+    # shouldn't silently suppress phone extraction on the next run). Scoped to
+    # this job so starting one scrape does not lift a dismissal the user just
+    # made on another one that is still running.
     from app.scraper import otp_store
-    otp_store.reset_cancel()
+    otp_store.reset_cancel(job_id)
 
     # Store a placeholder to track active jobs
     active_tasks[job_id] = {"status": "starting", "city": job_config.city, "category": job_config.category}
@@ -553,19 +555,26 @@ async def submit_otp_code(key: str, body: OtpSubmitRequest):
 
 
 @router.post("/otp-cancel")
-async def cancel_otp(key: Optional[str] = None):
-    """Dismiss a pending OTP prompt. With a key, clears that one; without,
-    clears every pending OTP request (used by the 'close' button so a stale
-    prompt from a dead job stops re-popping)."""
+async def cancel_otp(key: Optional[str] = None, job_id: Optional[str] = None):
+    """Dismiss a pending OTP prompt.
+
+    A key clears that single prompt. Otherwise OTP is suppressed for the rest of
+    the run so the scraper stops blocking on every phone that needs a code —
+    scoped to one job when the caller can name it, because up to three scrapes
+    run at once and dismissing one prompt should not silently stop the others
+    collecting phone numbers.
+    """
     from app.scraper import otp_store
     if key:
         otp_store.clear(key)
         return {"success": True, "cleared": 1}
-    # No key = the "close" button: suppress OTP for the rest of the run so
-    # the scraper stops blocking ~120s on every phone that needs a code.
-    pending = otp_store.get_pending()
-    otp_store.cancel_all()
-    return {"success": True, "cleared": len(pending), "suppressed": True}
+
+    # The key carries the job («{job_id}:{divar_id}»), so a dismissal aimed at
+    # one prompt can be scoped even when only the job is known.
+    target = job_id or None
+    cleared = otp_store.cancel_all(target)
+    return {"success": True, "cleared": cleared,
+            "suppressed": True, "scope": target or "all jobs"}
 
 
 class SingleScrapeRequest(BaseModel):

@@ -2853,7 +2853,12 @@ async function dismissDivarOtp() {
     if (key) _dismissedOtpKeys.add(key);           // stop the poll from re-opening it
     _otp2StopTimer();
     bootstrap.Modal.getInstance(document.getElementById('divarOtpModal'))?.hide();
-    try { await apiCall('/scraper/otp-cancel', { method: 'POST' }); } catch (_) {}
+    // The key is «{job_id}:{divar_id}», so dismissing this prompt suppresses OTP
+    // for this job only. Up to three scrapes run at once, and closing one modal
+    // used to stop all of them collecting phone numbers for fifteen minutes.
+    const jobId = key ? key.split(':')[0] : '';
+    const qs = jobId ? `?job_id=${encodeURIComponent(jobId)}` : '';
+    try { await apiCall(`/scraper/otp-cancel${qs}`, { method: 'POST' }); } catch (_) {}
 }
 
 async function submitDivarOtp() {

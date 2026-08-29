@@ -64,6 +64,16 @@ class Settings(BaseSettings):
     # 0 = never rotate.
     cookie_rotate_every: int = Field(default=100, env="COOKIE_ROTATE_EVERY")
     
+    # Image download limits. A listing's photo list comes from Divar and is not
+    # something we control, so both the count and the size of each file are
+    # capped rather than trusted.
+    max_images_per_property: int = Field(default=20, env="MAX_IMAGES_PER_PROPERTY")
+    max_image_bytes: int = Field(default=8 * 1024 * 1024, env="MAX_IMAGE_BYTES")
+    # Decoded pixel ceiling. A few hundred KB of PNG can decode to gigabytes of
+    # bitmap — the classic decompression bomb. 40MP is far above any real estate
+    # photo and far below anything that hurts.
+    max_image_pixels: int = Field(default=40_000_000, env="MAX_IMAGE_PIXELS")
+
     # Proxy Settings
     proxy_enabled: bool = Field(default=False, env="PROXY_ENABLED")
     proxy_list: str = Field(default="", env="PROXY_LIST")
