@@ -159,12 +159,40 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Pull image into k3s containerd
+        # Retried, because this is the one step that depends on a network the
+        # project does not control: a server in Iran reaching ghcr.io. A single
+        # DNS blip — "lookup ghcr.io: Try again" — has already failed a deploy
+        # whose tests and build both passed, and the image was fine.
+        #
+        # Backoff rather than a tight loop: if the registry is genuinely
+        # unreachable, hammering it neither helps nor tells us anything new.
+        # Six attempts over ~5 minutes covers a transient outage without
+        # sitting on the runner for an hour when the problem is real.
+        timeout-minutes: 20
         run: |
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
           echo "Pulling $IMAGE into containerd (k8s.io namespace)..."
-          k3s ctr -n k8s.io images pull \
-            --user "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
-            "$IMAGE"
+
+          for attempt in 1 2 3 4 5 6; do
+            if k3s ctr -n k8s.io images pull \
+                 --user "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+                 "$IMAGE"; then
+              echo "Pulled on attempt $attempt."
+              exit 0
+            fi
+            if [ "$attempt" -eq 6 ]; then break; fi
+            delay=$(( attempt * 20 ))
+            echo "Attempt $attempt failed — retrying in ${delay}s."
+            # A failed resolve can leave a stale negative DNS answer cached;
+            # a fresh lookup on the next attempt is the point of the wait.
+            getent hosts ghcr.io >/dev/null 2>&1 || echo "  (ghcr.io still not resolving)"
+            sleep "$delay"
+          done
+
+          echo "::error::Could not pull $IMAGE after 6 attempts."
+          echo "The image built and pushed successfully — this is the server"
+          echo "failing to reach ghcr.io. The running pod is untouched."
+          exit 1
 
       - name: Apply ingress manifests
         env:
