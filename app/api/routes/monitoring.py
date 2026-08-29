@@ -11,6 +11,7 @@ to parse an exposition format in the browser.
 """
 import os
 import time
+from typing import Optional
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
@@ -29,44 +30,174 @@ router = APIRouter()
 settings = get_settings()
 _STARTED = time.time()
 
+# Outbound reachability is cached: it makes a real request, and the live view
+# polls every five seconds. Probing an external host twelve times a minute is
+# load on someone else's server and looks like scanning from ours.
+_REACH_TTL = 60.0
+_reach_cache: dict = {"at": 0.0, "value": None}
 
-def _read_container_limits() -> dict:
-    """Memory and CPU as the container sees them.
 
-    cgroup v2 first (what k3s on a modern kernel uses), then v1. Read straight
-    from the filesystem: no privileges, no extra dependency, and it reports the
-    container's limit rather than the host's total — which is the number that
-    decides whether this pod gets killed.
+def _system_info() -> dict:
+    """What this process is running on. Read once — none of it changes."""
+    import platform
+    info = {
+        "os": f"{platform.system()} {platform.release()}",
+        "python": platform.python_version(),
+        "arch": platform.machine(),
+        "hostname": platform.node(),
+    }
+    # Ubuntu inside the Playwright image; PRETTY_NAME is the readable one
+    pretty = _read_first("/etc/os-release")
+    if pretty:
+        for line in pretty.splitlines():
+            if line.startswith("PRETTY_NAME="):
+                info["distro"] = line.split("=", 1)[1].strip().strip('"')
+                break
+    up = _read_first("/proc/uptime")
+    if up:
+        try:
+            info["host_uptime_seconds"] = int(float(up.split()[0]))
+        except ValueError:
+            pass
+    return info
+
+
+async def _check_reachability() -> dict:
+    """Can the scraper still reach Divar?
+
+    This is the one outbound check worth making. The scraper's whole job
+    depends on it, and from an Iranian network a host can become unreachable
+    without anything on this box changing — which otherwise shows up as a
+    scrape that mysteriously returns nothing.
+
+    Deliberately not a generic ping dashboard: probing Google from here always
+    fails under sanctions, and a permanently red tile teaches people to ignore
+    the panel.
     """
+    now = time.time()
+    if _reach_cache["value"] is not None and now - _reach_cache["at"] < _REACH_TTL:
+        return _reach_cache["value"]
+
+    import httpx
+    result = {}
+    started = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=False) as client:
+            r = await client.head("https://divar.ir/", headers={"User-Agent": "SorinFlow-HealthCheck"})
+        result = {"divar": {"up": r.status_code < 500,
+                            "status": r.status_code,
+                            "latency_ms": round((time.perf_counter() - started) * 1000, 1)}}
+    except Exception as e:
+        result = {"divar": {"up": False, "error": type(e).__name__,
+                            "latency_ms": round((time.perf_counter() - started) * 1000, 1)}}
+    _reach_cache.update({"at": now, "value": result})
+    return result
+
+
+def _read_first(*paths) -> Optional[str]:
+    """First readable path wins. cgroup v1 and v2 keep the same facts in
+    different places, and a container can be under either."""
+    for path in paths:
+        try:
+            with open(path) as fh:
+                return fh.read().strip()
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _read_meminfo() -> dict:
+    """/proc/meminfo — the host's view. Used for swap, which cgroup only
+    reports for the container's own usage, and as a fallback for total RAM."""
     out = {}
     try:
-        # ── cgroup v2 ──
-        if os.path.exists("/sys/fs/cgroup/memory.current"):
-            with open("/sys/fs/cgroup/memory.current") as fh:
-                out["memory_used_bytes"] = int(fh.read().strip())
-            try:
-                with open("/sys/fs/cgroup/memory.max") as fh:
-                    raw = fh.read().strip()
-                out["memory_limit_bytes"] = None if raw == "max" else int(raw)
-            except FileNotFoundError:
-                pass
-        # ── cgroup v1 ──
-        elif os.path.exists("/sys/fs/cgroup/memory/memory.usage_in_bytes"):
-            with open("/sys/fs/cgroup/memory/memory.usage_in_bytes") as fh:
-                out["memory_used_bytes"] = int(fh.read().strip())
-            with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as fh:
-                limit = int(fh.read().strip())
-            # v1 reports "no limit" as a number near 2^63; treat it as unlimited
-            out["memory_limit_bytes"] = None if limit > (1 << 62) else limit
-    except Exception:
-        pass
-
-    try:
-        with open("/proc/loadavg") as fh:
-            out["load_1m"] = float(fh.read().split()[0])
-    except Exception:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                key, _, rest = line.partition(":")
+                parts = rest.split()
+                if parts:
+                    out[key] = int(parts[0]) * 1024      # kB -> bytes
+    except OSError:
         pass
     return out
+
+
+def _read_resources() -> dict:
+    """CPU, RAM and swap, read from cgroup and /proc without extra privileges.
+
+    cgroup first, because the container's limit is what decides whether this
+    pod gets killed — the host having 8GB free is no comfort when the cgroup
+    cap is 512MB. /proc/meminfo fills in swap and the host totals.
+
+    Every value is optional: none of this exists on macOS, so a developer sees
+    empty tiles rather than a stack trace.
+    """
+    out = {"cpu_count": os.cpu_count()}
+
+    # ── memory ──
+    mem_cur = _read_first("/sys/fs/cgroup/memory.current",
+                          "/sys/fs/cgroup/memory/memory.usage_in_bytes")
+    if mem_cur and mem_cur.isdigit():
+        out["memory_used_bytes"] = int(mem_cur)
+
+    mem_max = _read_first("/sys/fs/cgroup/memory.max",
+                          "/sys/fs/cgroup/memory/memory.limit_in_bytes")
+    if mem_max and mem_max != "max" and mem_max.isdigit():
+        limit = int(mem_max)
+        # cgroup v1 spells "no limit" as a number near 2^63
+        out["memory_limit_bytes"] = None if limit > (1 << 62) else limit
+
+    info = _read_meminfo()
+    if info:
+        out["host_memory_total_bytes"] = info.get("MemTotal")
+        avail = info.get("MemAvailable")
+        if avail is not None and info.get("MemTotal"):
+            out["host_memory_used_bytes"] = info["MemTotal"] - avail
+        # ── swap ── bootstrap.sh adds 4GB precisely because RAM is tight here,
+        # so swap filling is a real signal and not a curiosity
+        total, free = info.get("SwapTotal"), info.get("SwapFree")
+        if total:
+            out["swap_total_bytes"] = total
+            out["swap_used_bytes"] = total - (free or 0)
+            out["swap_used_percent"] = round((total - (free or 0)) / total * 100, 1)
+        # if the cgroup gave no limit, the host total is the honest ceiling
+        out.setdefault("memory_limit_bytes", info.get("MemTotal"))
+        out.setdefault("memory_used_bytes", out.get("host_memory_used_bytes"))
+
+    # ── cpu ── cumulative microseconds; the caller differences two samples
+    cpu = _read_first("/sys/fs/cgroup/cpu.stat")
+    if cpu:
+        for line in cpu.splitlines():
+            if line.startswith("usage_usec"):
+                out["cpu_usage_usec"] = int(line.split()[1])
+                break
+    else:
+        v1 = _read_first("/sys/fs/cgroup/cpuacct/cpuacct.usage")   # nanoseconds
+        if v1 and v1.isdigit():
+            out["cpu_usage_usec"] = int(v1) // 1000
+
+    quota = _read_first("/sys/fs/cgroup/cpu.max")
+    if quota and quota != "max":
+        try:
+            q, period = quota.split()
+            if q != "max":
+                out["cpu_limit_cores"] = round(int(q) / int(period), 2)
+        except ValueError:
+            pass
+
+    load = _read_first("/proc/loadavg")
+    if load:
+        try:
+            out["load_1m"], out["load_5m"], out["load_15m"] = (
+                float(x) for x in load.split()[:3])
+        except ValueError:
+            pass
+    return out
+
+
+# kept for callers that only wanted the two memory facts
+def _read_container_limits() -> dict:
+    return _read_resources()
 
 
 @router.get("/live")
@@ -83,10 +214,10 @@ async def monitoring_live():
     snap = mx.snapshot()
     snap["ts"] = _t.time()
     snap["uptime_seconds"] = int(_t.time() - _STARTED)
-    limits = _read_container_limits()
-    snap["memory_used_bytes"] = limits.get("memory_used_bytes") or snap.get("rss_bytes")
-    snap["memory_limit_bytes"] = limits.get("memory_limit_bytes")
-    snap["load_1m"] = limits.get("load_1m")
+    res = _read_resources()
+    snap.update(res)
+    # process RSS is the fallback when no cgroup is readable
+    snap["memory_used_bytes"] = res.get("memory_used_bytes") or snap.get("rss_bytes")
     try:
         u = shutil.disk_usage(settings.images_path)
         snap["disk_used_percent"] = round((u.total - u.free) / u.total * 100, 1)
@@ -169,8 +300,21 @@ async def monitoring_overview(db: AsyncSession = Depends(get_db)):
     mx.properties_total.set(props)
     mx.leads_total.set(leads)
 
+    # Scraper liveness is a different question from the API's: the process can
+    # be up for days while the scraper has not completed a job since Tuesday.
+    running = (await db.execute(
+        select(func.count(ScrapingJob.id)).where(
+            ScrapingJob.status == "running"))).scalar() or 0
+
     return {
         "uptime_seconds": int(time.time() - _STARTED),
+        "system": _system_info(),
+        "network": {
+            "server_ip": settings.server_ip,
+            "domain": settings.domain,
+            "reachability": await _check_reachability(),
+        },
+        "scraper_running": running,
         "services": services,
         "scraper": {
             "jobs_by_status": jobs,

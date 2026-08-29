@@ -7418,6 +7418,43 @@ async function loadMonitoring() {
             ? 'آخرین تسک موفق: ' + new Date(d.scraper.last_completed_at).toLocaleString('fa-IR')
             : 'هنوز تسک موفقی ثبت نشده');
 
+        // ── host, network, uptimes ──
+        const sys = d.system || {}, net = d.network || {};
+        _setTile('sys-os', sys.distro || sys.os || '—');
+        _setTile('sys-arch', `${sys.arch || '—'} · Python ${sys.python || '—'}`);
+        _setTile('sys-host', sys.hostname || '—');
+        _setTile('sys-ip', net.server_ip || '—');
+        _setTile('sys-domain', net.domain || '—');
+
+        _setTile('up-panel', _fmtUptime(d.uptime_seconds));
+        _setTile('up-host', sys.host_uptime_seconds != null
+            ? _fmtUptime(sys.host_uptime_seconds) : '—');
+
+        // The API being up says nothing about the scraper: the process can run
+        // for days while no job has completed since Tuesday.
+        const lastDone = d.scraper?.last_completed_at;
+        const running = d.scraper_running || 0;
+        const upScraper = document.getElementById('up-scraper');
+        if (running > 0) {
+            upScraper.innerHTML = `<span class="text-success">${formatNumber(running)} تسک در حال اجرا</span>`;
+        } else if (lastDone) {
+            const hrs = (Date.now() - new Date(lastDone)) / 3600000;
+            const cls = hrs > 48 ? 'text-warning' : '';
+            upScraper.innerHTML = `<span class="${cls}">آخرین تسک: ${esc(_fmtUptime(hrs * 3600))} پیش</span>`;
+        } else {
+            upScraper.textContent = 'هنوز تسکی اجرا نشده';
+        }
+
+        const dv = net.reachability?.divar;
+        const dvEl = document.getElementById('net-divar');
+        if (dv) {
+            dvEl.innerHTML = dv.up
+                ? `<span class="text-success">در دسترس</span>
+                   <span class="text-muted small" dir="ltr"> ${esc(dv.latency_ms)} ms</span>`
+                : `<span class="text-danger">در دسترس نیست</span>
+                   <span class="text-muted small">${esc(dv.error || dv.status || '')}</span>`;
+        }
+
         await Promise.all([loadGcpStatus(), loadMonitoringLogs()]);
         startLive();
     } catch (e) {
@@ -7537,6 +7574,19 @@ function _liveChartInit() {
     });
 }
 
+// One place decides the colour, so CPU, RAM and swap agree on what "worrying"
+// means instead of each picking its own thresholds.
+function _setBar(barId, textId, percent, text) {
+    const txt = document.getElementById(textId);
+    if (txt) txt.textContent = text;
+    const bar = document.getElementById(barId);
+    if (!bar) return;
+    if (percent == null || !isFinite(percent)) { bar.style.width = '0%'; return; }
+    const p = Math.max(0, Math.min(percent, 100));
+    bar.style.width = p + '%';
+    bar.className = 'progress-bar ' + (p > 90 ? 'bg-danger' : p > 75 ? 'bg-warning' : 'bg-success');
+}
+
 function _fmtRate(n) {
     if (n == null || !isFinite(n)) return '—';
     return n < 10 ? n.toFixed(2) : Math.round(n).toString();
@@ -7556,8 +7606,16 @@ async function tickLive() {
             // average over the interval, not since boot — a slow start would
             // otherwise hide behind hours of healthy traffic
             const lat = dCount > 0 ? (dSum / dCount) * 1000 : null;
-            const cpu = (s.cpu_seconds != null && _livePrev.cpu_seconds != null)
-                ? ((s.cpu_seconds - _livePrev.cpu_seconds) / dt) * 100 : null;
+            // cgroup usage is cumulative microseconds across all cores, so the
+            // percentage is scaled by the core count the container may use —
+            // otherwise a busy 4-core box reads as 400%.
+            let cpu = null;
+            if (s.cpu_usage_usec != null && _livePrev.cpu_usage_usec != null) {
+                const cores = s.cpu_limit_cores || s.cpu_count || 1;
+                cpu = ((s.cpu_usage_usec - _livePrev.cpu_usage_usec) / 1e6 / dt / cores) * 100;
+            } else if (s.cpu_seconds != null && _livePrev.cpu_seconds != null) {
+                cpu = ((s.cpu_seconds - _livePrev.cpu_seconds) / dt) * 100;   // process fallback
+            }
 
             document.getElementById('live-rps').textContent = _fmtRate(rps);
             const epsEl = document.getElementById('live-eps');
@@ -7565,8 +7623,13 @@ async function tickLive() {
             epsEl.className = 'fs-5 fw-bold ' + (eps > 0 ? 'text-danger' : '');
             document.getElementById('live-lat').textContent =
                 lat != null ? Math.round(lat) + ' ms' : '—';
+            _setBar('live-cpu-bar', 'live-cpu-txt', cpu,
+                    cpu != null ? cpu.toFixed(1) + '%' : '—');
             document.getElementById('live-cpu').textContent =
                 cpu != null ? cpu.toFixed(1) + '%' : '—';   // null on macOS: no /proc
+            document.getElementById('live-load').textContent = s.load_1m != null
+                ? `load ${s.load_1m.toFixed(2)} / ${(s.load_5m ?? 0).toFixed(2)} / ${(s.load_15m ?? 0).toFixed(2)}`
+                : '';
 
             _liveChartInit();
             if (_liveChart) {
@@ -7582,11 +7645,25 @@ async function tickLive() {
             }
         }
 
+        // RAM — against the cgroup limit where there is one, because that is
+        // the number that decides whether the pod gets killed
         const mem = s.memory_used_bytes, lim = s.memory_limit_bytes;
-        document.getElementById('live-mem-txt').textContent =
-            mem ? _fmtBytes(mem) + (lim ? ' / ' + _fmtBytes(lim) : '') : '—';
-        const bar = document.getElementById('live-mem-bar');
-        if (bar && mem && lim) bar.style.width = Math.min((mem / lim) * 100, 100) + '%';
+        const memPct = (mem && lim) ? (mem / lim) * 100 : null;
+        _setBar('live-mem-bar', 'live-mem-txt', memPct,
+                mem ? _fmtBytes(mem) + (lim ? ' / ' + _fmtBytes(lim) : '') : '—');
+        document.getElementById('live-mem-note').textContent =
+            memPct != null ? `${formatNumber(memPct.toFixed(0))}٪ استفاده‌شده` : '';
+
+        // Swap — the server runs with 4GB of it because RAM is tight, so swap
+        // filling is a real signal that something is about to go badly.
+        const swPct = s.swap_used_percent;
+        _setBar('live-swap-bar', 'live-swap-txt', swPct,
+                s.swap_total_bytes
+                    ? _fmtBytes(s.swap_used_bytes) + ' / ' + _fmtBytes(s.swap_total_bytes)
+                    : '—');
+        document.getElementById('live-swap-note').textContent =
+            swPct != null ? `${formatNumber(swPct)}٪ استفاده‌شده`
+                          : (s.swap_total_bytes === 0 ? 'بدون swap' : '');
 
         document.getElementById('live-scraper').textContent =
             `${formatNumber(s.reveals || 0)} / ${formatNumber(s.challenges || 0)}`

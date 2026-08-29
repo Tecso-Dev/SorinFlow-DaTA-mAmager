@@ -1689,6 +1689,51 @@
                     </div>
                 </div>
 
+                <!-- Host, network and outbound reachability. Admin-only screen, so
+                     the server IP is fine here; it must not reach a public page. -->
+                <div class="row g-3 mb-3">
+                    <div class="col-lg-6">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="bi bi-hdd-stack"></i> سرور و سیستم</div>
+                            <div class="card-body">
+                                <table class="table table-sm mb-0" style="font-size:.82rem">
+                                    <tbody>
+                                        <tr><td class="text-muted">سیستم‌عامل</td>
+                                            <td dir="ltr" id="sys-os">—</td></tr>
+                                        <tr><td class="text-muted">معماری / پایتون</td>
+                                            <td dir="ltr" id="sys-arch">—</td></tr>
+                                        <tr><td class="text-muted">نام میزبان</td>
+                                            <td dir="ltr" id="sys-host">—</td></tr>
+                                        <tr><td class="text-muted">آی‌پی سرور</td>
+                                            <td dir="ltr" id="sys-ip">—</td></tr>
+                                        <tr><td class="text-muted">دامنه</td>
+                                            <td dir="ltr" id="sys-domain">—</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="bi bi-stopwatch"></i> مدت کارکرد و اتصال</div>
+                            <div class="card-body">
+                                <table class="table table-sm mb-0" style="font-size:.82rem">
+                                    <tbody>
+                                        <tr><td class="text-muted">پنل (این پردازه)</td>
+                                            <td id="up-panel">—</td></tr>
+                                        <tr><td class="text-muted">سرور (میزبان)</td>
+                                            <td id="up-host">—</td></tr>
+                                        <tr><td class="text-muted">اسکرپر</td>
+                                            <td id="up-scraper">—</td></tr>
+                                        <tr><td class="text-muted">اتصال به دیوار</td>
+                                            <td id="net-divar">—</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="row g-3 mb-3">
                     <div class="col-lg-7">
                         <div class="card h-100">
@@ -1754,21 +1799,43 @@
                             </div>
                         </div>
                         <div style="height:180px"><canvas id="liveChart"></canvas></div>
-                        <div class="row g-3 mt-1">
-                            <div class="col-md-6">
-                                <div class="text-muted small mb-1">
-                                    حافظه <span dir="ltr" id="live-mem-txt"></span>
+                        <!-- CPU / RAM / swap, read from cgroup and /proc. Empty on a
+                             machine without /proc rather than showing a wrong number. -->
+                        <div class="row g-3 mt-2">
+                            <div class="col-md-4">
+                                <div class="d-flex justify-content-between small">
+                                    <span class="text-muted">پردازنده</span>
+                                    <span dir="ltr" id="live-cpu-txt">—</span>
                                 </div>
-                                <div class="progress" style="height:6px">
+                                <div class="progress mt-1" style="height:7px">
+                                    <div class="progress-bar" id="live-cpu-bar" style="width:0%"></div>
+                                </div>
+                                <div class="small text-muted mt-1" dir="ltr" id="live-load"></div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="d-flex justify-content-between small">
+                                    <span class="text-muted">حافظه (RAM)</span>
+                                    <span dir="ltr" id="live-mem-txt">—</span>
+                                </div>
+                                <div class="progress mt-1" style="height:7px">
                                     <div class="progress-bar bg-info" id="live-mem-bar" style="width:0%"></div>
                                 </div>
+                                <div class="small text-muted mt-1" id="live-mem-note"></div>
                             </div>
-                            <div class="col-md-6">
-                                <div class="text-muted small mb-1">
-                                    اسکرپر — تماس‌های گرفته‌شده / کد درخواستی
+                            <div class="col-md-4">
+                                <div class="d-flex justify-content-between small">
+                                    <span class="text-muted">حافظهٔ مجازی (Swap)</span>
+                                    <span dir="ltr" id="live-swap-txt">—</span>
                                 </div>
-                                <div class="fw-bold" dir="ltr" id="live-scraper">—</div>
+                                <div class="progress mt-1" style="height:7px">
+                                    <div class="progress-bar bg-warning" id="live-swap-bar" style="width:0%"></div>
+                                </div>
+                                <div class="small text-muted mt-1" id="live-swap-note"></div>
                             </div>
+                        </div>
+                        <div class="mt-3 small">
+                            <span class="text-muted">اسکرپر — تماس‌های گرفته‌شده / کد درخواستی:</span>
+                            <span class="fw-bold" dir="ltr" id="live-scraper">—</span>
                         </div>
                     </div>
                 </div>
