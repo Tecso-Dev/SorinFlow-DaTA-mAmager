@@ -774,14 +774,31 @@ pre {
 }
 .form-control::placeholder { color: var(--text-muted); }
 
-/* Fix browser autofill overriding dark theme background */
+/* Fix browser autofill overriding the theme.
+   Chrome paints an autofilled field itself and ignores background-color, so
+   the only way to reach it is an inset shadow. The previous rule covered
+   input:-webkit-autofill alone, which left selects and textareas — and any
+   browser that only understands the unprefixed :autofill — showing a white
+   box on a dark panel. The colour is a solid token, because an inset shadow
+   in rgba() lets the browser's own fill show through it. */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
-input:-webkit-autofill:active {
+input:-webkit-autofill:active,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+input:autofill,
+select:autofill,
+textarea:autofill {
   -webkit-text-fill-color: var(--text) !important;
   -webkit-box-shadow: 0 0 0 1000px var(--surface2) inset !important;
+  box-shadow: 0 0 0 1000px var(--surface2) inset !important;
   caret-color: var(--text);
+  border-color: var(--border) !important;
 }
 /* Same fix for Firefox & standards-based autofill (separate rule:
    an unsupported selector would invalidate the whole group above) */

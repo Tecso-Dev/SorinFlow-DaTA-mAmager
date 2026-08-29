@@ -1955,12 +1955,14 @@
                             <div class="col-sm-4">
                                 <label class="form-label small">شمارهٔ تماس اضطراری</label>
                                 <input type="text" id="maintenance-phone" class="form-control form-control-sm"
-                                       dir="ltr" maxlength="32" placeholder="09123456789">
+                                       dir="ltr" maxlength="32" placeholder="09123456789"
+                                       autocomplete="off">
                             </div>
                             <div class="col-sm-4">
                                 <label class="form-label small">ایمیل پشتیبانی</label>
                                 <input type="email" id="maintenance-email" class="form-control form-control-sm"
-                                       dir="ltr" maxlength="200" placeholder="support@sorinflow.com">
+                                       dir="ltr" maxlength="200" placeholder="support@sorinflow.com"
+                                       autocomplete="off">
                             </div>
                         </div>
                         <p class="text-muted small mb-2">
@@ -1992,19 +1994,21 @@
                                 <form id="user-create-form">
                                     <div class="mb-2">
                                         <label class="form-label">نام کاربری</label>
-                                        <input type="text" id="new-username" class="form-control form-control-sm" required>
+                                        <input type="text" id="new-username" class="form-control form-control-sm" required
+                                               autocomplete="off">
                                     </div>
                                     <div class="mb-2">
                                         <label class="form-label">نام کامل</label>
-                                        <input type="text" id="new-fullname" class="form-control form-control-sm">
+                                        <input type="text" id="new-fullname" class="form-control form-control-sm" autocomplete="off">
                                     </div>
                                     <div class="mb-2">
                                         <label class="form-label">ایمیل</label>
-                                        <input type="email" id="new-email" class="form-control form-control-sm">
+                                        <input type="email" id="new-email" class="form-control form-control-sm" autocomplete="off">
                                     </div>
                                     <div class="mb-2">
                                         <label class="form-label">رمز عبور</label>
-                                        <input type="password" id="new-password" class="form-control form-control-sm" required>
+                                        <input type="password" id="new-password" class="form-control form-control-sm" required
+                                               autocomplete="new-password">
                                     </div>
                                     <div class="mb-2">
                                         <label class="form-label">نقش</label>
@@ -2019,7 +2023,8 @@
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">شماره دیوار <small class="text-muted">(اختیاری)</small></label>
-                                        <input type="text" id="new-divar-phone" class="form-control form-control-sm" placeholder="09xxxxxxxxx">
+                                        <input type="text" id="new-divar-phone" class="form-control form-control-sm"
+                                               placeholder="09xxxxxxxxx" autocomplete="off">
                                     </div>
                                     <button type="submit" class="btn btn-primary btn-w100 btn-sm">
                                         <i class="bi bi-plus-circle"></i> ساخت کاربر
