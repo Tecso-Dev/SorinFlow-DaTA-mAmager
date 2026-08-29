@@ -70,8 +70,7 @@ def _read_container_limits() -> dict:
 
 
 @router.get("/overview")
-async def monitoring_overview(db: AsyncSession = Depends(get_db),
-                              _=Depends(lambda: None)):
+async def monitoring_overview(db: AsyncSession = Depends(get_db)):
     """Health, resources and throughput in one call.
 
     One call rather than five because the screen refreshes on a timer and five
