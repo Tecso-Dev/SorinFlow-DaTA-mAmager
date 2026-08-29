@@ -10,10 +10,11 @@
 pytest==7.4.4
 pytest-asyncio==0.23.3
 
-# The app is async SQLAlchemy over Postgres. The suite runs against SQLite so it
-# needs no database service, which needs the async SQLite driver.
+# CI runs the suite against a real Postgres service, but DATABASE_URL falls back
+# to SQLite when nothing sets it, so a bare `pytest` still works on a laptop
+# with no database running. That fallback needs the async SQLite driver.
 aiosqlite==0.19.0
 
-# Verification codes and login throttling live in Redis. fakeredis keeps those
-# tests hermetic without standing a server up.
+# Verification codes and login throttling live in Redis. fakeredis lets the auth
+# tests run without a server, so they stay hermetic wherever the suite is run.
 fakeredis==2.21.0
