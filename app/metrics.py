@@ -121,6 +121,47 @@ def sample_disk(path: str) -> None:
         pass
 
 
+def snapshot() -> dict:
+    """Aggregate counter totals, for the panel's live view.
+
+    Counters are monotonic, so a rate needs two samples and the difference
+    between them. That subtraction happens in the browser rather than here: it
+    keeps a rolling window per open screen with no server-side history, no
+    retention policy and no storage — and "live" only ever means the last few
+    minutes anyway.
+    """
+    totals = {"requests": 0.0, "errors": 0.0, "latency_sum": 0.0,
+              "latency_count": 0.0, "reveals": 0.0, "challenges": 0.0,
+              "rotations": 0.0, "cpu_seconds": None, "rss_bytes": None}
+    try:
+        for metric in REGISTRY.collect():
+            for sample in metric.samples:
+                name, labels, value = sample.name, sample.labels, sample.value
+                if name == "sorinflow_http_requests_total":
+                    totals["requests"] += value
+                    # 4xx is the caller's problem; 5xx is ours, and only ours
+                    # belongs on an error-rate line somebody is paged for.
+                    if labels.get("status", "").startswith("5"):
+                        totals["errors"] += value
+                elif name == "sorinflow_http_request_seconds_sum":
+                    totals["latency_sum"] += value
+                elif name == "sorinflow_http_request_seconds_count":
+                    totals["latency_count"] += value
+                elif name == "sorinflow_scraper_contact_reveals_total":
+                    totals["reveals"] += value
+                elif name == "sorinflow_scraper_otp_challenges_total":
+                    totals["challenges"] += value
+                elif name == "sorinflow_scraper_account_rotations_total":
+                    totals["rotations"] += value
+                elif name == "process_cpu_seconds_total":
+                    totals["cpu_seconds"] = value
+                elif name == "process_resident_memory_bytes":
+                    totals["rss_bytes"] = value
+    except Exception:
+        pass
+    return totals
+
+
 class Timer:
     """Context manager that records a dependency round trip and whether it
     answered at all."""

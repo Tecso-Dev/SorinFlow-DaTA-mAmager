@@ -7419,6 +7419,7 @@ async function loadMonitoring() {
             : 'هنوز تسک موفقی ثبت نشده');
 
         await Promise.all([loadGcpStatus(), loadMonitoringLogs()]);
+        startLive();
     } catch (e) {
         showToast('خطا', 'خواندن وضعیت سامانه ناموفق بود', 'danger');
     }
@@ -7494,5 +7495,142 @@ async function loadMonitoringLogs() {
         box.scrollTop = box.scrollHeight;
     } catch (e) {
         box.textContent = 'خواندن لاگ ناموفق بود: ' + e.message;
+    }
+}
+
+
+// ══════════ live server status ═══════════════════════════════════════════
+// Polls /api/monitoring/live every 5s and derives rates from the difference
+// between two counter samples. The window lives in the browser, so there is no
+// server-side history to store, expire or size — and "live" only ever means
+// the last few minutes anyway.
+
+let _liveTimer = null, _livePrev = null, _liveChart = null, _liveOn = true;
+const LIVE_POINTS = 40;                      // ~3.5 minutes at 5s
+
+function _liveChartInit() {
+    const el = document.getElementById('liveChart');
+    if (!el || _liveChart) return;
+    const c = chartColors();
+    _liveChart = new Chart(el, {
+        type: 'line',
+        data: { labels: [], datasets: [
+            { label: 'درخواست/ثانیه', data: [], borderColor: '#a78bfa',
+              backgroundColor: 'rgba(167,139,250,.12)', fill: true,
+              tension: .35, pointRadius: 0, borderWidth: 2, yAxisID: 'y' },
+            { label: 'پاسخ (ms)', data: [], borderColor: '#67e8f9',
+              tension: .35, pointRadius: 0, borderWidth: 2, yAxisID: 'y1' },
+        ]},
+        options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            interaction: { intersect: false, mode: 'index' },
+            plugins: { legend: { labels: { color: c.text, boxWidth: 10, font: { size: 10 } } } },
+            scales: {
+                x: { ticks: { color: c.tick, maxTicksLimit: 6, font: { size: 9 } },
+                     grid: { color: 'transparent' } },
+                y: { position: 'right', beginAtZero: true,
+                     ticks: { color: c.tick, font: { size: 9 } }, grid: { color: c.grid } },
+                y1: { position: 'left', beginAtZero: true, grid: { display: false },
+                      ticks: { color: c.tick, font: { size: 9 } } },
+            },
+        },
+    });
+}
+
+function _fmtRate(n) {
+    if (n == null || !isFinite(n)) return '—';
+    return n < 10 ? n.toFixed(2) : Math.round(n).toString();
+}
+
+async function tickLive() {
+    if (!_liveOn) return;
+    try {
+        const s = await apiCall('/monitoring/live');
+
+        if (_livePrev) {
+            const dt = Math.max(s.ts - _livePrev.ts, 0.001);
+            const rps = (s.requests - _livePrev.requests) / dt;
+            const eps = (s.errors - _livePrev.errors) / dt;
+            const dCount = s.latency_count - _livePrev.latency_count;
+            const dSum = s.latency_sum - _livePrev.latency_sum;
+            // average over the interval, not since boot — a slow start would
+            // otherwise hide behind hours of healthy traffic
+            const lat = dCount > 0 ? (dSum / dCount) * 1000 : null;
+            const cpu = (s.cpu_seconds != null && _livePrev.cpu_seconds != null)
+                ? ((s.cpu_seconds - _livePrev.cpu_seconds) / dt) * 100 : null;
+
+            document.getElementById('live-rps').textContent = _fmtRate(rps);
+            const epsEl = document.getElementById('live-eps');
+            epsEl.textContent = _fmtRate(eps);
+            epsEl.className = 'fs-5 fw-bold ' + (eps > 0 ? 'text-danger' : '');
+            document.getElementById('live-lat').textContent =
+                lat != null ? Math.round(lat) + ' ms' : '—';
+            document.getElementById('live-cpu').textContent =
+                cpu != null ? cpu.toFixed(1) + '%' : '—';   // null on macOS: no /proc
+
+            _liveChartInit();
+            if (_liveChart) {
+                const t = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                _liveChart.data.labels.push(t);
+                _liveChart.data.datasets[0].data.push(+rps.toFixed(2));
+                _liveChart.data.datasets[1].data.push(lat != null ? Math.round(lat) : null);
+                if (_liveChart.data.labels.length > LIVE_POINTS) {
+                    _liveChart.data.labels.shift();
+                    _liveChart.data.datasets.forEach(d => d.data.shift());
+                }
+                _liveChart.update('none');
+            }
+        }
+
+        const mem = s.memory_used_bytes, lim = s.memory_limit_bytes;
+        document.getElementById('live-mem-txt').textContent =
+            mem ? _fmtBytes(mem) + (lim ? ' / ' + _fmtBytes(lim) : '') : '—';
+        const bar = document.getElementById('live-mem-bar');
+        if (bar && mem && lim) bar.style.width = Math.min((mem / lim) * 100, 100) + '%';
+
+        document.getElementById('live-scraper').textContent =
+            `${formatNumber(s.reveals || 0)} / ${formatNumber(s.challenges || 0)}`
+            + (s.rotations ? ` — ${formatNumber(s.rotations)} چرخش` : '');
+        document.getElementById('mon-live-updated').textContent =
+            'آخرین بروزرسانی: ' + new Date().toLocaleTimeString('fa-IR');
+
+        _livePrev = s;
+        const badge = document.getElementById('mon-live-badge');
+        badge.className = 'badge bg-success d-inline-flex align-items-center gap-1';
+    } catch (e) {
+        // A failed poll marks the indicator rather than throwing a toast every
+        // five seconds — the screen itself is the error report.
+        const badge = document.getElementById('mon-live-badge');
+        if (badge) badge.className = 'badge bg-danger d-inline-flex align-items-center gap-1';
+    }
+}
+
+function startLive() {
+    clearInterval(_liveTimer);
+    _livePrev = null;
+    tickLive();
+    _liveTimer = setInterval(() => {
+        const sec = document.getElementById('section-monitoring');
+        // stop as soon as the screen is not on show — a poll every 5s against a
+        // single-replica box for a page nobody is looking at is pure load
+        if (!sec || sec.style.display === 'none') { stopLive(); return; }
+        tickLive();
+    }, 5000);
+}
+
+function stopLive() { clearInterval(_liveTimer); _liveTimer = null; }
+
+function toggleLive() {
+    _liveOn = !_liveOn;
+    const btn = document.getElementById('mon-live-toggle');
+    const badge = document.getElementById('mon-live-badge');
+    if (_liveOn) {
+        btn.textContent = 'توقف';
+        badge.className = 'badge bg-success d-inline-flex align-items-center gap-1';
+        startLive();
+    } else {
+        btn.textContent = 'ادامه';
+        badge.className = 'badge bg-secondary d-inline-flex align-items-center gap-1';
+        stopLive();
     }
 }

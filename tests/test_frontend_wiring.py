@@ -165,3 +165,22 @@ def test_log_lines_are_escaped_before_rendering():
     fn = js[js.index("async function loadMonitoringLogs"):]
     fn = fn[:fn.index("\n}")]
     assert "esc(l)" in fn, "log lines reach innerHTML without esc()"
+
+
+def test_live_polling_stops_when_the_screen_is_hidden():
+    """A 5s poll against a single-replica box for a page nobody is looking at
+    is pure load. The interval has to check and clear itself."""
+    js = _app_js()
+    fn = js[js.index("function startLive()"):]
+    fn = fn[:fn.index("function stopLive")]
+    assert "style.display === 'none'" in fn and "stopLive()" in fn, (
+        "the live interval never stops itself when the section is hidden")
+
+
+def test_live_rates_are_derived_from_two_samples():
+    """Counters are monotonic — showing them raw would display 'requests since
+    boot' and call it a rate."""
+    js = _app_js()
+    fn = js[js.index("async function tickLive"):js.index("function startLive")]
+    assert "_livePrev" in fn and "s.ts - _livePrev.ts" in fn, (
+        "live view does not difference consecutive samples")

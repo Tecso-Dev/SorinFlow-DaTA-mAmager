@@ -69,6 +69,32 @@ def _read_container_limits() -> dict:
     return out
 
 
+@router.get("/live")
+async def monitoring_live():
+    """A cheap snapshot for the live view, polled every few seconds.
+
+    Deliberately touches nothing but the in-process registry and /proc — no
+    database, no Redis. The overview does the expensive work on a slower timer;
+    this one has to be safe to call often on a single-replica box.
+    """
+    import shutil
+    import time as _t
+
+    snap = mx.snapshot()
+    snap["ts"] = _t.time()
+    snap["uptime_seconds"] = int(_t.time() - _STARTED)
+    limits = _read_container_limits()
+    snap["memory_used_bytes"] = limits.get("memory_used_bytes") or snap.get("rss_bytes")
+    snap["memory_limit_bytes"] = limits.get("memory_limit_bytes")
+    snap["load_1m"] = limits.get("load_1m")
+    try:
+        u = shutil.disk_usage(settings.images_path)
+        snap["disk_used_percent"] = round((u.total - u.free) / u.total * 100, 1)
+    except Exception:
+        pass
+    return snap
+
+
 @router.get("/overview")
 async def monitoring_overview(db: AsyncSession = Depends(get_db)):
     """Health, resources and throughput in one call.

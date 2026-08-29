@@ -1720,6 +1720,59 @@
                     </div>
                 </div>
 
+                <!-- Live server status. Rates are derived in the browser from two
+                     consecutive counter samples, so there is no server-side history
+                     to store, expire or size. -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-broadcast"></i> وضعیت زندهٔ سرور
+                        <span class="badge bg-success d-inline-flex align-items-center gap-1"
+                              id="mon-live-badge">
+                            <span class="live-dot"></span> زنده
+                        </span>
+                        <span class="small text-muted ms-auto" id="mon-live-updated"></span>
+                        <button class="btn btn-sm btn-outline-secondary" id="mon-live-toggle"
+                                onclick="toggleLive()">توقف</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3 mb-3">
+                            <div class="col-6 col-lg-3">
+                                <div class="text-muted small">درخواست بر ثانیه</div>
+                                <div class="fs-5 fw-bold" dir="ltr" id="live-rps">—</div>
+                            </div>
+                            <div class="col-6 col-lg-3">
+                                <div class="text-muted small">خطا بر ثانیه (۵xx)</div>
+                                <div class="fs-5 fw-bold" dir="ltr" id="live-eps">—</div>
+                            </div>
+                            <div class="col-6 col-lg-3">
+                                <div class="text-muted small">میانگین پاسخ</div>
+                                <div class="fs-5 fw-bold" dir="ltr" id="live-lat">—</div>
+                            </div>
+                            <div class="col-6 col-lg-3">
+                                <div class="text-muted small">پردازنده</div>
+                                <div class="fs-5 fw-bold" dir="ltr" id="live-cpu">—</div>
+                            </div>
+                        </div>
+                        <div style="height:180px"><canvas id="liveChart"></canvas></div>
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-6">
+                                <div class="text-muted small mb-1">
+                                    حافظه <span dir="ltr" id="live-mem-txt"></span>
+                                </div>
+                                <div class="progress" style="height:6px">
+                                    <div class="progress-bar bg-info" id="live-mem-bar" style="width:0%"></div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="text-muted small mb-1">
+                                    اسکرپر — تماس‌های گرفته‌شده / کد درخواستی
+                                </div>
+                                <div class="fw-bold" dir="ltr" id="live-scraper">—</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-header d-flex align-items-center gap-2 flex-wrap">
                         <i class="bi bi-journal-text"></i> لاگ سامانه

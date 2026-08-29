@@ -2390,3 +2390,9 @@ select.status-quick {
  font-size:.8rem;font-weight:400;cursor:pointer}
 .perm-box input{margin:0;flex:none}
 @media(max-width:520px){.perm-box{grid-template-columns:1fr}}
+
+/* ── live status indicator ────────────────────────────────────────────────── */
+.live-dot{width:7px;height:7px;border-radius:50%;background:currentColor;
+ display:inline-block;animation:live-pulse 1.6s ease-in-out infinite}
+@keyframes live-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+@media (prefers-reduced-motion: reduce){.live-dot{animation:none}}
