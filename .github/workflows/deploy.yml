@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+  # Run the gate on pull requests too. Without this a PR got no checks at all
+  # and the suite only ran after merging — which is the one moment it is too
+  # late to learn something is broken. build and deploy stay push-only below,
+  # so a pull request is tested and never shipped.
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 env:
@@ -88,6 +95,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: test
+    # Never from a pull request: building would push an image to the registry
+    # tagged with a SHA that may never reach main.
+    if: github.event_name != 'pull_request' 
     permissions:
       contents: read
       packages: write
@@ -138,6 +148,7 @@ jobs:
   deploy:
     runs-on: [self-hosted, sorinflow]
     needs: build
+    if: github.event_name != 'pull_request' 
     permissions:
       contents: read
       packages: read
