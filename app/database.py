@@ -87,8 +87,24 @@ async def init_db():
         await _migrate_customer_criteria(conn)
         await _migrate_filing(conn)
         await _migrate_advertiser_type(conn)
-        await _migrate_auth_v2(conn)
         await _seed_reference_data(conn)
+
+    # Own transaction, deliberately outside the block above.
+    #
+    # Every migration up there swallows its own exception, which reads as
+    # "carry on regardless" — but Postgres aborts the whole transaction on the
+    # first failed statement, so a swallowed error silently turns every later
+    # statement into "current transaction is aborted". Sharing that transaction
+    # meant one unrelated migration failing could stop the users table getting
+    # its columns, and the verification below would then report a poisoned
+    # transaction rather than what is actually missing.
+    async with engine.begin() as conn:
+        await _migrate_auth_v2(conn)
+
+    # And a clean one for the check, so it reads the real schema rather than
+    # inheriting the wreckage of a failed migration and mis-reporting why.
+    async with engine.begin() as conn:
+        await _verify_auth_v2(conn)
 
     await _seed_super_admin()
     await _seed_root()
@@ -513,8 +529,6 @@ async def _migrate_auth_v2(conn):
         # Swallowed like its siblings — but see the verification below, which
         # is what actually decides whether this boot may continue.
         print(f"auth v2 migration statements failed: {e}")
-
-    await _verify_auth_v2(conn)
 
 
 async def _verify_auth_v2(conn):

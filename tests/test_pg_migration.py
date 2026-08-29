@@ -139,12 +139,93 @@ def test_boot_guard_raises_on_a_half_applied_schema():
 
     async def _go():
         eng = create_async_engine(PG_URL)
-        async with eng.begin() as c:
-            await c.execute(text("DROP TABLE IF EXISTS users CASCADE"))
-            await c.execute(text(
-                "CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(100))"))
-            with pytest.raises(RuntimeError, match="missing"):
-                await _verify_auth_v2(c)
-        await eng.dispose()
+        try:
+            async with eng.begin() as c:
+                await c.execute(text("DROP TABLE IF EXISTS users CASCADE"))
+                await c.execute(text(
+                    "CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(100))"))
+                with pytest.raises(RuntimeError, match="missing"):
+                    await _verify_auth_v2(c)
+        finally:
+            # Put the table back before leaving. This test deliberately leaves a
+            # users table with no `role` column, and anything that runs
+            # init_db() against this database afterwards — the rest of the
+            # suite, or simply the next run — hits
+            # `UPDATE users ... WHERE role = 'user'`, which aborts the
+            # transaction and fails every test after it. CI gets a fresh
+            # service container and never noticed; a developer running the
+            # suite twice locally would.
+            async with eng.begin() as c:
+                for stmt in OLD_SCHEMA.strip().split(";"):
+                    if stmt.strip():
+                        await c.execute(text(stmt))
+            await eng.dispose()
 
     _run(_go())
+
+
+def test_auth_migration_survives_an_earlier_migration_failing():
+    """init_db() runs thirteen migrations. They used to share one transaction,
+    and each swallows its own exception — which on Postgres is a trap: the first
+    failed statement aborts the transaction, so every later migration silently
+    becomes "current transaction is aborted".
+
+    Here an earlier migration is made to fail for real (a duplicate serial_no
+    makes _migrate_property_serial's UNIQUE index impossible). The auth columns
+    must still land, because they now run in their own transaction.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    import app.database as db
+
+    # init_db() uses the module-level engine, which was bound to DATABASE_URL at
+    # import time — not to PG_TEST_URL. Point it at the test database for the
+    # duration, and put it back afterwards so no other test inherits it.
+    saved_engine, saved_maker = db.engine, db.async_session_maker
+    db.engine = create_async_engine(PG_URL)
+    db.async_session_maker = async_sessionmaker(
+        db.engine, expire_on_commit=False, autocommit=False, autoflush=False)
+
+    async def _go():
+        eng = create_async_engine(PG_URL)
+        async with eng.begin() as c:
+            # a users table from before this change
+            for stmt in OLD_SCHEMA.strip().split(";"):
+                if stmt.strip():
+                    await c.execute(text(stmt))
+            # and a properties table that will break the serial migration
+            await c.execute(text("DROP TABLE IF EXISTS properties CASCADE"))
+            await c.execute(text(
+                "CREATE TABLE properties (id SERIAL PRIMARY KEY, serial_no INTEGER, "
+                "title VARCHAR(500), description TEXT, seller_name VARCHAR(200), "
+                "advertiser_type VARCHAR(20))"))
+            await c.execute(text(
+                "INSERT INTO properties (serial_no, title) VALUES (1000,'a'),(1000,'b')"))
+        await eng.dispose()
+
+        # the real boot path, with a guaranteed failure part-way through
+        await db.init_db()
+
+        eng = create_async_engine(PG_URL)
+        async with eng.begin() as c:
+            cols = {r[0] for r in (await c.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='users' AND table_schema=current_schema()"))).all()}
+            roles = {r[0]: r[1] for r in (await c.execute(text(
+                "SELECT username, role FROM users"))).all()}
+        await eng.dispose()
+        return cols, roles
+
+    try:
+        cols, roles = _run(_go())
+    finally:
+        _run(db.engine.dispose())
+        db.engine, db.async_session_maker = saved_engine, saved_maker
+
+    for need in ("phone", "phone_verified", "marketing_opt_in", "permissions"):
+        assert need in cols, (
+            f"{need} missing — an unrelated migration's failure still poisons "
+            "the auth migration")
+    # and the backfill ran, so the boot was not merely 'not crashing'
+    assert roles["viewer1"] == "admin"
+    assert "user" not in roles.values()

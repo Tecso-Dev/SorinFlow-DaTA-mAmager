@@ -10,9 +10,11 @@
 pytest==7.4.4
 pytest-asyncio==0.23.3
 
-# CI runs the suite against a real Postgres service, but DATABASE_URL falls back
-# to SQLite when nothing sets it, so a bare `pytest` still works on a laptop
-# with no database running. That fallback needs the async SQLite driver.
+# The suite needs Postgres: scraping_jobs.job_id is a postgresql.UUID column and
+# the pinned SQLAlchemy cannot render it on SQLite, so create_all() fails and
+# every test that builds the schema errors out. The database-free tests still
+# run anywhere, and a few of them reach for the async SQLite driver, which is
+# why this stays — but point DATABASE_URL at a Postgres to run the whole suite.
 aiosqlite==0.19.0
 
 # Verification codes and login throttling live in Redis. fakeredis lets the auth

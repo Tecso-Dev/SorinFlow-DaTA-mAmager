@@ -36,6 +36,16 @@ def client():
     import app.database as db
     from app.config import get_settings
 
+    # These tests build the whole schema, and scraping_jobs.job_id is a
+    # postgresql.UUID column the pinned SQLAlchemy cannot render on SQLite.
+    # Without this the run is twenty pages of UnsupportedCompilationError with
+    # nothing saying what to do about it; one skip line says it plainly.
+    if not str(db.engine.url).startswith("postgresql"):
+        pytest.skip(
+            "needs Postgres (scraping_jobs.job_id is a postgresql UUID column) — "
+            "run with DATABASE_URL=postgresql+asyncpg://user@host/db",
+            allow_module_level=True)
+
     # One cached Settings instance is shared by every module that did
     # `settings = get_settings()` at import, so overriding it here reaches all
     # of them. Restored afterwards so the rest of the suite sees the real
