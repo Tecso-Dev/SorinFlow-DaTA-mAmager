@@ -43,6 +43,7 @@ PERMISSIONS = {
     "proxies":    "پروکسی‌ها",
     "stats":      "آمار و گزارش",
     "portal":     "درخواست‌های بازدیدکنندگان",
+    "monitoring": "پایش سامانه و Google Cloud",
 }
 
 ALL_PERMISSIONS = list(PERMISSIONS.keys())

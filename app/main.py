@@ -94,12 +94,24 @@ async def lifespan(app: FastAPI):
     # Rented leads come back as fresh files when the lease year ends
     lease_task = asyncio.create_task(_lease_expiry_checker())
 
+    # Google Cloud export. Returns immediately when disabled, which is the
+    # shipped default — and when enabled on a host that cannot reach Google it
+    # backs off rather than retrying every interval.
+    from app.services.gcp import pipeline as gcp_pipeline
+    if settings.gcp_enabled:
+        logger.add(gcp_pipeline.sink, level="INFO", filter=redact_filter,
+                   backtrace=False, diagnose=False)
+    gcp_task = asyncio.create_task(gcp_pipeline.exporter_loop())
+
     yield
 
     # Cleanup
     reminder_task.cancel()
     backup_task.cancel()
     lease_task.cancel()
+    gcp_task.cancel()
+    from app.services.gcp import gcp_client as _gcp
+    await _gcp.close()
     logger.info("Shutting down...")
     await close_db()
     await close_redis()

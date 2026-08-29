@@ -79,6 +79,28 @@ class Settings(BaseSettings):
     # photo and far below anything that hurts.
     max_image_pixels: int = Field(default=40_000_000, env="MAX_IMAGE_PIXELS")
 
+    # ── Google Cloud Observability ────────────────────────────────────────
+    # OFF by default. Google's endpoints are not reachable from this server, so
+    # turning it on is only useful behind a VPN, after a migration, or when
+    # pointing at a client's project. Everything fails soft when it cannot
+    # connect: the exporter degrades and reports on /api/gcp/status, and no
+    # request path or scraper ever waits on Google.
+    gcp_enabled: bool = Field(default=False, env="GCP_ENABLED")
+    gcp_project_id: str = Field(default="", env="GCP_PROJECT_ID")
+    # Either the service-account JSON itself, or a path to it.
+    gcp_service_account_json: str = Field(default="", env="GCP_SERVICE_ACCOUNT_JSON")
+    gcp_log_name: str = Field(default="sorinflow", env="GCP_LOG_NAME")
+    gcp_pubsub_topic: str = Field(default="", env="GCP_PUBSUB_TOPIC")
+    # generic_node resource labels — this is self-hosted k3s, not GKE
+    gcp_location: str = Field(default="ir-tehran", env="GCP_LOCATION")
+    gcp_namespace: str = Field(default="sorinflow", env="GCP_NAMESPACE")
+    gcp_node_id: str = Field(default="backend", env="GCP_NODE_ID")
+    gcp_export_interval: int = Field(default=60, env="GCP_EXPORT_INTERVAL")
+    gcp_batch_size: int = Field(default=200, env="GCP_BATCH_SIZE")
+    # Short: from a host that cannot reach Google the connection hangs rather
+    # than refusing, and a background task blocked for 30s is its own problem.
+    gcp_timeout_seconds: float = Field(default=10.0, env="GCP_TIMEOUT_SECONDS")
+
     # Proxy Settings
     proxy_enabled: bool = Field(default=False, env="PROXY_ENABLED")
     proxy_list: str = Field(default="", env="PROXY_LIST")
