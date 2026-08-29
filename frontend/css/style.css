@@ -40,6 +40,16 @@
   --bs-border-color: rgba(255,255,255,.08);
   --bs-emphasis-color: #ffffff;
   --bs-secondary-color: #8f9fb6;
+  /* Bootstrap's *-bg-subtle defaults are light-mode greys (#e2e3e5 and
+     friends). Nothing sets data-bs-theme here, so every .bg-*-subtle chip
+     -- the permission badges on the users table above all -- painted itself
+     pale on a black panel. Tint them from the panel instead. */
+  --bs-secondary-bg-subtle: rgba(255,255,255,.05);
+  --bs-primary-bg-subtle:   rgba(99,102,241,.16);
+  --bs-info-bg-subtle:      rgba(6,182,212,.16);
+  --bs-success-bg-subtle:   rgba(16,185,129,.16);
+  --bs-warning-bg-subtle:   rgba(245,158,11,.16);
+  --bs-danger-bg-subtle:    rgba(239,68,68,.16);
 
   --glass:       rgba(10,10,12,.85);
   --glass2:      rgba(10,10,12,.8);
@@ -1365,6 +1375,13 @@ textarea.form-control { resize: vertical; }
   --bs-border-color: rgba(15,23,42,.12);
   --bs-emphasis-color: #0b1220;
   --bs-secondary-color: #67788f;
+  /* back to Bootstrap's own light-mode values */
+  --bs-secondary-bg-subtle: #e2e3e5;
+  --bs-primary-bg-subtle:   #cfe2ff;
+  --bs-info-bg-subtle:      #cff4fc;
+  --bs-success-bg-subtle:   #d1e7dd;
+  --bs-warning-bg-subtle:   #fff3cd;
+  --bs-danger-bg-subtle:    #f8d7da;
 
   --bg:          #eef1f8;
   --surface:     #ffffff;
