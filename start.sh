@@ -79,7 +79,7 @@ else
 fi
 
 # Check Redis
-if docker compose exec -T redis redis-cli -a redis_secret_2024 ping &> /dev/null; then
+if docker compose exec -T redis redis-cli -a "${REDIS_PASSWORD:?set REDIS_PASSWORD}" ping &> /dev/null; then
     echo -e "${GREEN}✓ Redis is ready${NC}"
 else
     echo -e "${RED}✗ Redis is not ready${NC}"

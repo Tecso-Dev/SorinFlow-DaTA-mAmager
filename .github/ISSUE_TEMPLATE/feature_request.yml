@@ -1,0 +1,33 @@
+name: پیشنهاد قابلیت — Feature request
+description: Something the system should be able to do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve? / چه مشکلی را حل می‌کند؟
+      description: Describe the situation you are stuck in, not the solution you have in mind. The best fix is often not the one first imagined.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind / پیشنهاد شما
+    validations:
+      required: true
+  - type: dropdown
+    id: who
+    attributes:
+      label: Who is it for? / برای چه کسی؟
+      options:
+        - Agency owner (مدیر ارشد)
+        - Agency staff (مدیر / کارشناس)
+        - Website visitors (بازدیدکنندگان)
+        - Developer / operations
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else / توضیحات بیشتر
+      description: Screenshots, similar products, constraints worth knowing.

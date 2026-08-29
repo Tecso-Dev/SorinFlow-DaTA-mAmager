@@ -22,14 +22,17 @@ class Settings(BaseSettings):
     domain_dns_only: str = Field(default="sc.sorinflow.com", env="DOMAIN_DNS_ONLY")
     
     # Database
+    # No working default on purpose. It used to carry a real password that was
+    # published in this repo, so a misconfigured deploy would connect anyway and
+    # look healthy. Now an unset DATABASE_URL fails to connect and says so.
     database_url: str = Field(
-        default="postgresql+asyncpg://sorinflow:sorinflow_secret_2024@db:5432/divar_scraper",
+        default="postgresql+asyncpg://sorinflow:CHANGE_ME@db:5432/divar_scraper",
         env="DATABASE_URL"
     )
     
     # Redis
     redis_url: str = Field(
-        default="redis://:redis_secret_2024@redis:6379/0",
+        default="redis://:CHANGE_ME@redis:6379/0",
         env="REDIS_URL"
     )
     
@@ -82,7 +85,9 @@ class Settings(BaseSettings):
 
     # Default super admin (created on first startup if no users exist)
     super_admin_username: str = Field(default="admin", env="SUPER_ADMIN_USERNAME")
-    super_admin_password: str = Field(default="sorinflow2024", env="SUPER_ADMIN_PASSWORD")
+    # Seeded only when the users table is empty. The old default was published
+    # in this repo and in INSTALL.md, so anyone could read it.
+    super_admin_password: str = Field(default="CHANGE_ME", env="SUPER_ADMIN_PASSWORD")
 
     # SMS — Kavenegar
     kavenegar_api_key: str = Field(default="", env="KAVENEGAR_API_KEY")

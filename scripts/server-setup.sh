@@ -53,26 +53,43 @@ echo ">>> Applying Kubernetes namespace and secrets..."
 kubectl apply -f k8s/00-namespace.yaml
 
 echo ""
-echo ">>> Creating k8s/01-secrets.yaml with production values..."
-cat > /tmp/sorinflow-secrets.yaml << 'SECRETS_EOF'
-apiVersion: v1
-kind: Secret
-metadata:
-  name: sorinflow-secrets
-  namespace: sorinflow
-type: Opaque
-stringData:
-  POSTGRES_USER: "sorinflow"
-  POSTGRES_PASSWORD: "sorinflow_secret_2024"
-  POSTGRES_DB: "divar_scraper"
-  REDIS_PASSWORD: "redis_secret_2024"
-  SECRET_KEY: "sorinflow-production-secret-key-CHANGE-ME-TO-RANDOM-STRING"
-  API_KEY: "sorinflow-secret-2024"
-  DATABASE_URL: "postgresql+asyncpg://sorinflow:sorinflow_secret_2024@postgres:5432/divar_scraper"
-  REDIS_URL: "redis://:redis_secret_2024@redis:6379/0"
-SECRETS_EOF
-kubectl apply -f /tmp/sorinflow-secrets.yaml
-rm /tmp/sorinflow-secrets.yaml
+echo ">>> Creating the sorinflow-secrets Secret..."
+
+# Generated, never hardcoded. This file is in a public repo, so anything written
+# literally here is a published credential — which is exactly what happened to
+# the previous version of this block.
+#
+# Idempotent on purpose. POSTGRES_PASSWORD is baked into the database when its
+# volume is first initialised, so regenerating it on a second run would hand the
+# app a password the existing PVC has never heard of and every connection would
+# fail. If the Secret already exists it is left alone; rotating it is a
+# deliberate, ordered operation (see SECRETS.md).
+if kubectl get secret sorinflow-secrets -n sorinflow >/dev/null 2>&1; then
+  echo "    Secret already exists — leaving it untouched."
+  echo "    To rotate, follow the runbook in SECRETS.md (the database password"
+  echo "    must be changed inside Postgres first, or the app cannot connect)."
+else
+  # hex, not base64, for anything interpolated into a URL: +, / and = would
+  # need escaping inside DATABASE_URL and REDIS_URL.
+  PG_PW=$(openssl rand -hex 24)
+  REDIS_PW=$(openssl rand -hex 24)
+  APP_SECRET=$(openssl rand -base64 48 | tr -d '\n')
+  APP_API_KEY=$(openssl rand -hex 32)
+
+  kubectl create secret generic sorinflow-secrets -n sorinflow \
+    --from-literal=POSTGRES_USER="sorinflow" \
+    --from-literal=POSTGRES_PASSWORD="$PG_PW" \
+    --from-literal=POSTGRES_DB="divar_scraper" \
+    --from-literal=REDIS_PASSWORD="$REDIS_PW" \
+    --from-literal=SECRET_KEY="$APP_SECRET" \
+    --from-literal=API_KEY="$APP_API_KEY" \
+    --from-literal=DATABASE_URL="postgresql+asyncpg://sorinflow:$PG_PW@postgres:5432/divar_scraper" \
+    --from-literal=REDIS_URL="redis://:$REDIS_PW@redis:6379/0"
+
+  echo "    Secret created with freshly generated values."
+  echo "    Read them back with:"
+  echo "      kubectl get secret sorinflow-secrets -n sorinflow -o jsonpath='{.data.API_KEY}' | base64 -d"
+fi
 
 # ── 6. Create ghcr.io pull secret ─────────────────────────────────────────────
 echo "[6/7] Setting up GitHub Container Registry pull secret..."

@@ -78,3 +78,26 @@ Downloads/
 # images and a local-only .env. None of it belongs in the repo — pgdata alone
 # is a whole Postgres data directory.
 local/
+
+# ── Never commit these ───────────────────────────────────────────────────────
+# Everything below was committed at some point and had to be purged out of
+# history. The patterns are deliberately broad: a leak costs far more than an
+# ignored file you actually wanted.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+nginx/ssl/
+k8s/01-secrets.yaml
+k8s/*secret*.yaml
+data/cookies/
+data/images/
+data/debug/
+debug_*.png
+graphify-out/
+docker-compose.override.yml
+.claude/settings.json

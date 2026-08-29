@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-sorinflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sorinflow_secret_2024}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-divar_scraper}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -26,13 +26,13 @@ services:
     image: redis:7-alpine
     container_name: sorinflow_redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secret_2024}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
     volumes:
       - redis_data:/data
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secret_2024}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -47,8 +47,8 @@ services:
     container_name: sorinflow_backend
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-sorinflow}:${POSTGRES_PASSWORD:-sorinflow_secret_2024}@db:5432/${POSTGRES_DB:-divar_scraper}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_secret_2024}@redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-sorinflow}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-divar_scraper}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-your-super-secret-key-change-in-production}
       - API_KEY=${API_KEY:-}
       - ENVIRONMENT=${ENVIRONMENT:-production}

@@ -1,0 +1,62 @@
+name: گزارش باگ — Bug report
+description: Something behaves differently than it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Not for security problems.** A vulnerability filed here is visible to
+        everyone immediately — please use
+        [a private advisory](https://github.com/Tecso-Dev/SorinFlow-DaTA-mAmager/security/advisories/new)
+        instead. See [SECURITY.md](../blob/main/SECURITY.md).
+
+        Please remove phone numbers, customer names and tokens from anything you
+        paste. This project handles real people's contact details.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened / چه اتفاقی افتاد
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce / مراحل بازتولید
+      description: The exact steps. A specific failing case is worth more than a description of the general area.
+      placeholder: |
+        1. Sign in as …
+        2. Open …
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area / بخش
+      options:
+        - Dashboard (پنل مدیریت)
+        - Customer portal (پورتال مشتریان)
+        - Scraper (اسکرپر دیوار)
+        - CRM (لیدها، مشتریان، معاملات)
+        - Authentication / roles (ورود و دسترسی‌ها)
+        - Deployment / infrastructure
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where / کجا
+      options:
+        - Production (sorinflow.com)
+        - Local (./local/start.sh)
+        - Both
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or errors / لاگ و خطا
+      description: Server log lines or the browser console. Redact anything personal.
+      render: shell

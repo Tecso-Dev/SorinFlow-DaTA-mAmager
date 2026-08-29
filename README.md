@@ -226,7 +226,7 @@ On an empty database, SorinFlow seeds this super-admin account:
 
 ```text
 Username: admin
-Password: sorinflow2024
+Password: whatever you set in SUPER_ADMIN_PASSWORD (there is no default)
 ```
 
 Change it immediately from the user-management screen. Bootstrap credentials are only read when the users table is empty; changing environment variables later does not update an existing account.
@@ -358,6 +358,42 @@ services:
 ```
 
 Explicit entries in `docker-compose.yml` continue to take precedence over values from `env_file`.
+
+## Secrets and server configuration
+
+**This repository is public.** A value written into a tracked file is published
+the moment it is pushed, and stays readable in the history even after the line
+is deleted. Full guide, including how to add a variable and how to rotate one
+without downtime: **[SECRETS.md](SECRETS.md)**.
+
+The short version:
+
+| Kind of value | Where it belongs | Committed? |
+|---|---|---|
+| Passwords, API keys, tokens, `SECRET_KEY` | Kubernetes Secret `sorinflow-secrets` | **never** |
+| TLS certificate and private key | Traefik's ACME store on the server | **never** |
+| Divar session cookies | the `data-pvc` volume (`/app/data/cookies`) | **never** |
+| Which variables exist, and what they mean | `.env.example` — names and comments only | yes |
+| Non-secret settings (timeouts, limits, flags) | `k8s/04-backend.yaml` as plain `env:` | yes |
+| Local development values | `local/local.env` — git-ignored | **never** |
+
+Adding a new secret is four steps — declare the name in `.env.example`, read it
+in `app/config.py` with an **empty** default, put the real value in the cluster
+with `kubectl patch secret`, then reference it from `k8s/04-backend.yaml` via
+`secretKeyRef`. Never default a setting to a working credential: a real-looking
+fallback makes a misconfigured deploy look healthy instead of failing loudly.
+
+⚠️ **`POSTGRES_PASSWORD` is the one that can take the site down.** It is stored
+inside the database on its volume, so changing only the Kubernetes Secret leaves
+the app presenting a password the database has never seen. It must be changed
+with `ALTER USER` first — the ordered runbook is in
+[SECRETS.md §4c](SECRETS.md).
+
+If a secret is ever committed again: **rotate it first**, then purge the
+history, then add it to `.gitignore`, then find the process that put it there. A
+leak is usually a process rather than an accident — `renew-ssl.sh` used to copy
+the TLS private key into `nginx/ssl/` on every renewal, so it reappeared no
+matter how often the file was deleted.
 
 ## Repository map
 
@@ -514,9 +550,14 @@ Cluster secrets and the self-hosted runner must already exist. Deployment script
 
 ## Security checklist
 
-- Rotate every credential or session value that has ever been committed.
-- Remove secret/runtime artifacts from current Git tracking and repository history.
-- Replace the default PostgreSQL, Redis, JWT, and super-admin credentials.
+- Rotate every credential or session value that has ever been committed — see
+  [SECRETS.md §4](SECRETS.md). History was purged in August 2026, but purging
+  does not un-publish a value that was public; only rotation does.
+- Keep secrets out of tracked files entirely: [SECRETS.md](SECRETS.md) covers
+  where each kind of value belongs and how to add a new one.
+- There are no default credentials any more. `POSTGRES_PASSWORD`, `REDIS_PASSWORD`,
+  `SECRET_KEY` and `SUPER_ADMIN_PASSWORD` have no working fallback, so an unset
+  one fails loudly instead of quietly accepting a published password.
 - Restrict `CORS_ORIGINS` in production.
 - Put the service behind HTTPS and trusted network controls.
 - Protect `data/cookies/`, `data/backups/`, `data/images/`, logs, and database volumes.

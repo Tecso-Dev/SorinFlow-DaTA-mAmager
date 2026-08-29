@@ -52,8 +52,10 @@ async def lifespan(app: FastAPI):
         logger.warning("SECRET_KEY is using the insecure default — set a strong value in .env")
     if not settings.api_key:
         logger.warning("API_KEY is not set — all API endpoints are unprotected")
-    if "sorinflow_secret_2024" in settings.database_url:
-        logger.warning("DATABASE_URL is using default credentials — change in .env for production")
+    if "CHANGE_ME" in settings.database_url:
+        logger.warning("DATABASE_URL still holds the placeholder password — set it for real")
+    if settings.super_admin_password == "CHANGE_ME":
+        logger.warning("SUPER_ADMIN_PASSWORD is the placeholder — set it before first boot")
 
     # Initialize database
     await init_db()

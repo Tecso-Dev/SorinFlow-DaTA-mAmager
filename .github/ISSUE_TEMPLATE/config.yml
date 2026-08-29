@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: گزارش آسیب‌پذیری امنیتی — Report a security vulnerability
+    url: https://github.com/Tecso-Dev/SorinFlow-DaTA-mAmager/security/advisories/new
+    about: Please report privately, never as a public issue — an issue is visible to everyone the moment it is filed.
