@@ -29,8 +29,26 @@ SwapFree:        3010556 kB
 """
 
 
+def _parse_meminfo(text: str) -> dict:
+    """The same kB → bytes parse the reader does, for building fixtures."""
+    out = {}
+    for line in text.splitlines():
+        key, _, rest = line.partition(":")
+        parts = rest.split()
+        if parts:
+            out[key] = int(parts[0]) * 1024
+    return out
+
+
 def _patch(monkeypatch, files: dict, meminfo: str = None):
-    """Serve fake cgroup/proc files to the reader."""
+    """Serve fake cgroup and meminfo data to the reader.
+
+    Both are stubbed, always. An earlier version patched only _read_first and
+    let _read_meminfo fall through to the real file — which is nothing on macOS
+    and a populated one on Linux, so the tests passed locally and failed in CI
+    against the runner's own memory. A test about parsing must not depend on
+    the machine it runs on.
+    """
     from app.api.routes import monitoring as mon
 
     def fake_read_first(*paths):
@@ -39,16 +57,8 @@ def _patch(monkeypatch, files: dict, meminfo: str = None):
                 return files[p]
         return None
     monkeypatch.setattr(mon, "_read_first", fake_read_first)
-
-    if meminfo is not None:
-        import io
-        real_open = open
-
-        def fake_open(path, *a, **k):
-            if path == "/proc/meminfo":
-                return io.StringIO(meminfo)
-            return real_open(path, *a, **k)
-        monkeypatch.setattr("builtins.open", fake_open)
+    monkeypatch.setattr(mon, "_read_meminfo",
+                        lambda: _parse_meminfo(meminfo) if meminfo else {})
     return mon
 
 
@@ -75,6 +85,20 @@ class TestCgroupV2:
             "/sys/fs/cgroup/memory.max": "max",
         })
         assert mon._read_resources().get("memory_limit_bytes") is None
+
+    def test_unlimited_cgroup_falls_back_to_the_host_total(self, monkeypatch):
+        """This is the path production actually takes: k8s/04-backend.yaml sets
+        no memory limit, so the cgroup says "max" and the host total is the
+        honest ceiling to show a percentage against."""
+        mon = _patch(monkeypatch, {
+            "/sys/fs/cgroup/memory.current": "1000",
+            "/sys/fs/cgroup/memory.max": "max",
+        }, meminfo=MEMINFO)
+        r = mon._read_resources()
+        assert r["memory_limit_bytes"] == 3906892 * 1024
+        # and the cgroup's own usage still wins over the host figure, because
+        # it is this container's number
+        assert r["memory_used_bytes"] == 1000
 
     def test_unlimited_cpu_is_not_reported_as_a_quota(self, monkeypatch):
         mon = _patch(monkeypatch, {"/sys/fs/cgroup/cpu.max": "max 100000"})
@@ -126,16 +150,23 @@ class TestSwap:
         assert mon._read_resources()["swap_total_bytes"] > 4_000_000_000
 
 
-class TestGracefulOnMac:
+class TestWhenNothingIsReadable:
     def test_missing_files_yield_no_keys_rather_than_raising(self, monkeypatch):
         """None of this exists on macOS; a developer should see empty tiles,
         not a stack trace."""
-        mon = _patch(monkeypatch, {})
+        mon = _patch(monkeypatch, {})                   # no cgroup, no meminfo
         r = mon._read_resources()
         assert isinstance(r, dict)
         assert r.get("cpu_count")                       # os.cpu_count always works
-        for absent in ("cpu_usage_usec", "swap_total_bytes"):
+        for absent in ("cpu_usage_usec", "swap_total_bytes", "memory_limit_bytes"):
             assert absent not in r or r[absent] is None
+
+    def test_it_runs_against_the_real_machine_without_raising(self):
+        """Unpatched, on whatever this is. Proves the reader survives both a
+        Linux runner with real cgroup files and a mac with none."""
+        from app.api.routes import monitoring as mon
+        r = mon._read_resources()
+        assert isinstance(r, dict) and r.get("cpu_count")
 
 
 class TestReachability:
