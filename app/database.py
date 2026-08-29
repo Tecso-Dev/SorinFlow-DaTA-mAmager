@@ -87,6 +87,7 @@ async def init_db():
         await _migrate_customer_criteria(conn)
         await _migrate_filing(conn)
         await _migrate_advertiser_type(conn)
+        await _migrate_cookie_usage(conn)
         await _seed_reference_data(conn)
 
     # Own transaction, deliberately outside the block above.
@@ -310,6 +311,25 @@ async def _seed_reference_data(conn):
                 + " ON CONFLICT DO NOTHING"), params)
     except Exception as e:
         print(f"reference data seed skipped: {e}")
+
+
+async def _migrate_cookie_usage(conn):
+    """Per-account reveal budget for چرخش شماره.
+
+    Divar charges its SMS challenge to the account and remembers across our
+    jobs. The scraper counted reveals on itself, and a fresh scraper is built
+    per job — so the count restarted every run while the account's real spend
+    kept climbing. These two columns move the count to where the spend actually
+    happens.
+    """
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE cookies "
+            "ADD COLUMN IF NOT EXISTS reveals INTEGER NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ"))
+    except Exception as e:
+        print(f"cookie usage migration skipped: {e}")
 
 
 async def _migrate_advertiser_type(conn):

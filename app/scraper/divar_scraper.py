@@ -170,10 +170,20 @@ class DivarScraper:
                     try:
                         from app.models.cookie import Cookie as CookieModel
                         from sqlalchemy import select as _select
+                        # Least-spent first, oldest-used to break the tie.
+                        #
+                        # This used to take the most recently *updated* row, and
+                        # saving a session on rotation bumps updated_at — so the
+                        # account that had just been used was always the one
+                        # picked next, and with up to three jobs at once they
+                        # all landed on the same number. One account absorbed
+                        # every reveal while the others sat idle, which is what
+                        # the constant SMS was.
                         _res = await self.db_session.execute(
                             _select(CookieModel)
                             .where(CookieModel.is_valid == True)
-                            .order_by(CookieModel.updated_at.desc())
+                            .order_by(CookieModel.reveals.asc(),
+                                      CookieModel.last_used_at.asc().nullsfirst())
                             .limit(1)
                         )
                         _rec = _res.scalar_one_or_none()
@@ -1377,8 +1387,10 @@ class DivarScraper:
                         f"Not requesting contact info for {property_data.get('divar_id')}: {reason}")
                     return property_data
 
-            # This is the moment Divar counts, so it is the moment we count.
+            # This is the moment Divar counts, so it is the moment we count —
+            # against the account, which is what Divar is counting against.
             self._reveals_since_rotation += 1
+            await self._charge_reveal()
             from app import metrics as _mx
             _mx.scrape_reveals.inc()
 
@@ -1953,7 +1965,8 @@ class DivarScraper:
         return local_paths
     
     async def _load_rotation_pool(self) -> List[str]:
-        """Valid saved Divar accounts, newest first — the rotation candidates."""
+        """Valid saved Divar accounts, least-spent first — the rotation
+        candidates, in the order they should be reached for."""
         if not self.db_session:
             return []
         try:
@@ -1961,7 +1974,8 @@ class DivarScraper:
             rows = (await self.db_session.execute(
                 select(CookieModel)
                 .where(CookieModel.is_valid == True)
-                .order_by(CookieModel.updated_at.desc())
+                .order_by(CookieModel.reveals.asc(),
+                          CookieModel.last_used_at.asc().nullsfirst())
             )).scalars().all()
             # de-dupe while keeping order (one entry per phone)
             seen, pool = set(), []
@@ -1973,6 +1987,94 @@ class DivarScraper:
         except Exception as e:
             logger.warning(f"[rotate] could not load cookie pool: {e}")
             return []
+
+    async def _charge_reveal(self) -> int:
+        """Bill one contact reveal to the active account; return its new total.
+
+        Written straight through rather than batched: a job that is cancelled
+        or crashes still spent those reveals on Divar's side, and losing the
+        record would let the next job pick that same account as if it were
+        rested.
+        """
+        if not self.active_phone or not self.db_session:
+            return 0
+        try:
+            from app.models.cookie import Cookie as CookieModel
+            row = (await self.db_session.execute(
+                select(CookieModel).where(
+                    CookieModel.phone_number == self.active_phone))).scalars().first()
+            if not row:
+                return 0
+            row.reveals = (row.reveals or 0) + 1
+            row.last_used_at = datetime.now()
+            await self.db_session.commit()
+            return row.reveals
+        except Exception as e:
+            logger.warning(f"[rotate] could not charge a reveal to {self.active_phone}: {e}")
+            try:
+                await self.db_session.rollback()
+            except Exception:
+                pass
+            return 0
+
+    async def _account_reveals(self, phone: Optional[str] = None) -> int:
+        """What this account has already spent, across every job."""
+        phone = phone or self.active_phone
+        if not phone or not self.db_session:
+            return 0
+        try:
+            from app.models.cookie import Cookie as CookieModel
+            row = (await self.db_session.execute(
+                select(CookieModel).where(
+                    CookieModel.phone_number == phone))).scalars().first()
+            return (row.reveals or 0) if row else 0
+        except Exception:
+            return 0
+
+    async def _mark_account_spent(self, phone: Optional[str], budget: int) -> None:
+        """Record an account as having used up its budget.
+
+        Used when Divar challenges it: the challenge is the account telling us
+        it is spent, and that beats whatever our own count had reached.
+        """
+        if not phone or not self.db_session:
+            return
+        try:
+            from app.models.cookie import Cookie as CookieModel
+            row = (await self.db_session.execute(
+                select(CookieModel).where(
+                    CookieModel.phone_number == phone))).scalars().first()
+            if not row:
+                return
+            row.reveals = max(row.reveals or 0, budget)
+            row.last_used_at = datetime.now()
+            await self.db_session.commit()
+            logger.info(f"[rotate] {phone} marked spent after a Divar challenge")
+        except Exception as e:
+            logger.warning(f"[rotate] could not mark {phone} spent: {e}")
+            try:
+                await self.db_session.rollback()
+            except Exception:
+                pass
+
+    async def _rest_all_accounts(self) -> None:
+        """Start a fresh round once every account has spent its budget.
+
+        Divar's own tolerance recovers with time; without this the pool would
+        stay permanently exhausted and rotation would stop meaning anything.
+        """
+        if not self.db_session:
+            return
+        try:
+            from app.models.cookie import Cookie as CookieModel
+            rows = (await self.db_session.execute(
+                select(CookieModel).where(CookieModel.is_valid == True))).scalars().all()  # noqa: E712
+            for r in rows:
+                r.reveals = 0
+            await self.db_session.commit()
+            logger.info(f"[rotate] every account had spent its budget — new round for {len(rows)}")
+        except Exception as e:
+            logger.warning(f"[rotate] could not start a new round: {e}")
 
     async def _persist_active_session(self) -> None:
         """Write the current account's live cookies back before leaving it.
@@ -2031,7 +2133,12 @@ class DivarScraper:
         if not forced:
             if every <= 0:
                 return False
-            if self._reveals_since_rotation < every:
+            # The account's total, not this job's slice. A fresh scraper is
+            # built per job, so the in-memory counter restarted every run while
+            # the account kept spending — which is why «۱۰۰ تا برای هر شماره»
+            # never actually happened on a series of short jobs.
+            spent = max(await self._account_reveals(), self._reveals_since_rotation)
+            if spent < every:
                 return False
 
         # Re-read the pool each time rather than caching it for the whole run:
@@ -2057,6 +2164,11 @@ class DivarScraper:
         # returning later resumes it instead of replaying a stale snapshot.
         await self._persist_active_session()
 
+        # If Divar challenged this one, its budget is gone whatever the counter
+        # says — bank that, or «least spent first» would hand it straight back.
+        if forced and every > 0:
+            await self._mark_account_spent(self.active_phone, every)
+
         for offset in range(1, len(self._rotation_pool) + 1):
             candidate = self._rotation_pool[(idx + offset) % len(self._rotation_pool)]
             if candidate == self.active_phone:
@@ -2077,6 +2189,10 @@ class DivarScraper:
                 _mx.scrape_rotations.labels("challenged" if forced else "threshold").inc()
                 self._reveals_since_rotation = 0
                 self._force_rotate = False
+                # If the one we just moved to is already spent, every account
+                # is — begin a new round rather than rotating in circles.
+                if await self._account_reveals(candidate) >= every > 0:
+                    await self._rest_all_accounts()
                 logger.info(
                     f"[rotate] switched Divar account {previous} → {candidate}"
                     f"{' (Divar asked it for a code)' if forced else ''}")

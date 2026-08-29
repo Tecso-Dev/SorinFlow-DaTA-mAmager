@@ -18,6 +18,15 @@ class Cookie(Base):
     expires_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # ── چرخش شماره ───────────────────────────────────────────────────────
+    # Divar's SMS challenge is charged to the *account*, and it does not forget
+    # between our scraping jobs. Counting reveals on the scraper object could
+    # not work: a new one is built per job, so the count restarted while the
+    # account's real spend kept climbing. It belongs here, next to the session
+    # it applies to.
+    reveals = Column(Integer, default=0, nullable=False)
+    last_used_at = Column(DateTime(timezone=True))
     
     def __repr__(self):
         return f"<Cookie(id={self.id}, phone={self.phone_number}, valid={self.is_valid})>"
@@ -31,4 +40,6 @@ class Cookie(Base):
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "reveals": self.reveals or 0,
+            "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
         }
