@@ -81,8 +81,6 @@ async def lifespan(app: FastAPI):
             "super-admin token. Set a strong value before serving traffic.")
     if "CHANGE_ME" in settings.database_url:
         logger.warning("DATABASE_URL still holds the placeholder password — set it for real")
-    if settings.super_admin_password == "CHANGE_ME" and settings.environment == "production":
-        logger.warning("SUPER_ADMIN_PASSWORD is the placeholder — set it before first boot")
     if not settings.api_key:
         # This used to read "all API endpoints are unprotected", which was
         # false and is the kind of false that trains people to skim warnings.
@@ -441,6 +439,22 @@ async def metrics_middleware(request: Request, call_next):
         response = await call_next(request)
         status = str(response.status_code)
         return response
+    except RuntimeError as exc:
+        # Starlette raises this exact string from BaseHTTPMiddleware when the
+        # downstream finished without sending anything AND without raising —
+        # which happens when the browser hangs up mid-request (a reload, a
+        # navigation, a closed tab). Nothing is wrong with the server and
+        # nobody is listening any more, but it used to reach the 500 handler
+        # and get logged as "Internal error", which is noise that teaches
+        # people to skim past real errors.
+        #
+        # A genuine route failure cannot land here wearing this message: when
+        # the app raises, Starlette re-raises *that* exception instead.
+        if str(exc) != "No response returned.":
+            raise
+        status = "disconnected"
+        logger.debug(f"[disconnect] client went away during {request.url.path}")
+        return Response(status_code=499)      # nginx's code for it; unread
     finally:
         mx.http_latency.labels(route).observe(time.perf_counter() - started)
         mx.http_requests.labels(route, request.method, status).inc()

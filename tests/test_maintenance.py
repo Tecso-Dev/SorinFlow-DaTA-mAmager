@@ -326,3 +326,63 @@ class TestBrandConsistency:
         assert "render_not_found" in gate, (
             "api_key_middleware rejects browser page requests with JSON, so the "
             "styled 404 can never be reached once API_KEY is set")
+
+
+class TestClientDisconnect:
+    """A browser that hangs up mid-request used to be logged as a 500.
+
+    Reproduced with a real socket: send a request, close the connection before
+    the handler finishes, and Starlette's BaseHTTPMiddleware raises
+    RuntimeError("No response returned.") — which reached the 500 handler and
+    logged 'Internal error on /api/users/permissions/catalog'. Nothing was
+    wrong with the server; the client was simply gone.
+    """
+
+    @pytest.mark.asyncio
+    async def test_disconnect_is_not_an_internal_error(self):
+        from app.main import metrics_middleware
+        from starlette.requests import Request
+
+        scope = {"type": "http", "method": "GET", "path": "/api/users/me",
+                 "headers": [], "query_string": b"", "scheme": "http",
+                 "server": ("t", 80), "client": ("1.1.1.1", 1)}
+
+        async def hung_up(_request):
+            raise RuntimeError("No response returned.")
+
+        resp = await metrics_middleware(Request(scope), hung_up)
+        # swallowed, not raised: no 500, no ERROR line, nobody listening
+        assert resp.status_code == 499
+
+    @pytest.mark.asyncio
+    async def test_a_real_runtime_error_still_propagates(self):
+        """The guard keys on Starlette's exact sentinel string. A genuine bug
+        in a route must not be silenced by it."""
+        from app.main import metrics_middleware
+        from starlette.requests import Request
+
+        scope = {"type": "http", "method": "GET", "path": "/api/users/me",
+                 "headers": [], "query_string": b"", "scheme": "http",
+                 "server": ("t", 80), "client": ("1.1.1.1", 1)}
+
+        async def genuinely_broken(_request):
+            raise RuntimeError("database pool exhausted")
+
+        with pytest.raises(RuntimeError, match="pool exhausted"):
+            await metrics_middleware(Request(scope), genuinely_broken)
+
+
+class TestSeedWarning:
+    def test_placeholder_password_warns_where_it_is_used_not_at_boot(self):
+        """The boot check fired on every restart of a database seeded months
+        ago, where the value is never read — _seed_super_admin returns early
+        once any user exists. Crying wolf trains people to skim warnings."""
+        import inspect
+        from app import main
+        from app import database
+
+        assert "SUPER_ADMIN_PASSWORD" not in inspect.getsource(main.lifespan)
+        seed = inspect.getsource(database._seed_super_admin)
+        assert "SUPER_ADMIN_PASSWORD" in seed
+        # and it must sit after the "users already exist" early return
+        assert seed.index("users already exist") < seed.index("SUPER_ADMIN_PASSWORD")

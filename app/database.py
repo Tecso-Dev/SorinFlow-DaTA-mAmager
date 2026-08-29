@@ -447,6 +447,16 @@ async def _seed_super_admin():
         if result.scalars().first():
             return  # users already exist
 
+        # Only now is the placeholder actually about to become a real
+        # password. Warning about it at boot cried wolf on every restart of a
+        # database that was seeded months ago and never reads this value.
+        if cfg.super_admin_password == "CHANGE_ME":
+            from loguru import logger as _log
+            _log.warning(
+                "SUPER_ADMIN_PASSWORD is the placeholder and is being used to "
+                "create the super-admin account right now — change it after "
+                "first login.")
+
         admin = User(
             username=cfg.super_admin_username,
             full_name="Super Admin",
