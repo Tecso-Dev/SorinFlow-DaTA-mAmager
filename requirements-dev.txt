@@ -7,8 +7,8 @@
 # about being the same thing.
 -r requirements.txt
 
-pytest==7.4.4
-pytest-asyncio==0.23.3
+pytest==9.1.1
+pytest-asyncio==1.4.0
 
 # The suite needs Postgres: scraping_jobs.job_id is a postgresql.UUID column and
 # the pinned SQLAlchemy cannot render it on SQLite, so create_all() fails and

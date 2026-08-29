@@ -1,30 +1,39 @@
 # FastAPI and ASGI
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
-python-multipart==0.0.6
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
+# Starlette parses the login form with this. Kept current for CVE-2024-53981
+# (unbounded multipart allocation) — it is on an unauthenticated path.
+python-multipart==0.0.32
+# Signs and validates every dashboard JWT. 3.3.0 carried CVE-2024-33663
+# (algorithm confusion) and CVE-2024-33664 (decode DoS).
+python-jose[cryptography]==3.5.0
+# Password hashing. app/auth/jwt.py imports bcrypt directly; it used to arrive
+# only as a passlib[bcrypt] extra, so dropping the unused passlib would have
+# silently taken bcrypt with it and broken every login. Pinned in its own right.
+bcrypt==5.0.0
 
 # Database
 sqlalchemy[asyncio]==2.0.25
 asyncpg==0.29.0
+# Migration tooling. Unused so far — boot-time ALTERs do the work today — but
+# kept deliberately: alembic is the way out of that, and psycopg2 is the sync
+# driver it needs.
 alembic==1.13.1
 psycopg2-binary==2.9.9
 
 # Redis
 redis==5.0.1
-aioredis==2.0.1
 
 # Web Scraping
 playwright==1.41.0
 beautifulsoup4==4.12.3
-lxml==5.1.0
+# Not imported anywhere, but BeautifulSoup(content, 'lxml') in divar_scraper.py
+# selects it by name — removing it would fail at runtime, not at import.
+lxml==6.1.2
 httpx==0.26.0
-aiohttp==3.9.1
 
 # Image Processing
-Pillow==10.2.0
-aiofiles==23.2.1
+Pillow==12.3.0
 opencv-python==4.9.0.80
 
 # Numeric
@@ -35,29 +44,12 @@ pydantic==2.5.3
 pydantic-settings==2.1.0
 
 # Utilities
-python-dotenv==1.0.0
-tenacity==8.2.3
-pytz==2024.1
-fake-useragent==1.4.0
+python-dotenv==1.2.3
 python-dateutil==2.8.2
 openpyxl==3.1.2
 
 # 2FA / TOTP
 pyotp==2.9.0
-qrcode==7.4.2
 
 # Logging
 loguru==0.7.2
-rich==13.7.0
-
-# Task Queue (optional for background tasks)
-celery==5.3.6
-flower==2.0.1
-
-# Testing
-pytest==7.4.4
-pytest-asyncio==0.23.3
-httpx==0.26.0
-
-# Monitoring
-prometheus-client==0.19.0
