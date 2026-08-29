@@ -126,11 +126,23 @@ class TestMaintenancePage:
     That is the right failure mode and the reason it needs its own test.
     """
 
-    def test_the_gate_function_exists(self):
+    @pytest.mark.parametrize("name", [
+        "_maintenance_allows",       # decides who gets through
+        "render_maintenance_page",   # builds the page
+        "MAINTENANCE_PAGE",          # the template itself
+    ])
+    def test_the_closed_site_path_is_intact(self, name):
+        """Every piece the closed-site path needs.
+
+        Named individually because the template is a huge string literal and
+        rewriting it has twice now swallowed the function next to it — once
+        _maintenance_allows (which fails open, so nothing broke visibly) and
+        once render_maintenance_page (which 500s every request). A test that
+        only knew about the first would have passed through the second.
+        """
         import app.main as m
-        assert hasattr(m, "_maintenance_allows"), (
-            "_maintenance_allows is gone — the middleware fails open, so "
-            "maintenance mode silently stops closing the site")
+        assert hasattr(m, name), (
+            f"{name} is missing — the closed-site path cannot work without it")
 
     def test_message_is_escaped_into_the_page(self):
         import app.main as m

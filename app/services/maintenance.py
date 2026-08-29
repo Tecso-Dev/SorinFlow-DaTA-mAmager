@@ -137,7 +137,12 @@ async def set_state(db, *, enabled: bool, message: Optional[str] = None,
     message = (message or current.message or DEFAULT_MESSAGE).strip()[:500]
 
     if enabled:
-        bypass = secrets.token_urlsafe(24)
+        # Only mint a new token when the site is being closed, not every time
+        # the settings are re-saved. Re-minting on a settings change invalidated
+        # the bypass link the admin was already using — and it meant a deadline
+        # could not be added to a site that was already closed without opening
+        # it first, which is exactly the state production was left in.
+        bypass = current.bypass if current.enabled and current.bypass else secrets.token_urlsafe(24)
         if hours is not None:
             until = (datetime.now(timezone.utc)
                      + timedelta(hours=max(float(hours), 0))).isoformat()

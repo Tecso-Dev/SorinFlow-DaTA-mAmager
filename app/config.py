@@ -42,6 +42,11 @@ class Settings(BaseSettings):
         env="SECRET_KEY"
     )
     api_key: str = Field(default="", env="API_KEY")
+    # Guards /metrics with its own credential, separate from API_KEY so a
+    # monitoring scraper never needs the key that opens the rest of the API.
+    # Empty disables the endpoint outright — it 404s rather than 401s, because a
+    # feature nobody enabled should not advertise itself.
+    metrics_token: str = Field(default="", env="METRICS_TOKEN")
     access_token_expire_minutes: int = 60 * 24  # 24 hours — re-login daily
 
     # CORS

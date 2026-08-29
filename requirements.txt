@@ -53,3 +53,7 @@ pyotp==2.9.0
 
 # Logging
 loguru==0.7.2
+
+# Metrics — pure Python, no transitive dependencies, no network egress. Removed
+# earlier as unused; the /metrics endpoint is what it was always there for.
+prometheus-client==0.19.0

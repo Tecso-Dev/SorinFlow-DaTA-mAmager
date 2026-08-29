@@ -2388,13 +2388,14 @@ async function loadMaintenance() {
     }
 }
 
-async function setMaintenance(enabled) {
+async function setMaintenance(enabled, opts = {}) {
     const message = document.getElementById('maintenance-message')?.value.trim() || null;
     const hours   = document.getElementById('maintenance-hours')?.value ?? '';
     const phone   = document.getElementById('maintenance-phone')?.value.trim() || '';
     const email   = document.getElementById('maintenance-email')?.value.trim() || '';
 
-    if (enabled && !confirm('سایت برای همه بسته می‌شود. مطمئن هستید؟')) return;
+    // re-saving settings on an already-closed site should not ask again
+    if (enabled && !opts.silent && !confirm('سایت برای همه بسته می‌شود. مطمئن هستید؟')) return;
     try {
         const data = await apiCall('/maintenance', {
             method: 'POST',
@@ -2405,9 +2406,25 @@ async function setMaintenance(enabled) {
                 contact_phone: phone, contact_email: email,
             }),
         });
-        showToast('انجام شد', enabled ? 'سایت بسته شد' : 'سایت باز شد', 'success');
+        if (!opts.silent) {
+            showToast('انجام شد', enabled ? 'سایت بسته شد' : 'سایت باز شد', 'success');
+        }
         renderMaintenanceState(data);
     } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// Update the countdown, contacts and message on a site that is ALREADY closed,
+// without toggling it. Without this the only way to set a deadline was to
+// reopen and re-close, which is a visible outage just to change a label.
+async function saveMaintenanceSettings() {
+    const enabled = document.getElementById('maintenance-badge')
+        ?.textContent.includes('روشن');
+    if (!enabled) {
+        showToast('توجه', 'سایت باز است — تنظیمات هنگام بستن اعمال می‌شود', 'info');
+        return;
+    }
+    await setMaintenance(true, { silent: true });
+    showToast('ذخیره شد', 'تنظیمات صفحهٔ تعمیر بروزرسانی شد', 'success');
 }
 
 async function copyMaintenanceLink() {

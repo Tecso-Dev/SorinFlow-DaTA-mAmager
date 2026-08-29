@@ -9,7 +9,9 @@ from fastapi import FastAPI, Request
 from app.auth.dependencies import require_super_admin as _require_super_admin
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
+import hmac
+import time
 from html import escape as html_escape
 from pathlib import Path
 from loguru import logger
@@ -20,11 +22,26 @@ from app.database import init_db, close_db, close_redis
 from app.api.routes import router as api_router
 
 # Configure logging
+#
+# Both sinks share the redaction filter. Container stdout is persisted to the
+# node's disk by containerd and the file sink writes to a volume, so a Divar
+# session cookie or a customer's phone number logged here is at rest on the
+# server — the filter is what stops a new call site leaking one by forgetting
+# to mask.
+#
+# diagnose=False matters as much as the filter: with it on, loguru prints local
+# variable values inside a traceback, which is how a connection error turns into
+# DATABASE_URL and its password appearing in the log.
+from app.log_redaction import redact_filter
+
 logger.remove()
 logger.add(
     sys.stdout,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level="INFO"
+    level="INFO",
+    filter=redact_filter,
+    backtrace=False,
+    diagnose=False,
 )
 # File logging is best-effort. The path used to be hardcoded to the container's
 # /app/logs, so importing the app anywhere else — a test run, a shell, a
@@ -36,7 +53,12 @@ try:
         rotation="10 MB",
         retention="7 days",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-        level="DEBUG"
+        level="INFO",
+        filter=redact_filter,
+        backtrace=False,
+        diagnose=False,
+        compression="gz",      # a 10MB text log compresses to well under 1MB
+        enqueue=True,          # the scraper and the API both write to this file
     )
 except Exception as _log_err:  # pragma: no cover - environment dependent
     logger.warning(f"file logging disabled ({_log_err})")
@@ -142,84 +164,149 @@ MAINTENANCE_PAGE = r"""<!doctype html><html lang="fa" dir="rtl"><head>
 <title>سورین‌فلو — در حال بروزرسانی</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <!--
-  Deliberately one file with no external request of any kind: no CDN script, no
-  webfont, no Lottie player. This is the page that shows when something is
-  already wrong, so every dependency it has is another thing that can be down at
-  exactly the moment it is needed. The animation below is inline SVG and CSS for
-  the same reason — it weighs nothing and cannot fail to load.
+  One file, no external request of any kind: no CDN script, no webfont, no
+  Lottie player. This is the page that shows when something is already wrong,
+  so every dependency is one more thing that can be down at the moment it is
+  needed. The blobs and the illustration are inline SVG; they weigh a couple of
+  kilobytes and cannot fail to load.
 -->
 <style>
 :root{
-  --bg:#0b1020; --card:#141a2e; --line:#26304d; --text:#e6e9f2;
-  --muted:#8f9fb6; --brand:#4f8cff; --brand2:#a78bfa; --ok:#2fbf71;
-}
-@media (prefers-color-scheme: light){
-  :root{--bg:#eef2f9;--card:#fff;--line:#d9e0ee;--text:#111827;--muted:#5b6880}
+  --ink:#2b2350; --muted:#7c7596; --card:#fff; --line:#efeaf7;
+  --p1:#7c3aed; --p2:#c026d3; --p3:#fb7185; --p4:#fb923c;
 }
 *{box-sizing:border-box}
-body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
- background:var(--bg);color:var(--text);padding:1.25rem;
- font-family:Vazirmatn,Tahoma,system-ui,-apple-system,sans-serif;line-height:1.9;
- background-image:radial-gradient(1100px 520px at 50% -12%,rgba(79,140,255,.13),transparent 70%)}
-.card{width:100%;max-width:560px;background:var(--card);border:1px solid var(--line);
- border-radius:20px;padding:2.25rem 1.75rem;text-align:center;
- box-shadow:0 24px 70px rgba(0,0,0,.32)}
-h1{margin:.25rem 0 .6rem;font-size:1.4rem;font-weight:800}
-p{margin:.35rem 0;color:var(--muted);font-size:.94rem}
+html,body{height:100%}
+body{margin:0;display:flex;align-items:center;justify-content:center;padding:2vmin;
+ font-family:Vazirmatn,Tahoma,system-ui,-apple-system,sans-serif;color:var(--ink);
+ line-height:1.9;overflow:hidden;
+ background:linear-gradient(135deg,#2b1055 0%,#7c3aed 38%,#c026d3 68%,#fb7185 100%)}
 
-/* ── the animation ───────────────────────────────────────────────────────── */
-.art{width:150px;height:150px;margin:0 auto .5rem;display:block}
-.gear-a{transform-origin:62px 62px;animation:spin 8s linear infinite}
-.gear-b{transform-origin:112px 104px;animation:spin-r 5.5s linear infinite}
-.spark{transform-origin:center;animation:pulse 2.4s ease-in-out infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes spin-r{to{transform:rotate(-360deg)}}
-@keyframes pulse{0%,100%{opacity:.25;transform:scale(.9)}50%{opacity:1;transform:scale(1.06)}}
+/* the soft organic shapes drifting behind the card */
+.blobs{position:fixed;inset:0;z-index:0;filter:blur(0.5px)}
+.blob{position:absolute;border-radius:46% 54% 58% 42%/47% 43% 57% 53%;opacity:.55;
+ animation:drift 22s ease-in-out infinite}
+.b1{width:46vmax;height:46vmax;left:-16vmax;top:-18vmax;background:#8b5cf6}
+.b2{width:34vmax;height:34vmax;right:-12vmax;top:-8vmax;background:#fb923c;opacity:.45;animation-duration:27s;animation-direction:reverse}
+.b3{width:40vmax;height:40vmax;right:-14vmax;bottom:-18vmax;background:#f472b6;animation-duration:31s}
+.b4{width:28vmax;height:28vmax;left:-8vmax;bottom:-12vmax;background:#a855f7;opacity:.5;animation-duration:25s;animation-direction:reverse}
+@keyframes drift{
+  0%,100%{transform:translate(0,0) rotate(0deg) scale(1)}
+  33%{transform:translate(2.5vmax,-2vmax) rotate(12deg) scale(1.05)}
+  66%{transform:translate(-2vmax,2.5vmax) rotate(-9deg) scale(.97)}
+}
 
-/* ── countdown ───────────────────────────────────────────────────────────── */
-.count{display:flex;gap:.5rem;justify-content:center;margin:1.25rem 0 .35rem;direction:ltr}
-.unit{min-width:66px;background:rgba(127,146,255,.10);border:1px solid var(--line);
- border-radius:14px;padding:.55rem .35rem}
-.unit b{display:block;font-size:1.5rem;font-weight:800;font-variant-numeric:tabular-nums;
- line-height:1.25;color:var(--text)}
-.unit span{display:block;font-size:.66rem;color:var(--muted)}
-.bar{height:6px;border-radius:99px;background:rgba(127,146,255,.15);overflow:hidden;margin:.9rem 0 .2rem}
-.bar>i{display:block;height:100%;width:0%;border-radius:99px;
- background:linear-gradient(90deg,var(--brand),var(--brand2));transition:width .6s ease}
+.card{position:relative;z-index:1;width:100%;max-width:620px;background:var(--card);
+ border-radius:26px;padding:2.4rem 1.9rem 1.8rem;text-align:center;
+ box-shadow:0 30px 90px rgba(43,16,85,.42);max-height:96vh;overflow:auto}
+h1{margin:.2rem 0 .5rem;font-size:1.55rem;font-weight:800;letter-spacing:-.01em}
+p{margin:.3rem 0;color:var(--muted);font-size:.93rem}
+
+/* the illustration sits in its own blob, as in the reference */
+.scene{width:min(320px,78%);margin:0 auto .4rem;display:block}
+.tick{transform-origin:214px 92px;animation:tick 3s steps(8) infinite}
+.beam{animation:beam 2.8s ease-in-out infinite}
+.bob{animation:bob 4.5s ease-in-out infinite}
+@keyframes tick{to{transform:rotate(360deg)}}
+@keyframes beam{0%,100%{opacity:.25}50%{opacity:.9}}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+
+.count{display:flex;gap:.55rem;justify-content:center;margin:1.35rem 0 .3rem;direction:ltr}
+.unit{min-width:70px;border-radius:16px;padding:.6rem .3rem;color:#fff;
+ background:linear-gradient(160deg,var(--p1),var(--p2));
+ box-shadow:0 8px 22px rgba(124,58,237,.32)}
+.unit:nth-child(3){background:linear-gradient(160deg,var(--p2),var(--p3))}
+.unit:nth-child(4){background:linear-gradient(160deg,var(--p3),var(--p4));
+ box-shadow:0 8px 22px rgba(251,146,60,.32)}
+.unit b{display:block;font-size:1.6rem;font-weight:800;line-height:1.2;
+ font-variant-numeric:tabular-nums}
+.unit span{display:block;font-size:.66rem;opacity:.9}
+.bar{height:7px;border-radius:99px;background:var(--line);overflow:hidden;margin:1rem 0 .25rem}
+.bar>i{display:block;height:100%;width:0;border-radius:99px;transition:width .6s ease;
+ background:linear-gradient(90deg,var(--p1),var(--p2),var(--p3),var(--p4))}
 
 .contact{margin-top:1.5rem;padding-top:1.15rem;border-top:1px solid var(--line)}
-.contact .lead{font-size:.8rem;color:var(--muted);margin-bottom:.6rem}
-.links{display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap}
-.links a{display:inline-flex;align-items:center;gap:.4rem;padding:.5rem .95rem;
- border:1px solid var(--line);border-radius:11px;color:var(--text);text-decoration:none;
- font-size:.85rem;transition:border-color .15s,transform .15s}
-.links a:hover{border-color:var(--brand);transform:translateY(-1px)}
-.links a b{direction:ltr;font-weight:600}
-.foot{margin-top:1.5rem;font-size:.72rem;color:var(--muted)}
+.contact .lead{font-size:.79rem;color:var(--muted);margin-bottom:.65rem}
+.links{display:flex;gap:.55rem;justify-content:center;flex-wrap:wrap}
+.links a{display:inline-flex;align-items:center;gap:.45rem;padding:.55rem 1.05rem;
+ border-radius:13px;text-decoration:none;font-size:.86rem;color:#fff;
+ background:linear-gradient(135deg,var(--p1),var(--p2));
+ box-shadow:0 8px 20px rgba(124,58,237,.28);transition:transform .15s,box-shadow .15s}
+.links a:last-child{background:linear-gradient(135deg,var(--p3),var(--p4));
+ box-shadow:0 8px 20px rgba(251,113,133,.28)}
+.links a:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(124,58,237,.36)}
+.links a b{direction:ltr;font-weight:700}
+.foot{margin-top:1.4rem;font-size:.71rem;color:var(--muted)}
 
 @media (prefers-reduced-motion: reduce){
-  .gear-a,.gear-b,.spark{animation:none}
+  .blob,.tick,.beam,.bob{animation:none}
   .bar>i{transition:none}
 }
+@media (max-width:420px){
+  .card{padding:1.7rem 1.1rem 1.4rem}
+  .unit{min-width:60px}.unit b{font-size:1.3rem}
+}
 </style></head><body>
+<div class="blobs" aria-hidden="true">
+  <div class="blob b1"></div><div class="blob b2"></div>
+  <div class="blob b3"></div><div class="blob b4"></div>
+</div>
+
 <div class="card">
-  <svg class="art" viewBox="0 0 176 176" fill="none" aria-hidden="true">
+  <svg class="scene" viewBox="0 0 300 210" fill="none" aria-hidden="true">
     <defs>
-      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#4f8cff"/><stop offset="1" stop-color="#a78bfa"/>
+      <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#7c3aed"/><stop offset=".55" stop-color="#c026d3"/>
+        <stop offset="1" stop-color="#fb7185"/>
       </linearGradient>
+      <linearGradient id="scr" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#60a5fa"/>
+      </linearGradient>
+      <linearGradient id="warm" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#fb923c"/><stop offset="1" stop-color="#fb7185"/>
+      </linearGradient>
+      <clipPath id="blobClip">
+        <path d="M150 10c46 0 92 14 112 48s6 78-18 104-64 38-100 38-76-10-100-36S18 96 30 62 104 10 150 10Z"/>
+      </clipPath>
     </defs>
-    <circle cx="88" cy="88" r="78" stroke="url(#g)" stroke-opacity=".16" stroke-width="2"/>
-    <g class="gear-a" stroke="url(#g)" stroke-width="7" stroke-linecap="round">
-      <circle cx="62" cy="62" r="23" fill="none"/>
-      <path d="M62 30v-11M62 105v-11M30 62H19M105 62H94M40 40l-8-8M92 92l-8-8M84 40l8-8M32 92l8-8"/>
-    </g>
-    <g class="gear-b" stroke="url(#g)" stroke-width="6" stroke-linecap="round" stroke-opacity=".8">
-      <circle cx="112" cy="104" r="16" fill="none"/>
-      <path d="M112 80v-8M112 136v-8M88 104h-8M144 104h-8M95 87l-6-6M135 127l-6-6M129 87l6-6M89 127l6-6"/>
-    </g>
-    <g class="spark" fill="url(#g)">
-      <circle cx="140" cy="46" r="4"/><circle cx="34" cy="132" r="3"/>
+
+    <!-- the organic frame the scene sits inside -->
+    <path d="M150 10c46 0 92 14 112 48s6 78-18 104-64 38-100 38-76-10-100-36S18 96 30 62 104 10 150 10Z"
+          fill="url(#bg)" opacity=".14"/>
+    <g clip-path="url(#blobClip)">
+      <path d="M150 10c46 0 92 14 112 48s6 78-18 104-64 38-100 38-76-10-100-36S18 96 30 62 104 10 150 10Z"
+            fill="url(#bg)" opacity=".9"/>
+
+      <!-- desk -->
+      <rect x="52" y="150" width="196" height="8" rx="4" fill="#2b1055" opacity=".55"/>
+      <!-- monitor -->
+      <g class="bob">
+        <rect x="96" y="86" width="98" height="62" rx="7" fill="#2b1055" opacity=".5"/>
+        <rect x="101" y="91" width="88" height="52" rx="5" fill="url(#scr)"/>
+        <rect x="109" y="101" width="42" height="4" rx="2" fill="#fff" opacity=".85"/>
+        <rect x="109" y="111" width="62" height="4" rx="2" fill="#fff" opacity=".6"/>
+        <rect x="109" y="121" width="30" height="4" rx="2" fill="#fff" opacity=".45"/>
+        <rect x="132" y="148" width="26" height="4" rx="2" fill="#2b1055" opacity=".55"/>
+      </g>
+      <!-- server rack, gently lit -->
+      <rect x="206" y="66" width="52" height="84" rx="8" fill="#2b1055" opacity=".45"/>
+      <g class="beam">
+        <rect x="214" y="78" width="36" height="5" rx="2.5" fill="#4ade80"/>
+        <rect x="214" y="90" width="36" height="5" rx="2.5" fill="#fbbf24"/>
+        <rect x="214" y="102" width="36" height="5" rx="2.5" fill="#60a5fa"/>
+      </g>
+      <circle cx="232" cy="126" r="11" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="3"/>
+      <!-- a wrench-ish tool leaning on the desk -->
+      <g transform="rotate(-24 70 132)">
+        <rect x="62" y="104" width="9" height="44" rx="4.5" fill="url(#warm)"/>
+        <circle cx="66.5" cy="100" r="10" fill="none" stroke="url(#warm)" stroke-width="6"/>
+      </g>
+      <!-- clock face, hand sweeping -->
+      <circle cx="214" cy="92" r="0" fill="none"/>
+      <g class="tick"><rect x="212.5" y="76" width="3" height="17" rx="1.5" fill="#fff" opacity=".0"/></g>
+      <!-- plant, because every one of these has a plant -->
+      <path d="M72 150c0-12 5-20 12-24-2 9 0 17 4 24Z" fill="#4ade80" opacity=".8"/>
+      <rect x="66" y="150" width="26" height="10" rx="3" fill="url(#warm)"/>
     </g>
   </svg>
 
@@ -234,7 +321,7 @@ p{margin:.35rem 0;color:var(--muted);font-size:.94rem}
       <div class="unit"><b id="s">۰</b><span>ثانیه</span></div>
     </div>
     <div class="bar"><i id="pb"></i></div>
-    <p id="eta" style="font-size:.78rem"></p>
+    <p id="eta" style="font-size:.77rem"></p>
   </div>
 
   <div class="contact" id="contact" style="display:none">
@@ -242,30 +329,29 @@ p{margin:.35rem 0;color:var(--muted);font-size:.94rem}
     <div class="links" id="links"></div>
   </div>
 
-  <div class="foot">
-    © <span id="yr">۱۴۰۴</span> املاک سورین — سورین‌فلو
-  </div>
+  <div class="foot">© <span id="yr">۱۴۰۴</span> املاک سورین — سورین‌فلو</div>
 </div>
 
 <script>
 const FA = n => String(n).padStart(2,'0').replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d]);
-document.getElementById('yr').textContent =
-  new Intl.DateTimeFormat('fa-IR-u-ca-persian',{year:'numeric'}).format(new Date())
-    .replace(/[^۰-۹]/g,'');
+try {
+  document.getElementById('yr').textContent =
+    new Intl.DateTimeFormat('fa-IR-u-ca-persian',{year:'numeric'}).format(new Date())
+      .replace(/[^۰-۹]/g,'');
+} catch (_) {}
 
-// Contact details are injected as JSON rather than interpolated into the markup,
-// so a phone number or address containing markup cannot become part of the page.
+// Injected as JSON the script reads, never interpolated into markup: an
+// operator-typed phone number is untrusted like any other input.
 const CFG = __CONFIG__;
 
 if (CFG.phone || CFG.email) {
   const box = document.getElementById('links');
   const add = (href, label, value) => {
     const a = document.createElement('a');
-    a.href = href;                       // href is built from the value, never from markup
-    const t = document.createTextNode(label + ' ');
+    a.href = href;
     const b = document.createElement('b');
-    b.textContent = value;               // textContent: nothing here can inject
-    a.append(t, b);
+    b.textContent = value;                 // textContent: nothing can inject
+    a.append(document.createTextNode(label + ' '), b);
     box.appendChild(a);
   };
   if (CFG.phone) add('tel:' + CFG.phone.replace(/[^\d+]/g,''), '☎', CFG.phone);
@@ -274,18 +360,16 @@ if (CFG.phone || CFG.email) {
 }
 
 if (CFG.seconds_left && CFG.seconds_left > 0) {
-  const cd = document.getElementById('cd');
-  cd.style.display = '';
-  const total = CFG.seconds_left;
-  const end = Date.now() + total * 1000;
+  document.getElementById('cd').style.display = '';
+  const total = CFG.seconds_left, end = Date.now() + total * 1000;
   const eta = document.getElementById('eta');
   try {
-    eta.textContent = 'زمان تخمینی بازگشت: ' + new Intl.DateTimeFormat('fa-IR-u-ca-persian',
-      {dateStyle:'full', timeStyle:'short'}).format(new Date(end));
+    eta.textContent = 'زمان تخمینی بازگشت: ' + new Intl.DateTimeFormat(
+      'fa-IR-u-ca-persian', {dateStyle:'full', timeStyle:'short'}).format(new Date(end));
   } catch (_) {}
 
   const tick = () => {
-    let left = Math.max(Math.floor((end - Date.now())/1000), 0);
+    const left = Math.max(Math.floor((end - Date.now())/1000), 0);
     document.getElementById('d').textContent = FA(Math.floor(left/86400));
     document.getElementById('h').textContent = FA(Math.floor(left%86400/3600));
     document.getElementById('m').textContent = FA(Math.floor(left%3600/60));
@@ -293,9 +377,9 @@ if (CFG.seconds_left && CFG.seconds_left > 0) {
     document.getElementById('pb').style.width = (100 - (left/total)*100).toFixed(1) + '%';
     if (left <= 0) {
       clearInterval(timer);
-      // The deadline passing does not reopen anything — only a person does. Say
-      // "finishing up" rather than counting into negative numbers, and reload
-      // periodically so the site returning is noticed without a manual refresh.
+      // The deadline passing reopens nothing — only a person does. Say
+      // "finishing up" rather than counting into negatives, and reload
+      // periodically so a site coming back is noticed without a refresh.
       eta.textContent = 'در حال نهایی‌سازی — به‌زودی باز می‌شویم';
       setTimeout(() => location.reload(), 60000);
     }
@@ -329,6 +413,45 @@ def render_maintenance_page(state=None, message: str = None) -> str:
     return (MAINTENANCE_PAGE
             .replace("__MESSAGE__", html_escape(text))
             .replace("__CONFIG__", blob))
+
+
+async def _maintenance_allows(request: Request) -> bool:
+    """Whether this particular request gets through a closed site.
+
+    Three ways in, and only three: a path that must never close, the bypass
+    cookie, or a bearer token belonging to a super_admin (or root).
+    """
+    from app.services import maintenance as mt
+
+    if mt.is_open_path(request.url.path) or request.method == "OPTIONS":
+        return True
+
+    from app.database import async_session_maker
+    async with async_session_maker() as db:
+        enabled, _message, bypass = await mt.get_state(db)
+        if not enabled:
+            return True
+        if bypass and request.cookies.get(mt.BYPASS_COOKIE) == bypass:
+            return True
+
+        token = request.headers.get("Authorization", "")
+        if token.startswith("Bearer "):
+            try:
+                from app.auth.jwt import decode_token, is_access_token
+                from app.models.user import User
+                from sqlalchemy import select
+                payload = decode_token(token[7:])
+                # A token issued before the TOTP step is not a login yet, so it
+                # must not open a site that has been deliberately closed.
+                username = payload.get("sub") if is_access_token(payload) else None
+                if username:
+                    user = (await db.execute(select(User).where(
+                        User.username == username))).scalar_one_or_none()
+                    if user and user.is_active and user.role in ("root", "super_admin"):
+                        return True
+            except Exception:
+                pass
+    return False
 
 
 async def _maintenance_allows(request: Request) -> bool:
@@ -477,6 +600,43 @@ def _apply_panel_cache_policy(request: Request, response) -> None:
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
     else:
         response.headers.setdefault("Cache-Control", "public, max-age=86400")
+
+
+# ─── metrics ────────────────────────────────────────────────────────────────
+# Registered last, which in Starlette means it runs FIRST. That is deliberate:
+# the API-key and maintenance middleware below reject requests without ever
+# reaching a route, and those rejections — a credential-stuffing run, a closed
+# site still being hammered — are the ones most worth counting. An inner
+# placement would never see them.
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    from app import metrics as mx
+
+    if request.url.path == "/metrics":
+        token = settings.metrics_token
+        if not token:
+            # not configured: behave as though the endpoint does not exist
+            return JSONResponse(status_code=404, content={"detail": "Resource not found"})
+        provided = (request.headers.get("X-Metrics-Token")
+                    or request.query_params.get("token") or "")
+        # compare_digest raises TypeError on non-ASCII str, and a token is
+        # operator-supplied — encode both sides first.
+        if not hmac.compare_digest(provided.encode("utf-8"), token.encode("utf-8")):
+            return JSONResponse(status_code=401, content={"detail": "Invalid metrics token"})
+        mx.sample_disk(settings.images_path)
+        body, content_type = mx.render()
+        return Response(content=body, media_type=content_type)
+
+    route = mx.route_label(request.url.path)
+    started = time.perf_counter()
+    status = "500"          # an unhandled route error arrives here as a raised
+    try:                    # exception, never as a response — so default to 500
+        response = await call_next(request)
+        status = str(response.status_code)
+        return response
+    finally:
+        mx.http_latency.labels(route).observe(time.perf_counter() - started)
+        mx.http_requests.labels(route, request.method, status).inc()
 
 
 # Include API routes

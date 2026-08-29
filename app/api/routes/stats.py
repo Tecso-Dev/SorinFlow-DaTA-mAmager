@@ -2,7 +2,10 @@
 SorinFlow Divar Scraper - Statistics API Routes
 """
 import json
-from fastapi import APIRouter, Depends
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from datetime import datetime, timedelta
@@ -17,6 +20,9 @@ from app.config import get_settings
 from app.auth.dependencies import get_current_user
 
 router = APIRouter()
+
+# Logs name job ids, Divar accounts and customer-facing errors — admin only.
+from app.auth.dependencies import require_admin as _require_admin  # noqa: E402
 settings = get_settings()
 
 _DASHBOARD_CACHE_TTL = 60  # seconds
@@ -276,26 +282,76 @@ async def get_jobs_summary(
     }
 
 
+def _tail_log(path: str, want: int, needle: str, level: str) -> dict:
+    """Read the last matching lines by walking backwards in fixed blocks.
+
+    The previous version did f.readlines() on the whole file and filtered
+    afterwards. The log rotates at 20MB, so a search for a rare word read 20MB
+    into memory to return 200 lines — and it did it synchronously inside the
+    event loop, so every other request waited on the disk. This reads from the
+    end and stops as soon as it has enough, which for the common case (recent
+    lines, no filter) touches a few kilobytes.
+    """
+    import os
+
+    if not os.path.exists(path):
+        return {"lines": [], "note": "log file not found", "total_returned": 0}
+
+    needle = (needle or "").lower()
+    level = (level or "").upper()
+    block = 64 * 1024
+    found, leftover = [], b""
+
+    with open(path, "rb") as fh:
+        pos = fh.seek(0, os.SEEK_END)
+        scanned = 0
+        # 8MB is the point past which this stops being a tail and starts being
+        # a full scan; better to return a partial answer than to stall the box.
+        while pos > 0 and len(found) < want and scanned < 8 * 1024 * 1024:
+            step = min(block, pos)
+            pos -= step
+            fh.seek(pos)
+            chunk = fh.read(step) + leftover
+            scanned += step
+            parts = chunk.split(b"\n")
+            leftover = parts.pop(0) if pos > 0 else b""
+            for raw in reversed(parts):
+                if not raw.strip():
+                    continue
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                if needle and needle not in line.lower():
+                    continue
+                if level and f"| {level}" not in line.upper():
+                    continue
+                found.append(line)
+                if len(found) >= want:
+                    break
+
+    found.reverse()          # back into chronological order
+    return {"lines": found, "total_returned": len(found)}
+
+
 @router.get("/logs")
 async def get_recent_logs(
-    lines: int = 200,
-    grep: str = "",
-    current_user: User = Depends(get_current_user),
+    lines: int = Query(200, ge=1, le=1000),
+    grep: str = Query("", max_length=200),
+    level: str = Query("", max_length=10),
+    _: User = _require_admin,
 ):
-    """Return last N lines from the scraper log file (admin only)."""
-    import os
-    log_path = "/app/logs/scraper.log"
+    """Recent log lines, newest last. Admin only — logs name jobs and accounts.
+
+    Runs in a worker thread: it is file I/O, and doing it on the event loop
+    blocks every other request for the duration of the read.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from app.config import get_settings
+
+    path = str(Path(get_settings().logs_path) / "scraper.log")
     try:
-        if not os.path.exists(log_path):
-            return {"lines": [], "note": "log file not found"}
-        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-            all_lines = f.readlines()
-        if grep:
-            all_lines = [l for l in all_lines if grep.lower() in l.lower()]
-        tail = all_lines[-lines:]
-        return {"lines": [l.rstrip() for l in tail], "total_returned": len(tail)}
+        return await run_in_threadpool(_tail_log, path, lines, grep, level)
     except Exception as e:
-        return {"error": str(e)}
+        logger.warning(f"[logs] read failed: {e}")
+        raise HTTPException(status_code=500, detail="could not read the log")
 
 
 @router.get("/property-trends")

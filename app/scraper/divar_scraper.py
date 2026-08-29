@@ -24,6 +24,16 @@ from app.models.proxy import Proxy
 from app.scraper.stealth import StealthConfig, STEALTH_JS, get_browser_args, get_context_options
 from app.scraper.auth import DivarAuth
 from app.scraper.contact_extractor import ContactExtractor
+
+
+def _mx_images(outcome: str, n: int = 1) -> None:
+    """Count an image outcome. Wrapped because a metrics failure must never be
+    the reason a scrape stops — this runs inside the per-listing loop."""
+    try:
+        from app import metrics as _mx
+        _mx.scrape_images.labels(outcome).inc(n)
+    except Exception:
+        pass
 from app.scraper.parsers import (
     extract_property_details as _parse_property_details,
     extract_price_info as _parse_price_info,
@@ -1369,6 +1379,8 @@ class DivarScraper:
 
             # This is the moment Divar counts, so it is the moment we count.
             self._reveals_since_rotation += 1
+            from app import metrics as _mx
+            _mx.scrape_reveals.inc()
 
             contact_extractor = ContactExtractor(
                 self.page, self.images_dir, otp_key=_otp_key,
@@ -1841,6 +1853,10 @@ class DivarScraper:
             logger.debug(f"Could not extract posted_at: {e}")
             return None
 
+    @staticmethod
+    def _noop(*_a, **_k):
+        return None
+
     async def download_images(
         self,
         images: List[str],
@@ -1867,6 +1883,7 @@ class DivarScraper:
             if max_count and len(images) > max_count:
                 logger.info(
                     f"{divar_id}: {len(images)} images offered, keeping the first {max_count}")
+                _mx_images("too_many", len(images) - max_count)
                 images = images[:max_count]
 
             try:
@@ -1896,6 +1913,7 @@ class DivarScraper:
                             logger.warning(
                                 f"{divar_id}: image {i+1} exceeded the "
                                 f"{max_bytes}B cap mid-download — skipped")
+                            _mx_images("too_big")
                             continue
 
                         # Always convert (webp/png/...) to JPEG so every stored
@@ -1918,6 +1936,7 @@ class DivarScraper:
                         except Exception as decode_err:
                             # not a decodable image, or a decompression bomb
                             logger.debug(f"{divar_id}: image {i+1} not usable: {decode_err}")
+                            _mx_images("undecodable")
                             continue
                         # served URL (see /images static mount)
                         local_paths.append(f"/images/{divar_id}/{filename}")
@@ -1988,6 +2007,8 @@ class DivarScraper:
         itself happens between listings, where it is safe to navigate.
         """
         self._force_rotate = True
+        from app import metrics as _mx
+        _mx.scrape_challenges.inc()
 
     async def maybe_rotate_account(self) -> bool:
         """Switch Divar account once this one has revealed `cookie_rotate_every`
@@ -2052,6 +2073,8 @@ class DivarScraper:
                 # rotation that could not find a working session still consumed
                 # the whole window, so the next try was a full threshold away —
                 # on the very account that had just proved it needed replacing.
+                from app import metrics as _mx
+                _mx.scrape_rotations.labels("challenged" if forced else "threshold").inc()
                 self._reveals_since_rotation = 0
                 self._force_rotate = False
                 logger.info(

@@ -315,7 +315,10 @@ class DivarAuth:
                 pass
 
             # Enter phone number — try multiple selectors
-            logger.info(f"Entering phone number: {phone_number}")
+            # masked: the redaction filter would catch it anyway, but a call
+            # site that never had the number in the string is one fewer thing
+            # depending on the filter being right
+            logger.info(f"Entering phone number: {str(phone_number)[:4]}*****{str(phone_number)[-2:]}")
             phone_input = None
             PHONE_SELECTORS = [
                 'input[name="mobile"]',
@@ -588,8 +591,11 @@ class DivarAuth:
             # Debug: Log all available cookies
             logger.info(f"All cookies after login: {len(cookies)} found")
             if cookies:
-                for cookie in cookies:
-                    logger.info(f"Cookie: {cookie.get('name')} = {cookie.get('value', '')[:50]}...")
+                # Names only. This used to log the first 50 characters of every
+                # value, and Divar's «token» cookie IS the session — printing it
+                # put a live credential in a file and on the node's disk. The
+                # count on the line above is what anyone was actually reading.
+                logger.info(f"Cookie names: {', '.join(sorted(c.get('name', '?') for c in cookies))}")
             else:
                 logger.warning("No cookies found at all after login attempt")
                 # Debug: Check page URL and title
