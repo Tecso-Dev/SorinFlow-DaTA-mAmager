@@ -1705,6 +1705,33 @@
                             <input type="text" id="maintenance-message" class="form-control form-control-sm"
                                    maxlength="200" placeholder="سایت در حال بروزرسانی می‌باشد">
                         </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-sm-4">
+                                <label class="form-label small">مدت زمان</label>
+                                <select id="maintenance-hours" class="form-select form-select-sm">
+                                    <option value="1">۱ ساعت</option>
+                                    <option value="6">۶ ساعت</option>
+                                    <option value="24">۱ روز</option>
+                                    <option value="72" selected>۳ روز</option>
+                                    <option value="168">۱ هفته</option>
+                                    <option value="">بدون زمان‌شمار</option>
+                                </select>
+                            </div>
+                            <div class="col-sm-4">
+                                <label class="form-label small">شمارهٔ تماس اضطراری</label>
+                                <input type="text" id="maintenance-phone" class="form-control form-control-sm"
+                                       dir="ltr" maxlength="32" placeholder="09123456789">
+                            </div>
+                            <div class="col-sm-4">
+                                <label class="form-label small">ایمیل پشتیبانی</label>
+                                <input type="email" id="maintenance-email" class="form-control form-control-sm"
+                                       dir="ltr" maxlength="200" placeholder="support@sorinflow.com">
+                            </div>
+                        </div>
+                        <p class="text-muted small mb-2">
+                            زمان‌شمار فقط به بازدیدکننده نشان داده می‌شود؛ با تمام‌شدن آن سایت
+                            <b>خودبه‌خود باز نمی‌شود</b> — باز کردن سایت همیشه با خود شماست.
+                        </p>
                         <div class="d-flex gap-2 flex-wrap">
                             <button class="btn btn-danger btn-sm" onclick="setMaintenance(true)">
                                 <i class="bi bi-lock"></i> بستن سایت
@@ -1713,6 +1740,7 @@
                                 <i class="bi bi-unlock"></i> باز کردن سایت
                             </button>
                         </div>
+                        <div id="maintenance-eta" class="d-none small mt-2" style="color:var(--brand,#4f8cff)"></div>
                         <div id="maintenance-bypass" class="d-none mt-3"></div>
                     </div>
                 </div>

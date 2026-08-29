@@ -2340,15 +2340,48 @@ function renderRotationHint() {
 }
 
 // ─── حالت تعمیر ──────────────────────────────────────────────────────────────
+// Paint the card from a state object — used both on load and after a toggle,
+// so the two can never disagree about what is currently set.
+function renderMaintenanceState(r) {
+    const badge = document.getElementById('maintenance-badge');
+    if (badge) {
+        badge.textContent = r.enabled ? 'روشن — سایت بسته است' : 'خاموش — سایت باز است';
+        badge.className = 'badge ' + (r.enabled ? 'bg-danger' : 'bg-success');
+    }
+    const set = (id, v) => {
+        const el = document.getElementById(id);
+        if (el && v !== undefined && v !== null) el.value = v;
+    };
+    const msg = document.getElementById('maintenance-message');
+    if (msg && !msg.value) msg.value = r.message || '';
+    set('maintenance-phone', r.contact_phone || '');
+    set('maintenance-email', r.contact_email || '');
+
+    // Show what the visitor is actually seeing right now, so nobody has to open
+    // the closed site in a private window to find out.
+    const eta = document.getElementById('maintenance-eta');
+    if (eta) {
+        if (r.enabled && r.seconds_left > 0) {
+            const h = Math.floor(r.seconds_left / 3600);
+            const d = Math.floor(h / 24);
+            eta.textContent = d >= 1
+                ? `زمان‌شمار: حدود ${formatNumber(d)} روز و ${formatNumber(h % 24)} ساعت باقی مانده`
+                : `زمان‌شمار: حدود ${formatNumber(h)} ساعت باقی مانده`;
+            eta.classList.remove('d-none');
+        } else if (r.enabled && r.until) {
+            eta.textContent = 'زمان‌شمار به پایان رسیده — بازدیدکننده «در حال نهایی‌سازی» می‌بیند';
+            eta.classList.remove('d-none');
+        } else {
+            eta.classList.add('d-none');
+        }
+    }
+}
+
 async function loadMaintenance() {
     const badge = document.getElementById('maintenance-badge');
     if (!badge) return;
     try {
-        const r = await apiCall('/maintenance');
-        badge.textContent = r.enabled ? 'روشن — سایت بسته است' : 'خاموش — سایت باز است';
-        badge.className = 'badge ' + (r.enabled ? 'bg-danger' : 'bg-success');
-        const msg = document.getElementById('maintenance-message');
-        if (msg && !msg.value) msg.value = r.message || '';
+        renderMaintenanceState(await apiCall('/maintenance'));
     } catch (e) {
         badge.textContent = 'نامشخص';
         badge.className = 'badge bg-secondary';
@@ -2356,38 +2389,25 @@ async function loadMaintenance() {
 }
 
 async function setMaintenance(enabled) {
-    if (enabled && !confirm('سایت برای همه بسته شود؟ فقط خودتان دسترسی خواهید داشت.')) return;
     const message = document.getElementById('maintenance-message')?.value.trim() || null;
-    const box = document.getElementById('maintenance-bypass');
+    const hours   = document.getElementById('maintenance-hours')?.value ?? '';
+    const phone   = document.getElementById('maintenance-phone')?.value.trim() || '';
+    const email   = document.getElementById('maintenance-email')?.value.trim() || '';
+
+    if (enabled && !confirm('سایت برای همه بسته می‌شود. مطمئن هستید؟')) return;
     try {
-        const r = await apiCall('/maintenance', {
-            method: 'POST', body: JSON.stringify({ enabled, message }),
+        const data = await apiCall('/maintenance', {
+            method: 'POST',
+            body: JSON.stringify({
+                enabled, message,
+                // only meaningful when closing; the server clears it on reopen
+                hours: enabled && hours !== '' ? Number(hours) : null,
+                contact_phone: phone, contact_email: email,
+            }),
         });
-        await loadMaintenance();
-        if (r.enabled && r.bypass_url) {
-            // The panel itself is now closed. This link is how another browser
-            // or phone gets back in, so it has to be kept somewhere safe.
-            box.classList.remove('d-none');
-            box.innerHTML = `
-                <div class="alert alert-warning mb-0" style="font-size:.8rem">
-                    <b>سایت بسته شد.</b> این مرورگر دسترسی دارد.
-                    برای ورود از دستگاه دیگر، این لینک را باز کنید — <b>جای امنی ذخیره‌اش کنید</b>،
-                    چون با هر بار بستن سایت لینک تازه‌ای ساخته می‌شود:
-                    <div class="input-group input-group-sm mt-2">
-                        <input type="text" class="form-control" id="maintenance-bypass-url"
-                               value="${esc(r.bypass_url)}" readonly dir="ltr">
-                        <button class="btn btn-outline-secondary" onclick="copyMaintenanceLink()">کپی</button>
-                    </div>
-                </div>`;
-            showToast('سایت بسته شد', 'فقط شما دسترسی دارید', 'warning');
-        } else {
-            box.classList.add('d-none');
-            box.innerHTML = '';
-            showToast('سایت باز شد', 'دسترسی برای همه برقرار است', 'success');
-        }
-    } catch (e) {
-        showToast('خطا', e.message, 'danger');
-    }
+        showToast('انجام شد', enabled ? 'سایت بسته شد' : 'سایت باز شد', 'success');
+        renderMaintenanceState(data);
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
 async function copyMaintenanceLink() {

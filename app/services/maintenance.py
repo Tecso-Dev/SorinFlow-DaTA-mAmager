@@ -11,6 +11,8 @@ every request; writes clear the cache immediately, so the toggle feels instant.
 """
 import secrets
 import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from loguru import logger
@@ -19,69 +21,144 @@ from sqlalchemy import select
 KEY_ENABLED = "maintenance_enabled"
 KEY_MESSAGE = "maintenance_message"
 KEY_BYPASS = "maintenance_bypass_token"
+KEY_UNTIL = "maintenance_until"          # ISO-8601 UTC — drives the countdown
+KEY_PHONE = "maintenance_contact_phone"
+KEY_EMAIL = "maintenance_contact_email"
 
 DEFAULT_MESSAGE = "سایت در حال بروزرسانی می‌باشد"
 BYPASS_COOKIE = "sf_maintenance_bypass"
+# How long a closure is assumed to last when nobody says otherwise.
+DEFAULT_WINDOW_HOURS = 72                # three days
+
+
+@dataclass
+class State:
+    """Everything the closed-site page needs to render itself.
+
+    A dataclass rather than a widening tuple: this grew from three fields to
+    six, and `enabled, message, bypass, until, phone, email = ...` at five call
+    sites is a positional mistake waiting to happen. Unpacking still works for
+    the first three, so existing callers were left alone where they only needed
+    those.
+    """
+    enabled: bool = False
+    message: str = DEFAULT_MESSAGE
+    bypass: Optional[str] = None
+    until: Optional[str] = None          # ISO-8601 UTC, or None for no countdown
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+    def __iter__(self):
+        # keeps `enabled, message, bypass = await get_state(db)` working
+        return iter((self.enabled, self.message, self.bypass))
+
+    @property
+    def seconds_left(self) -> Optional[int]:
+        if not self.until:
+            return None
+        try:
+            end = datetime.fromisoformat(self.until)
+        except ValueError:
+            return None
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        return max(int((end - datetime.now(timezone.utc)).total_seconds()), 0)
+
+    def to_dict(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "message": self.message,
+            "until": self.until,
+            "seconds_left": self.seconds_left,
+            "contact_phone": self.phone,
+            "contact_email": self.email,
+        }
 
 _CACHE_TTL = 5.0
-_cache: dict = {"at": 0.0, "enabled": False, "message": DEFAULT_MESSAGE, "bypass": None}
+_cache: dict = {"at": 0.0, "state": State()}
 
 
-def _put(enabled: bool, message: str, bypass: Optional[str]) -> None:
-    _cache.update({"at": time.time(), "enabled": enabled,
-                   "message": message or DEFAULT_MESSAGE, "bypass": bypass})
+def _put(state: State) -> None:
+    _cache.update({"at": time.time(), "state": state})
 
 
 def invalidate() -> None:
     _cache["at"] = 0.0
 
 
-async def _read(db) -> Tuple[bool, str, Optional[str]]:
+async def _read(db) -> State:
     from app.models.app_setting import AppSetting
-    rows = (await db.execute(select(AppSetting).where(
-        AppSetting.key.in_([KEY_ENABLED, KEY_MESSAGE, KEY_BYPASS])))).scalars().all()
-    values = {r.key: r.value for r in rows}
-    return (
-        (values.get(KEY_ENABLED) or "").lower() == "true",
-        values.get(KEY_MESSAGE) or DEFAULT_MESSAGE,
-        values.get(KEY_BYPASS) or None,
+    rows = (await db.execute(select(AppSetting).where(AppSetting.key.in_(
+        [KEY_ENABLED, KEY_MESSAGE, KEY_BYPASS,
+         KEY_UNTIL, KEY_PHONE, KEY_EMAIL])))).scalars().all()
+    v = {r.key: r.value for r in rows}
+    return State(
+        enabled=(v.get(KEY_ENABLED) or "").lower() == "true",
+        message=v.get(KEY_MESSAGE) or DEFAULT_MESSAGE,
+        bypass=v.get(KEY_BYPASS) or None,
+        until=v.get(KEY_UNTIL) or None,
+        phone=v.get(KEY_PHONE) or None,
+        email=v.get(KEY_EMAIL) or None,
     )
 
 
-async def get_state(db, *, fresh: bool = False) -> Tuple[bool, str, Optional[str]]:
-    """(enabled, message, bypass_token)."""
+async def get_state(db, *, fresh: bool = False) -> State:
+    """Current maintenance state. Unpacks as (enabled, message, bypass)."""
     if not fresh and time.time() - _cache["at"] < _CACHE_TTL:
-        return _cache["enabled"], _cache["message"], _cache["bypass"]
+        return _cache["state"]
     try:
-        enabled, message, bypass = await _read(db)
+        state = await _read(db)
     except Exception as e:
         # A database that is down must not lock everyone out of a site that
         # was never put into maintenance.
         logger.warning(f"[maintenance] state unreadable, assuming open: {e}")
-        return False, DEFAULT_MESSAGE, None
-    _put(enabled, message, bypass)
-    return enabled, message, bypass
+        return State()
+    _put(state)
+    return state
 
 
 async def set_state(db, *, enabled: bool, message: Optional[str] = None,
-                    actor: Optional[str] = None) -> Tuple[bool, str, str]:
-    """Turn it on or off. Returns (enabled, message, bypass_token).
+                    until: Optional[str] = None, hours: Optional[float] = None,
+                    phone: Optional[str] = None, email: Optional[str] = None,
+                    actor: Optional[str] = None) -> State:
+    """Turn it on or off, and set what the closed page shows.
 
     Turning it on mints a fresh bypass token, so a link shared during an
     earlier closure cannot reopen a later one.
+
+    `until` is an explicit ISO timestamp; `hours` is the friendlier form the
+    dashboard sends ("close it for 72 hours"). Neither given, a first closure
+    gets DEFAULT_WINDOW_HOURS so the page always has something to count down —
+    a closed site with no stated end reads as abandoned rather than busy.
     """
     from app.models.app_setting import AppSetting
 
-    _, current_message, bypass = await get_state(db, fresh=True)
-    message = (message or current_message or DEFAULT_MESSAGE).strip()[:500]
+    current = await get_state(db, fresh=True)
+    message = (message or current.message or DEFAULT_MESSAGE).strip()[:500]
+
     if enabled:
         bypass = secrets.token_urlsafe(24)
+        if hours is not None:
+            until = (datetime.now(timezone.utc)
+                     + timedelta(hours=max(float(hours), 0))).isoformat()
+        elif until is None:
+            # keep an existing deadline across a re-save, otherwise start one
+            until = current.until or (
+                datetime.now(timezone.utc)
+                + timedelta(hours=DEFAULT_WINDOW_HOURS)).isoformat()
     else:
         bypass = None
+        until = None                     # a reopened site has nothing to count
+
+    phone = (phone if phone is not None else current.phone or "").strip()[:32]
+    email = (email if email is not None else current.email or "").strip()[:200]
 
     for key, value in ((KEY_ENABLED, "true" if enabled else "false"),
                        (KEY_MESSAGE, message),
-                       (KEY_BYPASS, bypass or "")):
+                       (KEY_BYPASS, bypass or ""),
+                       (KEY_UNTIL, until or ""),
+                       (KEY_PHONE, phone),
+                       (KEY_EMAIL, email)):
         row = (await db.execute(select(AppSetting).where(
             AppSetting.key == key))).scalar_one_or_none()
         if row:
@@ -91,8 +168,10 @@ async def set_state(db, *, enabled: bool, message: Optional[str] = None,
             db.add(AppSetting(key=key, value=value, updated_by=actor))
     await db.commit()
     invalidate()
-    logger.info(f"[maintenance] {'ON' if enabled else 'OFF'} by {actor or 'unknown'}")
-    return enabled, message, bypass or ""
+    logger.info(f"[maintenance] {'ON' if enabled else 'OFF'} by {actor or 'unknown'}"
+                + (f" until {until}" if until else ""))
+    return State(enabled=enabled, message=message, bypass=bypass,
+                 until=until or None, phone=phone or None, email=email or None)
 
 
 # Paths that stay open no matter what.

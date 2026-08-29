@@ -113,3 +113,82 @@ class TestAccessDecision:
 
     def test_health_survives_a_closed_site(self):
         assert self.allows("/health", enabled=True) is True
+
+
+# ── the closed-site page ─────────────────────────────────────────────────────
+
+class TestMaintenancePage:
+    """The gate function and the page it renders.
+
+    _maintenance_allows was deleted once while the page template around it was
+    being rewritten, and nothing failed: the middleware catches everything and
+    fails open by design, so a closed site quietly served every request instead.
+    That is the right failure mode and the reason it needs its own test.
+    """
+
+    def test_the_gate_function_exists(self):
+        import app.main as m
+        assert hasattr(m, "_maintenance_allows"), (
+            "_maintenance_allows is gone — the middleware fails open, so "
+            "maintenance mode silently stops closing the site")
+
+    def test_message_is_escaped_into_the_page(self):
+        import app.main as m
+        html = m.render_maintenance_page(message='<img src=x onerror=alert(1)>')
+        assert "<img src=x" not in html
+        assert "&lt;img" in html
+
+    def test_contact_details_cannot_break_out_of_the_script(self):
+        """Phone and email are operator-typed, so they are untrusted like any
+        other input — they go in as JSON the script reads, never as markup."""
+        import app.main as m
+        from app.services.maintenance import State
+        st = State(enabled=True, message="x",
+                   phone='</script><script>alert(1)</script>',
+                   email='a@b.com')
+        html = m.render_maintenance_page(st)
+        assert "</script><script>alert(1)" not in html
+
+    def test_countdown_is_rendered_when_a_deadline_is_set(self):
+        import app.main as m
+        from app.services.maintenance import State
+        from datetime import datetime, timedelta, timezone
+        until = (datetime.now(timezone.utc) + timedelta(hours=72)).isoformat()
+        html = m.render_maintenance_page(State(enabled=True, message="x", until=until))
+        assert '"seconds_left":' in html.replace(" ", "")
+        # three days, allowing for the seconds spent getting here
+        import re
+        secs = int(re.search(r'"seconds_left":\s*(\d+)', html).group(1))
+        assert 71 * 3600 < secs <= 72 * 3600
+
+    def test_no_deadline_means_no_countdown(self):
+        import app.main as m
+        from app.services.maintenance import State
+        html = m.render_maintenance_page(State(enabled=True, message="x"))
+        assert '"seconds_left": null' in html or '"seconds_left":null' in html
+
+    def test_the_page_makes_no_external_requests(self):
+        """It is shown when something is already wrong, so every dependency is
+        another thing that can be down exactly when it is needed."""
+        import re
+        import app.main as m
+        for url in re.findall(r'(?:src|href)="(https?://[^"]+)"', m.MAINTENANCE_PAGE):
+            raise AssertionError(f"closed-site page loads an external resource: {url}")
+
+
+class TestMaintenanceStateObject:
+    def test_state_still_unpacks_as_the_old_three_tuple(self):
+        """Existing callers do `enabled, message, bypass = ...`."""
+        from app.services.maintenance import State
+        enabled, message, bypass = State(enabled=True, message="m", bypass="b")
+        assert (enabled, message, bypass) == (True, "m", "b")
+
+    def test_seconds_left_never_goes_negative(self):
+        from app.services.maintenance import State
+        from datetime import datetime, timedelta, timezone
+        past = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+        assert State(until=past).seconds_left == 0
+
+    def test_a_malformed_deadline_is_ignored_rather_than_raising(self):
+        from app.services.maintenance import State
+        assert State(until="not-a-date").seconds_left is None

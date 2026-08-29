@@ -10,6 +10,7 @@ from app.auth.dependencies import require_super_admin as _require_super_admin
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from html import escape as html_escape
 from pathlib import Path
 from loguru import logger
 import sys
@@ -135,26 +136,199 @@ app.add_middleware(
 # ─── حالت تعمیر ──────────────────────────────────────────────────────────────
 # Starlette runs the last-registered middleware first, so this one sits closest
 # to the routes — which is all it needs: it answers before any handler does.
-MAINTENANCE_PAGE = """<!doctype html><html lang="fa" dir="rtl"><head>
+MAINTENANCE_PAGE = r"""<!doctype html><html lang="fa" dir="rtl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>سورین‌فلو — در حال بروزرسانی</title><style>
-:root{color-scheme:dark}
+<meta name="robots" content="noindex">
+<title>سورین‌فلو — در حال بروزرسانی</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<!--
+  Deliberately one file with no external request of any kind: no CDN script, no
+  webfont, no Lottie player. This is the page that shows when something is
+  already wrong, so every dependency it has is another thing that can be down at
+  exactly the moment it is needed. The animation below is inline SVG and CSS for
+  the same reason — it weighs nothing and cannot fail to load.
+-->
+<style>
+:root{
+  --bg:#0b1020; --card:#141a2e; --line:#26304d; --text:#e6e9f2;
+  --muted:#8f9fb6; --brand:#4f8cff; --brand2:#a78bfa; --ok:#2fbf71;
+}
+@media (prefers-color-scheme: light){
+  :root{--bg:#eef2f9;--card:#fff;--line:#d9e0ee;--text:#111827;--muted:#5b6880}
+}
+*{box-sizing:border-box}
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
- background:#0b1020;color:#e6e9f2;font-family:Vazirmatn,Tahoma,system-ui,sans-serif;padding:1.5rem}
-.card{max-width:520px;text-align:center;background:#141a2e;border:1px solid #26304d;
- border-radius:20px;padding:2.5rem 2rem;box-shadow:0 18px 50px rgba(0,0,0,.45)}
-.ring{width:74px;height:74px;margin:0 auto 1.2rem;border-radius:50%;display:flex;
- align-items:center;justify-content:center;font-size:2rem;
- background:linear-gradient(135deg,#a78bfa,#38bdf8)}
-h1{font-size:1.35rem;margin:0 0 .7rem}
-p{margin:.35rem 0;color:#9aa4c0;font-size:.95rem;line-height:2}
-.foot{margin-top:1.6rem;font-size:.75rem;color:#5f6b8c}
-</style></head><body><div class="card">
-<div class="ring">🛠</div><h1>__MESSAGE__</h1>
-<p>در حال بهبود سامانه هستیم و به‌زودی برمی‌گردیم.</p>
-<p>از شکیبایی شما سپاسگزاریم.</p>
-<div class="foot">املاک سورین — سورین‌فلو</div>
-</div></body></html>"""
+ background:var(--bg);color:var(--text);padding:1.25rem;
+ font-family:Vazirmatn,Tahoma,system-ui,-apple-system,sans-serif;line-height:1.9;
+ background-image:radial-gradient(1100px 520px at 50% -12%,rgba(79,140,255,.13),transparent 70%)}
+.card{width:100%;max-width:560px;background:var(--card);border:1px solid var(--line);
+ border-radius:20px;padding:2.25rem 1.75rem;text-align:center;
+ box-shadow:0 24px 70px rgba(0,0,0,.32)}
+h1{margin:.25rem 0 .6rem;font-size:1.4rem;font-weight:800}
+p{margin:.35rem 0;color:var(--muted);font-size:.94rem}
+
+/* ── the animation ───────────────────────────────────────────────────────── */
+.art{width:150px;height:150px;margin:0 auto .5rem;display:block}
+.gear-a{transform-origin:62px 62px;animation:spin 8s linear infinite}
+.gear-b{transform-origin:112px 104px;animation:spin-r 5.5s linear infinite}
+.spark{transform-origin:center;animation:pulse 2.4s ease-in-out infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spin-r{to{transform:rotate(-360deg)}}
+@keyframes pulse{0%,100%{opacity:.25;transform:scale(.9)}50%{opacity:1;transform:scale(1.06)}}
+
+/* ── countdown ───────────────────────────────────────────────────────────── */
+.count{display:flex;gap:.5rem;justify-content:center;margin:1.25rem 0 .35rem;direction:ltr}
+.unit{min-width:66px;background:rgba(127,146,255,.10);border:1px solid var(--line);
+ border-radius:14px;padding:.55rem .35rem}
+.unit b{display:block;font-size:1.5rem;font-weight:800;font-variant-numeric:tabular-nums;
+ line-height:1.25;color:var(--text)}
+.unit span{display:block;font-size:.66rem;color:var(--muted)}
+.bar{height:6px;border-radius:99px;background:rgba(127,146,255,.15);overflow:hidden;margin:.9rem 0 .2rem}
+.bar>i{display:block;height:100%;width:0%;border-radius:99px;
+ background:linear-gradient(90deg,var(--brand),var(--brand2));transition:width .6s ease}
+
+.contact{margin-top:1.5rem;padding-top:1.15rem;border-top:1px solid var(--line)}
+.contact .lead{font-size:.8rem;color:var(--muted);margin-bottom:.6rem}
+.links{display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap}
+.links a{display:inline-flex;align-items:center;gap:.4rem;padding:.5rem .95rem;
+ border:1px solid var(--line);border-radius:11px;color:var(--text);text-decoration:none;
+ font-size:.85rem;transition:border-color .15s,transform .15s}
+.links a:hover{border-color:var(--brand);transform:translateY(-1px)}
+.links a b{direction:ltr;font-weight:600}
+.foot{margin-top:1.5rem;font-size:.72rem;color:var(--muted)}
+
+@media (prefers-reduced-motion: reduce){
+  .gear-a,.gear-b,.spark{animation:none}
+  .bar>i{transition:none}
+}
+</style></head><body>
+<div class="card">
+  <svg class="art" viewBox="0 0 176 176" fill="none" aria-hidden="true">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#4f8cff"/><stop offset="1" stop-color="#a78bfa"/>
+      </linearGradient>
+    </defs>
+    <circle cx="88" cy="88" r="78" stroke="url(#g)" stroke-opacity=".16" stroke-width="2"/>
+    <g class="gear-a" stroke="url(#g)" stroke-width="7" stroke-linecap="round">
+      <circle cx="62" cy="62" r="23" fill="none"/>
+      <path d="M62 30v-11M62 105v-11M30 62H19M105 62H94M40 40l-8-8M92 92l-8-8M84 40l8-8M32 92l8-8"/>
+    </g>
+    <g class="gear-b" stroke="url(#g)" stroke-width="6" stroke-linecap="round" stroke-opacity=".8">
+      <circle cx="112" cy="104" r="16" fill="none"/>
+      <path d="M112 80v-8M112 136v-8M88 104h-8M144 104h-8M95 87l-6-6M135 127l-6-6M129 87l6-6M89 127l6-6"/>
+    </g>
+    <g class="spark" fill="url(#g)">
+      <circle cx="140" cy="46" r="4"/><circle cx="34" cy="132" r="3"/>
+    </g>
+  </svg>
+
+  <h1>__MESSAGE__</h1>
+  <p>در حال بهبود سامانه هستیم و به‌زودی برمی‌گردیم.</p>
+
+  <div id="cd" style="display:none">
+    <div class="count">
+      <div class="unit"><b id="d">۰</b><span>روز</span></div>
+      <div class="unit"><b id="h">۰</b><span>ساعت</span></div>
+      <div class="unit"><b id="m">۰</b><span>دقیقه</span></div>
+      <div class="unit"><b id="s">۰</b><span>ثانیه</span></div>
+    </div>
+    <div class="bar"><i id="pb"></i></div>
+    <p id="eta" style="font-size:.78rem"></p>
+  </div>
+
+  <div class="contact" id="contact" style="display:none">
+    <div class="lead">در موارد فوری با ما تماس بگیرید</div>
+    <div class="links" id="links"></div>
+  </div>
+
+  <div class="foot">
+    © <span id="yr">۱۴۰۴</span> املاک سورین — سورین‌فلو
+  </div>
+</div>
+
+<script>
+const FA = n => String(n).padStart(2,'0').replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+document.getElementById('yr').textContent =
+  new Intl.DateTimeFormat('fa-IR-u-ca-persian',{year:'numeric'}).format(new Date())
+    .replace(/[^۰-۹]/g,'');
+
+// Contact details are injected as JSON rather than interpolated into the markup,
+// so a phone number or address containing markup cannot become part of the page.
+const CFG = __CONFIG__;
+
+if (CFG.phone || CFG.email) {
+  const box = document.getElementById('links');
+  const add = (href, label, value) => {
+    const a = document.createElement('a');
+    a.href = href;                       // href is built from the value, never from markup
+    const t = document.createTextNode(label + ' ');
+    const b = document.createElement('b');
+    b.textContent = value;               // textContent: nothing here can inject
+    a.append(t, b);
+    box.appendChild(a);
+  };
+  if (CFG.phone) add('tel:' + CFG.phone.replace(/[^\d+]/g,''), '☎', CFG.phone);
+  if (CFG.email) add('mailto:' + encodeURIComponent(CFG.email), '✉', CFG.email);
+  document.getElementById('contact').style.display = '';
+}
+
+if (CFG.seconds_left && CFG.seconds_left > 0) {
+  const cd = document.getElementById('cd');
+  cd.style.display = '';
+  const total = CFG.seconds_left;
+  const end = Date.now() + total * 1000;
+  const eta = document.getElementById('eta');
+  try {
+    eta.textContent = 'زمان تخمینی بازگشت: ' + new Intl.DateTimeFormat('fa-IR-u-ca-persian',
+      {dateStyle:'full', timeStyle:'short'}).format(new Date(end));
+  } catch (_) {}
+
+  const tick = () => {
+    let left = Math.max(Math.floor((end - Date.now())/1000), 0);
+    document.getElementById('d').textContent = FA(Math.floor(left/86400));
+    document.getElementById('h').textContent = FA(Math.floor(left%86400/3600));
+    document.getElementById('m').textContent = FA(Math.floor(left%3600/60));
+    document.getElementById('s').textContent = FA(left%60);
+    document.getElementById('pb').style.width = (100 - (left/total)*100).toFixed(1) + '%';
+    if (left <= 0) {
+      clearInterval(timer);
+      // The deadline passing does not reopen anything — only a person does. Say
+      // "finishing up" rather than counting into negative numbers, and reload
+      // periodically so the site returning is noticed without a manual refresh.
+      eta.textContent = 'در حال نهایی‌سازی — به‌زودی باز می‌شویم';
+      setTimeout(() => location.reload(), 60000);
+    }
+  };
+  tick();
+  const timer = setInterval(tick, 1000);
+}
+</script>
+</body></html>"""
+
+
+def render_maintenance_page(state=None, message: str = None) -> str:
+    """Fill the closed-site template.
+
+    The contact details go in as a JSON blob the script reads, not as markup:
+    an operator-typed phone number or address is untrusted like anything else,
+    and json.dumps escaping is what keeps it from becoming part of the page.
+    """
+    import json
+    from app.services import maintenance as mt
+
+    text = message or (state.message if state else mt.DEFAULT_MESSAGE)
+    cfg = {
+        "seconds_left": (state.seconds_left if state else None),
+        "phone": (state.phone if state else None),
+        "email": (state.email if state else None),
+    }
+    # </script> inside a JSON string would end the block early; the escape keeps
+    # the payload inert wherever it lands.
+    blob = json.dumps(cfg, ensure_ascii=False).replace("</", "<\\/")
+    return (MAINTENANCE_PAGE
+            .replace("__MESSAGE__", html_escape(text))
+            .replace("__CONFIG__", blob))
 
 
 async def _maintenance_allows(request: Request) -> bool:
@@ -208,10 +382,12 @@ async def maintenance_middleware(request: Request, call_next):
 
     from app.services import maintenance as mt
     from app.database import async_session_maker
+    state = None
     message = mt.DEFAULT_MESSAGE
     try:
         async with async_session_maker() as db:
-            _enabled, message, _bypass = await mt.get_state(db)
+            state = await mt.get_state(db)
+            message = state.message
     except Exception:
         pass
 
@@ -224,7 +400,7 @@ async def maintenance_middleware(request: Request, call_next):
         return JSONResponse(status_code=503,
                             content={"detail": message, "maintenance": True},
                             headers=head)
-    return HTMLResponse(MAINTENANCE_PAGE.replace("__MESSAGE__", message),
+    return HTMLResponse(render_maintenance_page(state, message),
                         status_code=503, headers=head)
 
 
@@ -526,9 +702,9 @@ async def maintenance_status(request: Request):
     from app.services import maintenance as mt
     from app.database import async_session_maker
     async with async_session_maker() as db:
-        enabled, message, bypass = await mt.get_state(db, fresh=True)
-    holds_bypass = bool(bypass and request.cookies.get(mt.BYPASS_COOKIE) == bypass)
-    return {"enabled": enabled, "message": message, "bypass_active": holds_bypass}
+        state = await mt.get_state(db, fresh=True)
+    holds_bypass = bool(state.bypass and request.cookies.get(mt.BYPASS_COOKIE) == state.bypass)
+    return {**state.to_dict(), "bypass_active": holds_bypass}
 
 
 @app.post("/api/maintenance", tags=["Maintenance"])
@@ -545,13 +721,24 @@ async def set_maintenance(payload: dict, request: Request,
 
     enabled = bool(payload.get("enabled"))
     message = payload.get("message")
+    # hours is what the dashboard sends ("close it for 72 hours"); until is the
+    # explicit form, kept for anyone driving this from a script
+    hours = payload.get("hours")
+    try:
+        hours = float(hours) if hours not in (None, "") else None
+    except (TypeError, ValueError):
+        hours = None
+
     async with async_session_maker() as db:
-        enabled, message, bypass = await mt.set_state(
+        state = await mt.set_state(
             db, enabled=enabled, message=message,
+            hours=hours, until=payload.get("until") or None,
+            phone=payload.get("contact_phone"), email=payload.get("contact_email"),
             actor=getattr(current_user, "username", None))
+    enabled, bypass = state.enabled, state.bypass
 
     base = str(request.base_url).rstrip("/")
-    body = {"enabled": enabled, "message": message,
+    body = {**state.to_dict(),
             "bypass_url": f"{base}/maintenance-access?key={bypass}" if bypass else None}
     response = JSONResponse(body)
     if enabled and bypass:
@@ -569,13 +756,14 @@ async def maintenance_access(key: str = ""):
     from app.services import maintenance as mt
     from app.database import async_session_maker
     async with async_session_maker() as db:
-        enabled, _message, bypass = await mt.get_state(db, fresh=True)
+        state = await mt.get_state(db, fresh=True)
+    enabled, bypass = state.enabled, state.bypass
 
     if not enabled:
         return HTMLResponse('<meta http-equiv="refresh" content="0; url=/dashboard" />')
     if not key or not bypass or key != bypass:
         return HTMLResponse(
-            MAINTENANCE_PAGE.replace("__MESSAGE__", "لینک دسترسی معتبر نیست"),
+            render_maintenance_page(message="لینک دسترسی معتبر نیست"),
             status_code=403, headers={"Cache-Control": "no-store"})
 
     response = HTMLResponse('<meta http-equiv="refresh" content="0; url=/dashboard" />',
