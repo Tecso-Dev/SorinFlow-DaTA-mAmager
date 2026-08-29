@@ -10,10 +10,13 @@
   --bg:          #000000;
   --surface:     #0a0a0c;
   --surface2:    #131316;
-  /* what a themed input actually renders as: the translucent fill
-     flattened onto the surface behind it, so an autofilled field
-     and an empty one are the same colour */
-  --input-bg-solid: color-mix(in srgb, #fff 5%, #0a0a0c);
+  /* One solid colour for every text field. Solid, because an autofilled
+     field can only be repainted with an inset shadow, and a translucent
+     one lets the browser's own fill show through. Kept close to the
+     panel so a field reads as part of it, not as a pale box on top. */
+  --input-bg:       #0e0e12;
+  --input-bg-solid: #0e0e12;
+  --input-bg-focus: #16161b;
   --surface3:    #1c1c21;
 
   --accent:      #6366f1;
@@ -79,7 +82,7 @@ a:hover { color: var(--accent); }
    (.form-control, .otp-box, …) still override as usual. */
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
 textarea, select {
-  background-color: var(--surface2);
+  background-color: var(--input-bg);
   color: var(--text);
   caret-color: var(--text);
 }
@@ -767,7 +770,7 @@ pre {
   margin-bottom: .4rem; display: block;
 }
 .form-control, .form-select {
-  background: var(--surface2);
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--text);
@@ -817,7 +820,7 @@ textarea:autofill {
    an unsupported selector would invalidate the whole group above) */
 input:autofill, textarea:autofill {
   -webkit-text-fill-color: var(--text) !important;
-  box-shadow: 0 0 0 1000px var(--surface2) inset !important;
+  box-shadow: 0 0 0 1000px var(--input-bg-solid) inset !important;
   caret-color: var(--text);
 }
 /* ── OTP Boxes ──────────────────────────────────── */
@@ -855,7 +858,7 @@ input:autofill, textarea:autofill {
 .form-control:focus, .form-select:focus {
   border-color: rgba(99,102,241,.6);
   box-shadow: 0 0 0 3px var(--accent-glow);
-  background: var(--surface3);
+  background: var(--input-bg-focus);
 }
 .form-select option { background: var(--surface); color: var(--text); }
 .form-control-sm, .form-select-sm { padding: .35rem .7rem; font-size: .8rem; }
@@ -1366,7 +1369,9 @@ textarea.form-control { resize: vertical; }
   --bg:          #eef1f8;
   --surface:     #ffffff;
   --surface2:    #f4f6fb;
+  --input-bg:       #f4f6fb;
   --input-bg-solid: #f4f6fb;
+  --input-bg-focus: #ffffff;
   --surface3:    #e6eaf4;
 
   --accent-glow: rgba(99,102,241,.16);
@@ -1829,12 +1834,12 @@ html:not([data-theme="light"]) .modal-backdrop.show { opacity: .62; }
 /* ── glass inputs with focus glow ── */
 html:not([data-theme="light"]) .form-control,
 html:not([data-theme="light"]) .form-select {
-  background: rgba(255,255,255,.05);
-  border-color: rgba(255,255,255,.09);
+  background: var(--input-bg);
+  border-color: var(--border);
 }
 html:not([data-theme="light"]) .form-control:focus,
 html:not([data-theme="light"]) .form-select:focus {
-  background: rgba(255,255,255,.07);
+  background: var(--input-bg-focus);
   border-color: rgba(167,139,250,.55);
   box-shadow: 0 0 0 3px rgba(167,139,250,.18), 0 0 18px rgba(167,139,250,.12);
 }
