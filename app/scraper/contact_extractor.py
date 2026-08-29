@@ -22,7 +22,7 @@ class ContactExtractor:
 
     def __init__(self, page, images_dir: Path, otp_key: Optional[str] = None,
                  on_pause=None, on_resume=None, should_cancel=None,
-                 account_phone: Optional[str] = None):
+                 account_phone: Optional[str] = None, on_challenge=None):
         self.page = page
         self.images_dir = images_dir
         self.otp_key = otp_key  # key into otp_store; set by scraper when a job is running
@@ -36,6 +36,10 @@ class ContactExtractor:
         self.on_resume = on_resume
         # async predicate: returns True if the job was cancelled → stop waiting
         self.should_cancel = should_cancel
+        # Fired the moment Divar demands a code, before we settle in to wait for
+        # a human. The scraper uses it to rotate to a fresh account instead —
+        # the challenge is this number telling us it is spent.
+        self.on_challenge = on_challenge
 
     async def get_phone_number(self) -> Optional[str]:
         """Click the contact button and return the extracted phone number."""
@@ -358,6 +362,16 @@ class ContactExtractor:
             if not self.otp_key:
                 logger.warning("SMS-OTP modal found but otp_key not set — phone extraction skipped")
                 return
+
+            # Tell the scraper before anything else. Whether a human types the
+            # code or nobody is watching, this account has been challenged and
+            # should be swapped out at the next safe point — that is true even
+            # if the wait below is cancelled or times out.
+            if self.on_challenge:
+                try:
+                    self.on_challenge()
+                except Exception as e:
+                    logger.warning(f"on_challenge callback failed: {e}")
 
             from app.scraper import otp_store
             # If the user already dismissed an OTP prompt this run, don't block

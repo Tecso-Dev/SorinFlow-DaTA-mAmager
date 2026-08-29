@@ -108,7 +108,14 @@ class DivarScraper:
         # Cookie rotation: cycle through saved Divar accounts mid-scrape so a
         # single number isn't hammered (which is what triggers the SMS checks)
         self._rotation_pool: List[str] = []
-        self._since_rotation = 0
+        # Counts contact-info reveals, not listings. Divar's SMS challenge is
+        # triggered by asking for a phone number, and pre_contact_skip means most
+        # listings never do that — so counting listings measured an event Divar
+        # does not, and the setting could never hold the codes off.
+        self._reveals_since_rotation = 0
+        # Set when Divar demands a code: it is the account itself saying it is
+        # spent, which beats any counter, so the next opportunity rotates.
+        self._force_rotate = False
         self._rotate_every_override: Optional[int] = None
 
         self.current_job: Optional[ScrapingJob] = None
@@ -1387,6 +1394,9 @@ class DivarScraper:
                         f"Not requesting contact info for {property_data.get('divar_id')}: {reason}")
                     return property_data
 
+            # This is the moment Divar counts, so it is the moment we count.
+            self._reveals_since_rotation += 1
+
             contact_extractor = ContactExtractor(
                 self.page, self.images_dir, otp_key=_otp_key,
                 on_pause=_pause_job, on_resume=_resume_job,
@@ -1394,6 +1404,9 @@ class DivarScraper:
                 # the code goes to whichever account is logged in *now*, which
                 # rotation may have changed since the job started
                 account_phone=self.active_phone,
+                # Divar challenging this account is the strongest signal there
+                # is that it needs replacing — louder than any threshold.
+                on_challenge=self._note_account_challenged,
             )
             phone_number = await contact_extractor.get_phone_number()
             if phone_number:
@@ -2287,21 +2300,39 @@ class DivarScraper:
         except Exception as e:
             logger.warning(f"[rotate] could not save session for {self.active_phone}: {e}")
 
+    def _note_account_challenged(self) -> None:
+        """Divar asked this account for an SMS code — rotate at the next chance.
+
+        Called from ContactExtractor the moment the OTP modal appears, before it
+        settles in to wait for a human. Deliberately synchronous and trivial: it
+        runs while a modal is on screen, so it only records the fact. The switch
+        itself happens between listings, where it is safe to navigate.
+        """
+        self._force_rotate = True
+
     async def maybe_rotate_account(self) -> bool:
-        """Every `cookie_rotate_every` listings, switch to the next saved Divar
-        account so Divar sees the load spread across numbers (fewer SMS checks).
+        """Switch Divar account once this one has revealed `cookie_rotate_every`
+        phone numbers, or as soon as Divar challenges it.
+
+        The threshold counts **contact-info reveals**, not listings processed.
+        Divar's SMS check is triggered by asking for a phone number, and
+        pre_contact_skip means a filtered run opens far more listings than it
+        reveals — so a listing-based count drifted further from Divar's the more
+        filtering was applied, and the setting looked like it was being ignored.
 
         Returns True when the active account actually changed.
         """
         override = getattr(self, "_rotate_every_override", None)
         every = override if override is not None else (getattr(settings, "cookie_rotate_every", 0) or 0)
-        if every <= 0:
-            return False
 
-        self._since_rotation += 1
-        if self._since_rotation < every:
-            return False
-        self._since_rotation = 0
+        forced = self._force_rotate
+        # every <= 0 disables the threshold, but never the challenge response:
+        # being asked for a code is Divar telling us to move.
+        if not forced:
+            if every <= 0:
+                return False
+            if self._reveals_since_rotation < every:
+                return False
 
         # Re-read the pool each time rather than caching it for the whole run:
         # a long job outlives the account list, so an account added or marked
@@ -2309,8 +2340,12 @@ class DivarScraper:
         pool = await self._load_rotation_pool()
         if pool:
             self._rotation_pool = pool
-        # nothing to rotate to (single account) — keep going as-is
         if len(self._rotation_pool) < 2:
+            # Only one account exists — there is nothing to rotate to, and that
+            # will not change by asking again on the next listing. Clear the
+            # counters so this does not re-run the pool query every time.
+            self._reveals_since_rotation = 0
+            self._force_rotate = False
             return False
 
         # pick the next phone after the current one
@@ -2334,13 +2369,28 @@ class DivarScraper:
             if restored:
                 previous = self.active_phone
                 self.active_phone = candidate
-                logger.info(f"[rotate] switched Divar account {previous} → {candidate}")
+                # Reset here, not before the attempt. Resetting up front meant a
+                # rotation that could not find a working session still consumed
+                # the whole window, so the next try was a full threshold away —
+                # on the very account that had just proved it needed replacing.
+                self._reveals_since_rotation = 0
+                self._force_rotate = False
+                logger.info(
+                    f"[rotate] switched Divar account {previous} → {candidate}"
+                    f"{' (Divar asked it for a code)' if forced else ''}")
                 # Let the restored session settle before it starts opening ads.
                 # A switch followed instantly by a page load is the part that
                 # reads as automated, not the overall pace.
                 await self._human_like_delay(3.0, 6.0)
                 return True
             logger.warning(f"[rotate] session for {candidate} not usable — trying next")
+
+        # Every candidate failed. Leave the counter high so the next reveal
+        # retries, but back it off a little: restoring a session navigates the
+        # browser, and retrying that on every single listing would cost more
+        # than the rotation saves.
+        self._reveals_since_rotation = max(every - 5, 0) if every > 0 else 0
+        self._force_rotate = False
         logger.info("[rotate] no alternative account could be restored; staying on current")
         return False
 
@@ -2742,13 +2792,12 @@ class DivarScraper:
                         if skip:
                             job.scraped_items = (i + 1) if pool_progress else min(job.new_items, max_items)
                             await self.db_session.commit()
-                            # A dropped listing still cost this account a page
-                            # open and a contact-info request — which is what
-                            # Divar counts before demanding a code. Skipping the
-                            # rotation here let one number carry hundreds of
-                            # requests while the counter barely moved, so the
-                            # setting looked like it was being ignored. It is
-                            # the requests that must be spread, not the saves.
+                            # Still ask, because this is a safe point to switch
+                            # and a challenge may be pending from the previous
+                            # listing. It no longer *advances* anything: a
+                            # dropped listing never reached ContactExtractor, so
+                            # Divar was never asked for anything on its behalf.
+                            # The counter moves where the reveal happens.
                             await self.maybe_rotate_account()
                             await self._human_like_delay()
                             continue
