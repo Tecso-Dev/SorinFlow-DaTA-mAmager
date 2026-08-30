@@ -88,6 +88,7 @@ async def init_db():
         await _migrate_filing(conn)
         await _migrate_advertiser_type(conn)
         await _migrate_cookie_usage(conn)
+        await _migrate_property_quality(conn)
         await _seed_reference_data(conn)
 
     # Own transaction, deliberately outside the block above.
@@ -426,6 +427,37 @@ async def _migrate_scraping_jobs_divar_phone(conn):
             await conn.execute(text(
                 "ALTER TABLE scraping_jobs ADD COLUMN IF NOT EXISTS divar_phone VARCHAR(20)"
             ))
+    except Exception:
+        pass
+
+
+async def _migrate_property_quality(conn):
+    """Idempotently add the scrape-quality columns to properties.
+
+    Added without a backfill on purpose: NULL means "scraped before anything
+    checked", which is the truth and is exactly what the panel should be able
+    to tell apart from "checked and fine". A backfill would also rewrite every
+    existing row at boot, which is how a rollout times out.
+    """
+    try:
+        from loguru import logger as _log
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='properties' AND column_name='quality_score'"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS quality_score DOUBLE PRECISION"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS quality_issues TEXT"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_properties_quality_score "
+                "ON properties (quality_score)"
+            ))
+            _log.info("Added quality_score/quality_issues to properties")
     except Exception:
         pass
 

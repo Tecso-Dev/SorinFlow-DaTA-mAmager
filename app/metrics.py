@@ -73,6 +73,17 @@ scrape_reveals_at_challenge = Histogram(
     buckets=(5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150),
     registry=REGISTRY,
 )
+scrape_quality = Counter(
+    "sorinflow_scraper_quality_total",
+    "Scraped listings by validator verdict",
+    ["verdict"], registry=REGISTRY,          # complete | flagged
+)
+scrape_confidence = Histogram(
+    "sorinflow_scraper_confidence",
+    "Validator confidence per saved listing (0-1)",
+    buckets=(0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0),
+    registry=REGISTRY,
+)
 scrape_images = Counter(
     "sorinflow_scraper_images_total", "Image downloads by outcome",
     ["outcome"], registry=REGISTRY,          # saved | too_big | too_many | undecodable

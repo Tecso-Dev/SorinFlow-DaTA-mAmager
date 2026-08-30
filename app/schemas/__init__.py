@@ -68,6 +68,10 @@ class PropertyResponse(PropertyBase):
     features: List[str] = []
     amenities: List[str] = []
     is_active: bool = True
+    # Scrape quality. None means the listing predates grading, "" means graded
+    # and clean — the two are deliberately different answers.
+    quality_score: Optional[float] = None
+    quality_issues: Optional[str] = None
     scraped_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     

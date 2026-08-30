@@ -2239,6 +2239,51 @@ class DivarScraper:
         logger.info("[rotate] no alternative account could be restored; staying on current")
         return False
 
+    # Divar's own words for what kind of ad this is, mapped to the two the
+    # validator knows. 'buy' is the scraper's term and 'sale' is the
+    # validator's -- without this every sale listing would be graded against
+    # the rent rules and reported as missing a rent price.
+    _VALIDATOR_TYPES = {"buy": "sale", "sale": "sale", "rent": "rent"}
+
+    def _grade_property(self, property_data: Dict[str, Any]) -> None:
+        """Score a listing against PropertyDataValidator and attach the result.
+
+        Writes quality_score / quality_issues onto property_data so they are
+        saved with the row. Never raises and never changes any other field: a
+        grading failure must not cost us a listing.
+        """
+        try:
+            from app.scraper.property_validator import validate_property_data
+
+            kind = self._VALIDATOR_TYPES.get(
+                (property_data.get("listing_type") or "").lower())
+            if kind is None:
+                # An unknown category tells us nothing about which rules apply,
+                # and guessing 'rent' would invent missing-rent errors on ads
+                # that never had a rent. Leave it ungraded -- NULL is honest.
+                return
+
+            result = validate_property_data(property_data, property_type=kind)
+            issues = list(result.errors) + list(result.warnings)
+            property_data["quality_score"] = round(float(result.confidence_score), 3)
+            # "" (not None) when the listing is clean, so re-scraping a
+            # listing that has since been fixed clears its old flags: the
+            # update path skips None values, and would otherwise keep stale
+            # issue text on a row that no longer has any.
+            # NULL therefore means "never graded", "" means "graded, clean".
+            property_data["quality_issues"] = "؛ ".join(issues)[:2000]
+
+            from app import metrics as _mx
+            _mx.scrape_confidence.observe(result.confidence_score)
+            _mx.scrape_quality.labels("complete" if result.is_valid else "flagged").inc()
+            if not result.is_valid:
+                logger.info(
+                    f"Quality flags on {property_data.get('divar_id')} "
+                    f"({kind}, score {result.confidence_score:.2f}): "
+                    f"{'; '.join(result.errors)}")
+        except Exception as e:
+            logger.warning(f"Could not grade {property_data.get('divar_id')}: {e}")
+
     async def property_exists(self, divar_id: str) -> bool:
         """Check if property already exists in database"""
         try:
@@ -2660,6 +2705,13 @@ class DivarScraper:
                                 property_data['thumbnail_url'] = local_images[0]
                                 property_data['images_downloaded'] = True
                         
+                        # Grade the record before storing it. Recorded, never
+                        # enforced: we already spent a contact reveal on this
+                        # listing, so a flagged row beats a dropped one. The
+                        # score is what makes "is the scraper getting the data
+                        # right?" a question with an answer.
+                        self._grade_property(property_data)
+
                         # Save to database
                         saved = await self.save_property(property_data)
                         if saved:

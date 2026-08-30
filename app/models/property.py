@@ -110,6 +110,13 @@ class Property(Base):
     seller_name = Column(String(200))
     advertiser_type = Column(String(20))  # personal, agency
     
+    # Data quality — filled by PropertyDataValidator at scrape time. Recorded,
+    # never enforced: a low score marks a listing worth looking at, it does not
+    # stop it being saved, because dropping data we already paid a contact
+    # reveal for would be worse than storing it flagged.
+    quality_score = Column(Float, index=True)      # 0.0 - 1.0, NULL = not checked
+    quality_issues = Column(Text)                  # what was missing or odd
+
     # URLs
     url = Column(String(500), nullable=False)
     
@@ -180,6 +187,8 @@ class Property(Base):
             "property_type": self.property_type,
             "listing_type": self.listing_type,
             "corner_type": self.corner_type,
+            "quality_score": self.quality_score,
+            "quality_issues": self.quality_issues,
             "phone_number": self.phone_number,
             "seller_name": self.seller_name,
             "url": self.url,
