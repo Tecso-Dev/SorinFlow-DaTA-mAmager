@@ -194,7 +194,7 @@ jobs:
           echo "failing to reach ghcr.io. The running pod is untouched."
           exit 1
 
-      - name: Apply ingress manifests
+      - name: Apply manifests
         env:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         # --validate=false skips the client-side schema check, which downloads
@@ -203,7 +203,38 @@ jobs:
         # even changed. The apiserver still validates on admission, so the
         # manifest is not going in unchecked — only the local pre-check is
         # dropped. Retried once, because the same node hiccup can hit the apply.
+        #
+        # 04-backend.yaml is applied here too. It used not to be, so every
+        # change to it — secret wiring, probes, resources, update strategy —
+        # sat in the repo doing nothing until somebody remembered to apply it
+        # by hand, and the cluster quietly drifted from what the repo claimed
+        # was true. Wiring it in is the only way that stops recurring.
+        #
+        # It cannot be applied as it stands: the manifest carries a placeholder
+        # `:latest` tag, and with imagePullPolicy IfNotPresent that either
+        # reuses whatever stale blob is cached under that name — shipping old
+        # code while reporting a healthy rollout — or wedges in ErrImagePull.
+        # So the image this run actually built is rendered into it first.
         run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
+
+          RENDERED="$(mktemp)"
+          sed -E "s|^([[:space:]]*image: )ghcr\.io/tecso-dev/sorinflow-data-manager:.*|\1${IMAGE}|" \
+            k8s/04-backend.yaml > "$RENDERED"
+
+          # If that image line is ever renamed the sed silently matches nothing
+          # and we would apply :latest — the exact failure this guard exists to
+          # prevent. Stop loudly instead of deploying the wrong thing.
+          grep -qF "image: ${IMAGE}" "$RENDERED" || {
+            echo "::error::Could not render the image into k8s/04-backend.yaml."
+            echo "Its image line no longer matches the expected pattern; applying"
+            echo "the manifest unchanged would reset the deployment to :latest."
+            exit 1
+          }
+
+          kubectl apply --validate=false -f "$RENDERED" ||
+            { sleep 10; kubectl apply --validate=false -f "$RENDERED"; }
           kubectl apply --validate=false -f k8s/05-ingress.yaml ||
             { sleep 10; kubectl apply --validate=false -f k8s/05-ingress.yaml; }
 
