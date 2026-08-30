@@ -229,3 +229,36 @@ def test_auth_migration_survives_an_earlier_migration_failing():
     # and the backfill ran, so the boot was not merely 'not crashing'
     assert roles["viewer1"] == "admin"
     assert "user" not in roles.values()
+
+
+def test_startup_never_waits_forever_for_a_lock():
+    """Two deploys (65048fc, b491c0c) died here.
+
+    An ALTER TABLE needs ACCESS EXCLUSIVE. During a rolling deploy the old pod
+    is still serving, and one connection left idle in transaction holds a
+    conflicting lock — so the new pod blocked, never opened its port, failed
+    its liveness probe, and was SIGKILLed. Kubernetes then never terminated the
+    old pod, because it was waiting for the new one to become ready.
+
+    Every database statement executed before uvicorn starts listening must
+    therefore have a lock timeout.
+    """
+    import inspect
+    import app.database as db
+
+    guard = inspect.getsource(db._guard)
+    assert "lock_timeout" in guard
+
+    # each migration in its own transaction, so one failure cannot roll back
+    # create_all along with it
+    init = inspect.getsource(db.init_db)
+    assert "for step in (" in init, "migrations must not share one transaction"
+    assert init.count("_guard(conn)") >= 3
+
+    # the seeders open their own sessions and run after the migrations
+    for fn in (db._seed_super_admin, db._seed_root):
+        assert "lock_timeout" in inspect.getsource(fn), \
+            f"{fn.__name__} can block startup indefinitely"
+
+    # and a failed seed must not stop a pod that is otherwise able to serve
+    assert "seed.__name__" in init and "skipped" in init

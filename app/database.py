@@ -135,8 +135,15 @@ async def init_db():
     async with engine.begin() as conn:
         await _verify_auth_v2(conn)
 
-    await _seed_super_admin()
-    await _seed_root()
+    # Seeding creates the *first* accounts. On an established database both are
+    # no-ops, so a failure here — a lock timeout, a transient database blip —
+    # must not stop a pod that is otherwise ready to serve. _verify_auth_v2
+    # above is the check that is allowed to refuse to start; this is not.
+    for seed in (_seed_super_admin, _seed_root):
+        try:
+            await seed()
+        except Exception as e:
+            print(f"{seed.__name__} skipped: {e}")
 
 
 async def _guard(conn):
@@ -570,6 +577,14 @@ async def _seed_super_admin():
     cfg = get_settings()
 
     async with async_session_maker() as session:
+        # Same lock guard as the migrations. This runs during startup, after a
+        # migration may have just failed on a lock — and a SELECT queued behind
+        # a pending ACCESS EXCLUSIVE request waits as long as that request
+        # does. Without a timeout here the process hangs before uvicorn opens
+        # its port, so the readiness probe gets "connection refused", the
+        # liveness probe kills the pod, and it crashloops. That is the b491c0c
+        # rollout, exactly.
+        await session.execute(text("SET lock_timeout = '5s'"))
         result = await session.execute(
             __import__("sqlalchemy", fromlist=["select"]).select(User)
         )
@@ -731,6 +746,7 @@ async def _seed_root():
         return
 
     async with async_session_maker() as session:
+        await session.execute(text("SET lock_timeout = '5s'"))   # see _seed_super_admin
         existing = await session.execute(
             select(User).where(User.username == cfg.root_username))
         if existing.scalars().first():
