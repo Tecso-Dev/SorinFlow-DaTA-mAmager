@@ -8248,8 +8248,10 @@ async function loadEmailSettings() {
     } catch (e) { showToast('ایمیل', 'تنظیمات خوانده نشد', 'error'); }
 }
 
-async function saveEmailSettings() {
-    const out = document.getElementById('em-settings-result');
+async function saveEmailSettings(opts = {}) {
+    // quiet: called by the verify and test buttons, which report their own
+    // outcome — a "ذخیره شد" flashing before the real answer reads as noise.
+    const out = opts.quiet ? null : document.getElementById('em-settings-result');
     const val = id => document.getElementById(id)?.value?.trim() ?? '';
     const body = {
         host: val('em-host'), user: val('em-user'),
@@ -8268,9 +8270,10 @@ async function saveEmailSettings() {
         await apiCall('/email/settings', { method: 'PUT', body: JSON.stringify(body) });
         if (pw) pw.value = '';
         if (out) { out.textContent = 'ذخیره شد'; out.className = 'small text-success'; }
-        loadEmailSettings();
+        if (!opts.quiet) loadEmailSettings();
     } catch (e) {
         if (out) { out.textContent = e.message || 'ذخیره نشد'; out.className = 'small text-danger'; }
+        if (opts.quiet) throw e;      // the caller reports it
     }
 }
 
@@ -8278,6 +8281,13 @@ async function verifyEmailSmtp() {
     const out = document.getElementById('em-settings-result');
     if (out) { out.textContent = 'در حال بررسی…'; out.className = 'small text-muted'; }
     try {
+        // Save first. /email/verify reads the database, not the form, so
+        // checking without saving tests the *previous* settings — and the
+        // panel prefills host and port as a convenience, which means a fresh
+        // load shows a complete-looking form whose values the server has
+        // never seen. Pressing «بررسی اتصال» then failed a third time with
+        // the boxes visibly filled in.
+        await saveEmailSettings({ quiet: true });
         const d = await apiCall('/email/verify', { method: 'POST' });
         if (out) {
             out.textContent = d.ok
@@ -8298,6 +8308,7 @@ async function sendEmailTest() {
     if (!to) { if (out) { out.textContent = 'آدرس گیرنده را وارد کنید'; out.className = 'small text-warning'; } return; }
     if (out) { out.textContent = 'در حال ارسال…'; out.className = 'small text-muted'; }
     try {
+        await saveEmailSettings({ quiet: true });   // same reason as بررسی اتصال
         const d = await apiCall(`/email/test?to=${encodeURIComponent(to)}`, { method: 'POST' });
         if (out) {
             out.textContent = d.ok ? 'ارسال شد — صندوق ورودی را ببینید' : (d.error || 'ناموفق');

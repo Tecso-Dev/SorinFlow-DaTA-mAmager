@@ -354,3 +354,28 @@ class TestErrorsNameTheMissingField:
         js = Path("frontend/js/app.js").read_text(encoding="utf-8")
         assert "d.host || 'smtp.gmail.com'" in js
         assert "d.port || 587" in js
+
+
+class TestTheButtonsTestWhatIsOnScreen:
+    """/email/verify reads the database, not the form.
+
+    The panel prefills host and port as a convenience, so a fresh load shows a
+    complete-looking form whose values the server has never seen. Checking
+    without saving therefore tested the previous settings and failed with every
+    box visibly filled in — the third variant of the same confusion.
+    """
+
+    def test_verify_saves_before_checking(self):
+        from pathlib import Path
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js.split("async function verifyEmailSmtp(")[1].split("\nasync function")[0]
+        assert "saveEmailSettings({ quiet: true })" in fn
+        # match the call, not the comment above it that names the endpoint
+        assert fn.index("saveEmailSettings") < fn.index("apiCall('/email/verify'")
+
+    def test_test_send_saves_before_sending(self):
+        from pathlib import Path
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js.split("async function sendEmailTest(")[1].split("\nasync function")[0]
+        assert "saveEmailSettings({ quiet: true })" in fn
+        assert fn.index("saveEmailSettings") < fn.index("apiCall(`/email/test")
