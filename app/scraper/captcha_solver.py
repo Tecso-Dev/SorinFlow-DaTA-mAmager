@@ -50,8 +50,16 @@ class PuzzleCaptchaSolver:
 
     # ── Detection strategies ─────────────────────────────────────────────────
 
-    def _template_match(self, bg, template, method=cv2.TM_CCOEFF_NORMED):
-        """Run matchTemplate; return (x_pos, confidence)."""
+    def _template_match(self, bg, template, method=None):
+        """Run matchTemplate; return (x_pos, confidence).
+
+        `method` resolves at call time, not in the signature: a default of
+        cv2.TM_CCOEFF_NORMED is evaluated when the class is created, so a
+        missing OpenCV took the whole application down at import instead of
+        degrading to «captcha unsolvable» the way the guard below intends.
+        """
+        if method is None:
+            method = cv2.TM_CCOEFF_NORMED
         result = cv2.matchTemplate(bg, template, method)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
         return max_loc[0], float(max_val)
