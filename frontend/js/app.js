@@ -8231,8 +8231,16 @@ async function loadEmailSettings() {
         if (hint) hint.textContent = d.password_masked ? `رمز فعلی: ${d.password_masked}` : '';
 
         const v = (id, val) => { const e = document.getElementById(id); if (e) e.value = val ?? ''; };
-        v('em-host', d.host); v('em-port', d.port); v('em-user', d.user);
+        // Prefill the Gmail defaults as REAL values when nothing is saved yet.
+        // They used to be placeholders, which render as grey text that looks
+        // identical to a filled field — so the form appeared complete while
+        // host and user were empty, and «بررسی اتصال» kept refusing with
+        // "تنظیمات SMTP کامل نیست" for no visible reason.
+        v('em-host', d.host || 'smtp.gmail.com');
+        v('em-port', d.port || 587);
+        v('em-user', d.user);
         v('em-from-name', d.from_name); v('em-reply-to', d.reply_to);
+        v('em-from-email', d.from_email);
         const sec = document.getElementById('em-security');
         if (sec) sec.value = d.security || 'starttls';
         const en = document.getElementById('em-enabled');
@@ -8246,6 +8254,7 @@ async function saveEmailSettings() {
     const body = {
         host: val('em-host'), user: val('em-user'),
         from_name: val('em-from-name'), reply_to: val('em-reply-to'),
+        from_email: val('em-from-email'),
         security: document.getElementById('em-security')?.value || 'starttls',
         enabled: !!document.getElementById('em-enabled')?.checked,
     };

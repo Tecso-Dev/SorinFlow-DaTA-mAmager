@@ -2190,17 +2190,17 @@
                             <div class="col-md-5">
                                 <label class="form-label small">میزبان SMTP</label>
                                 <input type="text" id="em-host" class="form-control form-control-sm"
-                                       dir="ltr" autocomplete="off" placeholder="smtp.gmail.com">
+                                       dir="ltr" autocomplete="off" placeholder="مثلاً smtp.gmail.com">
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label small">پورت</label>
                                 <input type="number" id="em-port" class="form-control form-control-sm"
-                                       dir="ltr" placeholder="587">
+                                       dir="ltr" placeholder="مثلاً ۵۸۷">
                             </div>
                             <div class="col-md-5">
                                 <label class="form-label small">نام کاربری (آدرس فرستنده)</label>
                                 <input type="text" id="em-user" class="form-control form-control-sm"
-                                       dir="ltr" autocomplete="off" placeholder="sorinflow.agency@gmail.com">
+                                       dir="ltr" autocomplete="off" placeholder="مثلاً you@gmail.com">
                             </div>
                         </div>
                         <div class="row g-2 mb-2">
@@ -2225,10 +2225,21 @@
                                        maxlength="60" placeholder="سورین‌فلو">
                             </div>
                         </div>
-                        <div class="mb-2">
-                            <label class="form-label small">آدرس پاسخ (Reply-To)</label>
-                            <input type="text" id="em-reply-to" class="form-control form-control-sm"
-                                   dir="ltr" autocomplete="off" placeholder="info@sorinflow.com">
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-6">
+                                <label class="form-label small">آدرس فرستنده نمایشی (From)</label>
+                                <input type="text" id="em-from-email" class="form-control form-control-sm"
+                                       dir="ltr" autocomplete="off" placeholder="مثلاً info@sorinflow.com">
+                                <div class="form-text small">
+                                    اگر خالی باشد از نام کاربری استفاده می‌شود. برای استفاده از این آدرس،
+                                    باید ابتدا در Gmail به‌عنوان «Send mail as» تأیید شده باشد.
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small">آدرس پاسخ (Reply-To)</label>
+                                <input type="text" id="em-reply-to" class="form-control form-control-sm"
+                                       dir="ltr" autocomplete="off" placeholder="مثلاً info@sorinflow.com">
+                            </div>
                         </div>
                         <div class="form-check form-switch mb-3">
                             <input class="form-check-input" type="checkbox" id="em-enabled" checked>

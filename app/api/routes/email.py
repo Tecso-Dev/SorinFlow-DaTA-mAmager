@@ -67,6 +67,7 @@ class EmailSettingsIn(BaseModel):
     password: Optional[str] = Field(None, description="write-only; omit to keep the current one")
     from_name: Optional[str] = None
     reply_to: Optional[str] = None
+    from_email: Optional[str] = None
     security: Optional[str] = Field(None, description="starttls | ssl | none")
     enabled: Optional[bool] = None
 
@@ -84,6 +85,7 @@ async def get_email_settings(db: AsyncSession = Depends(get_db),
         "password_source": cfg["source"],
         "from_name": cfg["from_name"],
         "reply_to": cfg["reply_to"],
+        "from_email": cfg.get("from_email", ""),
         "security": cfg["security"],
         "enabled": cfg["enabled"],
     }
@@ -101,6 +103,8 @@ async def put_email_settings(payload: EmailSettingsIn,
         raise HTTPException(400, "پورت نامعتبر است")
     if payload.reply_to and not mail.valid_email(payload.reply_to):
         raise HTTPException(400, "آدرس پاسخ نامعتبر است")
+    if payload.from_email and not mail.valid_email(payload.from_email):
+        raise HTTPException(400, "آدرس فرستنده نامعتبر است")
 
     if payload.password is not None:
         pw = payload.password.strip()
@@ -116,6 +120,7 @@ async def put_email_settings(payload: EmailSettingsIn,
                        (payload.user, mail.KEY_USER),
                        (payload.from_name, mail.KEY_FROM_NAME),
                        (payload.reply_to, mail.KEY_REPLY_TO),
+                       (payload.from_email, mail.KEY_FROM_EMAIL),
                        (payload.security, mail.KEY_SECURITY)):
         if value is not None:
             await secret_box.put(db, key, str(value).strip() or None, actor)

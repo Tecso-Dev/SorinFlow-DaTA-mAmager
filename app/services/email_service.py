@@ -59,9 +59,14 @@ KEY_FROM_NAME = "email_from_name"
 KEY_SECURITY = "email_security"             # starttls | ssl | none
 KEY_ENABLED = "email_enabled"
 KEY_REPLY_TO = "email_reply_to"
+# The address recipients see. Gmail only permits an alias that has been
+# verified under "Send mail as"; anything else is silently rewritten back to
+# the account address, or rejected outright.
+KEY_FROM_EMAIL = "email_from_email"
 
 ALL_KEYS = [KEY_HOST, KEY_PORT, KEY_USER, KEY_PASSWORD,
-            KEY_FROM_NAME, KEY_SECURITY, KEY_ENABLED, KEY_REPLY_TO]
+            KEY_FROM_NAME, KEY_SECURITY, KEY_ENABLED, KEY_REPLY_TO,
+            KEY_FROM_EMAIL]
 
 DEFAULT_FROM_NAME = "سورین‌فلو"
 TIMEOUT = 20
@@ -117,6 +122,7 @@ async def resolve_config(db=None) -> dict:
         "from_name": DEFAULT_FROM_NAME,
         "security": "starttls",
         "reply_to": "",
+        "from_email": "",
         "enabled": True,
         "source": "env" if (settings.smtp_host and settings.smtp_password) else None,
     }
@@ -149,6 +155,8 @@ async def resolve_config(db=None) -> dict:
         cfg["security"] = v[KEY_SECURITY]
     if v.get(KEY_REPLY_TO):
         cfg["reply_to"] = v[KEY_REPLY_TO]
+    if v.get(KEY_FROM_EMAIL):
+        cfg["from_email"] = v[KEY_FROM_EMAIL]
     if v.get(KEY_ENABLED) is not None:
         cfg["enabled"] = (v.get(KEY_ENABLED) or "true").lower() == "true"
     if cfg["source"] is None and cfg["host"] and cfg["password"]:
@@ -175,7 +183,11 @@ def _sync_send(cfg: dict, to: str, subject: str, html: str,
     """Blocking send. Returns the Message-ID."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = formataddr((str(cfg["from_name"]), cfg["user"]))
+    # The envelope sender stays the authenticated account — Gmail checks it
+    # and a mismatch is rejected. Only the visible From header uses the
+    # alias, which is what "Send mail as" authorises.
+    msg["From"] = formataddr((str(cfg["from_name"]),
+                              cfg.get("from_email") or cfg["user"]))
     msg["To"] = to
     if cfg.get("reply_to"):
         msg["Reply-To"] = cfg["reply_to"]

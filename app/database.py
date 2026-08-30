@@ -638,12 +638,30 @@ async def _migrate_auth_v2(conn):
         from sqlalchemy import text
         from app.auth.permissions import ALL_PERMISSIONS, LEGACY_USER_PERMISSIONS
 
-        await conn.execute(text(
-            "ALTER TABLE users "
-            "ADD COLUMN IF NOT EXISTS phone VARCHAR(20), "
-            "ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE, "
-            "ADD COLUMN IF NOT EXISTS marketing_opt_in BOOLEAN NOT NULL DEFAULT FALSE, "
-            "ADD COLUMN IF NOT EXISTS permissions JSON"))
+        # Ask the catalog before asking for the lock.
+        #
+        # ADD COLUMN IF NOT EXISTS is idempotent but not free: Postgres takes
+        # ACCESS EXCLUSIVE when it opens the relation, *before* it checks
+        # whether there is anything to add. On an already-migrated database
+        # this statement does nothing and still has to win the strictest lock
+        # there is — and while it waits it sits at the head of the lock queue,
+        # where every later request on `users`, including a plain SELECT,
+        # queues up behind it.
+        #
+        # That is what took down deploys 65048fc and b491c0c: the columns had
+        # existed for weeks, the ALTER was a no-op, and it still deadlocked the
+        # rollout. Every sibling migration already checks the catalog first
+        # (see _migrate_users_totp); this one never did.
+        present = {r[0] for r in (await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='users' AND table_schema=current_schema()"))).all()}
+        if not {"phone", "phone_verified", "marketing_opt_in", "permissions"} <= present:
+            await conn.execute(text(
+                "ALTER TABLE users "
+                "ADD COLUMN IF NOT EXISTS phone VARCHAR(20), "
+                "ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE, "
+                "ADD COLUMN IF NOT EXISTS marketing_opt_in BOOLEAN NOT NULL DEFAULT FALSE, "
+                "ADD COLUMN IF NOT EXISTS permissions JSON"))
         # Partial index: many staff rows have no portal phone at all, and a
         # plain UNIQUE would collapse them onto a single NULL slot in some
         # engines. Postgres allows repeated NULLs anyway; the WHERE clause

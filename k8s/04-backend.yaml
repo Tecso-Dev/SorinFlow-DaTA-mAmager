@@ -17,6 +17,24 @@ metadata:
   namespace: sorinflow
 spec:
   replicas: 1
+  # Recreate, not the default RollingUpdate.
+  #
+  # With one replica, RollingUpdate resolves to maxSurge=1/maxUnavailable=0:
+  # the new pod must become Ready before the old one is terminated. That has
+  # two consequences here, and both have already bitten.
+  #
+  #   * Both pods mount data-pvc, which is ReadWriteOnce. During the overlap
+  #     two processes write /app/data — including the live Divar session files.
+  #   * The new pod's startup migrations need locks the old pod is still
+  #     holding, so it can never become Ready, so the old pod is never
+  #     terminated. Deploys 65048fc and b491c0c both died in that deadlock.
+  #
+  # Recreate stops the old pod first, releasing its locks and the volume. It
+  # costs a few seconds of downtime per deploy, which a single replica has no
+  # way to avoid anyway — RollingUpdate here only ever provided the appearance
+  # of zero downtime.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: backend
@@ -54,6 +72,34 @@ spec:
                 secretKeyRef:
                   name: sorinflow-secrets
                   key: API_KEY
+            # Everything below is optional: true on purpose. The pod must start
+            # when a key has never been created — that is the normal state for
+            # a provider nobody has signed up for yet. Without the entry the
+            # variable does not reach the container at all, so `kubectl patch
+            # secret` for it is a silent no-op: the value sits in the Secret and
+            # the application never sees it.
+            - name: SMTP_HOST
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: SMTP_HOST, optional: true } }
+            - name: SMTP_PORT
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: SMTP_PORT, optional: true } }
+            - name: SMTP_USER
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: SMTP_USER, optional: true } }
+            - name: SMTP_PASSWORD
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: SMTP_PASSWORD, optional: true } }
+            - name: KAVENEGAR_API_KEY
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: KAVENEGAR_API_KEY, optional: true } }
+            - name: KAVENEGAR_SENDER
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: KAVENEGAR_SENDER, optional: true } }
+            - name: KAVENEGAR_OTP_TEMPLATE
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: KAVENEGAR_OTP_TEMPLATE, optional: true } }
+            - name: METRICS_TOKEN
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: METRICS_TOKEN, optional: true } }
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: TELEGRAM_BOT_TOKEN, optional: true } }
+            - name: TELEGRAM_CHAT_ID
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: TELEGRAM_CHAT_ID, optional: true } }
+            - name: ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: ROOT_PASSWORD, optional: true } }
             - name: ENVIRONMENT
               value: "production"
             - name: SERVER_IP
@@ -63,19 +109,45 @@ spec:
           volumeMounts:
             - name: app-data
               mountPath: /app/data
+          # A single replica with no requests is BestEffort, which makes it the
+          # first thing the kubelet evicts under node memory pressure — and it
+          # is the whole site. The limit is generous because the container runs
+          # Chromium in-process for scraping.
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              memory: "2Gi"
+          # Startup is create_all plus a migration chain, and its duration is
+          # not knowable in advance. Without a startupProbe the liveness probe
+          # kills the container ~150s in and it crashloops forever with no way
+          # out. This gives boot up to 5 minutes while keeping the liveness
+          # probe tight once the app is actually serving.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 6
+            # Unset defaults to 1s. One worker serves /health and the scraper on
+            # the same event loop, so a GC pause or an image decode was enough to
+            # fail a probe.
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 60
             periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5
       volumes:
         - name: app-data
           persistentVolumeClaim:
