@@ -70,9 +70,24 @@ kubectl patch secret sorinflow-secrets -n sorinflow \
 **Step 5 — apply and restart:**
 
 ```bash
-kubectl apply -f k8s/04-backend.yaml
+# For a secret VALUE change, a restart is enough — the pod re-reads the Secret
+# on start. Do NOT apply the manifest for this.
 kubectl rollout restart deployment/backend -n sorinflow
 ```
+
+> ⚠️ **Only apply the manifest when the manifest itself changed**, and always
+> follow it with a `set image`. `k8s/04-backend.yaml` still carries
+> `image: …:latest` while CI deploys by commit SHA, so a bare apply resets the
+> tag — either reusing a stale cached blob and reporting a healthy rollout of
+> old code, or wedging in `ErrImagePull`.
+>
+> ```bash
+> kubectl get deploy backend -n sorinflow \
+>   -o jsonpath='{.spec.template.spec.containers[0].image}'; echo   # note the SHA
+> kubectl apply -f k8s/04-backend.yaml -n sorinflow
+> kubectl set image deployment/backend backend=<that image> -n sorinflow
+> kubectl rollout status deployment/backend -n sorinflow --timeout=600s
+> ```
 
 The value never appears in a commit, a pull request, or a CI log.
 
@@ -209,7 +224,7 @@ window.
 NEW_PW=$(openssl rand -hex 24)          # hex, not base64: it goes inside a URL
 
 # 1. change it inside Postgres, where the old password still works
-kubectl exec -n sorinflow deploy/postgres -- \
+kubectl exec -n sorinflow postgres-0 -- \
   psql -U sorinflow -d divar_scraper \
   -c "ALTER USER sorinflow WITH PASSWORD '$NEW_PW';"
 
@@ -234,6 +249,18 @@ the site stays up while you fix it.
 
 `REDIS_PASSWORD` is the same shape but far more forgiving — Redis keeps no
 persistent copy, so patch the Secret and restart both Redis and the backend.
+Note that both are **StatefulSets**, not Deployments:
+
+```bash
+kubectl rollout restart statefulset/redis -n sorinflow
+kubectl rollout restart deployment/backend -n sorinflow
+```
+
+Redis's readiness probe passes `$(REDIS_PASSWORD)` to `redis-cli`, and `$(VAR)`
+expansion does **not** apply inside a probe's exec command — only in `command`
+and `args`. So the probe has never actually authenticated, and it will keep
+reporting ready after a password change whether or not the change worked. Check
+the restart by hand rather than trusting the probe.
 
 ---
 
