@@ -129,6 +129,10 @@ class Settings(BaseSettings):
     # SMS — Kavenegar
     kavenegar_api_key: str = Field(default="", env="KAVENEGAR_API_KEY")
     kavenegar_sender: str = Field(default="", env="KAVENEGAR_SENDER")
+    # Kavenegar template used for login codes (verify/lookup). Templates are
+    # the correct channel for one-time codes: dedicated route, no approved
+    # sender line needed, and they reach numbers opted out of advertising.
+    kavenegar_otp_template: str = Field(default="", env="KAVENEGAR_OTP_TEMPLATE")
 
     # SMS — Melipayamak
     melipayamak_api_key: str = Field(default="", env="MELIPAYAMAK_API_KEY")

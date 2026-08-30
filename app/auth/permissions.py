@@ -44,6 +44,7 @@ PERMISSIONS = {
     "stats":      "آمار و گزارش",
     "portal":     "درخواست‌های بازدیدکنندگان",
     "monitoring": "پایش سامانه و Google Cloud",
+    "sms":        "پیامک",
 }
 
 ALL_PERMISSIONS = list(PERMISSIONS.keys())

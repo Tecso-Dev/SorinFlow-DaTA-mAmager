@@ -15,6 +15,7 @@ hands, it does not belong in a file. It belongs in the Kubernetes Secret.
 | Kind of value | Where it lives | In git? |
 |---|---|---|
 | Passwords, API keys, tokens, `SECRET_KEY` | Kubernetes Secret `sorinflow-secrets` | **never** |
+| Kavenegar API key | the Secret, **or** the «پیامک» panel (encrypted) | **never** |
 | TLS certificates and private keys | Traefik's own ACME store on the server | **never** |
 | Divar session cookies | the `data-pvc` volume (`/app/data/cookies`) | **never** |
 | Which variables exist, and what they mean | `.env.example` — names and comments only | yes |
@@ -73,6 +74,37 @@ kubectl rollout restart deployment/backend -n sorinflow
 ```
 
 The value never appears in a commit, a pull request, or a CI log.
+
+---
+
+## 2b. The SMS panel (Kavenegar)
+
+The «پیامک» screen needs one credential. It can come from either place, and the
+environment always wins:
+
+```bash
+kubectl patch secret sorinflow-secrets -n sorinflow \
+  -p "{\"stringData\":{\"KAVENEGAR_API_KEY\":\"$REAL_KEY\",\"KAVENEGAR_SENDER\":\"10004346\"}}"
+kubectl rollout restart deployment/backend -n sorinflow
+```
+
+Or paste it into the panel: **پیامک → تنظیمات کاوه‌نگار**. A key saved there is
+encrypted with a Fernet key derived from `SECRET_KEY`, stored in `app_settings`,
+and never sent back to the browser — the form shows `ABCD****WXYZ` and nothing
+more. This exists so the panel can be set up without a deploy; the Secret is
+still the right home for it in production.
+
+Two consequences worth knowing:
+
+- **Rotating `SECRET_KEY` makes a panel-saved key unreadable.** That is
+  deliberate — it must be re-entered rather than silently decrypting under a
+  retired key. A key kept in the Secret is unaffected.
+- **`KAVENEGAR_OTP_TEMPLATE`** names the template used for login codes.
+  Templates are the correct channel for one-time codes: a dedicated delivery
+  route, no approved sender line required, and they reach numbers that have
+  opted out of advertising messages — which a login code is not, but a plain
+  send is treated as. Create it in Kavenegar's panel with `%token` as the code
+  placeholder.
 
 ---
 

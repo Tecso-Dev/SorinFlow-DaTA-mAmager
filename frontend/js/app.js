@@ -456,6 +456,7 @@ const NAV_PERMISSION = {
     'nav-link-proxies':    'proxies',
     'nav-link-portal':     'portal',
     'nav-link-monitoring': 'monitoring',
+    'nav-link-sms':        'sms',
 };
 // Sections that are not permission-gated but role-gated.
 const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'] };
@@ -463,7 +464,7 @@ const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'] };
 const SECTION_PERMISSION = {
     dashboard: 'stats', properties: 'properties', scraper: 'scraper',
     crm: 'crm', auth: 'divar_auth', proxies: 'proxies', portal: 'portal',
-    monitoring: 'monitoring',
+    monitoring: 'monitoring', sms: 'sms',
 };
 
 function _perms() { return (_currentUser && _currentUser.permissions) || []; }
@@ -562,6 +563,7 @@ const SECTION_META = {
     proxies:    { title: 'مدیریت پراکسی‌ها',     subtitle: 'افزودن، تست و مدیریت پراکسی‌ها' },
     portal:     { title: 'درخواست‌های مشتریان',  subtitle: 'ملک‌هایی که بازدیدکنندگان سایت دنبالش هستند' },
     monitoring: { title: 'پایش سامانه',          subtitle: 'سلامت سرویس‌ها، منابع و لاگ زندهٔ سامانه' },
+    sms:        { title: 'پیامک',                subtitle: 'تنظیمات کاوه‌نگار، ارسال تکی و گروهی، و گزارش تحویل' },
     users:      { title: 'مدیریت کاربران',       subtitle: 'حساب‌ها، دسترسی‌ها و درخواست‌های ارتقا' },
 };
 
@@ -647,6 +649,7 @@ function showSection(sectionName) {
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
         case 'portal':     loadPortalRequests(); break;
         case 'monitoring': loadMonitoring(); break;
+        case 'sms':        loadSms(); break;
         case 'users':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
                                loadUsers(); loadMaintenance(); initPermsUI(); loadTickets();
                            } break;
@@ -7374,6 +7377,7 @@ const JOB_STATUS_FA = {
 };
 
 async function loadMonitoring() {
+    loadCookieHealth();
     try {
         const d = await apiCall('/monitoring/overview');
 
@@ -7787,5 +7791,381 @@ async function runConnectivityTest() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = label;
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// پیامک — the SMS panel.
+//
+// Reads /api/sms/*. Every value that came from a person (a message body, a
+// campaign name, a phone number typed into a form) goes through esc() before
+// it reaches innerHTML: the send log is written by staff and read by staff,
+// which is exactly the shape that turns into stored XSS when it is skipped.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _smsOffset = 0;
+let _smsAudience = null;
+let _smsAudienceCount = 0;
+
+const _FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
+function faNum(n) {
+    if (n === null || n === undefined || n === '') return '—';
+    return String(n).replace(/\d/g, d => _FA_DIGITS[d]);
+}
+
+function smsCount(fieldId, outId) {
+    const el = document.getElementById(fieldId);
+    const out = document.getElementById(outId);
+    if (!el || !out) return;
+    const len = el.value.length;
+    // Persian text is billed at 70 characters per part, not 160 — saying so
+    // here is the difference between a 1,000 تومان send and a 5,000 تومان one.
+    const parts = len === 0 ? 0 : Math.ceil(len / 70);
+    out.textContent = `${faNum(len)} کاراکتر · ${faNum(parts)} بخش پیامک`;
+}
+
+async function loadSms() {
+    // Settings are super_admin-only; the card stays hidden for everyone else
+    // rather than showing a form whose save would 403.
+    const isBoss = ['root', 'super_admin'].includes(_currentUser?.role);
+    document.getElementById('sms-settings-card')?.classList.toggle('d-none', !isBoss);
+    // Stays disabled until an audience is picked — pickAudience() is what
+    // enables it, and only then does the button know how many people it is
+    // about to message, which is the number it has to show.
+    const bulkBtn = document.getElementById('sms-bulk-btn');
+    if (bulkBtn) bulkBtn.disabled = true;
+    _smsAudience = null;
+    _smsAudienceCount = 0;
+
+    loadSmsStats();
+    loadSmsCredit();
+    if (isBoss) loadSmsSettings();
+    loadSmsAudiences();
+    _smsOffset = 0;
+    loadSmsMessages();
+}
+
+async function loadSmsCredit() {
+    const el = document.getElementById('sms-credit');
+    if (!el) return;
+    try {
+        const d = await apiCall('/sms/account');
+        if (!d.ok) { el.textContent = '—'; el.title = d.error || ''; return; }
+        el.textContent = faNum(Number(d.remaining_credit || 0).toLocaleString('en-US'));
+        el.title = d.expire_date ? `انقضا: ${d.expire_date}` : '';
+    } catch (_) { el.textContent = '—'; }
+}
+
+async function loadSmsStats() {
+    try {
+        const d = await apiCall('/sms/stats');
+        const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = faNum(v); };
+        set('sms-sent-30', d.last_30_days);
+        set('sms-delivered', d.delivered_30_days);
+        set('sms-failed', d.failed_30_days);
+    } catch (_) { /* the cards keep their placeholder */ }
+}
+
+async function loadSmsSettings() {
+    try {
+        const d = await apiCall('/sms/settings');
+        const badge = document.getElementById('sms-config-badge');
+        if (badge) {
+            badge.textContent = d.configured ? 'پیکربندی شده' : 'کلید API تنظیم نشده';
+            badge.className = 'badge ' + (d.configured ? 'bg-success' : 'bg-danger');
+        }
+        const src = document.getElementById('sms-key-source');
+        if (src) {
+            src.textContent = d.key_source === 'env'
+                ? 'کلید از تنظیمات سرور خوانده می‌شود'
+                : (d.key_source === 'panel' ? 'کلید از همین پنل ذخیره شده است' : '');
+        }
+        const hint = document.getElementById('sms-key-hint');
+        if (hint) hint.textContent = d.api_key_masked ? `کلید فعلی: ${d.api_key_masked}` : '';
+        const v = (id, val) => { const e = document.getElementById(id); if (e) e.value = val || ''; };
+        v('sms-sender', d.sender);
+        v('sms-otp-template', d.otp_template);
+        v('sms-signature', d.signature);
+        const en = document.getElementById('sms-enabled');
+        if (en) en.checked = !!d.enabled;
+    } catch (e) { showToast('پیامک', 'تنظیمات خوانده نشد', 'error'); }
+}
+
+async function saveSmsSettings() {
+    const out = document.getElementById('sms-settings-result');
+    const body = {
+        sender: document.getElementById('sms-sender')?.value || '',
+        otp_template: document.getElementById('sms-otp-template')?.value || '',
+        signature: document.getElementById('sms-signature')?.value || '',
+        enabled: !!document.getElementById('sms-enabled')?.checked,
+    };
+    // Only send the key when one was typed — an empty box means "leave it",
+    // not "delete it", which is what the user expects from a masked field.
+    const keyEl = document.getElementById('sms-api-key');
+    if (keyEl && keyEl.value.trim()) body.api_key = keyEl.value.trim();
+
+    try {
+        await apiCall('/sms/settings', { method: 'PUT', body: JSON.stringify(body) });
+        if (keyEl) keyEl.value = '';
+        if (out) { out.textContent = 'ذخیره شد'; out.className = 'small text-success'; }
+        loadSmsSettings();
+        loadSmsCredit();
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'ذخیره نشد'; out.className = 'small text-danger'; }
+    }
+}
+
+async function sendSmsTest() {
+    const to = document.getElementById('sms-test-to')?.value?.trim();
+    const out = document.getElementById('sms-settings-result');
+    if (!to) { if (out) { out.textContent = 'شماره را وارد کنید'; out.className = 'small text-warning'; } return; }
+    if (out) { out.textContent = 'در حال ارسال…'; out.className = 'small text-muted'; }
+    try {
+        const d = await apiCall(`/sms/test?to=${encodeURIComponent(to)}`, { method: 'POST' });
+        if (out) {
+            out.textContent = d.ok ? 'ارسال شد' : (d.error || 'ناموفق');
+            out.className = 'small ' + (d.ok ? 'text-success' : 'text-danger');
+        }
+        loadSmsMessages(); loadSmsCredit();
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'ناموفق'; out.className = 'small text-danger'; }
+    }
+}
+
+async function sendSingleSms() {
+    const to = document.getElementById('sms-one-to')?.value?.trim();
+    const message = document.getElementById('sms-one-body')?.value?.trim();
+    const out = document.getElementById('sms-one-result');
+    if (!to || !message) {
+        if (out) { out.textContent = 'شماره و متن لازم است'; out.className = 'small text-warning'; }
+        return;
+    }
+    if (out) { out.textContent = 'در حال ارسال…'; out.className = 'small text-muted'; }
+    try {
+        const d = await apiCall('/sms/send', { method: 'POST', body: JSON.stringify({ to, message }) });
+        if (out) {
+            out.textContent = d.ok ? 'ارسال شد' : (d.error || 'ناموفق');
+            out.className = 'small ' + (d.ok ? 'text-success' : 'text-danger');
+        }
+        if (d.ok) document.getElementById('sms-one-body').value = '';
+        smsCount('sms-one-body', 'sms-one-count');
+        loadSmsMessages(); loadSmsStats(); loadSmsCredit();
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'ناموفق'; out.className = 'small text-danger'; }
+    }
+}
+
+async function loadSmsAudiences() {
+    const box = document.getElementById('sms-audiences');
+    if (!box) return;
+    try {
+        const d = await apiCall('/sms/audiences');
+        box.innerHTML = (d.audiences || []).map(a => `
+            <label class="d-flex align-items-center gap-2">
+              <input type="radio" name="sms-aud" value="${esc(a.key)}"
+                     data-count="${a.count === null ? 0 : a.count}"
+                     onchange="pickAudience(this)">
+              <span>${esc(a.label)}</span>
+              <span class="badge bg-secondary">${a.count === null ? '—' : faNum(a.count)}</span>
+            </label>`).join('');
+    } catch (_) {
+        box.innerHTML = '<span class="text-muted small">گروه‌ها خوانده نشد</span>';
+    }
+}
+
+function pickAudience(el) {
+    _smsAudience = el.value;
+    _smsAudienceCount = Number(el.dataset.count || 0);
+    const btn = document.getElementById('sms-bulk-btn');
+    if (btn) {
+        btn.disabled = !['root', 'super_admin'].includes(_currentUser?.role) || !_smsAudienceCount;
+        btn.innerHTML = `<i class="bi bi-megaphone"></i> ارسال به ${faNum(_smsAudienceCount)} گیرنده`;
+    }
+}
+
+async function sendBroadcast() {
+    const message = document.getElementById('sms-bulk-body')?.value?.trim();
+    const campaign = document.getElementById('sms-campaign')?.value?.trim();
+    const out = document.getElementById('sms-bulk-result');
+    if (!_smsAudience || !message) {
+        if (out) { out.textContent = 'گروه و متن لازم است'; out.className = 'small text-warning'; }
+        return;
+    }
+    // The last stop before spending money on an irreversible action. The count
+    // is repeated here on purpose — it is the number the server will verify.
+    if (!confirm(`ارسال این پیام به ${_smsAudienceCount} گیرنده؟\n\nاین کار برگشت‌پذیر نیست و هزینه دارد.`)) return;
+
+    const btn = document.getElementById('sms-bulk-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال ارسال…'; }
+    if (out) { out.textContent = ''; }
+    try {
+        const d = await apiCall('/sms/broadcast', {
+            method: 'POST',
+            body: JSON.stringify({ audience: _smsAudience, message, campaign,
+                                   confirm_count: _smsAudienceCount }),
+        });
+        if (out) {
+            out.textContent = `ارسال‌شده: ${faNum(d.sent)} · ناموفق: ${faNum(d.failed)}`;
+            out.className = 'small ' + (d.failed ? 'text-warning' : 'text-success');
+        }
+        document.getElementById('sms-bulk-body').value = '';
+        smsCount('sms-bulk-body', 'sms-bulk-count');
+        loadSmsMessages(); loadSmsStats(); loadSmsCredit();
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'ناموفق'; out.className = 'small text-danger'; }
+    } finally {
+        if (btn) { btn.disabled = false; pickAudience({ value: _smsAudience, dataset: { count: _smsAudienceCount } }); }
+    }
+}
+
+function smsPage(dir) {
+    _smsOffset = Math.max(0, _smsOffset + dir * 50);
+    loadSmsMessages();
+}
+
+async function loadSmsMessages() {
+    const body = document.getElementById('sms-messages-body');
+    if (!body) return;
+    const status = document.getElementById('sms-filter-status')?.value || '';
+    const search = document.getElementById('sms-search')?.value?.trim() || '';
+    const qs = new URLSearchParams({ limit: '50', offset: String(_smsOffset) });
+    if (status) qs.set('status', status);
+    if (search) qs.set('search', search);
+
+    try {
+        const d = await apiCall(`/sms/messages?${qs}`);
+        if (!d.items?.length) {
+            body.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">پیامی نیست</td></tr>';
+        } else {
+            body.innerHTML = d.items.map(m => {
+                const ok = m.status === 'sent';
+                const delivered = m.delivery_status === 10;
+                return `<tr>
+                  <td dir="ltr">${esc(m.to_number)}</td>
+                  <td class="text-truncate" style="max-width:260px" title="${esc(m.message || '')}">${esc(m.message || '—')}</td>
+                  <td><span class="badge ${ok ? 'bg-success' : 'bg-danger'}">${ok ? 'ارسال‌شده' : 'ناموفق'}</span></td>
+                  <td>${m.delivery_text
+                        ? `<span class="${delivered ? 'text-success' : 'text-muted'}">${esc(m.delivery_text)}</span>`
+                        : '<span class="text-muted">—</span>'}</td>
+                  <td>${esc(m.campaign || '—')}</td>
+                  <td>${esc(m.sent_by || '—')}</td>
+                  <td dir="ltr" class="text-muted small">${m.sent_at ? new Date(m.sent_at).toLocaleString('fa-IR') : '—'}</td>
+                </tr>`;
+            }).join('');
+        }
+        const tot = document.getElementById('sms-messages-total');
+        if (tot) tot.textContent = `${faNum(d.total)} پیام`;
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-3">${esc(e.message || 'خطا')}</td></tr>`;
+    }
+}
+
+async function refreshSmsDelivery() {
+    const btn = document.getElementById('sms-refresh-btn');
+    const label = btn?.innerHTML;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+    try {
+        const d = await apiCall('/sms/messages/refresh-status', { method: 'POST' });
+        showToast('پیامک', d.ok ? `${d.updated} پیام بروزرسانی شد` : (d.error || 'ناموفق'),
+                  d.ok ? 'success' : 'error');
+        loadSmsMessages(); loadSmsStats();
+    } catch (e) {
+        showToast('پیامک', e.message || 'ناموفق', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = label; }
+    }
+}
+
+
+// ── Divar session health ────────────────────────────────────────────────────
+//
+// The scraper's rotation pool is exactly the set of sessions marked valid, so
+// one that died without anyone noticing keeps being handed work until someone
+// looks at this table. The list is cheap (database only); «بررسی واقعی» is the
+// button, because it costs a real request to Divar.
+
+async function loadCookieHealth() {
+    const rows = document.getElementById('ck-rows');
+    const btn = document.getElementById('ck-refresh');
+    if (!rows) return;
+    if (btn) btn.disabled = true;
+
+    try {
+        const d = await apiCall('/monitoring/cookies');
+        const items = d.items || [];
+
+        const summary = document.getElementById('ck-summary');
+        if (summary) {
+            summary.textContent = `${faNum(d.usable)} از ${faNum(d.total)} قابل استفاده`;
+            summary.className = 'badge ms-auto ' + (d.usable ? 'bg-success' : 'bg-danger');
+        }
+
+        // A single account cannot rotate at all — maybe_rotate_account needs
+        // two before it will switch. Silent in the logs, so say it here.
+        const warn = document.getElementById('ck-warn');
+        if (warn) {
+            if (!d.rotation_possible) {
+                warn.textContent = d.usable === 0
+                    ? 'هیچ نشست معتبری وجود ندارد — اسکرپر نمی‌تواند کار کند.'
+                    : 'فقط یک حساب فعال است؛ چرخش شماره انجام نمی‌شود. برای چرخش حداقل دو حساب لازم است.';
+                warn.classList.remove('d-none');
+            } else {
+                warn.classList.add('d-none');
+            }
+        }
+
+        if (!items.length) {
+            rows.innerHTML = '<tr><td colspan="6" class="text-muted">هیچ حساب دیواری ذخیره نشده است</td></tr>';
+            return;
+        }
+
+        const badge = { active: 'bg-success', expiring: 'bg-warning text-dark', expired: 'bg-danger' };
+        const label = { active: 'فعال', expiring: 'نزدیک انقضا', expired: 'باطل' };
+
+        rows.innerHTML = items.map(i => `
+          <tr>
+            <td dir="ltr">${esc(i.phone_number)}</td>
+            <td><span class="badge ${badge[i.state] || 'bg-secondary'}">${label[i.state] || esc(i.state)}</span>
+                <div class="text-muted" style="font-size:.72rem">${esc(i.note || '')}</div></td>
+            <td dir="ltr" class="text-muted">${i.expires_at ? new Date(i.expires_at).toLocaleDateString('fa-IR') : '—'}</td>
+            <td dir="ltr" class="text-muted">${i.updated_at ? new Date(i.updated_at).toLocaleString('fa-IR') : '—'}</td>
+            <td>${i.in_rotation ? '<i class="bi bi-check-circle-fill text-success"></i>'
+                                : '<i class="bi bi-x-circle text-muted"></i>'}</td>
+            <td class="text-start">
+              <button class="btn btn-sm btn-outline-primary"
+                      onclick="checkCookieSession('${esc(i.phone_number)}', this)">
+                بررسی
+              </button>
+              <span class="small ms-2" id="ck-res-${esc(i.phone_number)}"></span>
+            </td>
+          </tr>`).join('');
+    } catch (e) {
+        rows.innerHTML = `<tr><td colspan="6" class="text-danger">${esc(e.message || 'خطا')}</td></tr>`;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function checkCookieSession(phone, btn) {
+    const out = document.getElementById(`ck-res-${phone}`);
+    const label = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+    if (out) { out.textContent = ''; out.className = 'small ms-2'; }
+    try {
+        const d = await apiCall(`/monitoring/cookies/check?phone=${encodeURIComponent(phone)}`,
+                                { method: 'POST' });
+        if (out) {
+            // alive === null is "Divar did not answer", which is deliberately
+            // not the same as the session being dead — see the endpoint.
+            out.textContent = d.message || '';
+            out.className = 'small ms-2 ' + (d.alive === true ? 'text-success'
+                                          : d.alive === false ? 'text-danger' : 'text-warning');
+        }
+        if (d.alive === false) loadCookieHealth();   // it just left the pool
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'خطا'; out.className = 'small ms-2 text-danger'; }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = label; }
     }
 }

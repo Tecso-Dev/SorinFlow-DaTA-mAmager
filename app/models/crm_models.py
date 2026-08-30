@@ -194,6 +194,22 @@ class SmsLog(Base):
     contact_id = Column(Integer, ForeignKey("crm_contacts.id", ondelete="SET NULL"), nullable=True, index=True)
     sent_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # ── added for the «پیامک» panel ──
+    # Kavenegar's id for the message. Without it there is no way to ask whether
+    # a message actually arrived, which is the question asked days later.
+    message_id = Column(String(40), index=True)
+    cost = Column(Integer)
+    # Kavenegar's delivery verdict, refreshed on demand rather than polled: a
+    # broadcast of 4,000 would otherwise mean 4,000 status calls nobody read.
+    delivery_status = Column(Integer)
+    delivery_text = Column(String(60))
+    delivery_checked_at = Column(DateTime(timezone=True))
+    # Who sent it, and which broadcast it belonged to. A campaign tag turns
+    # thousands of rows into one line in the panel.
+    sent_by = Column(String(200))
+    campaign = Column(String(120), index=True)
+    kind = Column(String(20), default="manual")   # manual|broadcast|otp|reminder
+
     contact = relationship("Contact", back_populates="sms_logs")
 
     def to_dict(self):
@@ -206,6 +222,13 @@ class SmsLog(Base):
             "response": self.response,
             "contact_id": self.contact_id,
             "sent_at": self.sent_at.isoformat() if self.sent_at else None,
+            "message_id": self.message_id,
+            "cost": self.cost,
+            "delivery_status": self.delivery_status,
+            "delivery_text": self.delivery_text,
+            "sent_by": self.sent_by,
+            "campaign": self.campaign,
+            "kind": self.kind,
         }
 
 

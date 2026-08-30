@@ -89,6 +89,7 @@ async def init_db():
         await _migrate_advertiser_type(conn)
         await _migrate_cookie_usage(conn)
         await _migrate_property_quality(conn)
+        await _migrate_sms_panel(conn)
         await _seed_reference_data(conn)
 
     # Own transaction, deliberately outside the block above.
@@ -149,6 +150,37 @@ async def _migrate_property_serial(conn):
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_properties_serial_no ON properties (serial_no)"))
     except Exception as e:
         print(f"property serial migration skipped: {e}")
+
+
+async def _migrate_sms_panel(conn):
+    """Columns the «پیامک» panel adds to the CRM's existing SMS log.
+
+    Deliberately extending crm_sms_logs rather than creating a second table:
+    the CRM already writes every send there, and two histories would mean two
+    places to look when someone asks whether a customer was messaged.
+    """
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE crm_sms_logs "
+            "ADD COLUMN IF NOT EXISTS message_id VARCHAR(40), "
+            "ADD COLUMN IF NOT EXISTS cost INTEGER, "
+            "ADD COLUMN IF NOT EXISTS delivery_status INTEGER, "
+            "ADD COLUMN IF NOT EXISTS delivery_text VARCHAR(60), "
+            "ADD COLUMN IF NOT EXISTS delivery_checked_at TIMESTAMPTZ, "
+            "ADD COLUMN IF NOT EXISTS sent_by VARCHAR(200), "
+            "ADD COLUMN IF NOT EXISTS campaign VARCHAR(120), "
+            "ADD COLUMN IF NOT EXISTS kind VARCHAR(20) DEFAULT 'manual'"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_sms_logs_message_id "
+            "ON crm_sms_logs (message_id)"))
+        # The panel's default view is newest-first within one campaign; without
+        # this it scans the whole table once a broadcast has filled it.
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_sms_logs_campaign_sent "
+            "ON crm_sms_logs (campaign, sent_at DESC)"))
+    except Exception as e:
+        print(f"SMS panel migration skipped: {e}")
 
 
 async def _migrate_filing(conn):
