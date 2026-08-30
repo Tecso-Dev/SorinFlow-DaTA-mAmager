@@ -33,8 +33,6 @@ shown only as a masked hint. The environment is still the right place for it in
 production; the dashboard exists so the panel can be set up without a deploy.
 """
 import asyncio
-import base64
-import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Iterable, Optional
@@ -124,61 +122,20 @@ class SmsError(Exception):
         super().__init__(f"[{status}] {self.message}")
 
 
-# ── credential storage ──────────────────────────────────────────────────────
+# ── credential storage ─────────────────────────────────────────────────────
+#
+# Shared with the email panel — see app/services/secret_box.py for why the
+# Fernet key is derived from SECRET_KEY rather than stored separately. The
+# names below are kept as thin aliases so existing callers and tests do not
+# have to care that the implementation moved.
 
-def _fernet():
-    """A Fernet built from SECRET_KEY.
+from app.services import secret_box
 
-    Derived rather than stored separately so there is no second secret to
-    manage; rotating SECRET_KEY makes a dashboard-saved API key unreadable,
-    which is the correct outcome — it must be re-entered rather than silently
-    decrypting under a key that has been retired.
-    """
-    from cryptography.fernet import Fernet
-    digest = hashlib.sha256(settings.secret_key.encode("utf-8")).digest()
-    return Fernet(base64.urlsafe_b64encode(digest))
-
-
-def _encrypt(value: str) -> str:
-    return _fernet().encrypt(value.encode("utf-8")).decode("ascii")
-
-
-def _decrypt(value: str) -> str:
-    try:
-        return _fernet().decrypt(value.encode("ascii")).decode("utf-8")
-    except Exception:
-        # Wrong SECRET_KEY, or a hand-edited row. Treat as absent rather than
-        # raising inside a send.
-        logger.warning("[sms] stored API key could not be decrypted — re-enter it in the panel")
-        return ""
-
-
-def mask_key(key: str) -> str:
-    """A hint that identifies a key without revealing it."""
-    if not key:
-        return ""
-    if len(key) <= 8:
-        return "*" * len(key)
-    return f"{key[:4]}{'*' * 8}{key[-4:]}"
-
-
-async def _get_settings_rows(db, keys: Iterable[str]) -> dict:
-    from app.models.app_setting import AppSetting
-    rows = (await db.execute(
-        select(AppSetting).where(AppSetting.key.in_(list(keys))))).scalars().all()
-    return {r.key: r.value for r in rows}
-
-
-async def put_setting(db, key: str, value: Optional[str], actor: str = "") -> None:
-    from app.models.app_setting import AppSetting
-    row = (await db.execute(
-        select(AppSetting).where(AppSetting.key == key))).scalars().first()
-    if row is None:
-        row = AppSetting(key=key)
-        db.add(row)
-    row.value = value
-    row.updated_by = actor or None
-    await db.commit()
+_encrypt = secret_box.encrypt
+_decrypt = secret_box.decrypt
+mask_key = secret_box.mask
+_get_settings_rows = secret_box.get_many
+put_setting = secret_box.put
 
 
 async def resolve_credentials(db=None) -> tuple:

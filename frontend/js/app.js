@@ -457,6 +457,7 @@ const NAV_PERMISSION = {
     'nav-link-portal':     'portal',
     'nav-link-monitoring': 'monitoring',
     'nav-link-sms':        'sms',
+    'nav-link-email':      'email',
 };
 // Sections that are not permission-gated but role-gated.
 const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'] };
@@ -464,7 +465,7 @@ const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'] };
 const SECTION_PERMISSION = {
     dashboard: 'stats', properties: 'properties', scraper: 'scraper',
     crm: 'crm', auth: 'divar_auth', proxies: 'proxies', portal: 'portal',
-    monitoring: 'monitoring', sms: 'sms',
+    monitoring: 'monitoring', sms: 'sms', email: 'email',
 };
 
 function _perms() { return (_currentUser && _currentUser.permissions) || []; }
@@ -563,6 +564,7 @@ const SECTION_META = {
     proxies:    { title: 'مدیریت پراکسی‌ها',     subtitle: 'افزودن، تست و مدیریت پراکسی‌ها' },
     portal:     { title: 'درخواست‌های مشتریان',  subtitle: 'ملک‌هایی که بازدیدکنندگان سایت دنبالش هستند' },
     monitoring: { title: 'پایش سامانه',          subtitle: 'سلامت سرویس‌ها، منابع و لاگ زندهٔ سامانه' },
+    email:      { title: 'ایمیل',                subtitle: 'تنظیمات SMTP، قالب‌های سایت و گزارش ارسال' },
     sms:        { title: 'پیامک',                subtitle: 'تنظیمات کاوه‌نگار، ارسال تکی و گروهی، و گزارش تحویل' },
     users:      { title: 'مدیریت کاربران',       subtitle: 'حساب‌ها، دسترسی‌ها و درخواست‌های ارتقا' },
 };
@@ -650,6 +652,7 @@ function showSection(sectionName) {
         case 'portal':     loadPortalRequests(); break;
         case 'monitoring': loadMonitoring(); break;
         case 'sms':        loadSms(); break;
+        case 'email':      loadEmail(); break;
         case 'users':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
                                loadUsers(); loadMaintenance(); initPermsUI(); loadTickets();
                            } break;
@@ -731,13 +734,17 @@ function formatPrice(price) {
 async function apiCall(endpoint, options = {}) {
     try {
         const token = getToken();
+        // `raw` returns the body as text instead of parsing JSON — the email
+        // template preview is an HTML document, and it still has to go through
+        // here so the Authorization header travels with it.
+        const { raw, ...fetchOptions } = options;
         const response = await fetch(`${API_BASE}${endpoint}`, {
             headers: {
                 'Content-Type': 'application/json',
                 ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
                 ...options.headers
             },
-            ...options
+            ...fetchOptions
         });
 
         if (response.status === 401) {
@@ -747,8 +754,12 @@ async function apiCall(endpoint, options = {}) {
         }
 
         if (!response.ok) {
-            const error = await response.json();
-            let message = 'Request failed';
+            // An error body is not always JSON — an HTML endpoint that fails
+            // returns a page, and calling .json() on it throws a parse error
+            // that hides the real status.
+            let error = {};
+            try { error = await response.json(); } catch (_) { error = {}; }
+            let message = `Request failed (${response.status})`;
             if (error.detail) {
                 if (typeof error.detail === 'string') {
                     message = error.detail;
@@ -761,7 +772,7 @@ async function apiCall(endpoint, options = {}) {
             throw new Error(message);
         }
 
-        return await response.json();
+        return raw ? await response.text() : await response.json();
     } catch (error) {
         console.error('API Error:', error);
         throw error;
@@ -8167,5 +8178,207 @@ async function checkCookieSession(phone, btn) {
         if (out) { out.textContent = e.message || 'خطا'; out.className = 'small ms-2 text-danger'; }
     } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = label; }
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ایمیل — the email panel.
+//
+// Reads /api/email/*. The SMTP password is write-only: it is sent when typed
+// and comes back only as a mask, so the field is left empty on load and an
+// empty field on save means "leave it alone", not "delete it".
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadEmail() {
+    const isBoss = ['root', 'super_admin'].includes(_currentUser?.role);
+    document.getElementById('em-settings-card')?.classList.toggle('d-none', !isBoss);
+
+    loadEmailStats();
+    if (isBoss) loadEmailSettings();
+    loadEmailTemplates();
+    loadEmailMessages();
+}
+
+async function loadEmailStats() {
+    try {
+        const d = await apiCall('/email/stats');
+        const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = faNum(v); };
+        set('em-sent-30', d.last_30_days);
+        set('em-codes', d.login_codes_30_days);
+        set('em-failed', d.failed_30_days);
+    } catch (_) { /* cards keep their placeholder */ }
+}
+
+async function loadEmailSettings() {
+    try {
+        const d = await apiCall('/email/settings');
+        const badge = document.getElementById('em-config-badge');
+        if (badge) {
+            badge.textContent = d.configured ? 'پیکربندی شده' : 'تنظیم نشده';
+            badge.className = 'badge ' + (d.configured ? 'bg-success' : 'bg-danger');
+        }
+        const state = document.getElementById('em-state');
+        if (state) state.textContent = d.configured ? 'آماده' : 'تنظیم نشده';
+
+        const src = document.getElementById('em-pw-source');
+        if (src) {
+            src.textContent = d.password_source === 'env'
+                ? 'رمز از تنظیمات سرور خوانده می‌شود'
+                : (d.password_source === 'panel' ? 'رمز از همین پنل ذخیره شده است' : '');
+        }
+        const hint = document.getElementById('em-pw-hint');
+        if (hint) hint.textContent = d.password_masked ? `رمز فعلی: ${d.password_masked}` : '';
+
+        const v = (id, val) => { const e = document.getElementById(id); if (e) e.value = val ?? ''; };
+        v('em-host', d.host); v('em-port', d.port); v('em-user', d.user);
+        v('em-from-name', d.from_name); v('em-reply-to', d.reply_to);
+        const sec = document.getElementById('em-security');
+        if (sec) sec.value = d.security || 'starttls';
+        const en = document.getElementById('em-enabled');
+        if (en) en.checked = !!d.enabled;
+    } catch (e) { showToast('ایمیل', 'تنظیمات خوانده نشد', 'error'); }
+}
+
+async function saveEmailSettings() {
+    const out = document.getElementById('em-settings-result');
+    const val = id => document.getElementById(id)?.value?.trim() ?? '';
+    const body = {
+        host: val('em-host'), user: val('em-user'),
+        from_name: val('em-from-name'), reply_to: val('em-reply-to'),
+        security: document.getElementById('em-security')?.value || 'starttls',
+        enabled: !!document.getElementById('em-enabled')?.checked,
+    };
+    const port = parseInt(val('em-port'), 10);
+    if (!Number.isNaN(port)) body.port = port;
+    // Only send a password that was actually typed — see the header note.
+    const pw = document.getElementById('em-password');
+    if (pw && pw.value.trim()) body.password = pw.value.trim();
+
+    try {
+        await apiCall('/email/settings', { method: 'PUT', body: JSON.stringify(body) });
+        if (pw) pw.value = '';
+        if (out) { out.textContent = 'ذخیره شد'; out.className = 'small text-success'; }
+        loadEmailSettings();
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'ذخیره نشد'; out.className = 'small text-danger'; }
+    }
+}
+
+async function verifyEmailSmtp() {
+    const out = document.getElementById('em-settings-result');
+    if (out) { out.textContent = 'در حال بررسی…'; out.className = 'small text-muted'; }
+    try {
+        const d = await apiCall('/email/verify', { method: 'POST' });
+        if (out) {
+            out.textContent = d.ok
+                ? `اتصال برقرار شد (${d.host}:${d.port})`
+                : (d.error || 'ناموفق');
+            out.className = 'small ' + (d.ok ? 'text-success' : 'text-danger');
+        }
+        const state = document.getElementById('em-state');
+        if (state) state.textContent = d.ok ? 'متصل' : 'خطا';
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'ناموفق'; out.className = 'small text-danger'; }
+    }
+}
+
+async function sendEmailTest() {
+    const to = document.getElementById('em-test-to')?.value?.trim();
+    const out = document.getElementById('em-settings-result');
+    if (!to) { if (out) { out.textContent = 'آدرس گیرنده را وارد کنید'; out.className = 'small text-warning'; } return; }
+    if (out) { out.textContent = 'در حال ارسال…'; out.className = 'small text-muted'; }
+    try {
+        const d = await apiCall(`/email/test?to=${encodeURIComponent(to)}`, { method: 'POST' });
+        if (out) {
+            out.textContent = d.ok ? 'ارسال شد — صندوق ورودی را ببینید' : (d.error || 'ناموفق');
+            out.className = 'small ' + (d.ok ? 'text-success' : 'text-danger');
+        }
+        loadEmailMessages(); loadEmailStats();
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'ناموفق'; out.className = 'small text-danger'; }
+    }
+}
+
+async function sendOneEmail() {
+    const to = document.getElementById('em-one-to')?.value?.trim();
+    const subject = document.getElementById('em-one-subject')?.value?.trim();
+    const message = document.getElementById('em-one-body')?.value?.trim();
+    const out = document.getElementById('em-one-result');
+    if (!to || !subject || !message) {
+        if (out) { out.textContent = 'گیرنده، موضوع و متن لازم است'; out.className = 'small text-warning'; }
+        return;
+    }
+    if (out) { out.textContent = 'در حال ارسال…'; out.className = 'small text-muted'; }
+    try {
+        const d = await apiCall('/email/send', {
+            method: 'POST', body: JSON.stringify({ to, subject, message }) });
+        if (out) {
+            out.textContent = d.ok ? 'ارسال شد' : (d.error || 'ناموفق');
+            out.className = 'small ' + (d.ok ? 'text-success' : 'text-danger');
+        }
+        if (d.ok) document.getElementById('em-one-body').value = '';
+        loadEmailMessages(); loadEmailStats();
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'ناموفق'; out.className = 'small text-danger'; }
+    }
+}
+
+async function loadEmailTemplates() {
+    const sel = document.getElementById('em-template');
+    if (!sel) return;
+    try {
+        const d = await apiCall('/email/templates');
+        sel.innerHTML = (d.templates || [])
+            .map(t => `<option value="${esc(t.key)}">${esc(t.label)}</option>`).join('');
+        previewEmailTemplate();
+    } catch (_) {
+        sel.innerHTML = '<option>—</option>';
+    }
+}
+
+async function previewEmailTemplate() {
+    const frame = document.getElementById('em-preview');
+    const name = document.getElementById('em-template')?.value;
+    if (!frame || !name) return;
+    try {
+        // Fetched rather than pointed at with src, so the auth header goes
+        // with it — the preview route sits behind the same permission as the
+        // rest of the panel.
+        const html = await apiCall(`/email/preview/${encodeURIComponent(name)}`, { raw: true });
+        frame.srcdoc = typeof html === 'string' ? html : '';
+    } catch (e) {
+        frame.srcdoc = `<p style="font-family:Tahoma;color:#f88;padding:12px">${esc(e.message || 'خطا')}</p>`;
+    }
+}
+
+async function loadEmailMessages() {
+    const body = document.getElementById('em-messages-body');
+    if (!body) return;
+    const status = document.getElementById('em-filter-status')?.value || '';
+    const qs = new URLSearchParams({ limit: '50' });
+    if (status) qs.set('status', status);
+    try {
+        const d = await apiCall(`/email/messages?${qs}`);
+        if (!d.items?.length) {
+            body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">ایمیلی نیست</td></tr>';
+        } else {
+            body.innerHTML = d.items.map(m => {
+                const ok = m.status === 'sent';
+                return `<tr>
+                  <td dir="ltr">${esc(m.to_email)}</td>
+                  <td class="text-truncate" style="max-width:220px" title="${esc(m.subject || '')}">${esc(m.subject || '—')}</td>
+                  <td>${esc(m.template || '—')}</td>
+                  <td><span class="badge ${ok ? 'bg-success' : 'bg-danger'}">${ok ? 'ارسال‌شده' : 'ناموفق'}</span>
+                      ${m.error ? `<div class="text-danger" style="font-size:.7rem">${esc(m.error)}</div>` : ''}</td>
+                  <td>${esc(m.sent_by || '—')}</td>
+                  <td dir="ltr" class="text-muted small">${m.created_at ? new Date(m.created_at).toLocaleString('fa-IR') : '—'}</td>
+                </tr>`;
+            }).join('');
+        }
+        const tot = document.getElementById('em-messages-total');
+        if (tot) tot.textContent = `${faNum(d.total)} ایمیل`;
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3">${esc(e.message || 'خطا')}</td></tr>`;
     }
 }

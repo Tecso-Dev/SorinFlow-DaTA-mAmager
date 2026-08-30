@@ -40,6 +40,10 @@ class IssuedCode:
     ttl: int
     cooldown: int
     debug_code: str | None = None
+    # Which route the code actually took. The portal shows "کد به ایمیل شما
+    # ارسال شد" or "...به شمارهٔ شما", and guessing wrong sends someone to
+    # stare at the wrong inbox.
+    channel: str = "sms"
 
 
 def _norm(identifier: str) -> str:
@@ -70,11 +74,23 @@ def generate_code() -> str:
 
 
 async def issue_code(purpose: str, identifier: str, phone: str,
-                     message_template: str | None = None) -> IssuedCode:
+                     message_template: str | None = None,
+                     email: str | None = None,
+                     channel: str | None = None,
+                     db=None) -> IssuedCode:
     """Create, store and send a verification code.
 
     Raises VerificationError when the caller is asking too often — the message
     is safe to show the user verbatim.
+
+    `channel` picks the delivery route: "sms", "email", or None to decide
+    automatically — email when an address is known and SMS is not configured,
+    SMS otherwise. Everything above the delivery line is channel-agnostic: the
+    Redis keys hash on `identifier`, not on how the code travelled, so a code
+    sent by email verifies through exactly the same path as one sent by SMS.
+
+    The returned IssuedCode carries `channel` so the portal can tell the person
+    where to go looking for it.
     """
     keys = _keys(purpose, identifier)
     try:
@@ -109,19 +125,85 @@ async def issue_code(purpose: str, identifier: str, phone: str,
     pipe.expire(keys["sends"], 3600)
     await pipe.execute()
 
-    text = (message_template or "کد ورود شما به سورین‌فلو: {code}").format(code=code)
-    result = await send_sms(phone, text, provider=settings.auth_sms_provider)
-    if not result.get("success"):
-        # Burn the code rather than leave one alive that nobody received.
+    used = await _deliver(code, phone=phone, email=email, channel=channel,
+                          message_template=message_template, ttl=ttl, db=db)
+    if not used:
+        # Burn the code rather than leave one alive that nobody received. This
+        # is why _deliver returns a channel-or-None instead of raising: the
+        # cleanup must happen whichever route failed.
         await r.delete(keys["code"], keys["cooldown"])
-        logger.error(f"[verification] SMS send failed for {purpose}: {result.get('response')}")
-        raise VerificationError("ارسال پیامک ناموفق بود. کمی بعد دوباره تلاش کنید")
+        logger.error(f"[verification] delivery failed for {purpose}")
+        raise VerificationError("ارسال کد ناموفق بود. کمی بعد دوباره تلاش کنید")
 
-    logger.info(f"[verification] code sent purpose={purpose} ttl={ttl}s")
+    logger.info(f"[verification] code sent purpose={purpose} via={used} ttl={ttl}s")
     # Only ever populated outside production, so a developer can finish the
     # flow without a live SMS panel.
     debug = code if settings.environment != "production" else None
-    return IssuedCode(ttl=ttl, cooldown=settings.auth_code_resend_cooldown, debug_code=debug)
+    return IssuedCode(ttl=ttl, cooldown=settings.auth_code_resend_cooldown,
+                      debug_code=debug, channel=used)
+
+
+async def _deliver(code: str, *, phone: str, email: str | None,
+                   channel: str | None, message_template: str | None,
+                   ttl: int, db=None) -> str | None:
+    """Send the code. Returns the channel that worked, or None.
+
+    Order matters when nothing is specified. Email is tried first only when SMS
+    has no credentials at all — otherwise SMS stays primary, because a phone is
+    verified at sign-up and an address is not.
+    """
+    from app.services import email_service, email_templates
+
+    text = (message_template or "کد ورود شما به سورین‌فلو: {code}").format(code=code)
+
+    # Each leg is wrapped. A provider that raises — a bad credential, a
+    # library that changed its signature, a socket error nobody predicted —
+    # must degrade to "this route did not work" so the other one is still
+    # tried and the code is burned. Letting it escape turns a delivery problem
+    # into a 500 on the sign-up form, which is the worst place to have one.
+    async def _sms() -> bool:
+        if not phone:
+            return False
+        try:
+            res = await send_sms(phone, text, provider=settings.auth_sms_provider, db=db)
+        except Exception as e:
+            logger.warning(f"[verification] sms leg raised: {type(e).__name__}: {e}")
+            return False
+        if not res.get("success"):
+            logger.warning(f"[verification] sms leg failed: {res.get('response')}")
+        return bool(res.get("success"))
+
+    async def _email() -> bool:
+        if not email or not email_service.valid_email(email):
+            return False
+        try:
+            subject, html, plain = email_templates.login_code(
+                code, minutes=max(1, ttl // 60))
+            res = await email_service.send(email, subject, html, plain, db=db)
+        except Exception as e:
+            logger.warning(f"[verification] email leg raised: {type(e).__name__}: {e}")
+            return False
+        if not res.get("success"):
+            logger.warning(f"[verification] email leg failed: {res.get('error')}")
+        return bool(res.get("success"))
+
+    if channel == "email":
+        return "email" if await _email() else None
+    if channel == "sms":
+        return "sms" if await _sms() else None
+
+    # Automatic. Prefer whichever is actually configured, and fall through to
+    # the other rather than failing outright — a sign-up that dies because one
+    # provider is down is a lost customer.
+    sms_ready = bool((settings.kavenegar_api_key or "").strip()) or \
+        settings.auth_sms_provider == "console"
+    order = ["sms", "email"] if sms_ready else ["email", "sms"]
+    for leg in order:
+        if leg == "sms" and await _sms():
+            return "sms"
+        if leg == "email" and await _email():
+            return "email"
+    return None
 
 
 async def verify_code(purpose: str, identifier: str, code: str) -> bool:

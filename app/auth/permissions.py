@@ -45,6 +45,7 @@ PERMISSIONS = {
     "portal":     "درخواست‌های بازدیدکنندگان",
     "monitoring": "پایش سامانه و Google Cloud",
     "sms":        "پیامک",
+    "email":      "ایمیل",
 }
 
 ALL_PERMISSIONS = list(PERMISSIONS.keys())

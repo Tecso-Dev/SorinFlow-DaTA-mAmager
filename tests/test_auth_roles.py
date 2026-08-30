@@ -315,7 +315,7 @@ def test_only_super_admin_decides_tickets_and_approval_grants_admin(client):
 def test_signup_requires_the_sms_code_and_burns_it(client, monkeypatch):
     sent = {}
 
-    async def fake_sms(to, msg, provider="kavenegar"):
+    async def fake_sms(to, msg, provider="kavenegar", **kw):
         sent["to"], sent["msg"] = to, msg
         return {"success": True, "provider": "test", "response": "ok"}
 
@@ -484,7 +484,7 @@ def test_pending_response_carries_the_phone_for_email_login(client, monkeypatch)
     would start the resend cooldown and this test would measure the throttle
     (covered separately) instead of the email-login path.
     """
-    async def fake_sms(to, msg, provider="kavenegar"):
+    async def fake_sms(to, msg, provider="kavenegar", **kw):
         return {"success": True, "provider": "test", "response": "ok"}
     import app.services.verification as v
     monkeypatch.setattr(v, "send_sms", fake_sms)

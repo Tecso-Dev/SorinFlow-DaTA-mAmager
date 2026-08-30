@@ -180,6 +180,10 @@
                 <span class="nav-icon"><i class="bi bi-chat-left-text"></i></span>
                 پیامک
             </a>
+            <a class="nav-item-link" onclick="showSection('email')" id="nav-link-email">
+                <span class="nav-icon"><i class="bi bi-envelope-at"></i></span>
+                ایمیل
+            </a>
             <a class="nav-item-link d-none" onclick="showSection('users')" id="nav-users">
                 <span class="nav-icon"><i class="bi bi-person-gear"></i></span>
                 کاربران
@@ -2126,6 +2130,199 @@
                             <button class="btn btn-outline-secondary" onclick="smsPage(-1)">قبلی</button>
                             <button class="btn btn-outline-secondary" onclick="smsPage(1)">بعدی</button>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ایمیل — SMTP settings, template previews, send log. Same card
+                 and stat-card language as the rest of the panel. -->
+            <div id="section-email" class="section-content" style="display:none;">
+
+                <div class="row g-3 mb-4">
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-green">
+                            <div class="stat-icon"><i class="bi bi-plug"></i></div>
+                            <div class="stat-value" id="em-state">—</div>
+                            <div class="stat-label">وضعیت اتصال</div>
+                            <i class="bi bi-plug stat-bg-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-purple">
+                            <div class="stat-icon"><i class="bi bi-envelope"></i></div>
+                            <div class="stat-value" id="em-sent-30">—</div>
+                            <div class="stat-label">ارسال‌شده در ۳۰ روز</div>
+                            <i class="bi bi-envelope stat-bg-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-cyan">
+                            <div class="stat-icon"><i class="bi bi-key"></i></div>
+                            <div class="stat-value" id="em-codes">—</div>
+                            <div class="stat-label">کد ورود ارسالی</div>
+                            <i class="bi bi-key stat-bg-icon"></i>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-orange">
+                            <div class="stat-icon"><i class="bi bi-exclamation-triangle"></i></div>
+                            <div class="stat-value" id="em-failed">—</div>
+                            <div class="stat-label">ناموفق در ۳۰ روز</div>
+                            <i class="bi bi-exclamation-triangle stat-bg-icon"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3 d-none" id="em-settings-card">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-gear"></i> تنظیمات ایمیل (SMTP)
+                        <span id="em-config-badge" class="badge bg-secondary">در حال بررسی…</span>
+                        <span class="ms-auto text-muted small" id="em-pw-source"></span>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-warning py-2 px-3 small">
+                            برای Gmail باید از <b>App Password</b> استفاده کنید، نه رمز عبور حساب.
+                            ابتدا «تأیید دو مرحله‌ای» را روی حساب فعال کنید، سپس از
+                            <span dir="ltr">Google Account → Security → App passwords</span>
+                            یک رمز ۱۶ حرفی بسازید.
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-5">
+                                <label class="form-label small">میزبان SMTP</label>
+                                <input type="text" id="em-host" class="form-control form-control-sm"
+                                       dir="ltr" autocomplete="off" placeholder="smtp.gmail.com">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small">پورت</label>
+                                <input type="number" id="em-port" class="form-control form-control-sm"
+                                       dir="ltr" placeholder="587">
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label small">نام کاربری (آدرس فرستنده)</label>
+                                <input type="text" id="em-user" class="form-control form-control-sm"
+                                       dir="ltr" autocomplete="off" placeholder="sorinflow.agency@gmail.com">
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-5">
+                                <label class="form-label small">رمز عبور (App Password)</label>
+                                <input type="password" id="em-password" class="form-control form-control-sm"
+                                       dir="ltr" autocomplete="new-password"
+                                       placeholder="برای تغییر، رمز جدید را وارد کنید">
+                                <div class="form-text small" id="em-pw-hint"></div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">رمزگذاری</label>
+                                <select id="em-security" class="form-select form-select-sm">
+                                    <option value="starttls">STARTTLS (۵۸۷)</option>
+                                    <option value="ssl">SSL/TLS (۴۶۵)</option>
+                                    <option value="none">بدون رمزگذاری</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small">نام نمایشی فرستنده</label>
+                                <input type="text" id="em-from-name" class="form-control form-control-sm"
+                                       maxlength="60" placeholder="سورین‌فلو">
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">آدرس پاسخ (Reply-To)</label>
+                            <input type="text" id="em-reply-to" class="form-control form-control-sm"
+                                   dir="ltr" autocomplete="off" placeholder="info@sorinflow.com">
+                        </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="em-enabled" checked>
+                            <label class="form-check-label small" for="em-enabled">ارسال ایمیل فعال باشد</label>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap align-items-center">
+                            <button class="btn btn-primary btn-sm" onclick="saveEmailSettings()">
+                                <i class="bi bi-save"></i> ذخیرهٔ تنظیمات
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="verifyEmailSmtp()">
+                                <i class="bi bi-shield-check"></i> بررسی اتصال
+                            </button>
+                            <input type="text" id="em-test-to" class="form-control form-control-sm"
+                                   dir="ltr" style="max-width:230px" placeholder="آدرس گیرندهٔ آزمایشی">
+                            <button class="btn btn-outline-primary btn-sm" onclick="sendEmailTest()">
+                                <i class="bi bi-send"></i> ارسال ایمیل آزمایشی
+                            </button>
+                            <span id="em-settings-result" class="small"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-lg-5">
+                        <div class="card h-100">
+                            <div class="card-header d-flex align-items-center gap-2">
+                                <i class="bi bi-pencil-square"></i> ارسال ایمیل
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-2">
+                                    <label class="form-label small">گیرنده</label>
+                                    <input type="text" id="em-one-to" class="form-control form-control-sm"
+                                           dir="ltr" autocomplete="off" placeholder="name@example.com">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small">موضوع</label>
+                                    <input type="text" id="em-one-subject" class="form-control form-control-sm"
+                                           maxlength="200">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small">متن</label>
+                                    <textarea id="em-one-body" class="form-control form-control-sm"
+                                              rows="4" maxlength="4000"></textarea>
+                                </div>
+                                <button class="btn btn-primary btn-sm" onclick="sendOneEmail()">
+                                    <i class="bi bi-send"></i> ارسال
+                                </button>
+                                <span id="em-one-result" class="small ms-2"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-7">
+                        <div class="card h-100">
+                            <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                                <i class="bi bi-window"></i> پیش‌نمایش قالب‌ها
+                                <select id="em-template" class="form-select form-select-sm ms-auto"
+                                        style="max-width:220px" onchange="previewEmailTemplate()">
+                                </select>
+                            </div>
+                            <div class="card-body p-2">
+                                <iframe id="em-preview" title="پیش‌نمایش قالب ایمیل"
+                                        style="width:100%;height:420px;border:1px solid var(--border);
+                                               border-radius:10px;background:#030305"></iframe>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <span><i class="bi bi-clock-history"></i> تاریخچهٔ ارسال</span>
+                        <select id="em-filter-status" class="form-select form-select-sm"
+                                style="max-width:150px" onchange="loadEmailMessages()">
+                            <option value="">همهٔ وضعیت‌ها</option>
+                            <option value="sent">ارسال‌شده</option>
+                            <option value="failed">ناموفق</option>
+                        </select>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0" style="font-size:.82rem">
+                                <thead>
+                                    <tr><th>گیرنده</th><th>موضوع</th><th>قالب</th>
+                                        <th>وضعیت</th><th>فرستنده</th><th>زمان</th></tr>
+                                </thead>
+                                <tbody id="em-messages-body">
+                                    <tr><td colspan="6" class="text-center text-muted py-3">در حال بارگذاری…</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <span class="text-muted small" id="em-messages-total"></span>
                     </div>
                 </div>
             </div>

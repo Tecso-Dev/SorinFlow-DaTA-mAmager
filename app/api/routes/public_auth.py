@@ -54,9 +54,20 @@ def _normalize_email(email: str | None) -> str | None:
     return email or None
 
 
-def _issued_response(issued, message: str, phone: str | None = None) -> PortalPendingResponse:
+def _issued_response(issued, message: str | None = None,
+                     phone: str | None = None) -> PortalPendingResponse:
+    """Wrap an IssuedCode for the portal.
+
+    The message names the channel the code actually took. Telling someone to
+    check their SMS when it went to their inbox is how a sign-up is abandoned
+    thirty seconds in.
+    """
+    if message is None:
+        message = ("کد تأیید به ایمیل شما ارسال شد"
+                   if issued.channel == "email"
+                   else "کد تأیید برای شما پیامک شد")
     return PortalPendingResponse(
-        ttl=issued.ttl, cooldown=issued.cooldown,
+        ttl=issued.ttl, cooldown=issued.cooldown, channel=issued.channel,
         message=message, phone=phone, debug_code=issued.debug_code,
     )
 
@@ -70,6 +81,32 @@ def _token_for(user: User) -> TokenResponse:
         username=user.username,
         full_name=user.full_name,
     )
+
+
+
+# ── notification email ──────────────────────────────────────────────────────
+#
+# Fire-and-forget by design: a welcome message that fails must not roll back a
+# registration that succeeded, and an approval email that bounces must not stop
+# someone becoming an admin. Every call is wrapped, and failures are logged and
+# recorded, never raised.
+
+async def notify_by_email(db, to: str | None, rendered, *, template: str,
+                          actor: str = "") -> None:
+    from app.services import email_service as _mail
+    from app.api.routes.email import log_email as _log
+    from loguru import logger as _log_out
+
+    if not to or not _mail.valid_email(to):
+        return
+    try:
+        subject, html, text = rendered
+        result = await _mail.send(to, subject, html, text, db=db)
+        await _log(db, to, subject, template, result, actor)
+        if not result.get("success"):
+            _log_out.warning(f"[notify] {template} to {to} failed: {result.get('error')}")
+    except Exception as e:
+        _log_out.warning(f"[notify] {template} to {to} raised: {e}")
 
 
 @router.post("/register", response_model=PortalPendingResponse, dependencies=[_enabled])
@@ -125,12 +162,13 @@ async def portal_register(data: PortalRegisterRequest, db: AsyncSession = Depend
     await db.flush()
 
     try:
-        issued = await issue_code(PURPOSE_SIGNUP, data.phone, data.phone)
+        issued = await issue_code(PURPOSE_SIGNUP, data.phone, data.phone,
+                                  email=data.email, db=db)
     except VerificationError as e:
         raise HTTPException(status_code=429 if e.retry_after else 503, detail=e.message)
 
     await db.commit()
-    return _issued_response(issued, "کد تأیید برای شما پیامک شد")
+    return _issued_response(issued)
 
 
 @router.post("/resend", response_model=PortalPendingResponse, dependencies=[_enabled])
@@ -143,7 +181,8 @@ async def portal_resend(data: PortalResendRequest, db: AsyncSession = Depends(ge
         raise HTTPException(status_code=400, detail="درخواست نامعتبر است")
 
     try:
-        issued = await issue_code(PURPOSE_SIGNUP, data.phone, data.phone)
+        issued = await issue_code(PURPOSE_SIGNUP, data.phone, data.phone,
+                                  email=user.email, db=db)
     except VerificationError as e:
         raise HTTPException(status_code=429 if e.retry_after else 503, detail=e.message)
     return _issued_response(issued, "کد تأیید دوباره ارسال شد")
@@ -163,11 +202,19 @@ async def portal_verify(data: PortalVerifyRequest, db: AsyncSession = Depends(ge
     except VerificationError as e:
         raise HTTPException(status_code=400, detail=e.message)
 
+    was_unverified = not user.phone_verified
     user.phone_verified = True
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
     await clear_login_failures(data.phone)
+
+    # Only on the first verification — re-verifying later must not re-welcome
+    # someone who has been a customer for months.
+    if was_unverified:
+        from app.services import email_templates as _t
+        await notify_by_email(db, user.email, _t.welcome(user.full_name or "کاربر"),
+                              template="welcome")
     return _token_for(user)
 
 
@@ -218,7 +265,8 @@ async def portal_login(data: PortalLoginRequest, db: AsyncSession = Depends(get_
 
     if not user.phone_verified:
         try:
-            issued = await issue_code(PURPOSE_SIGNUP, user.phone, user.phone)
+            issued = await issue_code(PURPOSE_SIGNUP, user.phone, user.phone,
+                                      email=user.email, db=db)
         except VerificationError as e:
             raise HTTPException(status_code=429 if e.retry_after else 503, detail=e.message)
         # phone echoed back because the caller may have signed in with an email

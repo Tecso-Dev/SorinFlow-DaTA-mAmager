@@ -16,6 +16,7 @@ hands, it does not belong in a file. It belongs in the Kubernetes Secret.
 |---|---|---|
 | Passwords, API keys, tokens, `SECRET_KEY` | Kubernetes Secret `sorinflow-secrets` | **never** |
 | Kavenegar API key | the Secret, **or** the «پیامک» panel (encrypted) | **never** |
+| SMTP / Gmail App Password | the Secret, **or** the «ایمیل» panel (encrypted) | **never** |
 | TLS certificates and private keys | Traefik's own ACME store on the server | **never** |
 | Divar session cookies | the `data-pvc` volume (`/app/data/cookies`) | **never** |
 | Which variables exist, and what they mean | `.env.example` — names and comments only | yes |
@@ -105,6 +106,47 @@ Two consequences worth knowing:
   opted out of advertising messages — which a login code is not, but a plain
   send is treated as. Create it in Kavenegar's panel with `%token` as the code
   placeholder.
+
+---
+
+## 2c. Email (Gmail SMTP)
+
+The site sends login codes, welcome messages and notifications from
+`sorinflow.agency@gmail.com`.
+
+**Google will not accept the account password.** SMTP needs a 16-character
+*App Password*, and that requires 2-Step Verification on the account first:
+
+1. Turn on 2-Step Verification — <span dir="ltr">Google Account → Security</span>
+2. <span dir="ltr">Security → App passwords</span> → create one, name it "SorinFlow"
+3. Copy the 16 characters (Google shows them once)
+
+Then either put it in the cluster:
+
+```bash
+kubectl patch secret sorinflow-secrets -n sorinflow -p "{\"stringData\":{
+  \"SMTP_HOST\": \"smtp.gmail.com\",
+  \"SMTP_PORT\": \"587\",
+  \"SMTP_USER\": \"sorinflow.agency@gmail.com\",
+  \"SMTP_PASSWORD\": \"<the 16-character app password>\"
+}}"
+kubectl rollout restart deployment/backend -n sorinflow
+```
+
+…or paste it into **ایمیل → تنظیمات ایمیل** in the panel, where it is encrypted
+with a key derived from `SECRET_KEY` and never returned to the browser. The
+environment wins if both are set.
+
+Two buttons in that panel, and they answer different questions:
+
+- **بررسی اتصال** logs in and hangs up. Use it while typing the password — it
+  costs nobody an email.
+- **ارسال ایمیل آزمایشی** sends the real styled message, which proves the
+  templates, the Persian and the RTL as well as the credentials.
+
+If the account is ever compromised, revoke that App Password from the same
+Google screen; it is independent of the account password and revoking it does
+not lock anyone out of the mailbox.
 
 ---
 

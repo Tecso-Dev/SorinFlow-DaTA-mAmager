@@ -30,6 +30,31 @@ from app.schemas import (
 
 router = APIRouter()
 
+
+def _summarise_request(req) -> str:
+    """One readable line for the confirmation email.
+
+    Built from whichever fields the visitor actually filled in — a summary that
+    prints "بودجه: None" reads as broken software.
+    """
+    bits = []
+    if getattr(req, "city", None):
+        bits.append(str(req.city))
+    if getattr(req, "district", None):
+        bits.append(str(req.district))
+    if getattr(req, "property_kind", None):
+        bits.append(str(req.property_kind))
+    rooms = getattr(req, "rooms", None)
+    if rooms:
+        bits.append(f"{rooms} خوابه")
+    area = getattr(req, "min_area", None) or getattr(req, "area", None)
+    if area:
+        bits.append(f"از {area} متر")
+    budget = getattr(req, "max_price", None) or getattr(req, "budget", None)
+    if budget:
+        bits.append(f"بودجه تا {int(budget):,} تومان".replace(",", "٬"))
+    return " · ".join(bits) or "بدون جزئیات اضافی"
+
 _portal_staff = Depends(require_permission("portal"))
 _super_admin = Depends(_role_dep("root", "super_admin"))
 
@@ -87,6 +112,13 @@ async def create_request(data: PropertyRequestCreate,
     db.add(req)
     await db.commit()
     await db.refresh(req)
+
+    from app.services import email_templates as _t
+    from app.api.routes.public_auth import notify_by_email
+    await notify_by_email(db, current_user.email,
+                          _t.request_received(req.contact_name or "کاربر",
+                                              _summarise_request(req)),
+                          template="request_received")
     return req.to_dict()
 
 
@@ -245,4 +277,12 @@ async def decide_ticket(ticket_id: int, data: UpgradeTicketDecision,
     ticket.decided_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(ticket)
+
+    from app.services import email_templates as _t
+    from app.api.routes.public_auth import notify_by_email
+    await notify_by_email(
+        db, user.email,
+        _t.ticket_decision(user.full_name or "کاربر", bool(data.approve),
+                           data.decision_note or ""),
+        template="ticket_decision", actor=current_user.username)
     return ticket.to_dict()

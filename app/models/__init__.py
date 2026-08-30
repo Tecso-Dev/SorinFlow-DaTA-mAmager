@@ -8,10 +8,11 @@ from app.models.proxy import Proxy
 from app.models.crm_models import Contact, Deal, Note, Task, Reminder, SmsLog
 from app.models.user import User
 from app.models.portal import PropertyRequest, UpgradeTicket
+from app.models.email_log import EmailLog
 
 __all__ = [
     "Property", "City", "Category",
     "Cookie", "ScrapingJob", "ScrapingLog", "Proxy",
-    "Contact", "Deal", "Note", "Task", "Reminder", "SmsLog",
+    "Contact", "Deal", "Note", "Task", "Reminder", "SmsLog", "EmailLog",
     "User", "PropertyRequest", "UpgradeTicket",
 ]
