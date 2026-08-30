@@ -3,10 +3,11 @@ SorinFlow Divar Scraper - Authentication Handler
 Handles login, cookies, and session management for Divar.ir
 """
 import asyncio
+import time
 import json
 import os
 from datetime import datetime, timezone
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 from pathlib import Path
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from loguru import logger
@@ -419,6 +420,53 @@ class DivarAuth:
             logger.error(result["message"])
             return result
     
+    # What Divar says when a code is not accepted. Matched on its own words,
+    # because the alternative — reporting "no authentication tokens found" —
+    # tells whoever typed the code nothing about whether the code was wrong,
+    # expired, or the flow itself is broken.
+    _OTP_REJECTIONS = (
+        "کد وارد شده صحیح نیست", "کد اشتباه", "کد نامعتبر",
+        "کد منقضی", "منقضی شده", "نامعتبر است", "دوباره تلاش",
+    )
+
+    async def _divar_rejection_text(self) -> Optional[str]:
+        """Divar's own visible complaint about the code, if it is showing one."""
+        try:
+            body = (await self.page.inner_text("body")) or ""
+        except Exception:
+            return None
+        for phrase in self._OTP_REJECTIONS:
+            if phrase in body:
+                return f"دیوار کد را نپذیرفت: «{phrase}»"
+        return None
+
+    async def _await_login_outcome(
+        self, timeout: float = 30.0
+    ) -> Tuple[List[Dict], Optional[str]]:
+        """Poll until Divar sets the session cookie, rejects the code, or time runs out.
+
+        Returns (cookies, rejection_message). A rejection short-circuits: there
+        is nothing left to wait for once Divar has said no.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            cookies = await self.get_current_cookies()
+            if any(c.get("name") == "token" for c in cookies):
+                logger.info("Session cookie appeared — login completed")
+                return cookies, None
+
+            rejection = await self._divar_rejection_text()
+            if rejection:
+                return cookies, rejection
+
+            if time.monotonic() >= deadline:
+                logger.warning(
+                    f"No session cookie after {timeout:.0f}s and no complaint "
+                    f"from Divar — falling through to the full cookie check")
+                return cookies, None
+
+            await asyncio.sleep(1.0)
+
     async def submit_otp_code(self, code: str, phone_number: str = None) -> Dict[str, Any]:
         """Submit OTP verification code"""
         result = {
@@ -582,19 +630,24 @@ class DivarAuth:
                     logger.info("Login button clicked")
                 except Exception as e:
                     logger.warning(f"Login button not clickable ({e}); continuing to cookie check")
-                await asyncio.sleep(5)
-                
-                # Debug: Take screenshot after clicking login
-                try:
-                    await self.page.screenshot(path="/app/debug_after_login_click.png")
-                    logger.info("Screenshot saved: debug_after_login_click.png")
-                except Exception as e:
-                    logger.warning(f"Could not take screenshot after login: {e}")
-            else:
-                logger.warning("No login button found")
-            
-            # Check if login successful
-            cookies = await self.get_current_cookies()
+
+            # Wait for the outcome, on both paths. This used to be a flat 5s
+            # sleep inside the button branch: on the auto-submit path there was
+            # no wait at all, and on the clicked path a Divar round trip slower
+            # than 5s was read as "no authentication tokens" for a code that had
+            # in fact just worked. Poll for the real signal instead, and stop
+            # early the moment Divar says the code was wrong.
+            cookies, divar_error = await self._await_login_outcome()
+            if divar_error:
+                result["message"] = divar_error
+                logger.error(f"Divar rejected the code: {divar_error}")
+                return result
+
+            # Debug: Take screenshot after the attempt
+            try:
+                await self.page.screenshot(path="/app/debug_after_login_click.png")
+            except Exception as e:
+                logger.warning(f"Could not take screenshot after login: {e}")
             
             # Debug: Log all available cookies
             logger.info(f"All cookies after login: {len(cookies)} found")
