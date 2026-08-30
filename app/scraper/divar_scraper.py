@@ -2135,6 +2135,26 @@ class DivarScraper:
         every = override if override is not None else (getattr(settings, "cookie_rotate_every", 0) or 0)
 
         forced = self._force_rotate
+
+        if forced:
+            # How much budget this account had actually spent when Divar
+            # challenged it — the one number needed to tune the threshold, and
+            # the one nothing recorded. Read here, before _mark_account_spent
+            # below overwrites it with `every`. Measured the same way the
+            # threshold measures, so the two are directly comparable.
+            # Bookkeeping must never break a rotation, hence the guard.
+            try:
+                spent_at_challenge = max(
+                    await self._account_reveals(), self._reveals_since_rotation)
+                from app import metrics as _mx
+                _mx.scrape_reveals_at_challenge.observe(spent_at_challenge)
+                logger.info(
+                    f"[rotate] Divar challenged {self.active_phone} after "
+                    f"{spent_at_challenge} reveals "
+                    f"(threshold {every if every > 0 else 'off'})")
+            except Exception as e:
+                logger.warning(f"[rotate] could not record the challenge budget: {e}")
+
         # every <= 0 disables the threshold, but never the challenge response:
         # being asked for a code is Divar telling us to move.
         if not forced:

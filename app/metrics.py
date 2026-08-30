@@ -64,6 +64,15 @@ scrape_challenges = Counter(
     "sorinflow_scraper_otp_challenges_total",
     "Times Divar demanded an SMS code", registry=REGISTRY,
 )
+scrape_reveals_at_challenge = Histogram(
+    "sorinflow_scraper_reveals_at_challenge",
+    "Reveals an account had spent when Divar demanded a code. The number "
+    "COOKIE_ROTATE_EVERY has to sit below: set above Divar's real limit and "
+    "every account is challenged every round, so the threshold buys nothing "
+    "and Divar sets the SMS rate instead of us.",
+    buckets=(5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150),
+    registry=REGISTRY,
+)
 scrape_images = Counter(
     "sorinflow_scraper_images_total", "Image downloads by outcome",
     ["outcome"], registry=REGISTRY,          # saved | too_big | too_many | undecodable
@@ -132,7 +141,9 @@ def snapshot() -> dict:
     """
     totals = {"requests": 0.0, "errors": 0.0, "latency_sum": 0.0,
               "latency_count": 0.0, "reveals": 0.0, "challenges": 0.0,
-              "rotations": 0.0, "cpu_seconds": None, "rss_bytes": None}
+              "rotations": 0.0, "challenge_budget_sum": 0.0,
+              "challenge_budget_count": 0.0,
+              "cpu_seconds": None, "rss_bytes": None}
     try:
         for metric in REGISTRY.collect():
             for sample in metric.samples:
@@ -153,6 +164,10 @@ def snapshot() -> dict:
                     totals["challenges"] += value
                 elif name == "sorinflow_scraper_account_rotations_total":
                     totals["rotations"] += value
+                elif name == "sorinflow_scraper_reveals_at_challenge_sum":
+                    totals["challenge_budget_sum"] += value
+                elif name == "sorinflow_scraper_reveals_at_challenge_count":
+                    totals["challenge_budget_count"] += value
                 elif name == "process_cpu_seconds_total":
                     totals["cpu_seconds"] = value
                 elif name == "process_resident_memory_bytes":
