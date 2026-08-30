@@ -314,3 +314,43 @@ class TestVerificationReportsItsChannel:
         from app.api.routes import public_auth
         src = inspect.getsource(public_auth._issued_response)
         assert "ایمیل" in src and "پیامک" in src
+
+
+class TestErrorsNameTheMissingField:
+    """«تنظیمات SMTP کامل نیست» cost an hour of guessing.
+
+    The panel prefilled its host/user boxes with placeholder text that reads
+    like a filled field, so the form looked complete while two boxes were
+    empty — and the error named none of them.
+    """
+
+    @pytest.mark.parametrize("cfg,expect", [
+        ({"host": "", "user": "", "password": "x"}, ["میزبان SMTP", "نام کاربری"]),
+        ({"host": "h", "user": "u", "password": ""}, ["رمز عبور"]),
+        ({"host": "", "user": "", "password": ""}, ["میزبان SMTP", "نام کاربری", "رمز عبور"]),
+        ({"host": "h", "user": "u", "password": "p"}, []),
+    ])
+    def test_it_lists_exactly_what_is_blank(self, cfg, expect):
+        from app.services.email_service import _missing_fields
+        assert _missing_fields(cfg) == expect
+
+    @pytest.mark.asyncio
+    async def test_the_send_error_names_them(self, monkeypatch):
+        from app.services import email_service
+
+        async def cfg(db=None):
+            return {"host": "", "user": "", "password": "x", "port": 587,
+                    "from_name": "x", "security": "starttls", "reply_to": "",
+                    "from_email": "", "enabled": True, "source": None}
+        monkeypatch.setattr(email_service, "resolve_config", cfg)
+        out = await email_service.send("a@b.com", "s", "<p>h</p>")
+        assert out["success"] is False
+        assert "میزبان SMTP" in out["error"] and "نام کاربری" in out["error"]
+
+    def test_the_panel_prefills_rather_than_placeholders(self):
+        """A grey placeholder renders close enough to a real value that the
+        form looked complete. The Gmail defaults are values now."""
+        from pathlib import Path
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert "d.host || 'smtp.gmail.com'" in js
+        assert "d.port || 587" in js

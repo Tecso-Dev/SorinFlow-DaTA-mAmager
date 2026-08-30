@@ -216,6 +216,23 @@ def _strip_html(html: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def _missing_fields(cfg: dict) -> list:
+    """Which required settings are blank, in Persian, for the panel.
+
+    "تنظیمات SMTP کامل نیست" told an operator nothing. The panel prefills the
+    Gmail defaults now, but a blank field is still possible, and naming it is
+    the difference between a five-second fix and an hour of guessing.
+    """
+    names = []
+    if not cfg.get("host"):
+        names.append("میزبان SMTP")
+    if not cfg.get("user"):
+        names.append("نام کاربری")
+    if not cfg.get("password"):
+        names.append("رمز عبور")
+    return names
+
+
 async def send(to: str, subject: str, html: str, text: str = "",
                db=None, cfg: Optional[dict] = None) -> dict:
     """Send one message. Never raises — see the module docstring."""
@@ -226,10 +243,10 @@ async def send(to: str, subject: str, html: str, text: str = "",
 
     if not cfg["enabled"]:
         return {"success": False, "error": "ارسال ایمیل در تنظیمات غیرفعال است"}
-    if not cfg["host"] or not cfg["user"]:
-        return {"success": False, "error": "تنظیمات SMTP کامل نیست"}
-    if not cfg["password"]:
-        return {"success": False, "error": "رمز SMTP تنظیم نشده است"}
+    missing = _missing_fields(cfg)
+    if missing:
+        return {"success": False,
+                "error": f"این فیلدها خالی است: {'، '.join(missing)}"}
 
     try:
         mid = await asyncio.to_thread(_sync_send, cfg, to.strip(), subject, html, text)
@@ -252,10 +269,10 @@ async def verify_connection(db=None) -> dict:
     it costs nobody an email.
     """
     cfg = await resolve_config(db)
-    if not cfg["host"] or not cfg["user"]:
-        return {"ok": False, "error": "تنظیمات SMTP کامل نیست"}
-    if not cfg["password"]:
-        return {"ok": False, "error": "رمز SMTP تنظیم نشده است"}
+    missing = _missing_fields(cfg)
+    if missing:
+        return {"ok": False, "missing": missing,
+                "error": f"این فیلدها خالی است: {'، '.join(missing)}"}
 
     def _check():
         with _connect(cfg) as server:
