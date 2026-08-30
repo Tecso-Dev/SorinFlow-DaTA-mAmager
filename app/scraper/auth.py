@@ -558,9 +558,17 @@ class DivarAuth:
                             login_button = btn
                             break
                 
+                # No "last resort - any button" fallback. The first <button>
+                # on Divar's login modal is its close control, so falling back
+                # to it dismissed the login instead of submitting it, and the
+                # cookie check below then reported "no authentication tokens"
+                # for a code that was perfectly good. Divar auto-submits once
+                # the last digit lands, so having no button to click is a
+                # normal, working path — not a reason to click something else.
                 if not login_button:
-                    # Last resort - any button
-                    login_button = await self.page.query_selector('button')
+                    logger.info(
+                        "No submit button on the OTP modal — relying on Divar's "
+                        "own auto-submit once the last digit is entered")
                     
             except Exception as e:
                 logger.warning(f"Error finding login button: {e}")
