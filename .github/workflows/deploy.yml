@@ -215,3 +215,33 @@ jobs:
           kubectl set image deployment/backend backend="$IMAGE" -n sorinflow
           kubectl rollout status deployment/backend -n sorinflow --timeout=300s
           kubectl get pods -n sorinflow
+
+      # `kubectl get pods` above only ever runs when the rollout succeeded,
+      # which is precisely when nobody needs it. The 65048fc failure printed
+      # five minutes of "1 old replicas are pending termination" and not one
+      # word about why the new pod was unhealthy.
+      - name: Why the rollout failed
+        if: failure()
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          echo "::group::pods"
+          kubectl get pods -n sorinflow -o wide || true
+          echo "::endgroup::"
+          echo "::group::new pod description (events at the bottom)"
+          POD=$(kubectl get pods -n sorinflow -l app=backend \
+                --sort-by=.metadata.creationTimestamp -o name | tail -1)
+          kubectl describe "$POD" -n sorinflow || true
+          echo "::endgroup::"
+          echo "::group::new pod logs"
+          kubectl logs "$POD" -n sorinflow --tail=120 || true
+          kubectl logs "$POD" -n sorinflow --previous --tail=60 2>/dev/null || true
+          echo "::endgroup::"
+          echo "::group::sessions holding locks (the deadlock that bit us before)"
+          kubectl exec -n sorinflow deploy/postgres -- psql -U sorinflow -d divar_scraper -c \
+            "SELECT pid, state, wait_event_type, left(query,80) AS query,
+                    now()-state_change AS held
+             FROM pg_stat_activity
+             WHERE state <> 'idle' OR state = 'idle in transaction'
+             ORDER BY state_change;" || true
+          echo "::endgroup::" 

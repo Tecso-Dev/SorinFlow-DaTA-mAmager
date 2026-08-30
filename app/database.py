@@ -2,6 +2,7 @@
 SorinFlow Divar Scraper - Database Connection
 """
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy import text
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 import redis.asyncio as redis
@@ -71,46 +72,90 @@ async def close_redis():
 
 
 async def init_db():
-    """Initialize database tables and seed default super_admin if needed."""
-    async with engine.begin() as conn:
-        from app.models import property, cookie, scraping_job, lead, user, crm_models, app_setting, portal, email_log
-        await conn.run_sync(Base.metadata.create_all)
-        await _migrate_users_totp(conn)
-        await _migrate_users_divar_phone(conn)
-        await _migrate_scraping_jobs_divar_phone(conn)
-        await _migrate_properties_owner_phone(conn)
-        await _migrate_dpa_activities(conn)
-        await _migrate_lead_form_v2(conn)
-        await _migrate_property_serial(conn)
-        await _migrate_property_corner(conn)
-        await _migrate_calendar_sms(conn)
-        await _migrate_customer_criteria(conn)
-        await _migrate_filing(conn)
-        await _migrate_advertiser_type(conn)
-        await _migrate_cookie_usage(conn)
-        await _migrate_property_quality(conn)
-        await _migrate_sms_panel(conn)
-        await _seed_reference_data(conn)
+    """Create tables, apply migrations, seed the first accounts.
 
-    # Own transaction, deliberately outside the block above.
-    #
-    # Every migration up there swallows its own exception, which reads as
-    # "carry on regardless" — but Postgres aborts the whole transaction on the
-    # first failed statement, so a swallowed error silently turns every later
-    # statement into "current transaction is aborted". Sharing that transaction
-    # meant one unrelated migration failing could stop the users table getting
-    # its columns, and the verification below would then report a poisoned
-    # transaction rather than what is actually missing.
+    Each migration runs in **its own transaction**. Sharing one was the cause
+    of the 65048fc deploy failure, and the mechanism is worth spelling out
+    because it is not obvious:
+
+      * Postgres aborts an entire transaction on the first failed statement.
+      * Every migration below swallows its own exception, which reads as
+        "carry on regardless" — but the transaction is already poisoned, so
+        every later statement silently becomes "current transaction is
+        aborted", and on exit the whole block rolls back.
+      * That rollback includes `create_all`. One unrelated migration failing
+        therefore undid the table creation as well, and the pod came up
+        against a database missing columns the models read on every query.
+
+    Isolating them costs a handful of short transactions at boot and means a
+    single failing migration is exactly that — one skipped step, logged, with
+    everything else applied.
+    """
+    from app.models import (property, cookie, scraping_job, lead, user,
+                            crm_models, app_setting, portal, email_log)
+
     async with engine.begin() as conn:
+        await _guard(conn)
+        await conn.run_sync(Base.metadata.create_all)
+
+    # Order still matters where one migration depends on another's columns;
+    # it is preserved. What changed is the blast radius when one fails.
+    for step in (_migrate_users_totp,
+                 _migrate_users_divar_phone,
+                 _migrate_scraping_jobs_divar_phone,
+                 _migrate_properties_owner_phone,
+                 _migrate_dpa_activities,
+                 _migrate_lead_form_v2,
+                 _migrate_property_serial,
+                 _migrate_property_corner,
+                 _migrate_calendar_sms,
+                 _migrate_customer_criteria,
+                 _migrate_filing,
+                 _migrate_advertiser_type,
+                 _migrate_cookie_usage,
+                 _migrate_property_quality,
+                 _migrate_sms_panel,
+                 _seed_reference_data):
+        try:
+            async with engine.begin() as conn:
+                await _guard(conn)
+                await step(conn)
+        except Exception as e:
+            # The step already swallows its own errors; this catches the ones
+            # it cannot — a lock timeout on the very first statement, or a
+            # failure while committing.
+            print(f"{step.__name__} skipped: {e}")
+
+    async with engine.begin() as conn:
+        await _guard(conn)
         await _migrate_auth_v2(conn)
 
-    # And a clean one for the check, so it reads the real schema rather than
-    # inheriting the wreckage of a failed migration and mis-reporting why.
+    # A clean transaction for the check, so it reads the real schema rather
+    # than inheriting the wreckage of a failed migration and mis-reporting why.
     async with engine.begin() as conn:
         await _verify_auth_v2(conn)
 
     await _seed_super_admin()
     await _seed_root()
+
+
+async def _guard(conn):
+    """Never wait indefinitely for a lock during startup.
+
+    An ALTER TABLE needs ACCESS EXCLUSIVE. During a rolling deploy the previous
+    pod is still running, and one connection left idle in transaction is enough
+    to hold a conflicting lock indefinitely. The new pod then blocks here,
+    never passes its readiness probe, so Kubernetes never terminates the old
+    pod that is holding the lock — the deploy deadlocks and times out with the
+    site pinned on the old image. That is exactly how 65048fc failed, five
+    minutes of "1 old replicas are pending termination" and no other clue.
+
+    Five seconds is far more than any of these statements needs against a free
+    table, and a timeout is caught by the caller — so the pod boots and the
+    migration applies on the next restart instead of taking the deploy down.
+    """
+    await conn.execute(text("SET lock_timeout = '5s'"))
+    await conn.execute(text("SET statement_timeout = '120s'"))
 
 
 async def _migrate_dpa_activities(conn):
