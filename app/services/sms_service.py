@@ -83,9 +83,9 @@ STATUS_FA = {
     418: "اعتبار شما کافی نیست",
     419: "طول آرایه‌ها با هم برابر نیست",
     420: "درج لینک در متن پیام برای حساب شما محدود شده است",
-    422: "داده‌ها به دلیل نامعتبر بودن قابل پردازش نیستند",
+    422: "داده‌ها به دلیل وجود کاراکتر نامناسب قابل پردازش نیستند",
     424: "الگوی مورد نظر یافت نشد",
-    426: "این سرویس نیاز به حساب کاربری تجاری دارد",
+    426: "این متد نیازمند «سرویس پیشرفته» است — آن را در پنل کاوه‌نگار فعال کنید",
     427: "این خط نیازمند ایجاد سطح دسترسی است",
     428: "ارسال کد از طریق تماس تلفنی مقدور نیست",
     429: "IP شما محدود شده است",
@@ -112,7 +112,7 @@ DELIVERY_FA = {
     11: "نرسیده به گیرنده",
     13: "لغو شده",
     14: "در لیست سیاه",
-    100: "شناسه پیام نامعتبر است",
+    100: "نامعتبر یا خارج از بازهٔ گزارش‌گیری ۴۸ ساعته",
 }
 # Which of those are final, so the poller stops asking.
 DELIVERY_FINAL = {6, 10, 11, 13, 14, 100}
@@ -227,22 +227,33 @@ async def account_info(db=None) -> dict:
     }
 
 
+# sms/status accepts at most 500 ids per call — «در هر بار اجرای این متد
+# می‌توانید از وضعیت ۵۰۰ پیامک با خبر شوید», and 414 is the error when you
+# exceed it. Today's only caller is capped at 200 by its own query parameter,
+# so this is latent; but the function takes a plain list and a longer one
+# would lose the status of every id in the batch, not just the excess.
+STATUS_CHUNK = 500
+
+
 async def delivery_status(message_ids: list, db=None) -> list:
     """Delivery state for messages already sent."""
     if not message_ids:
         return []
     api_key, _ = await resolve_credentials(db)
-    entries = await _call(api_key, "sms", "status",
-                          {"messageid": ",".join(str(m) for m in message_ids)})
+
     out = []
-    for e in entries:
-        code = int(e.get("status") or 0)
-        out.append({
-            "messageid": e.get("messageid"),
-            "status": code,
-            "status_text": DELIVERY_FA.get(code, e.get("statustext") or "نامشخص"),
-            "final": code in DELIVERY_FINAL,
-        })
+    for start in range(0, len(message_ids), STATUS_CHUNK):
+        chunk = message_ids[start:start + STATUS_CHUNK]
+        entries = await _call(api_key, "sms", "status",
+                              {"messageid": ",".join(str(m) for m in chunk)})
+        for e in entries:
+            code = int(e.get("status") or 0)
+            out.append({
+                "messageid": e.get("messageid"),
+                "status": code,
+                "status_text": DELIVERY_FA.get(code, e.get("statustext") or "نامشخص"),
+                "final": code in DELIVERY_FINAL,
+            })
     return out
 
 
@@ -336,12 +347,22 @@ async def send_bulk(numbers: list, message: str, db=None,
     api_key, sender = await resolve_credentials(db)
     numbers = [n for n in (str(x).strip() for x in numbers) if n]
 
-    if not api_key:
+    # A missing sender is fatal here in a way it is not for a single send.
+    #
+    # sms/send lists sender as اختیاری and falls back to the account's default
+    # line. sendarray does not: it takes parallel arrays and error 419 is
+    # «تعداد اعضای آرایه متن و گیرنده و ارسال کننده هم اندازه نیست», so a
+    # request carrying receptor and message but no sender is malformed rather
+    # than defaulted. Without this guard a broadcast on an unconfigured line
+    # failed every chunk and reported the whole audience as failed with a raw
+    # provider string, when the actual cause was one empty field in the panel.
+    if not api_key or not sender:
         # Per-recipient results even though nothing was attempted: the caller
         # writes one log row per result, and returning an empty list here left
         # a broadcast that failed for everyone with no trace in the history at
         # all — the panel showed "failed: 40" once and then nothing.
-        err = "کلید API تنظیم نشده است"
+        err = ("کلید API تنظیم نشده است" if not api_key
+               else "شمارهٔ فرستنده تنظیم نشده است — ارسال گروهی بدون خط ارسال ممکن نیست")
         return {"success": False, "sent": 0, "failed": len(numbers), "error": err,
                 "results": [{"receptor": n, "ok": False, "error": err} for n in numbers]}
     results, sent, failed = [], 0, 0
@@ -376,7 +397,10 @@ async def send_bulk(numbers: list, message: str, db=None,
             for n in chunk:
                 results.append({"receptor": n, "ok": False, "error": str(e)})
             logger.error(f"[sms] bulk chunk failed at {start}: {e}")
-            if e.status == 418:      # out of credit — the rest will fail too
+            # Out of credit, or throttled at the IP level: whatever the
+            # remaining chunks do, they will do it too. Stop rather than
+            # spend the rest of the run collecting identical failures.
+            if e.status in (418, 429, 451):
                 for n in numbers[start + BULK_CHUNK:]:
                     failed += 1
                     results.append({"receptor": n, "ok": False,

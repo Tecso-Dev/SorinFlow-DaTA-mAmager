@@ -276,3 +276,64 @@ class TestPlaceholdersAreNotMistakenForValues:
         fn = js.split("async function loadSmsCredit(")[1].split("\nasync function")[0]
         assert "stat-label" in fn and "text-danger" in fn
         assert "d.error" in fn
+
+
+class TestSpecCompliance:
+    """Checked against kavenegar.com/rest.html, not against their Python SDK,
+    which is what this client was originally written from."""
+
+    @pytest.mark.asyncio
+    async def test_a_broadcast_without_a_sender_line_is_refused_up_front(self, monkeypatch):
+        """sms/send treats sender as optional and falls back to the account
+        default; sendarray does not — it takes parallel arrays and 419 is a
+        length mismatch. So an unconfigured line failed every chunk and blamed
+        the provider."""
+        from app.services import sms_service as sms
+
+        async def key_but_no_sender(db=None):
+            return "A-REAL-KEY", ""
+        monkeypatch.setattr(sms, "resolve_credentials", key_but_no_sender)
+
+        out = await sms.send_bulk(["09121112233", "09121112234"], "سلام")
+        assert out["success"] is False
+        assert out["failed"] == 2
+        assert "فرستنده" in out["error"], "the error must name the missing field"
+        assert len(out["results"]) == 2      # still one log row per recipient
+
+    @pytest.mark.asyncio
+    async def test_delivery_status_chunks_at_the_500_id_ceiling(self, monkeypatch):
+        """«در هر بار اجرای این متد می‌توانید از وضعیت ۵۰۰ پیامک با خبر شوید»,
+        and 414 is the error past it. Over the limit the whole batch is lost,
+        not just the excess."""
+        from app.services import sms_service as sms
+
+        seen = []
+
+        async def fake_call(api_key, action, method, params):
+            ids = params["messageid"].split(",")
+            seen.append(len(ids))
+            return [{"messageid": i, "status": 10} for i in ids]
+
+        async def creds(db=None):
+            return "k", "10004346"
+        monkeypatch.setattr(sms, "_call", fake_call)
+        monkeypatch.setattr(sms, "resolve_credentials", creds)
+
+        out = await sms.delivery_status(list(range(1200)))
+        assert seen == [500, 500, 200], f"expected 500-id chunks, got {seen}"
+        assert len(out) == 1200, "every id must come back, not just the last chunk"
+
+    def test_the_error_table_says_what_to_do(self):
+        from app.services.sms_service import STATUS_FA, DELIVERY_FA
+        # the spec names a cause for 422; ours used to be circular
+        assert "کاراکتر نامناسب" in STATUS_FA[422]
+        # 426 is «سرویس پیشرفته», not a "commercial account" that does not exist
+        assert "سرویس پیشرفته" in STATUS_FA[426]
+        # status 100 is the 48h reporting window expiring, not a bad id
+        assert "۴۸" in DELIVERY_FA[100]
+
+    def test_throttling_stops_the_run_like_an_empty_balance_does(self):
+        import inspect
+        from app.services import sms_service as sms
+        src = inspect.getsource(sms.send_bulk)
+        assert "in (418, 429, 451)" in src

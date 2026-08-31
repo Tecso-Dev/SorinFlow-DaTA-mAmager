@@ -579,3 +579,76 @@ class TestContactDetailsAreMandatory:
         assert "email," in js
         # and it is checked before the request, so the message names the field
         assert "ایمیل معتبر وارد کنید" in js
+
+
+class TestRegistrationBlockers:
+    """Two defects that would have bitten the day the portal was switched on."""
+
+    def test_the_duplicate_email_guard_excludes_by_id_not_phone(self):
+        """`User.phone != data.phone` is NULL in SQL for every phone-less row,
+        so staff and root were invisible to the check. Registering with a staff
+        address reached the INSERT, hit the UNIQUE index, and became a 500 that
+        also revealed which addresses belong to staff."""
+        import inspect
+        from app.api.routes import public_auth
+
+        src = inspect.getsource(public_auth.portal_register)
+        # Strip comments: the fix is explained in one, which quotes the very
+        # string being asserted against.
+        code = "\n".join(l.split("#")[0] for l in src.splitlines())
+        assert "User.phone != data.phone" not in code, "the NULL-unsafe filter is back"
+        assert "User.id != existing.id" in code
+        # and a legacy duplicate must not raise MultipleResultsFound
+        assert ".scalars().first()" in src
+
+    def test_null_phone_rows_are_invisible_to_the_old_filter(self):
+        """The behaviour, in real Postgres: `NULL <> '0912…'` is NULL, not
+        true, so a WHERE on it drops every phone-less row. This is the whole
+        bug, and it is a SQL semantics fact rather than an application one."""
+        import os, asyncio
+        pg = os.environ.get("PG_TEST_URL")
+        if not pg:
+            pytest.skip("set PG_TEST_URL to check the SQL semantics")
+
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        async def _go():
+            eng = create_async_engine(pg)
+            async with eng.begin() as c:
+                await c.execute(text("DROP TABLE IF EXISTS _nulltest"))
+                await c.execute(text(
+                    "CREATE TABLE _nulltest (id int, email text, phone text)"))
+                await c.execute(text(
+                    "INSERT INTO _nulltest VALUES "
+                    "(1,'staff@x.com',NULL), (2,'visitor@x.com','09121112233')"))
+                excluded_by_phone = (await c.execute(text(
+                    "SELECT count(*) FROM _nulltest WHERE lower(email)='staff@x.com' "
+                    "AND phone <> '09129998877'"))).scalar()
+                excluded_by_id = (await c.execute(text(
+                    "SELECT count(*) FROM _nulltest WHERE lower(email)='staff@x.com' "
+                    "AND id <> 99"))).scalar()
+                await c.execute(text("DROP TABLE _nulltest"))
+            await eng.dispose()
+            return excluded_by_phone, excluded_by_id
+
+        by_phone, by_id = asyncio.run(_go())
+        assert by_phone == 0, "the old filter should miss the staff row — that was the bug"
+        assert by_id == 1, "excluding by primary key finds it"
+
+    def test_a_pending_row_is_not_rewritten_without_sms(self):
+        """Overwriting a pending account's password and email before anyone has
+        proven they own the number is a takeover: with no SMS provider the code
+        goes to whichever address the *caller* supplied."""
+        import inspect
+        from app.api.routes import public_auth
+
+        src = inspect.getsource(public_auth.portal_register)
+        code = "\n".join(l.split("#")[0] for l in src.splitlines())
+        assert "sms_ready" in code
+        assert "deliver_email = existing.email" in code, \
+            "the email path must re-send to the address already on file"
+        # the rewrite must sit behind the guard, not before it
+        i_guard = code.index("if sms_ready:")
+        i_write = code.index("user.hashed_password = get_password_hash")
+        assert i_guard < i_write, "credentials are still rewritten unconditionally"

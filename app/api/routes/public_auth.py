@@ -7,13 +7,25 @@ none of them can produce anything above a visitor. Staff keep using
 ever asking for their second factor.
 
 The whole module answers 404 while PUBLIC_AUTH_ENABLED is off, which is the
-state it ships in. Codes go by SMS — email is collected for marketing only,
-because delivery from Iran is not dependable enough to stand between a user and
-their own account.
+state it ships in.
+
+Codes go by SMS when a provider is configured, and by email otherwise — see
+_deliver in app/services/verification.py. Email was originally collected for
+marketing only, on the reasoning that delivery from Iran is not dependable
+enough to stand between a user and their own account. That is still true, but
+with no SMS provider bought yet the alternative was no channel at all, so it
+became a fallback rather than a replacement.
+
+One consequence is load-bearing and easy to miss: when the code travels by
+email it proves control of the *address*, not of the phone. So a
+re-registration may only rewrite an existing pending row on the SMS path,
+where verification actually proves ownership of the number being claimed.
+See portal_register.
 """
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from loguru import logger
 from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -127,18 +139,56 @@ async def portal_register(data: PortalRegisterRequest, db: AsyncSession = Depend
                             detail="این شماره قبلاً ثبت شده است. وارد شوید")
 
     if email:
-        dup = (await db.execute(select(User).where(
-            func.lower(User.email) == email,
-            User.phone != data.phone))).scalar_one_or_none()
+        # Exclude by primary key, not by phone.
+        #
+        # This used to say `User.phone != data.phone`, and in SQL
+        # `NULL != '0912…'` is NULL, not true — so every row without a phone
+        # was invisible to the check. That is every staff account and the
+        # seeded root. Registering with a staff email sailed past this guard,
+        # reached the INSERT, hit the users.email UNIQUE index and surfaced as
+        # an unhandled 500 — which also told an anonymous caller which
+        # addresses belong to staff.
+        dup_q = select(User).where(func.lower(User.email) == email)
+        if existing is not None:
+            dup_q = dup_q.where(User.id != existing.id)
+        # first(), not scalar_one_or_none(): a legacy database holding two rows
+        # with the same address would otherwise raise MultipleResultsFound and
+        # become a second 500.
+        dup = (await db.execute(dup_q.limit(1))).scalars().first()
         if dup:
             raise HTTPException(status_code=400, detail="این ایمیل قبلاً ثبت شده است")
 
+    # Whether a re-registration is allowed to rewrite the row it found.
+    #
+    # The pending row belongs to whoever owns that phone number. Overwriting
+    # its password and email before anyone has proven they own the number is
+    # an account takeover: an attacker registers a victim's pending number
+    # with their own address, the code goes to *them* — because with no SMS
+    # provider configured _deliver prefers email — they verify unaided, and
+    # they now hold a verified account bound to someone else's number, with
+    # the victim locked out by the check above.
+    #
+    # It is only safe when the code travels to the phone being claimed, since
+    # then verification itself proves ownership. So: rewrite on the SMS path,
+    # and on the email path re-send to the address already on file and change
+    # nothing.
+    sms_ready = bool((settings.kavenegar_api_key or "").strip()) or \
+        settings.auth_sms_provider == "console"
+    deliver_email = data.email
+
     if existing:
         user = existing
-        user.full_name = data.full_name
-        user.hashed_password = get_password_hash(data.password)
-        user.email = email
-        user.marketing_opt_in = bool(data.marketing_opt_in)
+        if sms_ready:
+            user.full_name = data.full_name
+            user.hashed_password = get_password_hash(data.password)
+            user.email = email
+            user.marketing_opt_in = bool(data.marketing_opt_in)
+        else:
+            deliver_email = existing.email
+            logger.info(
+                f"[signup] re-registration of pending {data.phone} left "
+                "unchanged — no SMS channel, so the code goes to the address "
+                "already on file")
     else:
         dup_username = (await db.execute(
             select(User).where(User.username == data.phone))).scalar_one_or_none()
@@ -163,7 +213,7 @@ async def portal_register(data: PortalRegisterRequest, db: AsyncSession = Depend
 
     try:
         issued = await issue_code(PURPOSE_SIGNUP, data.phone, data.phone,
-                                  email=data.email, db=db)
+                                  email=deliver_email, db=db)
     except VerificationError as e:
         raise HTTPException(status_code=429 if e.retry_after else 503, detail=e.message)
 
