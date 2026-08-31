@@ -249,3 +249,30 @@ class TestBroadcastButtonState:
         assert "bulkBtn.disabled = true" in load
         pick = js.split("function pickAudience(")[1].split("\nasync function")[0]
         assert "_smsAudienceCount" in pick and "btn.disabled" in pick
+
+
+class TestPlaceholdersAreNotMistakenForValues:
+    """Grey placeholder text renders close enough to a filled field that the
+    form looks complete when it is empty. It happened on the email panel and
+    again on this one — the sender number read as 10004346 while the box was
+    blank, so every send went out with no sender."""
+
+    def test_sms_placeholders_are_marked_as_examples(self):
+        from pathlib import Path
+        html = Path("frontend/index.html").read_text(encoding="utf-8")
+        for field in ("sms-sender", "sms-otp-template", "sms-signature", "sms-test-to"):
+            i = html.index(f'id="{field}"')
+            block = html[i:i + 400]
+            if "placeholder=" in block:
+                ph = block.split('placeholder="')[1].split('"')[0]
+                assert ph.startswith("مثلاً"), \
+                    f"{field} placeholder '{ph}' reads like a real value"
+
+    def test_a_failed_credit_lookup_states_the_reason(self):
+        """It rendered a bare em dash with the cause hidden in a title
+        attribute. Nobody hovers a blank number to find out why it is blank."""
+        from pathlib import Path
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js.split("async function loadSmsCredit(")[1].split("\nasync function")[0]
+        assert "stat-label" in fn and "text-danger" in fn
+        assert "d.error" in fn

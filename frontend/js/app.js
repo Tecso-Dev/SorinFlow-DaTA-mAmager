@@ -7875,7 +7875,20 @@ async function loadSmsCredit() {
     if (!el) return;
     try {
         const d = await apiCall('/sms/account');
-        if (!d.ok) { el.textContent = '—'; el.title = d.error || ''; return; }
+        if (!d.ok) {
+            // A dash with the reason hidden in a title attribute is not an
+            // error message — nobody hovers a number to find out why it is
+            // blank. Kavenegar's own code is already mapped to Persian, so
+            // show it where the value would have been.
+            el.textContent = '—';
+            el.title = d.error || '';
+            const lbl = el.parentElement?.querySelector('.stat-label');
+            if (lbl) lbl.innerHTML =
+                `<span class="text-danger">${esc(d.error || 'اعتبار خوانده نشد')}</span>`;
+            return;
+        }
+        const lbl0 = el.parentElement?.querySelector('.stat-label');
+        if (lbl0) lbl0.textContent = 'اعتبار باقی‌مانده';
         el.textContent = faNum(Number(d.remaining_credit || 0).toLocaleString('en-US'));
         el.title = d.expire_date ? `انقضا: ${d.expire_date}` : '';
     } catch (_) { el.textContent = '—'; }
