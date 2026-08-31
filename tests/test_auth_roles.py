@@ -652,3 +652,103 @@ class TestRegistrationBlockers:
         i_guard = code.index("if sms_ready:")
         i_write = code.index("user.hashed_password = get_password_hash")
         assert i_guard < i_write, "credentials are still rewritten unconditionally"
+
+
+class TestPerIpThrottling:
+    """The per-phone budgets reset when the number changes, so they stop a
+    locked-out person and do nothing at all against a script."""
+
+    def test_the_trusted_address_is_the_one_our_proxy_wrote(self):
+        """Traefik APPENDS the real peer to whatever X-Forwarded-For the caller
+        supplied, so the rightmost entry is the only one that cannot be forged.
+        Taking the leftmost — the common mistake — would let anyone reset their
+        own budget with a made-up header."""
+        from app.services.verification import client_ip
+
+        class Req:
+            def __init__(self, h, peer="10.0.0.1"):
+                self.headers = h
+                self.client = type("C", (), {"host": peer})()
+
+        assert client_ip(Req({"x-forwarded-for": "1.2.3.4, 203.0.113.9"})) == "203.0.113.9"
+        assert client_ip(Req({})) == "10.0.0.1"
+        assert client_ip(None) == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_the_budget_refuses_once_spent(self):
+        import app.services.verification as v
+
+        class Req:
+            headers = {"x-forwarded-for": "198.51.100.77"}
+            client = type("C", (), {"host": "10.0.0.1"})()
+
+        req = Req()
+        try:
+            r = await v.get_redis()
+            await r.delete(f"{v._NS}:ip:signup:198.51.100.77")
+        except Exception:
+            pytest.skip("redis unavailable")
+
+        for _ in range(v.IP_SIGNUP_LIMIT):
+            await v.check_ip_budget(req, "signup", v.IP_SIGNUP_LIMIT)
+            await v.spend_ip_budget(req, "signup")
+
+        with pytest.raises(v.VerificationError) as e:
+            await v.check_ip_budget(req, "signup", v.IP_SIGNUP_LIMIT)
+        assert e.value.retry_after > 0, "a lockout must state how long it lasts"
+
+    def test_register_and_resend_are_both_guarded(self):
+        import inspect
+        from app.api.routes import public_auth
+
+        reg = inspect.getsource(public_auth.portal_register)
+        assert "check_ip_budget" in reg
+        # checked before any database work, so a script cannot make us do it
+        assert reg.index("check_ip_budget") < reg.index("select(User)")
+        # and spent only once the send succeeded
+        assert "spend_ip_budget" in reg
+
+        res = inspect.getsource(public_auth.portal_resend)
+        assert "check_ip_budget" in res and "spend_ip_budget" in res
+
+    def test_it_fails_open_when_redis_is_down(self):
+        """A Redis blip must degrade the limit, not close public sign-up."""
+        import inspect
+        from app.services import verification
+        src = inspect.getsource(verification.check_ip_budget)
+        assert "except Exception" in src and "return" in src
+
+
+class TestMarketingCapture:
+    """marketing_opt_in was collected at every sign-up and read by nothing."""
+
+    def test_consent_defines_an_audience_on_both_channels(self):
+        from app.api.routes.sms import AUDIENCES as SMS_A
+        from app.api.routes.email import AUDIENCES as MAIL_A
+        assert "marketing" in SMS_A
+        assert "marketing" in MAIL_A
+
+    def test_the_marketing_group_requires_consent_and_verification(self):
+        """An unverified row is a contact nobody has proven belongs to them."""
+        import inspect
+        from app.api.routes import sms, email
+
+        for mod, fn in ((sms, sms._audience_numbers), (email, email._audience_emails)):
+            src = inspect.getsource(fn)
+            block = src[src.index('"marketing"'):]
+            assert "marketing_opt_in == True" in block
+            assert "phone_verified == True" in block, \
+                f"{mod.__name__} would message unverified contacts"
+
+    def test_a_broadcast_is_confirmed_by_count(self):
+        import inspect
+        from app.api.routes import email
+        src = inspect.getsource(email.email_broadcast)
+        assert "confirm_count" in src and "409" in src
+
+    def test_the_export_is_super_admin_only(self):
+        """A list of customers' contact details is not something an ordinary
+        panel user should be able to walk off with."""
+        import inspect
+        from app.api.routes import email
+        assert "_super_admin" in inspect.getsource(email.export_audience)

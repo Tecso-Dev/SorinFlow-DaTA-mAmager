@@ -216,10 +216,13 @@ async def _with_signature(db, message: str) -> str:
 # is a way to mail the wrong list once and never live it down.
 
 AUDIENCES = {
-    "staff":     "کارکنان پنل",
-    "visitors":  "بازدیدکنندگان ثبت‌نام‌کرده",
-    "contacts":  "مخاطبین CRM",
-    "requests":  "ثبت‌کنندگان درخواست ملک",
+    "staff":       "کارکنان پنل",
+    "visitors":    "بازدیدکنندگان ثبت‌نام‌کرده",
+    # The consent flag has been collected at every sign-up since the portal was
+    # built and read by nothing. This is the group it exists to define.
+    "marketing":   "بازدیدکنندگانی که تبلیغات را پذیرفته‌اند",
+    "contacts":    "مخاطبین CRM",
+    "requests":    "ثبت‌کنندگان درخواست ملک",
 }
 
 
@@ -236,6 +239,16 @@ async def _audience_numbers(db, audience: str) -> list:
         rows = (await db.execute(
             select(User.phone).where(User.phone.isnot(None),
                                      User.role == "visitor",
+                                     User.is_active == True))).scalars().all()  # noqa: E712
+        raw = rows
+    elif audience == "marketing":
+        # Consent is the whole point of this group: only people who ticked the
+        # box, and only ones who finished verifying. Messaging an unverified
+        # row means messaging a number nobody has proven belongs to them.
+        rows = (await db.execute(
+            select(User.phone).where(User.phone.isnot(None),
+                                     User.marketing_opt_in == True,   # noqa: E712
+                                     User.phone_verified == True,     # noqa: E712
                                      User.is_active == True))).scalars().all()  # noqa: E712
         raw = rows
     elif audience == "contacts":

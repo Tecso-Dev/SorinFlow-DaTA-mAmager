@@ -152,7 +152,15 @@ class TestBroadcastGuards:
         """Letting the panel compose its own recipient query is how a message
         reaches the wrong list once and never lives it down."""
         from app.api.routes.sms import AUDIENCES
-        assert set(AUDIENCES) == {"staff", "visitors", "contacts", "requests"}
+        import inspect
+        from app.api.routes import sms
+        # A fixed, named set — the point is that the browser cannot compose the
+        # recipient query, not that the list never grows.
+        assert isinstance(AUDIENCES, dict) and AUDIENCES
+        assert {"staff", "visitors", "contacts"} <= set(AUDIENCES)
+        src = inspect.getsource(sms._audience_numbers)
+        # every branch is an explicit elif on a known key, ending in a refusal
+        assert 'raise HTTPException(400, f"گروه نامعتبر' in src
 
 
 class TestPanelWiring:

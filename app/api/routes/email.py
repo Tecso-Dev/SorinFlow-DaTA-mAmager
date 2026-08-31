@@ -217,6 +217,142 @@ async def preview_template(name: str, _: User = Depends(get_current_user)):
     return HTMLResponse(html)
 
 
+# ── audiences ───────────────────────────────────────────────────────────────
+#
+# marketing_opt_in has been collected at every sign-up since the portal was
+# built and read by nothing — the consent existed and there was no way to act
+# on it. These are the groups it defines.
+#
+# Named groups rather than a free-form query, for the same reason as the SMS
+# panel: letting the browser compose the recipient list is how a message
+# reaches the wrong people once and is never lived down.
+
+AUDIENCES = {
+    "marketing": "کاربرانی که تبلیغات را پذیرفته‌اند",
+    "visitors":  "همهٔ بازدیدکنندگان تأییدشده",
+    "staff":     "کارکنان پنل",
+    "contacts":  "مخاطبین CRM",
+}
+
+
+async def _audience_emails(db, audience: str) -> list:
+    """Distinct, valid addresses for one named group."""
+    if audience == "marketing":
+        # Consent AND a finished verification. An unverified row is an address
+        # nobody has proven belongs to them.
+        rows = (await db.execute(
+            select(User.email).where(User.email.isnot(None),
+                                     User.marketing_opt_in == True,      # noqa: E712
+                                     User.phone_verified == True,        # noqa: E712
+                                     User.is_active == True))).scalars().all()  # noqa: E712
+    elif audience == "visitors":
+        rows = (await db.execute(
+            select(User.email).where(User.email.isnot(None),
+                                     User.role == "visitor",
+                                     User.phone_verified == True,        # noqa: E712
+                                     User.is_active == True))).scalars().all()  # noqa: E712
+    elif audience == "staff":
+        rows = (await db.execute(
+            select(User.email).where(User.email.isnot(None),
+                                     User.role != "visitor",
+                                     User.is_active == True))).scalars().all()  # noqa: E712
+    elif audience == "contacts":
+        from app.models.crm_models import Contact
+        rows = (await db.execute(
+            select(Contact.email).where(Contact.email.isnot(None)))).scalars().all()
+    else:
+        raise HTTPException(400, f"گروه نامعتبر: {audience}")
+
+    seen, out = set(), []
+    for r in rows:
+        a = (r or "").strip().lower()
+        if a and a not in seen and mail.valid_email(a):
+            seen.add(a)
+            out.append(a)
+    return out
+
+
+@router.get("/audiences")
+async def list_audiences(db: AsyncSession = Depends(get_db),
+                         _: User = Depends(get_current_user)):
+    """Each group and how many reachable addresses it holds.
+
+    Counted before sending: a broadcast cannot be recalled, and this number is
+    the last chance to notice that a group is larger than expected.
+    """
+    out = []
+    for key, label in AUDIENCES.items():
+        try:
+            out.append({"key": key, "label": label,
+                        "count": len(await _audience_emails(db, key))})
+        except Exception as e:
+            logger.warning(f"[email] audience {key} could not be counted: {e}")
+            out.append({"key": key, "label": label, "count": None})
+    return {"audiences": out}
+
+
+class BroadcastIn(BaseModel):
+    audience: str
+    subject: str = Field(..., min_length=1, max_length=200)
+    message: str = Field(..., min_length=1, max_length=4000)
+    cta_label: Optional[str] = None
+    cta_url: Optional[str] = None
+    confirm_count: int = Field(..., description="what the panel showed the user")
+
+
+@router.post("/broadcast")
+async def email_broadcast(payload: BroadcastIn,
+                          db: AsyncSession = Depends(get_db),
+                          user: User = _super_admin):
+    """Send one message to a whole group.
+
+    super_admin only, and guarded by confirm_count exactly as the SMS panel is:
+    the browser sends back the number it displayed, and if the real audience has
+    grown since, the send is refused rather than quietly reaching people the
+    sender never agreed to.
+    """
+    addresses = await _audience_emails(db, payload.audience)
+    if not addresses:
+        raise HTTPException(400, "هیچ آدرس معتبری در این گروه نیست")
+    if payload.confirm_count != len(addresses):
+        raise HTTPException(
+            409,
+            f"تعداد گیرندگان تغییر کرده است: {len(addresses)} به جای "
+            f"{payload.confirm_count}. دوباره بررسی و تایید کنید.")
+
+    _, html, text = tpl.notification(
+        payload.subject, payload.message,
+        cta_label=payload.cta_label or "", cta_url=payload.cta_url or "")
+
+    logger.info(f"[email] broadcast '{payload.subject}' to {len(addresses)} "
+                f"addresses by {user.username}")
+
+    sent = failed = 0
+    cfg = await mail.resolve_config(db)          # resolved once, not per message
+    for addr in addresses:
+        result = await mail.send(addr, payload.subject, html, text, db=db, cfg=cfg)
+        await log_email(db, addr, payload.subject, "broadcast", result, user.username)
+        if result.get("success"):
+            sent += 1
+        else:
+            failed += 1
+    return {"ok": failed == 0, "sent": sent, "failed": failed, "total": len(addresses)}
+
+
+@router.get("/export")
+async def export_audience(audience: str = Query("marketing"),
+                          db: AsyncSession = Depends(get_db),
+                          _: User = _super_admin):
+    """The collected addresses, for use somewhere else.
+
+    super_admin only. This is a list of people's contact details, so it is not
+    something an ordinary panel user should be able to walk off with.
+    """
+    addresses = await _audience_emails(db, audience)
+    return {"audience": audience, "label": AUDIENCES.get(audience, audience),
+            "count": len(addresses), "emails": addresses}
+
+
 # ── history ─────────────────────────────────────────────────────────────────
 
 @router.get("/messages")

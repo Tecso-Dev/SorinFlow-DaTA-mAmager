@@ -238,6 +238,85 @@ async def verify_code(purpose: str, identifier: str, code: str) -> bool:
     return True
 
 
+# ── per-IP throttling ───────────────────────────────────────────────────────
+#
+# The existing budgets key on the phone number, so rotating the number resets
+# them to zero. That is fine against someone locked out of one account and
+# useless against a script: unlimited `users` rows, and one SMS per request
+# billed to the owner. Nothing else stands in the way — the api-key middleware
+# explicitly exempts /api/public/auth/*, and the ingress has no limiter.
+
+# registrations per IP per hour, and codes sent per IP per hour
+IP_SIGNUP_LIMIT = 5
+IP_CODE_LIMIT = 10
+IP_WINDOW = 3600
+
+
+def client_ip(request) -> str:
+    """The caller's address, as trustworthy as this topology allows.
+
+    Traefik APPENDS the real peer to any X-Forwarded-For the client supplied,
+    so the rightmost entry is the one our own proxy wrote and the only one a
+    caller cannot forge. Taking the leftmost — the common mistake — would let
+    anyone reset their own budget by sending a made-up header.
+    """
+    if request is None:
+        return "unknown"
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        parts = [p.strip() for p in fwd.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
+    real = request.headers.get("x-real-ip", "").strip()
+    if real:
+        return real
+    return getattr(getattr(request, "client", None), "host", None) or "unknown"
+
+
+async def check_ip_budget(request, bucket: str, limit: int) -> None:
+    """Raise VerificationError once this address has spent its hourly budget.
+
+    Fails OPEN when Redis is unavailable, matching check_login_rate: a Redis
+    blip must not close public sign-up altogether. The per-phone budgets still
+    apply underneath, so failing open is degraded, not absent.
+    """
+    ip = client_ip(request)
+    if ip == "unknown":
+        return
+    key = f"{_NS}:ip:{bucket}:{ip}"
+    try:
+        r = await get_redis()
+        used = int(await r.get(key) or 0)
+        if used >= limit:
+            ttl = await r.ttl(key)
+            raise VerificationError(
+                "تعداد درخواست‌ها از این دستگاه بیش از حد مجاز است. "
+                f"{max(ttl // 60, 1)} دقیقهٔ دیگر تلاش کنید",
+                retry_after=max(ttl, 60))
+    except VerificationError:
+        raise
+    except Exception as e:
+        logger.warning(f"[verification] ip budget unavailable, allowing: {e}")
+        return
+
+
+async def spend_ip_budget(request, bucket: str) -> None:
+    """Count one against this address. Called only after the work succeeded, so
+    a request refused for another reason does not consume the budget."""
+    ip = client_ip(request)
+    if ip == "unknown":
+        return
+    key = f"{_NS}:ip:{bucket}:{ip}"
+    try:
+        r = await get_redis()
+        pipe = r.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, IP_WINDOW)
+        await pipe.execute()
+    except Exception:
+        pass
+
+
 async def check_login_rate(identifier: str) -> None:
     """Throttle password guessing. Raises VerificationError when locked out."""
     key = f"{_NS}:login:{_norm(identifier)}"

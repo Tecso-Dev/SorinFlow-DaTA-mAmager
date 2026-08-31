@@ -24,7 +24,7 @@ See portal_register.
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,7 @@ from app.auth.permissions import ROLE_VISITOR, STAFF_ROLES
 from app.services.verification import (
     VerificationError, issue_code, verify_code,
     check_login_rate, record_login_failure, clear_login_failures,
+    check_ip_budget, spend_ip_budget, IP_SIGNUP_LIMIT, IP_CODE_LIMIT,
 )
 from app.schemas import (
     PortalRegisterRequest, PortalVerifyRequest, PortalResendRequest,
@@ -122,13 +123,21 @@ async def notify_by_email(db, to: str | None, rendered, *, template: str,
 
 
 @router.post("/register", response_model=PortalPendingResponse, dependencies=[_enabled])
-async def portal_register(data: PortalRegisterRequest, db: AsyncSession = Depends(get_db)):
+async def portal_register(data: PortalRegisterRequest, request: Request,
+                          db: AsyncSession = Depends(get_db)):
     """Create (or refresh) an unverified visitor and send them a code.
 
     A phone that registered but never verified may register again — otherwise a
     mistyped digit or an SMS that never arrived would strand that number
     forever, since the row already occupies the unique index.
     """
+    # Before any database work: a script rotating phone numbers would
+    # otherwise walk straight past the per-phone budgets.
+    try:
+        await check_ip_budget(request, "signup", IP_SIGNUP_LIMIT)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message)
+
     email = _normalize_email(data.email)
 
     existing = (await db.execute(
@@ -218,11 +227,14 @@ async def portal_register(data: PortalRegisterRequest, db: AsyncSession = Depend
         raise HTTPException(status_code=429 if e.retry_after else 503, detail=e.message)
 
     await db.commit()
+    # Counted only now — a request refused above must not consume the budget.
+    await spend_ip_budget(request, "signup")
     return _issued_response(issued)
 
 
 @router.post("/resend", response_model=PortalPendingResponse, dependencies=[_enabled])
-async def portal_resend(data: PortalResendRequest, db: AsyncSession = Depends(get_db)):
+async def portal_resend(data: PortalResendRequest, request: Request,
+                        db: AsyncSession = Depends(get_db)):
     user = (await db.execute(
         select(User).where(User.phone == data.phone))).scalar_one_or_none()
     # Same answer whether or not the number exists, so this cannot be used to
@@ -231,10 +243,12 @@ async def portal_resend(data: PortalResendRequest, db: AsyncSession = Depends(ge
         raise HTTPException(status_code=400, detail="درخواست نامعتبر است")
 
     try:
+        await check_ip_budget(request, "code", IP_CODE_LIMIT)
         issued = await issue_code(PURPOSE_SIGNUP, data.phone, data.phone,
                                   email=user.email, db=db)
     except VerificationError as e:
         raise HTTPException(status_code=429 if e.retry_after else 503, detail=e.message)
+    await spend_ip_budget(request, "code")
     return _issued_response(issued, "کد تأیید دوباره ارسال شد")
 
 
@@ -269,7 +283,8 @@ async def portal_verify(data: PortalVerifyRequest, db: AsyncSession = Depends(ge
 
 
 @router.post("/login", dependencies=[_enabled])
-async def portal_login(data: PortalLoginRequest, db: AsyncSession = Depends(get_db)):
+async def portal_login(data: PortalLoginRequest, request: Request,
+                       db: AsyncSession = Depends(get_db)):
     """Visitor login by phone or email.
 
     Staff are turned away on purpose: this path has no TOTP step, so letting an
