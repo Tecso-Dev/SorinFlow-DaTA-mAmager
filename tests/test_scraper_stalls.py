@@ -115,3 +115,40 @@ class TestRestartsDoNotLeaveGhostJobs:
         src = inspect.getsource(main._release_orphaned_jobs)
         assert "update(ScrapingJob)" in src
         assert "for " not in src.split("async with")[1][:400]
+
+
+class TestTheStartupHookIsWiredCorrectly:
+    """It was inserted between @asynccontextmanager and lifespan, so the
+    decorator landed on it instead: awaiting it raised TypeError, and the
+    app's lifespan lost its decorator entirely. The counts in a test run
+    happened to match the usual baseline, which is why comparing numbers
+    rather than reasons missed it."""
+
+    def test_the_helper_carries_no_decorator(self):
+        import ast
+        import app.main as m
+        tree = ast.parse(open(m.__file__, encoding="utf-8-sig").read())
+        for node in tree.body:
+            if getattr(node, "name", None) == "_release_orphaned_jobs":
+                assert node.decorator_list == [], (
+                    "a decorator here means it was inserted above the wrong def"
+                )
+                return
+        pytest.fail("_release_orphaned_jobs is not a module-level function")
+
+    def test_lifespan_still_has_its_decorator(self):
+        import ast
+        import app.main as m
+        tree = ast.parse(open(m.__file__, encoding="utf-8-sig").read())
+        for node in tree.body:
+            if getattr(node, "name", None) == "lifespan":
+                names = [getattr(d, "id", getattr(d, "attr", "")) for d in node.decorator_list]
+                assert "asynccontextmanager" in names
+                return
+        pytest.fail("lifespan is not a module-level function")
+
+    def test_the_helper_is_actually_awaitable(self):
+        """The failure mode was a coroutine that could not be awaited."""
+        import inspect
+        import app.main as m
+        assert inspect.iscoroutinefunction(m._release_orphaned_jobs)

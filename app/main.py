@@ -67,7 +67,6 @@ except Exception as _log_err:  # pragma: no cover - environment dependent
 settings = get_settings()
 
 
-@asynccontextmanager
 async def _release_orphaned_jobs() -> None:
     """Close out scrapes this process was running when it last stopped.
 
@@ -105,6 +104,7 @@ async def _release_orphaned_jobs() -> None:
         logger.warning(f"Could not release orphaned scraping jobs: {e}")
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     logger.info("Starting SorinFlow Divar Scraper...")
