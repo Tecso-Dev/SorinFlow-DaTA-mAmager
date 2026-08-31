@@ -3,6 +3,19 @@
  */
 
 const API_BASE = '/api';
+
+// The chart library takes a font name as a string, not a CSS value, so it
+// cannot use var(--font-fa) directly. Reading the computed variable keeps it
+// on the same face as the rest of the panel — including after a font swap.
+const FA_FONT = (() => {
+    try {
+        const v = getComputedStyle(document.documentElement)
+            .getPropertyValue('--font-fa').trim();
+        // Chart.js wants a bare family name; take the first entry, unquoted.
+        return (v.split(',')[0] || '').replace(/['"]/g, '').trim() || 'Vazirmatn';
+    } catch (_) { return 'Vazirmatn'; }
+})();
+
 let currentPage = 1;
 let cityChart = null;
 let trendChart = null;
@@ -921,10 +934,10 @@ const _sfCenter = {
         const ctx = chart.ctx;
         ctx.save();
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.font = "800 26px Vazirmatn";
+        ctx.font = `800 26px ${FA_FONT}`;
         ctx.fillStyle = opts.color || '#fff';
         ctx.fillText(opts.big, x, y - 9);
-        ctx.font = "500 12px Vazirmatn";
+        ctx.font = `500 12px ${FA_FONT}`;
         ctx.fillStyle = opts.subColor || '#8f96a8';
         ctx.fillText(opts.sub || '', x, y + 17);
         ctx.restore();
@@ -934,8 +947,8 @@ const _sfTooltip = themeC => ({
     rtl: true, textDirection: 'rtl',
     backgroundColor: 'rgba(12,12,20,.92)',
     borderColor: 'rgba(167,139,250,.35)', borderWidth: 1,
-    titleFont: { family: 'Vazirmatn', weight: '700' },
-    bodyFont: { family: 'Vazirmatn' },
+    titleFont: { family: FA_FONT, weight: '700' },
+    bodyFont: { family: FA_FONT },
     padding: 12, cornerRadius: 12, displayColors: false,
 });
 
@@ -979,7 +992,7 @@ function updateCityChart(data) {
                 legend: {
                     position: 'right',
                     labels: {
-                        color: themeC.text, font: { family: 'Vazirmatn', size: 12 },
+                        color: themeC.text, font: { family: FA_FONT, size: 12 },
                         usePointStyle: true, pointStyle: 'circle', boxWidth: 8, padding: 14,
                     }
                 },
@@ -1051,14 +1064,14 @@ function updateTrendChart(data) {
                 x: {
                     grid: { color: 'transparent' },
                     border: { display: false },
-                    ticks: { color: themeC.tick, font: { family: 'Vazirmatn', size: 11 }, maxRotation: 0 }
+                    ticks: { color: themeC.tick, font: { family: FA_FONT, size: 11 }, maxRotation: 0 }
                 },
                 y: {
                     beginAtZero: true,
                     grid: { color: themeC.grid, tickBorderDash: [4, 5] },
                     border: { display: false, dash: [4, 5] },
                     ticks: {
-                        color: themeC.tick, font: { family: 'Vazirmatn', size: 11 },
+                        color: themeC.tick, font: { family: FA_FONT, size: 11 },
                         callback: v => formatNumber(v), maxTicksLimit: 6, padding: 8,
                     }
                 }
@@ -3702,7 +3715,7 @@ function _renderCrmCharts(data) {
                 legend: {
                     position: 'bottom',
                     labels: {
-                        color: themeC.text, font: { family: 'Vazirmatn', size: 11 },
+                        color: themeC.text, font: { family: FA_FONT, size: 11 },
                         usePointStyle: true, pointStyle: 'circle', boxWidth: 7, padding: 12,
                     }
                 },
@@ -3742,13 +3755,13 @@ function _renderCrmCharts(data) {
                     beginAtZero: true,
                     grid: { color: themeC.grid }, border: { display: false },
                     ticks: {
-                        color: themeC.tick, font: { family: 'Vazirmatn', size: 11 },
+                        color: themeC.tick, font: { family: FA_FONT, size: 11 },
                         precision: 0, callback: v => formatNumber(v),
                     }
                 },
                 y: {
                     grid: { color: 'transparent' }, border: { display: false },
-                    ticks: { color: themeC.text, font: { family: 'Vazirmatn', size: 12, weight: '600' } }
+                    ticks: { color: themeC.text, font: { family: FA_FONT, size: 12, weight: '600' } }
                 }
             }
         }

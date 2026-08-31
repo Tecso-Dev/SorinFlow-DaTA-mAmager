@@ -15,6 +15,8 @@
 -->
 <style>
 :root{
+  /* single source for the Persian face — see frontend/css/style.css */
+  --font-fa:'Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif;
   --bg:#0b1020; --surface:#141a2e; --surface-2:#1a2138; --line:#26304d;
   --text:#e6e9f2; --muted:#8f9fb6; --brand:#4f8cff; --brand-2:#3a6fd8;
   --ok:#2fbf71; --err:#ff6b6b; --warn:#f0a92c; --radius:14px;
@@ -25,7 +27,7 @@
 }
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);
- font-family:Vazirmatn,Tahoma,system-ui,-apple-system,sans-serif;line-height:1.8}
+ font-family:var(--font-fa);line-height:1.8}
 a{color:var(--brand);text-decoration:none}
 .wrap{max-width:920px;margin:0 auto;padding:1.25rem}
 .center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.25rem}
@@ -118,8 +120,9 @@ input[dir="ltr"]{direction:ltr;text-align:left}
       <input id="rg-name" autocomplete="name">
       <label for="rg-phone">شماره موبایل</label>
       <input id="rg-phone" dir="ltr" inputmode="tel" maxlength="11" placeholder="09123456789" autocomplete="tel">
-      <label for="rg-email">ایمیل <span class="muted">(اختیاری)</span></label>
-      <input id="rg-email" type="email" dir="ltr" autocomplete="email">
+      <label for="rg-email">ایمیل</label>
+      <input id="rg-email" type="email" dir="ltr" autocomplete="email"
+             required placeholder="you@example.com">
       <label for="rg-pass">رمز عبور <span class="muted">(حداقل ۶ کاراکتر)</span></label>
       <input id="rg-pass" type="password" autocomplete="new-password">
       <div class="check">

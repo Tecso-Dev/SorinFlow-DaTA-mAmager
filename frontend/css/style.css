@@ -3,10 +3,39 @@
    Design: Dark sidebar + glassmorphism cards
    ═══════════════════════════════════════════════════ */
 
+/* ── Persian face ───────────────────────────────────────────────────────────
+   To switch the whole site to a licensed face such as دانا:
+
+     1. Buy the licence (fontiran.com) — Dana is commercial and is not on any
+        public CDN, which is why it cannot simply be linked.
+     2. Drop Dana-Regular.woff2 / Dana-Medium.woff2 / Dana-Bold.woff2 into
+        frontend/css/fonts/
+     3. Uncomment the @font-face rules below.
+     4. Put Dana at the front of --font-fa. That one edit reaches the panel,
+        the landing page, the portal, the error pages and the charts, because
+        they all read the same variable.
+
+   Self-hosting is also faster than the CDN import below, and it is the only
+   option for a licensed font.
+
+@font-face { font-family:'Dana'; font-style:normal; font-weight:400;
+             src:url('fonts/Dana-Regular.woff2') format('woff2'); font-display:swap; }
+@font-face { font-family:'Dana'; font-style:normal; font-weight:500;
+             src:url('fonts/Dana-Medium.woff2') format('woff2'); font-display:swap; }
+@font-face { font-family:'Dana'; font-style:normal; font-weight:700;
+             src:url('fonts/Dana-Bold.woff2') format('woff2'); font-display:swap; }
+─────────────────────────────────────────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap');
 
 /* ── Variables ─────────────────────────────────────── */
 :root {
+/* One place to change the Persian face for the whole panel.
+   Swap the first name here and everything follows — headings, body,
+   inputs and the Chart.js labels all read this variable.
+   To use a licensed face such as دانا, drop its .woff2 into
+   frontend/css/fonts/, add an @font-face block below, and put its
+   family name at the front of this list. */
+  --font-fa: 'Vazirmatn', 'Segoe UI', Tahoma, sans-serif;
   --bg:          #000000;
   --surface:     #0a0a0c;
   --surface2:    #131316;
@@ -71,7 +100,7 @@
 /* ── Reset ─────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: 'Vazirmatn', 'Segoe UI', Tahoma, sans-serif;
+  font-family: var(--font-fa);
   background: var(--bg);
   color: var(--text);
   direction: rtl;

@@ -528,3 +528,54 @@ def test_portal_resend_button_is_restored_on_success():
     body = js[js.index("async function doPortalResend"):js.index("async function doPortalVerify")]
     success = body[:body.index("} catch")]
     assert "withSpinner(btn, false" in success, "resend never restores the button on success"
+
+
+class TestContactDetailsAreMandatory:
+    """Both an email and a phone are required to register.
+
+    The phone keys the account and carries the login code; the email is the
+    second channel and the one that survives a number change. Email used to be
+    Optional, so a visitor could sign up reachable by exactly one route — and
+    with no SMS provider configured, that route was nothing at all.
+    """
+
+    def test_the_schema_requires_both(self):
+        import pydantic
+        from app.schemas import PortalRegisterRequest
+
+        base = dict(full_name="علی محمدی", phone="09121112233", password="pw123456")
+
+        # both present -> valid
+        ok = PortalRegisterRequest(**base, email="a@b.com")
+        assert ok.email == "a@b.com" and ok.phone == "09121112233"
+
+        # email missing -> rejected
+        with pytest.raises(pydantic.ValidationError) as e:
+            PortalRegisterRequest(**base)
+        assert "email" in str(e.value)
+
+        # phone missing -> rejected
+        with pytest.raises(pydantic.ValidationError):
+            PortalRegisterRequest(full_name="علی", password="pw123456", email="a@b.com")
+
+    @pytest.mark.parametrize("bad", ["", "notanemail", "a@b", "a b@c.com", "@b.com"])
+    def test_a_malformed_email_is_refused(self, bad):
+        import pydantic
+        from app.schemas import PortalRegisterRequest
+        with pytest.raises(pydantic.ValidationError):
+            PortalRegisterRequest(full_name="علی محمدی", phone="09121112233",
+                                  password="pw123456", email=bad)
+
+    def test_the_portal_form_asks_for_it_and_always_sends_it(self):
+        """The label said «(اختیاری)» and the payload sent `email || null`, so a
+        blank box silently produced an account with no address."""
+        from pathlib import Path
+        html = Path("frontend/portal.html").read_text(encoding="utf-8")
+        js = Path("frontend/js/portal.js").read_text(encoding="utf-8")
+
+        i = html.index('id="rg-email"')
+        assert "(اختیاری)" not in html[max(0, i - 200):i], "label still says optional"
+        assert "email || null" not in js, "a blank box would still register"
+        assert "email," in js
+        # and it is checked before the request, so the message names the field
+        assert "ایمیل معتبر وارد کنید" in js

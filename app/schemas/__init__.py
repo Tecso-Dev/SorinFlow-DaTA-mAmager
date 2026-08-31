@@ -465,10 +465,15 @@ EMAIL_RE = r'^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$'
 
 
 class PortalRegisterRequest(BaseModel):
+    # Both contact fields are mandatory. The phone is what the account is keyed
+    # on and what a login code is sent to; the email is the second channel and
+    # the one that survives a number change. Optional email meant a visitor
+    # could sign up reachable by exactly one route, and with no SMS provider
+    # configured that route is currently nothing at all.
     full_name: str = Field(..., min_length=2, max_length=200)
     phone: str = Field(..., pattern=PHONE_RE)
     password: str = Field(..., min_length=6, max_length=128)
-    email: Optional[str] = Field(None, max_length=200, pattern=EMAIL_RE)
+    email: str = Field(..., max_length=200, pattern=EMAIL_RE)
     marketing_opt_in: bool = False
 
 

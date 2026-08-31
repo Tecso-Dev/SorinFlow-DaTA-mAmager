@@ -13,6 +13,8 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
+  /* single source for the Persian face — see frontend/css/style.css */
+  --font-fa:'Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif;
   --bg:#030305;
   --text:#f2f3f8;
   --dim:#8f96a8;
@@ -23,7 +25,7 @@
 }
 html{scroll-behavior:smooth}
 body{
-  font-family:'Vazirmatn',Tahoma,sans-serif;
+  font-family:var(--font-fa);
   background:var(--bg);color:var(--text);
   direction:rtl;overflow-x:hidden;line-height:1.85;
 }

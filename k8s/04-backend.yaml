@@ -100,6 +100,25 @@ spec:
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: TELEGRAM_CHAT_ID, optional: true } }
             - name: ROOT_PASSWORD
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: ROOT_PASSWORD, optional: true } }
+            # ── the visitor portal ──
+            #
+            # Ships OFF. With it false, /portal redirects to the dashboard and
+            # every /api/public/auth/* endpoint answers 404, so the sign-up
+            # flow cannot be reached even by URL. Flip it to "true" only when
+            # a delivery channel is actually configured — a portal that takes
+            # a registration and then cannot send the code is worse than one
+            # that is closed.
+            #
+            # Not a secret, so it lives here rather than in the Secret. It was
+            # missing entirely until now, which meant the switch could not be
+            # thrown from the cluster at all.
+            - name: PUBLIC_AUTH_ENABLED
+              value: "false"
+            # Which channel carries the login code. verification.py falls back
+            # to the other one if this fails, so this is a preference, not a
+            # hard route.
+            - name: AUTH_SMS_PROVIDER
+              value: "kavenegar"
             - name: ENVIRONMENT
               value: "production"
             - name: SERVER_IP

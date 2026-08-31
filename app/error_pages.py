@@ -28,11 +28,15 @@ _SHELL = """<!doctype html><html lang="fa" dir="rtl"><head>
   --line:rgba(255,255,255,.08); --glass:rgba(255,255,255,.035);
   --indigo:#6366f1; --violet:#a78bfa; --cyan:#67e8f9; --pink:#f0a6ff; --gold:#fcd34d;
   --grad:linear-gradient(120deg,#a78bfa,#f0a6ff 40%,#67e8f9 80%);
+  /* Deliberately no webfont request here — see the module docstring.
+     Vazirmatn if the visitor has it, Tahoma otherwise. Same single token as
+     the panel so a font swap reaches the error pages too. */
+  --font-fa:'Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--text);
- font-family:'Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif;line-height:1.9;
+ font-family:var(--font-fa);line-height:1.9;
  display:flex;align-items:center;justify-content:center;padding:1.5rem;overflow:hidden}
 ::selection{background:rgba(167,139,250,.35)}
 

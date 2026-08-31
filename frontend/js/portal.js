@@ -89,6 +89,10 @@ async function doPortalRegister() {
   if (name.length < 2) return showMsg($('auth-msg'), 'نام خود را وارد کنید', 'err'), show($('auth-msg'));
   if (!/^09\d{9}$/.test(phone)) return showMsg($('auth-msg'), 'شماره موبایل باید با فرمت 09xxxxxxxxx باشد', 'err'), show($('auth-msg'));
   if (pass.length < 6) return showMsg($('auth-msg'), 'رمز عبور باید حداقل ۶ کاراکتر باشد', 'err'), show($('auth-msg'));
+  // Checked here as well as server-side so the message is instant and names
+  // the field, rather than coming back as a 422 the visitor has to decode.
+  if (!/^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(email))
+    return showMsg($('auth-msg'), 'ایمیل معتبر وارد کنید — برای ارسال کد ورود و اطلاع‌رسانی لازم است', 'err'), show($('auth-msg'));
 
   withSpinner(btn, true, 'در حال ثبت‌نام…');
   try {
@@ -96,7 +100,7 @@ async function doPortalRegister() {
       method: 'POST',
       body: JSON.stringify({
         full_name: name, phone, password: pass,
-        email: email || null, marketing_opt_in: $('rg-optin').checked,
+        email, marketing_opt_in: $('rg-optin').checked,
       }),
     });
     _pendingPhone = phone;
