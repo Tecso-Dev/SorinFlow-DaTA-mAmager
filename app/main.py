@@ -68,6 +68,43 @@ settings = get_settings()
 
 
 @asynccontextmanager
+async def _release_orphaned_jobs() -> None:
+    """Close out scrapes this process was running when it last stopped.
+
+    Runs once at startup, before anything can create a new job, so every
+    running/paused row it finds necessarily belongs to a dead process.
+    Failures here must not stop the app booting — a stale row is a cosmetic
+    problem, a pod that will not start is not.
+    """
+    try:
+        from sqlalchemy import update, or_
+        from app.database import async_session_maker
+        from app.models.scraping_job import ScrapingJob
+
+        async with async_session_maker() as db:
+            result = await db.execute(
+                update(ScrapingJob)
+                .where(or_(ScrapingJob.status == "running",
+                           ScrapingJob.status == "paused"))
+                .values(
+                    status="failed",
+                    completed_at=datetime.now(),
+                    finish_reason=(
+                        "سرور در میانهٔ اجرا ری‌استارت شد — این تسک ادامه پیدا "
+                        "نکرد. آگهی‌های ذخیره‌شده سر جایشان هستند؛ برای بقیه "
+                        "دوباره اجرا کنید"
+                    ),
+                )
+            )
+            await db.commit()
+            if result.rowcount:
+                logger.warning(
+                    f"{result.rowcount} scraping job(s) were left running by a "
+                    "previous process and have been marked failed")
+    except Exception as e:
+        logger.warning(f"Could not release orphaned scraping jobs: {e}")
+
+
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     logger.info("Starting SorinFlow Divar Scraper...")
@@ -97,6 +134,17 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_db()
     logger.info("Database initialized")
+
+    # A scrape lives in an asyncio task inside this process. When the process
+    # goes — a deploy, a restart, the node rebooting — the task dies and the
+    # row it was updating is left saying «running» forever, at whatever
+    # percentage it had reached. It is indistinguishable on screen from a
+    # scrape that is genuinely working, so the panel shows a job that will
+    # never move and offers a stop button that stops nothing.
+    #
+    # Nothing can resume it: the browser, its Divar session and its place in
+    # the feed are all gone. So say what happened and let it be re-run.
+    await _release_orphaned_jobs()
 
     # Start reminder background checker
     reminder_task = asyncio.create_task(_reminder_checker())

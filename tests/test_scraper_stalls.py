@@ -1,15 +1,20 @@
 """
-An unanswered code prompt made every later listing wait all over again.
+The two ways a scrape sat at «در حال اجرا» making no progress.
 
 Reported as «اسکرپر گیر کرد و کار نمیکنه» — a job showing 6% after 34
 minutes, three listings saved.
 
-Divar challenges a contact reveal, the scraper
+**Unanswered code prompts.** Divar challenges a contact reveal, the scraper
 waits `otp_wait_timeout` (300s) for someone to type the code, times out, and
 then does the same thing on the next listing. The suppression window that
 exists for exactly this was only armed when the user *dismissed* a prompt;
 a timeout armed nothing. Fifty listings meant four hours of waiting for
 codes nobody was there to enter.
+
+**Jobs orphaned by a restart.** A scrape is an asyncio task in the web
+process. A deploy, restart or reboot kills it, and the row stays «running»
+at whatever percent it reached, forever — with a stop button that stops
+nothing. Today's four deploys each created one.
 """
 import inspect
 import os
@@ -69,3 +74,44 @@ class TestTheRunSaysWhenNumbersAreMissing:
         src = inspect.getsource(DivarScraper.start_scraping_job)
         i = src.index("is_cancelled(job.job_id)")
         assert "if finish_reason else" in src[i:i + 500]
+
+
+class TestRestartsDoNotLeaveGhostJobs:
+    def test_startup_releases_them(self):
+        from app import main
+        assert hasattr(main, "_release_orphaned_jobs")
+
+    def test_it_runs_at_startup(self):
+        from app import main
+        src = inspect.getsource(main.lifespan)
+        assert "_release_orphaned_jobs" in src
+
+    def test_it_runs_after_init_db(self):
+        """The tables have to exist before it can update them."""
+        from app import main
+        src = inspect.getsource(main.lifespan)
+        assert src.index("init_db()") < src.index("_release_orphaned_jobs()")
+
+    def test_it_covers_paused_too(self):
+        """A job paused waiting for a code is just as dead after a restart."""
+        from app import main
+        src = inspect.getsource(main._release_orphaned_jobs)
+        assert '"paused"' in src and '"running"' in src
+
+    def test_it_explains_itself_rather_than_vanishing(self):
+        from app import main
+        src = inspect.getsource(main._release_orphaned_jobs)
+        assert "finish_reason" in src
+
+    def test_it_cannot_stop_the_app_booting(self):
+        """A cosmetic row is not worth a pod that will not start."""
+        from app import main
+        src = inspect.getsource(main._release_orphaned_jobs)
+        assert "except Exception" in src
+
+    def test_it_is_a_single_bulk_update(self):
+        """Row-by-row at boot is how a rollout times out."""
+        from app import main
+        src = inspect.getsource(main._release_orphaned_jobs)
+        assert "update(ScrapingJob)" in src
+        assert "for " not in src.split("async with")[1][:400]
