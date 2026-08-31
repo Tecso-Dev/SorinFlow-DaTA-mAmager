@@ -6,15 +6,17 @@
 <title>سورین‌فلو — تجربه دیجیتال املاک</title>
 <meta name="description" content="سورین‌فلو: اسکرپر هوشمند دیوار، CRM مدیریت لید و ارزیابی عملکرد مشاوران املاک — همه در یک پلتفرم.">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;800;900&display=swap" rel="stylesheet">
 <style>
+@font-face{font-family:'Estedad';
+  src:url('/dashboard/css/fonts/Estedad-Variable.woff2') format('woff2-variations'),
+      url('/dashboard/css/fonts/Estedad-Variable.woff2') format('woff2');
+  font-weight:100 900;font-style:normal;font-display:swap}
+
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   /* single source for the Persian face — see frontend/css/style.css */
-  --font-fa:'Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif;
+  --font-fa:'Estedad','Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif;
   --bg:#030305;
   --text:#f2f3f8;
   --dim:#8f96a8;

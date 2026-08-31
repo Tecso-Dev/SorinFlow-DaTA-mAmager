@@ -58,7 +58,7 @@ class TestTemplatesRender:
         _, html, _t = _SAMPLES["welcome"]()
         assert "fonts.googleapis.com" not in html
         assert "@import" not in html
-        assert "Vazirmatn" in html and "Tahoma" in html
+        assert "Estedad" in html and "Tahoma" in html
 
     def test_no_inline_svg_or_background_clip(self):
         """Outlook renders neither. The brand mark is a text wordmark over a

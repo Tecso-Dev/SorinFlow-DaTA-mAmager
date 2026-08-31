@@ -3,29 +3,28 @@
    Design: Dark sidebar + glassmorphism cards
    ═══════════════════════════════════════════════════ */
 
-/* ── Persian face ───────────────────────────────────────────────────────────
-   To switch the whole site to a licensed face such as دانا:
+/* ── Persian face: Estedad, self-hosted ─────────────────────────────────────
+   One variable file covers weights 100-900 in 106 KB, which replaces the
+   Google Fonts round-trip entirely — fewer requests, no third-party
+   dependency, and it works on a network where fonts.googleapis.com is slow
+   or blocked. That last point is not theoretical for a server in Iran.
 
-     1. Buy the licence (fontiran.com) — Dana is commercial and is not on any
-        public CDN, which is why it cannot simply be linked.
-     2. Drop Dana-Regular.woff2 / Dana-Medium.woff2 / Dana-Bold.woff2 into
-        frontend/css/fonts/
-     3. Uncomment the @font-face rules below.
-     4. Put Dana at the front of --font-fa. That one edit reaches the panel,
-        the landing page, the portal, the error pages and the charts, because
-        they all read the same variable.
+   The non-FD cut is deliberate. Estedad ships an "FD" variant that renders
+   ASCII digits as Persian numerals automatically; this codebase already
+   decides where Persian numerals belong (faNum() in app.js) and deliberately
+   keeps Latin digits for login codes, phone numbers, IPs and timestamps shown
+   with dir="ltr". FD would override those decisions font-side.
 
-   Self-hosting is also faster than the CDN import below, and it is the only
-   option for a licensed font.
-
-@font-face { font-family:'Dana'; font-style:normal; font-weight:400;
-             src:url('fonts/Dana-Regular.woff2') format('woff2'); font-display:swap; }
-@font-face { font-family:'Dana'; font-style:normal; font-weight:500;
-             src:url('fonts/Dana-Medium.woff2') format('woff2'); font-display:swap; }
-@font-face { font-family:'Dana'; font-style:normal; font-weight:700;
-             src:url('fonts/Dana-Bold.woff2') format('woff2'); font-display:swap; }
-─────────────────────────────────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap');
+   Estedad is SIL OFL 1.1 — free to bundle and serve.
+   ─────────────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: 'Estedad';
+  src: url('fonts/Estedad-Variable.woff2') format('woff2-variations'),
+       url('fonts/Estedad-Variable.woff2') format('woff2');
+  font-weight: 100 900;      /* variable axis, not nine separate files */
+  font-style: normal;
+  font-display: swap;        /* text paints immediately in the fallback */
+}
 
 /* ── Variables ─────────────────────────────────────── */
 :root {
@@ -35,7 +34,7 @@
    To use a licensed face such as دانا, drop its .woff2 into
    frontend/css/fonts/, add an @font-face block below, and put its
    family name at the front of this list. */
-  --font-fa: 'Vazirmatn', 'Segoe UI', Tahoma, sans-serif;
+  --font-fa: 'Estedad', 'Vazirmatn', Tahoma, 'Segoe UI', sans-serif;
   --bg:          #000000;
   --surface:     #0a0a0c;
   --surface2:    #131316;

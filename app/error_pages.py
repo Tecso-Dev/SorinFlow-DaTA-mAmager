@@ -31,8 +31,9 @@ _SHELL = """<!doctype html><html lang="fa" dir="rtl"><head>
   /* Deliberately no webfont request here — see the module docstring.
      Vazirmatn if the visitor has it, Tahoma otherwise. Same single token as
      the panel so a font swap reaches the error pages too. */
-  --font-fa:'Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif;
+  --font-fa:'Estedad','Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif;
 }
+@font-face{font-family:'Estedad';src:url('/dashboard/css/fonts/Estedad-Variable.woff2') format('woff2-variations'),url('/dashboard/css/fonts/Estedad-Variable.woff2') format('woff2');font-weight:100 900;font-style:normal;font-display:swap}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--text);

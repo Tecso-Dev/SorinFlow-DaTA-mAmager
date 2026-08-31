@@ -12,7 +12,7 @@ Email is not a browser, and three constraints shape everything here:
     brand mark on the site is a gradient-stroked SVG infinity; in email it is a
     text wordmark over a gradient bar that carries a solid `background-color`
     underneath, so Outlook shows flat violet instead of nothing.
-  * **No webfont.** Vazirmatn is a Google Fonts request on the site. Mail
+  * **No webfont.** Estedad is self-hosted on the site. Mail
     clients block or ignore that, so the stack leads with Vazirmatn for the
     people who have it and falls to Tahoma, which ships on Windows and macOS
     and renders Persian correctly. This is the same stack error_pages.py
@@ -40,7 +40,10 @@ DANGER = "#ef4444"
 SUCCESS = "#10b981"
 
 GRADIENT = f"linear-gradient(120deg,{VIOLET},{PINK} 40%,{CYAN} 80%)"
-FONT = "'Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif"
+# Estedad first for the few clients that have it installed locally; no
+# webfont is requested here and none would load — see the module note.
+# Tahoma is the one that actually renders Persian on Windows and Outlook.
+FONT = "'Estedad','Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif"
 
 SITE_URL = "https://sorinflow.com"
 BRAND = "سورین‌فلو"
