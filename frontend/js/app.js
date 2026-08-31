@@ -8230,6 +8230,12 @@ async function loadEmailSettings() {
         const hint = document.getElementById('em-pw-hint');
         if (hint) hint.textContent = d.password_masked ? `رمز فعلی: ${d.password_masked}` : '';
 
+        // The App Password explainer is guidance for someone setting this up
+        // for the first time. Once it works, leaving it on screen reads as an
+        // unresolved warning — which is exactly how it was read.
+        document.getElementById('em-apppw-hint')
+                ?.classList.toggle('d-none', !!d.configured);
+
         const v = (id, val) => { const e = document.getElementById(id); if (e) e.value = val ?? ''; };
         // Prefill the Gmail defaults as REAL values when nothing is saved yet.
         // They used to be placeholders, which render as grey text that looks

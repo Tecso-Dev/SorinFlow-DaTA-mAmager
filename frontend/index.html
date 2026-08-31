@@ -2180,7 +2180,10 @@
                         <span class="ms-auto text-muted small" id="em-pw-source"></span>
                     </div>
                     <div class="card-body">
-                        <div class="alert alert-warning py-2 px-3 small">
+                        <!-- Setup guidance, not a warning about the current state. Hidden once
+                             SMTP is configured — an alert that never goes away reads as a
+                             problem that was never fixed. -->
+                        <div class="alert alert-warning py-2 px-3 small d-none" id="em-apppw-hint">
                             برای Gmail باید از <b>App Password</b> استفاده کنید، نه رمز عبور حساب.
                             ابتدا «تأیید دو مرحله‌ای» را روی حساب فعال کنید، سپس از
                             <span dir="ltr">Google Account → Security → App passwords</span>

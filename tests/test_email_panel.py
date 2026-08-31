@@ -379,3 +379,17 @@ class TestTheButtonsTestWhatIsOnScreen:
         fn = js.split("async function sendEmailTest(")[1].split("\nasync function")[0]
         assert "saveEmailSettings({ quiet: true })" in fn
         assert fn.index("saveEmailSettings") < fn.index("apiCall(`/email/test")
+
+
+class TestSetupGuidanceIsNotAPermanentWarning:
+    def test_the_app_password_banner_hides_once_configured(self):
+        """It is a yellow alert that always rendered, so a working setup still
+        looked like it had an unresolved problem."""
+        from pathlib import Path
+        html = Path("frontend/index.html").read_text(encoding="utf-8")
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert 'id="em-apppw-hint"' in html
+        # ships hidden, shown only when unconfigured
+        i = html.index('id="em-apppw-hint"')
+        assert "d-none" in html[i - 120:i]
+        assert "em-apppw-hint" in js and "!!d.configured" in js
