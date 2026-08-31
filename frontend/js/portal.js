@@ -47,6 +47,16 @@ function numOrNull(id) {
   return v ? parseInt(v, 10) : null;
 }
 
+/** FastAPI sends `detail` as a string, or as a list of {msg} objects on a 422.
+ *  Passing the list to new Error() renders "[object Object]" into the form —
+ *  which is what a visitor saw for any field the browser did not catch first. */
+function detailText(detail) {
+  if (!detail) return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) return detail.map(d => (d && d.msg) || JSON.stringify(d)).join(' — ');
+  return JSON.stringify(detail);
+}
+
 async function api(path, opts = {}) {
   const headers = opts.headers || {};
   if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
@@ -55,8 +65,13 @@ async function api(path, opts = {}) {
   const resp = await fetch(API + path, { ...opts, headers });
   let data = {};
   try { data = await resp.json(); } catch (_) {}
-  if (resp.status === 401) { clearToken(); showAuth(); throw new Error(data.detail || 'نیاز به ورود مجدد'); }
-  if (!resp.ok) throw new Error(data.detail || 'خطا در ارتباط با سرور');
+  if (resp.status === 401) { clearToken(); showAuth(); throw new Error(detailText(data.detail) || 'نیاز به ورود مجدد'); }
+  if (!resp.ok) {
+    const err = new Error(detailText(data.detail) || 'خطا در ارتباط با سرور');
+    err.status = resp.status;            // callers need it to offer the right way out
+    err.retryAfter = data.retry_after || 0;
+    throw err;
+  }
   return data;
 }
 
@@ -86,13 +101,19 @@ async function doPortalRegister() {
   const email = $('rg-email').value.trim();
   hide($('auth-msg'));
 
-  if (name.length < 2) return showMsg($('auth-msg'), 'نام خود را وارد کنید', 'err'), show($('auth-msg'));
-  if (!/^09\d{9}$/.test(phone)) return showMsg($('auth-msg'), 'شماره موبایل باید با فرمت 09xxxxxxxxx باشد', 'err'), show($('auth-msg'));
-  if (pass.length < 6) return showMsg($('auth-msg'), 'رمز عبور باید حداقل ۶ کاراکتر باشد', 'err'), show($('auth-msg'));
+  clearFieldErrs();
+  // At the field, and focus it — so the fix is where the eye already is.
+  const bad = (id, msg) => { fieldErr(id, msg); const e = $(id); if (e) e.focus(); return true; };
+  if (name.length < 2)            return bad('rg-name', 'نام خود را وارد کنید');
+  if (!/^09\d{9}$/.test(phone))   return bad('rg-phone', 'شماره باید با فرمت ۰۹۱۲۳۴۵۶۷۸۹ باشد');
+  const r = pwScore(pass);
+  if (!r.len)                     return bad('rg-pass', 'رمز عبور باید حداقل ۸ کاراکتر باشد');
+  if (Object.values(r).filter(Boolean).length < 3)
+                                  return bad('rg-pass', 'رمز عبور ضعیف است — شرط‌های زیر را کامل کنید');
   // Checked here as well as server-side so the message is instant and names
   // the field, rather than coming back as a 422 the visitor has to decode.
   if (!/^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(email))
-    return showMsg($('auth-msg'), 'ایمیل معتبر وارد کنید — برای ارسال کد ورود و اطلاع‌رسانی لازم است', 'err'), show($('auth-msg'));
+    return bad('rg-email', 'ایمیل معتبر وارد کنید — کد ورود به این آدرس فرستاده می‌شود');
 
   withSpinner(btn, true, 'در حال ثبت‌نام…');
   try {
@@ -112,7 +133,12 @@ async function doPortalRegister() {
 
 function startVerify(res) {
   switchTab('verify');
-  $('vf-hint').textContent = 'کد ارسال‌شده به ' + _pendingPhone + ' را وارد کنید.';
+  // The server already builds a channel-correct sentence — it knows whether
+  // the code went by SMS or email, and this screen did not. Telling someone to
+  // check their phone when it landed in their inbox is how a sign-up is
+  // abandoned thirty seconds in.
+  $('vf-hint').textContent = (res && res.message)
+    || ('کد ارسال‌شده به ' + _pendingPhone + ' را وارد کنید.');
   $('vf-code').value = '';
   $('vf-code').focus();
   if (res && res.debug_code) { // only present off-production
@@ -335,3 +361,104 @@ async function submitTicket() {
 
   if (getToken()) { await showPortal(); } else { showAuth(); }
 })();
+
+
+// ═══ auth UX ═══════════════════════════════════════════════════════════════
+// Same practices as the panel — see frontend/js/app.js. Kept deliberately
+// small and dependency-free: this page is the first thing a customer sees and
+// must render on a slow connection.
+
+function fieldErr(id, msg) {
+  const box = $('e-' + id), wrap = $('w-' + id);
+  if (box) { box.textContent = msg || ''; box.classList.toggle('show', !!msg); }
+  if (wrap) wrap.classList.toggle('invalid', !!msg);
+}
+
+function clearFieldErrs() {
+  document.querySelectorAll('.f-err').forEach(e => { e.textContent=''; e.classList.remove('show'); });
+  document.querySelectorAll('.fld').forEach(f => f.classList.remove('invalid'));
+}
+
+/** A problem plus the way out of it, rather than a bare statement of failure. */
+function showMsgFix(el, message, fix, kind) {
+  el.className = 'msg ' + (kind || 'err');
+  el.innerHTML = escapeHtml(message) + (fix ? '<span class="fix">' + escapeHtml(fix) + '</span>' : '');
+  show(el);
+}
+
+function escapeHtml(t) {
+  return String(t == null ? '' : t).replace(/[&<>"']/g,
+    c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// show / hide password — paste stays enabled, password managers depend on it
+document.addEventListener('click', e => {
+  const b = e.target.closest('.pw-eye');
+  if (!b) return;
+  const i = $(b.dataset.for);
+  if (!i) return;
+  const showing = i.type === 'text';
+  i.type = showing ? 'password' : 'text';
+  b.textContent = showing ? '👁' : '🙈';
+  const lbl = showing ? 'نمایش رمز عبور' : 'پنهان کردن رمز عبور';
+  b.setAttribute('aria-label', lbl); b.title = lbl;
+  i.focus();
+});
+
+function watchCaps(inputId, warnId) {
+  const i = $(inputId), w = $(warnId);
+  if (!i || !w) return;
+  const check = ev => w.classList.toggle('show',
+    !!(ev.getModifierState && ev.getModifierState('CapsLock')));
+  i.addEventListener('keyup', check);
+  i.addEventListener('keydown', check);
+  i.addEventListener('blur', () => w.classList.remove('show'));
+}
+
+function pwScore(v) {
+  return { len: v.length >= 8, lower: /[a-z]/.test(v),
+           digit: /[0-9]/.test(v), upper: /[A-Z]/.test(v) || /[^A-Za-z0-9]/.test(v) };
+}
+
+function paintStrength() {
+  const i = $('rg-pass');
+  if (!i) return;
+  const r = pwScore(i.value);
+  const met = Object.values(r).filter(Boolean).length;
+  document.querySelectorAll('#rg-rules li').forEach(li => li.classList.toggle('met', !!r[li.dataset.rule]));
+  const steps = [
+    { w:'0%',   c:'transparent', t:'قدرت رمز عبور' },
+    { w:'25%',  c:'var(--err)',  t:'خیلی ضعیف' },
+    { w:'50%',  c:'#f0a35e',     t:'ضعیف' },
+    { w:'75%',  c:'#f0c95e',     t:'متوسط' },
+    { w:'100%', c:'var(--ok)',   t:'قوی' },
+  ][i.value ? met : 0];
+  const bar = $('rg-meter'), lab = $('rg-meter-label');
+  if (bar) { bar.style.width = steps.w; bar.style.background = steps.c; }
+  if (lab) lab.textContent = steps.t;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  watchCaps('li-pass', 'caps-li');
+  watchCaps('rg-pass', 'caps-rg');
+  const pw = $('rg-pass');
+  if (pw) pw.addEventListener('input', paintStrength);
+
+  // Autofocus the first field, but not on touch — raising the keyboard hides
+  // the form the person was about to read.
+  if (!window.matchMedia || !window.matchMedia('(pointer: coarse)').matches) {
+    const first = $('li-id');
+    if (first && !first.closest('.hide')) first.focus();
+  }
+
+  // Validate after a field is finished, not while it is being typed.
+  const onBlur = (id, check) => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('blur', () => { if (el.value.trim()) fieldErr(id, check(el.value.trim()) || ''); });
+    el.addEventListener('input', () => fieldErr(id, ''));
+  };
+  onBlur('rg-email', v => /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(v) ? '' : 'ایمیل معتبر وارد کنید');
+  onBlur('rg-phone', v => /^09\d{9}$/.test(toAsciiDigits(v)) ? '' : 'شماره باید با فرمت ۰۹۱۲۳۴۵۶۷۸۹ باشد');
+  onBlur('rg-name',  v => v.length >= 2 ? '' : 'نام را کامل وارد کنید');
+});

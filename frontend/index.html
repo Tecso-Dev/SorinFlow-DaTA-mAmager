@@ -31,76 +31,188 @@
 
     <div class="login-card">
         <div class="login-logo">
+            <!-- The animated mark replaces the static icon only once the player
+                 has actually loaded it. If anything fails — no script, reduced
+                 motion, a slow network — the icon is what stays on screen, so
+                 the card never has a hole in it. -->
+            <div id="auth-lottie" class="auth-lottie" aria-hidden="true"></div>
             <div class="logo-icon"><i class="bi bi-building"></i></div>
             <h4>SorinFlow</h4>
             <p>پنل مدیریت اسکرپر دیوار</p>
         </div>
 
-        <div id="login-error" class="d-none"></div>
+        <!-- Failures that belong to no single field: a wrong pair, a lockout,
+             a server that did not answer. Field-specific problems are shown at
+             the field instead, where the cause is. -->
+        <!-- A returning user is welcomed by name rather than met with an
+             empty form. Only the username is kept, never the password. -->
+        <div id="welcome-back" class="welcome-back d-none">
+            <i class="bi bi-person-check"></i>
+            <span>خوش آمدید، <b id="welcome-name"></b></span>
+            <button type="button" class="auth-link-btn" onclick="forgetUser()">من نیستم</button>
+        </div>
 
-        <!-- Step 1: username + password -->
-        <div id="login-step-1">
-            <div class="login-input-wrap">
-                <span class="input-icon"><i class="bi bi-person"></i></span>
-                <input type="text" id="login-username" placeholder="نام کاربری" autocomplete="username">
+        <div id="login-error" class="auth-alert err" role="alert" aria-live="assertive"></div>
+
+        <!-- ── Step 1 · credentials ─────────────────────────────────────────
+             A real <form>: Enter submits, and the browser offers to save the
+             pair. The old markup was divs with onclick, which gives neither. -->
+        <form id="login-step-1" onsubmit="event.preventDefault();doLogin()">
+            <div class="auth-field" id="f-username">
+                <label for="login-username">نام کاربری</label>
+                <div class="auth-input-row">
+                    <span class="field-icon"><i class="bi bi-person"></i></span>
+                    <input type="text" id="login-username" autocomplete="username"
+                           autocapitalize="none" spellcheck="false" required
+                           aria-describedby="e-username"
+                           placeholder="نام کاربری پنل">
+                </div>
+                <div class="field-error" id="e-username" role="alert"></div>
             </div>
-            <div class="login-input-wrap">
-                <span class="input-icon"><i class="bi bi-lock"></i></span>
-                <input type="password" id="login-password" placeholder="رمز عبور" autocomplete="current-password">
+
+            <div class="auth-field" id="f-password">
+                <label for="login-password">رمز عبور</label>
+                <div class="auth-input-row">
+                    <span class="field-icon"><i class="bi bi-lock"></i></span>
+                    <input type="password" id="login-password" autocomplete="current-password"
+                           required aria-describedby="e-password caps-login">
+                    <button type="button" class="pw-toggle" data-for="login-password"
+                            aria-label="نمایش رمز عبور" title="نمایش رمز عبور">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                </div>
+                <div class="caps-warn" id="caps-login">
+                    <i class="bi bi-capslock"></i> کلید Caps Lock روشن است
+                </div>
+                <div class="field-error" id="e-password" role="alert"></div>
             </div>
-            <button id="login-btn" class="btn-login" onclick="doLogin()">
+
+            <div class="auth-links">
+                <label class="remember-row" for="login-remember">
+                    <input type="checkbox" id="login-remember" checked>
+                    <span>مرا به خاطر بسپار</span>
+                </label>
+                <button type="button" class="auth-link-btn" onclick="showForgotHelp()">
+                    رمز عبور را فراموش کرده‌اید؟
+                </button>
+            </div>
+
+            <button id="login-btn" class="btn-login" type="submit">
                 <i class="bi bi-box-arrow-in-right"></i> ورود به داشبورد
             </button>
-        </div>
+        </form>
 
-        <!-- Step 2: TOTP code (shown only when requires_totp=true) -->
-        <div id="login-step-2" class="d-none">
-            <div style="text-align:center;margin-bottom:1.2rem;color:var(--text-muted,#aaa);font-size:.9rem;">
-                <i class="bi bi-shield-lock" style="font-size:2rem;color:#7c6ef5;display:block;margin-bottom:.5rem;"></i>
-                کد ۶ رقمی Google Authenticator را وارد کنید
+        <!-- ── Step 2 · second factor ───────────────────────────────────── -->
+        <form id="login-step-2" class="d-none" onsubmit="event.preventDefault();verifyTotpLogin()">
+            <div style="text-align:center;margin-bottom:1rem;color:var(--text-muted);font-size:.85rem;">
+                <i class="bi bi-shield-lock" style="font-size:1.9rem;color:var(--accent);display:block;margin-bottom:.45rem;"></i>
+                کد ۶ رقمی را از اپلیکیشن احراز هویت خود وارد کنید
             </div>
-            <div class="login-input-wrap">
-                <span class="input-icon"><i class="bi bi-shield-check"></i></span>
-                <input type="text" id="login-totp-code" placeholder="کد احراز هویت"
-                       maxlength="6" autocomplete="one-time-code" inputmode="numeric">
+            <div class="auth-field" id="f-totp">
+                <label for="login-totp-code" class="sr-only-label">کد احراز هویت دو مرحله‌ای</label>
+                <div class="auth-input-row">
+                    <input type="text" id="login-totp-code" class="otp-input"
+                           maxlength="6" autocomplete="one-time-code" inputmode="numeric"
+                           pattern="[0-9]*" dir="ltr" required
+                           aria-describedby="e-totp" placeholder="······">
+                </div>
+                <div class="field-error" id="e-totp" role="alert"></div>
             </div>
-            <button id="login-totp-btn" class="btn-login" onclick="verifyTotpLogin()">
-                <i class="bi bi-check-circle"></i> تأیید
+            <button id="login-totp-btn" class="btn-login" type="submit">
+                <i class="bi bi-check-circle"></i> تأیید و ورود
             </button>
-            <button class="btn-login" style="background:transparent;border:1px solid var(--border,#444);color:var(--text,#fff);margin-top:.5rem;font-size:.85rem;" onclick="backToLogin()">
-                <i class="bi bi-arrow-right"></i> بازگشت
-            </button>
-        </div>
+            <div class="auth-links" style="margin-top:.7rem">
+                <button type="button" class="auth-link-btn" onclick="showTotpHelp()">
+                    به اپلیکیشن دسترسی ندارید؟
+                </button>
+                <button type="button" class="auth-link-btn" onclick="backToLogin()">بازگشت</button>
+            </div>
+        </form>
 
-        <!-- Step 3: Register form -->
-        <div id="login-step-register" class="d-none">
-            <div class="login-input-wrap">
-                <span class="input-icon"><i class="bi bi-person"></i></span>
-                <input type="text" id="reg-username" placeholder="نام کاربری" autocomplete="username">
+        <!-- ── Step 3 · create an account ───────────────────────────────── -->
+        <form id="login-step-register" class="d-none" onsubmit="event.preventDefault();doRegister()">
+            <div class="auth-field" id="f-reg-username">
+                <label for="reg-username">نام کاربری</label>
+                <div class="auth-input-row">
+                    <span class="field-icon"><i class="bi bi-person"></i></span>
+                    <input type="text" id="reg-username" autocomplete="username"
+                           autocapitalize="none" spellcheck="false" maxlength="50" required
+                           aria-describedby="e-reg-username" placeholder="مثلاً ali.m">
+                </div>
+                <div class="field-error" id="e-reg-username" role="alert"></div>
             </div>
-            <div class="login-input-wrap">
-                <span class="input-icon"><i class="bi bi-person-badge"></i></span>
-                <input type="text" id="reg-fullname" placeholder="نام کامل">
+
+            <div class="auth-field" id="f-reg-fullname">
+                <label for="reg-fullname">نام و نام خانوادگی</label>
+                <div class="auth-input-row">
+                    <span class="field-icon"><i class="bi bi-person-badge"></i></span>
+                    <input type="text" id="reg-fullname" autocomplete="name" maxlength="200" required
+                           aria-describedby="e-reg-fullname">
+                </div>
+                <div class="field-error" id="e-reg-fullname" role="alert"></div>
             </div>
-            <div class="login-input-wrap">
-                <span class="input-icon"><i class="bi bi-phone"></i></span>
-                <input type="text" id="reg-divar-phone" placeholder="شماره دیوار (09xxxxxxxxx)" maxlength="11" inputmode="tel">
+
+            <div class="auth-field" id="f-reg-phone">
+                <label for="reg-divar-phone">شمارهٔ دیوار <span class="optional">(اختیاری)</span></label>
+                <div class="auth-input-row">
+                    <span class="field-icon"><i class="bi bi-phone"></i></span>
+                    <input type="text" id="reg-divar-phone" maxlength="11" inputmode="tel"
+                           dir="ltr" autocomplete="tel" placeholder="09123456789"
+                           aria-describedby="e-reg-phone">
+                </div>
+                <div class="field-error" id="e-reg-phone" role="alert"></div>
             </div>
-            <div class="login-input-wrap">
-                <span class="input-icon"><i class="bi bi-lock"></i></span>
-                <input type="password" id="reg-password" placeholder="رمز عبور (حداقل ۶ کاراکتر)" autocomplete="new-password">
+
+            <div class="auth-field" id="f-reg-password">
+                <label for="reg-password">رمز عبور</label>
+                <div class="auth-input-row">
+                    <span class="field-icon"><i class="bi bi-lock"></i></span>
+                    <input type="password" id="reg-password" autocomplete="new-password"
+                           required aria-describedby="pw-rules caps-reg e-reg-password">
+                    <button type="button" class="pw-toggle" data-for="reg-password"
+                            aria-label="نمایش رمز عبور" title="نمایش رمز عبور">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                </div>
+                <div class="caps-warn" id="caps-reg">
+                    <i class="bi bi-capslock"></i> کلید Caps Lock روشن است
+                </div>
+                <div class="pw-meter"><span id="pw-meter-bar"></span></div>
+                <div class="pw-meter-label" id="pw-meter-label">قدرت رمز عبور</div>
+                <!-- Stated before it is needed, so the target is never a guess. -->
+                <ul class="pw-rules" id="pw-rules">
+                    <li data-rule="len">حداقل ۸ کاراکتر</li>
+                    <li data-rule="lower">حرف کوچک انگلیسی</li>
+                    <li data-rule="digit">حداقل یک رقم</li>
+                    <li data-rule="upper">حرف بزرگ یا نماد</li>
+                </ul>
+                <div class="field-error" id="e-reg-password" role="alert"></div>
             </div>
-            <div class="login-input-wrap">
-                <span class="input-icon"><i class="bi bi-lock-fill"></i></span>
-                <input type="password" id="reg-password2" placeholder="تکرار رمز عبور" autocomplete="new-password">
+
+            <div class="auth-field" id="f-reg-password2">
+                <label for="reg-password2">تکرار رمز عبور</label>
+                <div class="auth-input-row">
+                    <span class="field-icon"><i class="bi bi-lock-fill"></i></span>
+                    <input type="password" id="reg-password2" autocomplete="new-password"
+                           required aria-describedby="e-reg-password2">
+                    <button type="button" class="pw-toggle" data-for="reg-password2"
+                            aria-label="نمایش رمز عبور" title="نمایش رمز عبور">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                </div>
+                <div class="field-error" id="e-reg-password2" role="alert"></div>
             </div>
-            <button id="reg-btn" class="btn-login" onclick="doRegister()">
+
+            <button id="reg-btn" class="btn-login" type="submit">
                 <i class="bi bi-person-plus"></i> ایجاد حساب کاربری
             </button>
-            <button class="btn-login" style="background:transparent;border:1px solid var(--border,#444);color:var(--text,#fff);margin-top:.5rem;font-size:.85rem;" onclick="showLoginForm()">
-                <i class="bi bi-arrow-right"></i> بازگشت به ورود
-            </button>
-        </div>
+            <div class="auth-links" style="margin-top:.7rem">
+                <button type="button" class="auth-link-btn" onclick="showLoginForm()">
+                    <i class="bi bi-arrow-right"></i> بازگشت به ورود
+                </button>
+                <span></span>
+            </div>
+        </form>
 
         <!-- Panel accounts are made by a super admin. Members of the public sign
              up on /portal instead — the link appears only when that is enabled,
@@ -112,6 +224,12 @@
                 <a href="/portal">ثبت‌نام و ورود مشتریان</a>
             </div>
         </div>
+
+        <div class="auth-trust">
+            <i class="bi bi-shield-lock-fill"></i>
+            <span>اتصال رمزنگاری‌شده · سورین‌فلو</span>
+        </div>
+
         <div id="register-toggle-link" style="display:none;">
             <a href="#" onclick="showLoginForm();return false;">ورود</a>
         </div>

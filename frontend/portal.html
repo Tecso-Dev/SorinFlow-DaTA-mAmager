@@ -74,6 +74,37 @@ input[dir="ltr"]{direction:ltr;text-align:left}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
 @media(max-width:640px){.row{grid-template-columns:1fr}}
 .check{display:flex;align-items:flex-start;gap:.5rem;margin-top:.8rem}
+/* ── auth UX ──────────────────────────────────────────────────────────────
+   Same practices as the panel: a visible label rather than a placeholder that
+   vanishes, a way to see what you typed, the rules stated before they are
+   enforced, and every error paired with the way out of it. */
+.pw-wrap{position:relative}
+.pw-wrap input{padding-left:2.6rem}
+.pw-eye{position:absolute;left:.45rem;top:50%;transform:translateY(-50%);
+  background:none;border:0;cursor:pointer;color:var(--muted);font-size:1rem;
+  padding:.25rem .35rem;border-radius:6px;line-height:1;width:auto;margin:0}
+.pw-eye:hover{color:var(--text)}
+.pw-eye:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.f-err{display:none;font-size:.76rem;color:var(--err);margin-top:.3rem;line-height:1.6}
+.f-err.show{display:block}
+.invalid input{border-color:var(--err)!important}
+.caps{display:none;font-size:.76rem;color:#f0a35e;margin-top:.3rem}
+.caps.show{display:block}
+.rules{display:grid;grid-template-columns:1fr 1fr;gap:.15rem .6rem;margin-top:.45rem;padding:0}
+.rules li{list-style:none;font-size:.73rem;color:var(--muted);display:flex;align-items:center;gap:.3rem}
+.rules li::before{content:"○"}
+.rules li.met{color:var(--ok)}
+.rules li.met::before{content:"●"}
+.meter{height:4px;border-radius:99px;background:var(--surface-2);margin-top:.45rem;overflow:hidden}
+.meter>span{display:block;height:100%;width:0;border-radius:99px;transition:width .25s,background .25s}
+.meter-label{font-size:.73rem;color:var(--muted);margin-top:.25rem}
+.msg .fix{display:block;margin-top:.3rem;opacity:.85;font-size:.8rem}
+.trust{display:flex;align-items:center;justify-content:center;gap:.4rem;
+  margin-top:1.1rem;font-size:.73rem;color:var(--muted)}
+.remember{display:flex;align-items:center;gap:.4rem;font-size:.78rem;
+  color:var(--muted);cursor:pointer;margin:.7rem 0 0}
+.remember input{width:auto;margin:0}
+.helper{font-size:.75rem;color:var(--muted);margin-top:.3rem;line-height:1.7}
 .check input{width:auto;margin-top:.35rem}
 .check label{margin:0;color:var(--text);font-size:.85rem}
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:1rem;
@@ -112,24 +143,75 @@ input[dir="ltr"]{direction:ltr;text-align:left}
 
     <!-- login -->
     <form id="pane-login" onsubmit="event.preventDefault();doPortalLogin()">
-      <label for="li-id">شماره موبایل یا ایمیل</label>
-      <input id="li-id" dir="ltr" autocomplete="username" placeholder="09123456789">
-      <label for="li-pass">رمز عبور</label>
-      <input id="li-pass" type="password" autocomplete="current-password">
+      <div class="fld" id="w-li-id">
+        <label for="li-id">شماره موبایل یا ایمیل</label>
+        <input id="li-id" dir="ltr" autocomplete="username" inputmode="email"
+               autocapitalize="none" spellcheck="false" maxlength="200"
+               placeholder="۰۹۱۲۳۴۵۶۷۸۹ یا you@example.com"
+               aria-describedby="e-li-id">
+        <div class="f-err" id="e-li-id" role="alert"></div>
+      </div>
+      <div class="fld" id="w-li-pass">
+        <label for="li-pass">رمز عبور</label>
+        <div class="pw-wrap">
+          <input id="li-pass" type="password" autocomplete="current-password" maxlength="128"
+                 aria-describedby="caps-li e-li-pass">
+          <button type="button" class="pw-eye" data-for="li-pass"
+                  aria-label="نمایش رمز عبور" title="نمایش رمز عبور">👁</button>
+        </div>
+        <div class="caps" id="caps-li">⇪ کلید Caps Lock روشن است</div>
+        <div class="f-err" id="e-li-pass" role="alert"></div>
+      </div>
+      <label class="remember" for="li-remember">
+        <input type="checkbox" id="li-remember" checked>
+        <span>مرا به خاطر بسپار</span>
+      </label>
       <button class="btn" id="li-btn" type="submit">ورود</button>
+      <p class="helper" style="text-align:center">
+        حساب ندارید؟ <a href="#" onclick="switchTab('register');return false;">ثبت‌نام کنید</a>
+      </p>
     </form>
 
     <!-- register -->
     <form id="pane-register" class="hide" onsubmit="event.preventDefault();doPortalRegister()">
-      <label for="rg-name">نام و نام خانوادگی</label>
-      <input id="rg-name" autocomplete="name">
-      <label for="rg-phone">شماره موبایل</label>
-      <input id="rg-phone" dir="ltr" inputmode="tel" maxlength="11" placeholder="09123456789" autocomplete="tel">
-      <label for="rg-email">ایمیل</label>
-      <input id="rg-email" type="email" dir="ltr" autocomplete="email"
-             required placeholder="you@example.com">
-      <label for="rg-pass">رمز عبور <span class="muted">(حداقل ۶ کاراکتر)</span></label>
-      <input id="rg-pass" type="password" autocomplete="new-password">
+      <div class="fld" id="w-rg-name">
+        <label for="rg-name">نام و نام خانوادگی</label>
+        <input id="rg-name" autocomplete="name" maxlength="200" placeholder="مثلاً علی محمدی"
+               aria-describedby="e-rg-name">
+        <div class="f-err" id="e-rg-name" role="alert"></div>
+      </div>
+      <div class="fld" id="w-rg-phone">
+        <label for="rg-phone">شماره موبایل</label>
+        <input id="rg-phone" dir="ltr" inputmode="tel" maxlength="11" placeholder="09123456789"
+               autocomplete="tel" aria-describedby="e-rg-phone">
+        <div class="f-err" id="e-rg-phone" role="alert"></div>
+      </div>
+      <div class="fld" id="w-rg-email">
+        <label for="rg-email">ایمیل</label>
+        <input id="rg-email" type="email" dir="ltr" autocomplete="email"
+             required maxlength="200" placeholder="you@example.com" inputmode="email"
+             autocapitalize="none" spellcheck="false">
+        <div class="f-err" id="e-rg-email" role="alert"></div>
+      </div>
+      <div class="fld" id="w-rg-pass">
+      <label for="rg-pass">رمز عبور</label>
+      <div class="pw-wrap">
+        <input id="rg-pass" type="password" autocomplete="new-password" maxlength="128"
+               aria-describedby="rg-rules caps-rg e-rg-pass">
+        <button type="button" class="pw-eye" data-for="rg-pass"
+                aria-label="نمایش رمز عبور" title="نمایش رمز عبور">👁</button>
+      </div>
+      <div class="caps" id="caps-rg">⇪ کلید Caps Lock روشن است</div>
+      <div class="meter"><span id="rg-meter"></span></div>
+      <div class="meter-label" id="rg-meter-label">قدرت رمز عبور</div>
+      <ul class="rules" id="rg-rules">
+        <li data-rule="len">حداقل ۸ کاراکتر</li>
+        <li data-rule="lower">حرف کوچک انگلیسی</li>
+        <li data-rule="digit">حداقل یک رقم</li>
+        <li data-rule="upper">حرف بزرگ یا نماد</li>
+      </ul>
+      <div class="f-err" id="e-rg-pass" role="alert"></div>
+      </div>
       <div class="check">
         <input type="checkbox" id="rg-optin">
         <label for="rg-optin">مایلم آگهی‌ها و پیشنهادهای ملکی برایم ایمیل شود</label>
@@ -154,6 +236,7 @@ input[dir="ltr"]{direction:ltr;text-align:left}
     <p class="muted" style="text-align:center;margin-top:1.25rem">
       کاربر پنل هستید؟ <a href="/dashboard">ورود به پنل مدیریت</a>
     </p>
+    <div class="trust">🔒 اتصال رمزنگاری‌شده · سورین‌فلو</div>
   </div>
 </div>
 

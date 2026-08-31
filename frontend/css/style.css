@@ -2477,3 +2477,211 @@ select.status-quick {
  display:inline-block;animation:live-pulse 1.6s ease-in-out infinite}
 @keyframes live-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
 @media (prefers-reduced-motion: reduce){.live-dot{animation:none}}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   AUTH — login, register, second factor
+   ══════════════════════════════════════════════════════════════════════════
+   Built against the practices in authgear.com/post/login-signup-ux-guide.
+   The ones that changed the markup, and why each is here:
+
+     · Real <form> elements, so Enter submits and password managers offer to
+       save. The previous markup was loose <div>s with onclick, which gives
+       neither.
+     · Visible <label>s, not placeholders. A placeholder disappears the moment
+       someone types, so anyone interrupted mid-form loses the question — and
+       screen readers treat it as a hint, not a name.
+     · A show-password toggle, and paste left enabled. Blocking paste breaks
+       password managers, which is most people's strongest password.
+     · Errors inline at the field AND announced, rather than one banner far
+       from the cause.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.auth-field { margin-bottom: .95rem; text-align: right; }
+
+.auth-field > label {
+  display: block;
+  font-size: .78rem; font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: .38rem;
+  letter-spacing: -.01em;
+}
+.auth-field .optional { font-weight: 400; color: var(--text-muted); }
+
+.auth-input-row { position: relative; display: block; }
+.auth-input-row input {
+  width: 100%;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  padding: .72rem 2.5rem .72rem 2.6rem;   /* room for icon (right) + eye (left) */
+  font-family: inherit; font-size: .9rem;
+  transition: var(--trans);
+  outline: none;
+}
+.auth-input-row input::placeholder { color: var(--text-muted); opacity: .7; }
+.auth-input-row input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.auth-input-row .field-icon {
+  position: absolute; right: .85rem; top: 50%; transform: translateY(-50%);
+  color: var(--text-muted); font-size: .95rem; pointer-events: none;
+}
+
+/* Show/hide password. A real <button>, so it is reachable by keyboard and
+   announced — an icon-only <span> is invisible to anyone not using a mouse. */
+.pw-toggle {
+  position: absolute; left: .5rem; top: 50%; transform: translateY(-50%);
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-muted); font-size: .95rem;
+  padding: .3rem .4rem; border-radius: 6px; line-height: 1;
+  transition: var(--trans);
+}
+.pw-toggle:hover { color: var(--text); background: var(--surface2); }
+.pw-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Inline, per-field error. Sits directly under the input it belongs to. */
+.field-error {
+  display: none;
+  font-size: .74rem; color: #fca5a5;
+  margin-top: .35rem; line-height: 1.6;
+}
+.field-error.show { display: block; }
+.auth-field.invalid .auth-input-row input {
+  border-color: rgba(239,68,68,.55);
+  box-shadow: 0 0 0 3px rgba(239,68,68,.12);
+}
+
+/* Caps Lock. Silent capitals are one of the most common causes of a login
+   failure people cannot explain to themselves. */
+.caps-warn {
+  display: none;
+  font-size: .74rem; color: var(--warning);
+  margin-top: .35rem;
+}
+.caps-warn.show { display: flex; align-items: center; gap: .3rem; }
+
+/* Password requirements, stated up front rather than discovered by failing.
+   Each rule flips as it is met, so the target is never a guess. */
+.pw-rules {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .2rem .7rem;
+  margin-top: .5rem;
+}
+.pw-rules li {
+  list-style: none; font-size: .72rem; color: var(--text-muted);
+  display: flex; align-items: center; gap: .3rem; transition: var(--trans);
+}
+.pw-rules li::before { content: "○"; font-size: .7rem; }
+.pw-rules li.met { color: var(--accent3); }
+.pw-rules li.met::before { content: "●"; }
+
+.pw-meter { height: 4px; border-radius: 99px; background: var(--surface3); margin-top: .5rem; overflow: hidden; }
+.pw-meter > span {
+  display: block; height: 100%; width: 0; border-radius: 99px;
+  transition: width .25s ease, background .25s ease;
+}
+.pw-meter-label { font-size: .72rem; margin-top: .3rem; color: var(--text-muted); }
+
+/* One-time code: wide tracking so 6 and 8 cannot be mistaken for each other. */
+.otp-input {
+  text-align: center !important;
+  font-size: 1.4rem !important; font-weight: 700;
+  letter-spacing: .55em; text-indent: .55em;   /* indent cancels the trailing gap */
+  padding-right: .9rem !important; padding-left: .9rem !important;
+  font-family: 'Courier New', Consolas, monospace !important;
+}
+
+/* A summary error, kept for failures that belong to no single field —
+   a wrong credential pair, a lockout, a server that did not answer. */
+.auth-alert {
+  display: none;
+  border-radius: var(--r-sm);
+  padding: .65rem .85rem;
+  font-size: .8rem; line-height: 1.7;
+  margin-bottom: .9rem;
+  text-align: right;
+}
+.auth-alert.show { display: block; }
+.auth-alert.err  { background: rgba(239,68,68,.12);  border: 1px solid rgba(239,68,68,.3);  color: #fca5a5; }
+.auth-alert.warn { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.3); color: #fcd34d; }
+.auth-alert.ok   { background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.3); color: #6ee7b7; }
+.auth-alert .fix { display: block; margin-top: .3rem; opacity: .85; font-size: .76rem; }
+
+/* Every error is paired with the way out of it — the guide's error→recovery
+   mapping. A dead end is what makes people abandon a login. */
+.auth-links {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: .6rem; margin-top: -.35rem; margin-bottom: .9rem;
+}
+.auth-links a, .auth-link-btn {
+  font-size: .76rem; color: var(--accent2);
+  background: none; border: 0; cursor: pointer; padding: 0;
+  font-family: inherit; text-decoration: none;
+}
+.auth-links a:hover, .auth-link-btn:hover { text-decoration: underline; }
+
+.auth-divider {
+  display: flex; align-items: center; gap: .7rem;
+  margin: 1.1rem 0 .9rem; color: var(--text-muted); font-size: .72rem;
+}
+.auth-divider::before, .auth-divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+
+/* Trust signals — who this panel belongs to and that the session is encrypted.
+   Cheap to add, and it is what tells someone they are not on a copy. */
+.auth-trust {
+  display: flex; align-items: center; justify-content: center;
+  gap: .4rem; margin-top: 1.1rem;
+  font-size: .71rem; color: var(--text-muted);
+}
+.auth-trust i { color: var(--accent3); }
+
+.btn-login[disabled] { opacity: .6; cursor: not-allowed; }
+
+@media (max-width: 420px) {
+  .pw-rules { grid-template-columns: 1fr; }
+  .auth-links { flex-direction: column; align-items: stretch; text-align: center; }
+}
+
+/* Remember me, and the returning-user greeting. */
+.remember-row {
+  display: flex; align-items: center; gap: .4rem;
+  font-size: .76rem; color: var(--text-dim);
+  cursor: pointer; user-select: none; margin: 0;
+}
+.remember-row input { accent-color: var(--accent); cursor: pointer; }
+
+.welcome-back {
+  display: flex; align-items: center; gap: .5rem;
+  background: var(--surface3); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: .55rem .8rem;
+  font-size: .8rem; color: var(--text-dim); margin-bottom: .9rem;
+}
+.welcome-back i { color: var(--accent3); }
+.welcome-back b { color: var(--text); font-weight: 600; }
+.welcome-back .auth-link-btn { margin-inline-start: auto; }
+
+/* A label that names a field for a screen reader without taking space. */
+.sr-only-label {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Lottie brand mark on the login card.
+   Sits where the static icon was; the icon stays as the fallback and is what
+   renders if the player never loads, on a coarse pointer, or under
+   prefers-reduced-motion. */
+.auth-lottie {
+  width: 96px; height: 96px; margin: 0 auto .2rem;
+  display: none;                       /* shown by script once it has loaded */
+}
+.auth-lottie.ready { display: block; }
+.auth-lottie.ready + .logo-icon { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-lottie { display: none !important; }
+  .auth-lottie.ready + .logo-icon { display: flex !important; }
+}

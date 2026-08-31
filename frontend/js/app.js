@@ -30,9 +30,27 @@ let _authToken = null;
 let _currentUser = null; // { username, role, full_name }
 let _totpSession = null; // temporary session token for TOTP step 2
 
-function getToken() { return localStorage.getItem('sf_token'); }
-function setToken(t) { localStorage.setItem('sf_token', t); _authToken = t; }
-function clearToken() { localStorage.removeItem('sf_token'); _authToken = null; _currentUser = null; _totpSession = null; }
+// Where the session lives is the user's choice, not ours.
+//
+// "مرا به خاطر بسپار" ticked -> localStorage, and the session survives closing
+// the browser. Unticked -> sessionStorage, and it dies with the tab. That
+// distinction matters on a shared or public machine, and offering it is what
+// lets someone safely say no.
+function _tokenStore() {
+    try {
+        return localStorage.getItem('sf_remember') === '0' ? sessionStorage : localStorage;
+    } catch (_) { return localStorage; }
+}
+function getToken() {
+    try { return sessionStorage.getItem('sf_token') || localStorage.getItem('sf_token'); }
+    catch (_) { return localStorage.getItem('sf_token'); }
+}
+function setToken(t) { _tokenStore().setItem('sf_token', t); _authToken = t; }
+function clearToken() {
+    try { sessionStorage.removeItem('sf_token'); } catch (_) {}
+    localStorage.removeItem('sf_token');
+    _authToken = null; _currentUser = null; _totpSession = null;
+}
 
 // ═══ Theme (dark / light) ═════════════════════════════════════
 // data-theme is set on <html> before first paint by an inline
@@ -93,16 +111,25 @@ document.addEventListener('DOMContentLoaded', () => applyTheme(currentTheme()));
 
 // ═══ Login / Logout ═══════════════════════════════════════════
 async function doLogin() {
-    const username = document.getElementById('login-username').value.trim();
-    const password = document.getElementById('login-password').value;
-    const errEl = document.getElementById('login-error');
+    const uEl = document.getElementById('login-username');
+    const pEl = document.getElementById('login-password');
+    const username = uEl.value.trim();
+    const password = pEl.value;
     const btn = document.getElementById('login-btn');
 
-    if (!username || !password) { errEl.textContent = 'نام کاربری و رمز عبور الزامی است'; errEl.classList.remove('d-none'); return; }
+    clearAuthErrors();
+
+    // Validate at the field, and stop at the first empty one so focus lands
+    // somewhere useful rather than on a summary the user must then decode.
+    if (!username) {
+        setFieldError('username', 'نام کاربری را وارد کنید'); uEl.focus(); return;
+    }
+    if (!password) {
+        setFieldError('password', 'رمز عبور را وارد کنید'); pEl.focus(); return;
+    }
 
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال ورود...';
-    errEl.classList.add('d-none');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال ورود…';
 
     try {
         const form = new URLSearchParams();
@@ -114,9 +141,14 @@ async function doLogin() {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: form.toString()
         });
-        const data = await resp.json();
 
-        if (!resp.ok) { throw new Error(data.detail || 'خطا در ورود'); }
+        let data = {};
+        try { data = await resp.json(); } catch (_) { data = {}; }
+
+        if (!resp.ok) {
+            _explainLoginFailure(resp.status, data.detail, pEl);
+            return;
+        }
 
         if (data.requires_totp) {
             _totpSession = data.totp_session;
@@ -129,24 +161,74 @@ async function doLogin() {
         await _finishLogin(data);
 
     } catch (err) {
-        errEl.textContent = err.message;
-        errEl.classList.remove('d-none');
+        // A network failure is not the user's fault and must not read like it.
+        showAuthAlert('ارتباط با سرور برقرار نشد.',
+                      'اتصال اینترنت خود را بررسی کنید و دوباره تلاش کنید. اطلاعات واردشده حفظ شده است.');
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-box-arrow-in-right"></i> ورود به داشبورد';
     }
 }
 
+/** Map a failed sign-in onto a cause and a next step.
+ *
+ * The guide's error→recovery mapping: a bare "خطا در ورود" tells someone
+ * nothing about what to try. Note the deliberate refusal to distinguish a
+ * wrong username from a wrong password — saying which was wrong tells an
+ * anonymous caller that the account exists.
+ *
+ * Inputs are never cleared. Retyping a whole form because one field was wrong
+ * is the most irritating thing a login can do.
+ */
+function _explainLoginFailure(status, detail, passwordEl) {
+    _loginFailures = (_loginFailures || 0) + 1;
+
+    if (status === 429) {
+        showAuthAlert(detail || 'تلاش‌های ناموفق بیش از حد مجاز بوده است.',
+                      'برای امنیت حساب، ورود موقتاً محدود شده است. کمی صبر کنید و دوباره تلاش کنید.',
+                      'warn');
+        return;
+    }
+    if (status === 403) {
+        showAuthAlert(detail || 'این حساب غیرفعال است.',
+                      'برای فعال‌سازی با مدیر سیستم تماس بگیرید.', 'warn');
+        return;
+    }
+    if (status >= 500) {
+        showAuthAlert('سرور در حال حاضر پاسخ نمی‌دهد.',
+                      'چند لحظه دیگر دوباره تلاش کنید. اطلاعات واردشده حفظ شده است.');
+        return;
+    }
+
+    setFieldError('password', 'نام کاربری یا رمز عبور نادرست است');
+    passwordEl.focus();
+    passwordEl.select();
+
+    // After a second failure the likeliest problem is no longer a typo, so
+    // surface the way out instead of repeating the same red text.
+    if (_loginFailures >= 2) {
+        showAuthAlert('چند بار ورود ناموفق بوده است.',
+                      'اگر رمز خود را به یاد ندارید، مدیر سیستم می‌تواند آن را بازنشانی کند. کلید Caps Lock را هم بررسی کنید.',
+                      'warn');
+    }
+}
+
+let _loginFailures = 0;
+
 async function verifyTotpLogin() {
-    const code = document.getElementById('login-totp-code').value.trim();
-    const errEl = document.getElementById('login-error');
+    const el = document.getElementById('login-totp-code');
+    const code = el.value.trim();
     const btn = document.getElementById('login-totp-btn');
 
-    if (!code || code.length !== 6) { errEl.textContent = 'کد ۶ رقمی را وارد کنید'; errEl.classList.remove('d-none'); return; }
+    clearAuthErrors();
+    if (code.length !== 6) {
+        setFieldError('totp', 'کد ۶ رقمی را کامل وارد کنید');
+        el.focus();
+        return;
+    }
 
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال تأیید...';
-    errEl.classList.add('d-none');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال تأیید…';
 
     try {
         const resp = await fetch(`${API_BASE}/users/token/verify-totp`, {
@@ -154,15 +236,24 @@ async function verifyTotpLogin() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ totp_session: _totpSession, code })
         });
-        const data = await resp.json();
-        if (!resp.ok) { throw new Error(data.detail || 'کد اشتباه است'); }
+        let data = {}; try { data = await resp.json(); } catch (_) {}
+
+        if (!resp.ok) {
+            // A TOTP code is time-based, so "wrong" and "expired" look the same
+            // from here — say both, and name the clock, which is the usual cause.
+            setFieldError('totp', 'این کد نادرست است یا منقضی شده');
+            showAuthAlert('کد پذیرفته نشد.',
+                          'کد هر ۳۰ ثانیه عوض می‌شود — کد تازه را وارد کنید. اگر باز هم نشد، ساعت گوشی شما باید با زمان واقعی هماهنگ باشد.',
+                          'warn');
+            el.value = ''; el.focus();
+            return;
+        }
         await _finishLogin(data);
     } catch (err) {
-        errEl.textContent = err.message;
-        errEl.classList.remove('d-none');
+        showAuthAlert('ارتباط با سرور برقرار نشد.', 'چند لحظه دیگر دوباره تلاش کنید.');
     } finally {
         btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-check-circle"></i> تأیید';
+        btn.innerHTML = '<i class="bi bi-check-circle"></i> تأیید و ورود';
     }
 }
 
@@ -192,23 +283,41 @@ function showLoginForm() {
 }
 
 async function doRegister() {
-    const username   = document.getElementById('reg-username').value.trim();
-    const full_name  = document.getElementById('reg-fullname').value.trim();
-    const divar_phone = document.getElementById('reg-divar-phone').value.trim() || null;
-    const password   = document.getElementById('reg-password').value;
-    const password2  = document.getElementById('reg-password2').value;
-    const errEl      = document.getElementById('login-error');
-    const btn        = document.getElementById('reg-btn');
+    const f = id => document.getElementById(id);
+    const username    = f('reg-username').value.trim();
+    const full_name   = f('reg-fullname').value.trim();
+    const divar_phone = f('reg-divar-phone').value.trim() || null;
+    const password    = f('reg-password').value;
+    const password2   = f('reg-password2').value;
+    const btn         = f('reg-btn');
 
-    errEl.classList.add('d-none');
+    clearAuthErrors();
 
-    if (!username) { errEl.textContent = 'نام کاربری الزامی است'; errEl.classList.remove('d-none'); return; }
-    if (!password || password.length < 6) { errEl.textContent = 'رمز عبور باید حداقل ۶ کاراکتر باشد'; errEl.classList.remove('d-none'); return; }
-    if (password !== password2) { errEl.textContent = 'رمزهای عبور یکسان نیستند'; errEl.classList.remove('d-none'); return; }
-    if (divar_phone && !/^09\d{9}$/.test(divar_phone)) { errEl.textContent = 'شماره دیوار باید با فرمت 09xxxxxxxxx باشد'; errEl.classList.remove('d-none'); return; }
+    // Each failure lands on its own field and focuses it, so the fix is where
+    // the eye already is rather than in a banner at the top of the form.
+    const fail = (field, msg) => {
+        setFieldError(field, msg);
+        const el = document.querySelector(`#f-${field} input`);
+        if (el) el.focus();
+        return false;
+    };
+
+    if (username.length < 3) return fail('reg-username', 'نام کاربری باید حداقل ۳ کاراکتر باشد');
+    if (!/^[A-Za-z0-9._-]+$/.test(username))
+        return fail('reg-username', 'فقط حروف انگلیسی، عدد، نقطه، خط تیره و زیرخط مجاز است');
+    if (full_name.length < 2) return fail('reg-fullname', 'نام و نام خانوادگی را وارد کنید');
+    if (divar_phone && !/^09\d{9}$/.test(divar_phone))
+        return fail('reg-divar-phone', 'شماره باید با فرمت ۰۹۱۲۳۴۵۶۷۸۹ باشد');
+
+    const rules = _pwScore(password);
+    if (!rules.len) return fail('reg-password', 'رمز عبور باید حداقل ۸ کاراکتر باشد');
+    if (Object.values(rules).filter(Boolean).length < 3)
+        return fail('reg-password', 'رمز عبور ضعیف است — شرط‌های زیر را کامل کنید');
+    if (password !== password2)
+        return fail('reg-password2', 'رمزهای عبور یکسان نیستند');
 
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال ثبت‌نام...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال ساخت حساب…';
 
     try {
         const resp = await fetch(`${API_BASE}/users/register`, {
@@ -216,10 +325,26 @@ async function doRegister() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, full_name: full_name || null, divar_phone, password })
         });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.detail || 'خطا در ثبت‌نام');
+        let data = {}; try { data = await resp.json(); } catch (_) {}
 
-        // Auto-login after successful registration
+        if (!resp.ok) {
+            const detail = _detailText(data.detail);
+            // "Account exists" is not a dead end — it is a sign-in, prefilled.
+            if (resp.status === 400 && /تکرار|قبلا|قبلاً|exists/i.test(detail)) {
+                setFieldError('reg-username', detail || 'این نام کاربری قبلاً ثبت شده است');
+                showAuthAlert('به نظر می‌رسد این حساب از قبل وجود دارد.',
+                              'اگر حساب شماست، وارد شوید. نام کاربری برایتان پر شده است.', 'warn');
+                const goto = document.getElementById('login-username');
+                if (goto) goto.value = username;
+                return;
+            }
+            showAuthAlert(detail || 'ساخت حساب انجام نشد.',
+                          'اطلاعات واردشده حفظ شده است. دوباره تلاش کنید یا با مدیر سیستم تماس بگیرید.');
+            return;
+        }
+
+        // Straight in — asking someone to log in with credentials they typed
+        // ten seconds ago is friction with no purpose.
         const form = new URLSearchParams();
         form.append('username', username);
         form.append('password', password);
@@ -228,20 +353,39 @@ async function doRegister() {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: form.toString()
         });
-        const loginData = await loginResp.json();
-        if (!loginResp.ok) throw new Error(loginData.detail || 'ثبت نام موفق، لطفاً وارد شوید');
+        let loginData = {}; try { loginData = await loginResp.json(); } catch (_) {}
+        if (!loginResp.ok) {
+            showAuthAlert('حساب ساخته شد.', 'اکنون با همان مشخصات وارد شوید.', 'ok');
+            showLoginForm();
+            const u = document.getElementById('login-username');
+            if (u) { u.value = username; document.getElementById('login-password').focus(); }
+            return;
+        }
+        _rememberUser(username);
         await _finishLogin(loginData);
 
     } catch (err) {
-        errEl.textContent = err.message;
-        errEl.classList.remove('d-none');
+        showAuthAlert('ارتباط با سرور برقرار نشد.',
+                      'اتصال خود را بررسی کنید. اطلاعات واردشده حفظ شده است.');
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-person-plus"></i> ایجاد حساب کاربری';
     }
 }
 
+/** FastAPI sends `detail` as a string OR a list of {msg} on a 422. Rendering
+ *  the list straight into the DOM produces "[object Object]". */
+function _detailText(detail) {
+    if (!detail) return '';
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) return detail.map(d => d.msg || JSON.stringify(d)).join(' — ');
+    return JSON.stringify(detail);
+}
+
 async function _finishLogin(data) {
+    // Record the choice BEFORE the token is stored — setToken reads it to
+    // decide between localStorage and sessionStorage.
+    _rememberUser(data.username);
     setToken(data.access_token);
     // A visitor has no dashboard at all — send them to their own page rather
     // than rendering a shell with every nav item hidden.
@@ -8440,3 +8584,286 @@ async function loadEmailMessages() {
         body.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3">${esc(e.message || 'خطا')}</td></tr>`;
     }
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTH UX
+//
+// Built against authgear.com/post/login-signup-ux-guide. The parts that
+// changed behaviour rather than markup:
+//
+//   · Errors land at the field that caused them, and every one names what to
+//     do next. A dead end is what makes someone abandon a login.
+//   · Inputs are never cleared on failure. Retyping a whole form because one
+//     field was wrong is the single most irritating thing a login can do.
+//   · Caps Lock is surfaced. Silent capitals are the most common cause of a
+//     failure nobody can explain to themselves.
+//   · The one-time code submits itself at six digits — there is nothing else
+//     that field could be waiting for.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function _authField(id) { return document.getElementById('f-' + id); }
+
+function setFieldError(id, message) {
+    const wrap = _authField(id);
+    const box = document.getElementById('e-' + id);
+    if (box) {
+        box.textContent = message || '';
+        box.classList.toggle('show', !!message);
+    }
+    if (wrap) wrap.classList.toggle('invalid', !!message);
+}
+
+function clearAuthErrors() {
+    document.querySelectorAll('.field-error').forEach(e => {
+        e.textContent = ''; e.classList.remove('show');
+    });
+    document.querySelectorAll('.auth-field').forEach(f => f.classList.remove('invalid'));
+    const box = document.getElementById('login-error');
+    if (box) { box.classList.remove('show'); box.innerHTML = ''; }
+}
+
+/** A summary problem plus the way out of it. `fix` is the recovery step. */
+function showAuthAlert(message, fix = '', kind = 'err') {
+    const box = document.getElementById('login-error');
+    if (!box) return;
+    box.className = `auth-alert ${kind} show`;
+    box.innerHTML = esc(message) + (fix ? `<span class="fix">${esc(fix)}</span>` : '');
+}
+
+// ── show / hide password ───────────────────────────────────────────────────
+// Paste stays enabled on purpose: blocking it breaks password managers, which
+// hold most people's strongest passwords.
+document.addEventListener('click', e => {
+    const btn = e.target.closest('.pw-toggle');
+    if (!btn) return;
+    const input = document.getElementById(btn.dataset.for);
+    if (!input) return;
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.querySelector('i').className = showing ? 'bi bi-eye' : 'bi bi-eye-slash';
+    const label = showing ? 'نمایش رمز عبور' : 'پنهان کردن رمز عبور';
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+    input.focus();
+});
+
+// ── Caps Lock ──────────────────────────────────────────────────────────────
+function _watchCaps(inputId, warnId) {
+    const input = document.getElementById(inputId);
+    const warn = document.getElementById(warnId);
+    if (!input || !warn) return;
+    const check = ev => {
+        // getModifierState is unavailable on some mobile keyboards; absent is
+        // simply "we cannot tell", so say nothing rather than guess.
+        const on = ev.getModifierState && ev.getModifierState('CapsLock');
+        warn.classList.toggle('show', !!on);
+    };
+    input.addEventListener('keyup', check);
+    input.addEventListener('keydown', check);
+    input.addEventListener('blur', () => warn.classList.remove('show'));
+}
+
+// ── password strength ──────────────────────────────────────────────────────
+// Deliberately about composition and length, not an entropy score. A number a
+// person cannot influence is not guidance.
+function _pwScore(v) {
+    return {
+        len:   v.length >= 8,
+        lower: /[a-z]/.test(v),
+        digit: /[0-9]/.test(v),
+        upper: /[A-Z]/.test(v) || /[^A-Za-z0-9]/.test(v),
+    };
+}
+
+function _paintStrength() {
+    const input = document.getElementById('reg-password');
+    if (!input) return;
+    const rules = _pwScore(input.value);
+    const met = Object.values(rules).filter(Boolean).length;
+
+    document.querySelectorAll('#pw-rules li').forEach(li => {
+        li.classList.toggle('met', !!rules[li.dataset.rule]);
+    });
+
+    const bar = document.getElementById('pw-meter-bar');
+    const label = document.getElementById('pw-meter-label');
+    const steps = [
+        { w: '0%',   c: 'transparent',      t: 'قدرت رمز عبور' },
+        { w: '25%',  c: 'var(--danger)',    t: 'خیلی ضعیف' },
+        { w: '50%',  c: 'var(--warning)',   t: 'ضعیف' },
+        { w: '75%',  c: 'var(--warning2)',  t: 'متوسط' },
+        { w: '100%', c: 'var(--accent3)',   t: 'قوی' },
+    ][input.value ? met : 0];
+    if (bar) { bar.style.width = steps.w; bar.style.background = steps.c; }
+    if (label) label.textContent = steps.t;
+}
+
+// ── one-time code ──────────────────────────────────────────────────────────
+function _wireOtp(inputId, submit) {
+    const el = document.getElementById(inputId);
+    if (!el) return;
+    el.addEventListener('input', () => {
+        // Persian digits arrive from a Persian keyboard; the server wants ASCII.
+        el.value = el.value.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+                           .replace(/[^0-9]/g, '');
+        if (el.value.length === el.maxLength) submit();
+    });
+}
+
+// ── recovery paths ─────────────────────────────────────────────────────────
+// Honest rather than decorative: there is no self-service reset for panel
+// accounts, so this says who can actually do it instead of linking to a page
+// that would only apologise.
+function showForgotHelp() {
+    showAuthAlert(
+        'بازیابی رمز عبور پنل توسط مدیر ارشد انجام می‌شود.',
+        'با مدیر سیستم تماس بگیرید تا رمز شما را بازنشانی کند. اگر مشتری هستید و دنبال ملک می‌گردید، از «ثبت‌نام و ورود مشتریان» استفاده کنید.',
+        'warn');
+}
+
+function showTotpHelp() {
+    showAuthAlert(
+        'به اپلیکیشن احراز هویت دسترسی ندارید؟',
+        'تنها مدیر ارشد می‌تواند احراز هویت دو مرحله‌ای را برای حساب شما غیرفعال کند. با او تماس بگیرید — به دلایل امنیتی این کار از این صفحه ممکن نیست.',
+        'warn');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    _watchCaps('login-password', 'caps-login');
+    _watchCaps('reg-password', 'caps-reg');
+    const pw = document.getElementById('reg-password');
+    if (pw) pw.addEventListener('input', _paintStrength);
+    _wireOtp('login-totp-code', () => {
+        const b = document.getElementById('login-totp-btn');
+        if (b && !b.disabled) verifyTotpLogin();
+    });
+});
+
+
+// ── returning user ─────────────────────────────────────────────────────────
+// Only the username, and only ever the username. Storing anything more would
+// turn a convenience into a liability on a shared machine.
+function _rememberUser(username) {
+    try {
+        if (document.getElementById('login-remember')?.checked === false) {
+            localStorage.setItem('sf_remember', '0');
+            localStorage.removeItem('sf_last_user');
+            return;
+        }
+        localStorage.setItem('sf_remember', '1');
+        localStorage.setItem('sf_last_user', username);
+    } catch (_) { /* private mode — the greeting is optional */ }
+}
+
+function forgetUser() {
+    try { localStorage.removeItem('sf_last_user'); } catch (_) {}
+    document.getElementById('welcome-back')?.classList.add('d-none');
+    const u = document.getElementById('login-username');
+    if (u) { u.value = ''; u.focus(); }
+}
+
+function _greetReturningUser() {
+    let last = null;
+    try { last = localStorage.getItem('sf_last_user'); } catch (_) {}
+    if (!last) return false;
+    const u = document.getElementById('login-username');
+    const box = document.getElementById('welcome-back');
+    const name = document.getElementById('welcome-name');
+    if (u) u.value = last;
+    if (name) name.textContent = last;
+    if (box) box.classList.remove('d-none');
+    return true;
+}
+
+// ── validate as they go, not at the end ────────────────────────────────────
+// Checking the whole form only on submit means someone completes six fields
+// and is then told the second one was wrong. Validation runs on blur — after
+// they have finished a field, never while they are still mid-word.
+function _validateOnBlur(fieldId, check) {
+    const el = document.querySelector(`#f-${fieldId} input`);
+    if (!el) return;
+    el.addEventListener('blur', () => {
+        if (!el.value.trim()) return;            // empty is the submit's job
+        setFieldError(fieldId, check(el.value.trim()) || '');
+    });
+    // Clear the moment they start fixing it — a red field they are actively
+    // correcting is just nagging.
+    el.addEventListener('input', () => setFieldError(fieldId, ''));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Autofocus: the password when we already know who this is, the username
+    // otherwise. Skipped on touch devices, where focusing raises the keyboard
+    // and hides the form the person was about to read.
+    const touch = window.matchMedia?.('(pointer: coarse)').matches;
+    const known = _greetReturningUser();
+    if (!touch) {
+        const target = known ? 'login-password' : 'login-username';
+        document.getElementById(target)?.focus();
+    }
+
+    _validateOnBlur('reg-username', v =>
+        v.length < 3 ? 'حداقل ۳ کاراکتر'
+        : !/^[A-Za-z0-9._-]+$/.test(v) ? 'فقط حروف انگلیسی، عدد، نقطه، خط تیره و زیرخط' : '');
+    _validateOnBlur('reg-fullname', v => v.length < 2 ? 'نام را کامل وارد کنید' : '');
+    _validateOnBlur('reg-divar-phone', v =>
+        /^09\d{9}$/.test(v) ? '' : 'شماره باید با فرمت ۰۹۱۲۳۴۵۶۷۸۹ باشد');
+    _validateOnBlur('reg-password2', v =>
+        v === document.getElementById('reg-password')?.value ? '' : 'با رمز عبور بالا یکسان نیست');
+});
+
+
+// ── animated brand mark ────────────────────────────────────────────────────
+//
+// Loaded after the form is interactive, never before. The player is 168 KB and
+// the animation is decoration — making someone wait on it to reach a password
+// field would be the wrong trade, and this page's whole job is to get out of
+// the way.
+//
+// Both files are served from our own origin. The site makes no third-party
+// requests, which matters on a network where a CDN may be slow or blocked, and
+// lottie-web is MIT so vendoring it is allowed (see js/vendor/*.LICENSE.md).
+//
+// Skipped entirely when: the visitor asked for reduced motion, the pointer is
+// coarse (the card should own a small screen, not share it with an ornament),
+// or the browser is saving data.
+function _initAuthMark() {
+    const host = document.getElementById('auth-lottie');
+    if (!host) return;
+
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const coarse  = window.matchMedia?.('(pointer: coarse)').matches;
+    const saver   = navigator.connection?.saveData;
+    if (reduced || coarse || saver) return;
+
+    const script = document.createElement('script');
+    script.src = '/dashboard/js/vendor/lottie_light.min.js';
+    script.async = true;
+    script.onload = () => {
+        try {
+            window.lottie.loadAnimation({
+                container: host,
+                renderer: 'svg',
+                loop: true,
+                autoplay: true,
+                // Versioned so a redeploy is never served a stale animation —
+                // this cost real time to diagnose once already.
+                path: '/dashboard/assets/auth-mark.json?v=2',
+            });
+            host.classList.add('ready');
+        } catch (_) { /* the static icon is already there */ }
+    };
+    // No onerror handler beyond ignoring it: a missing ornament is not an
+    // error worth telling anyone about.
+    script.onerror = () => {};
+    document.head.appendChild(script);
+}
+
+// requestIdleCallback where it exists, so this never competes with the form
+// for the main thread on a slow device.
+document.addEventListener('DOMContentLoaded', () => {
+    const go = () => _initAuthMark();
+    if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 2500 });
+    else setTimeout(go, 1200);
+});
