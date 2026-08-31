@@ -426,6 +426,21 @@ class ContactExtractor:
                 if not got_code and not otp_store.is_cancelled(self.otp_key):
                     logger.warning(f"SMS-OTP timeout — no code in {timeout}s")
                     otp_store.clear(self.otp_key)
+                    # Nobody answered. Nobody is going to answer the next one
+                    # either — an unanswered prompt means no one is watching —
+                    # and every further listing that needs a code would block
+                    # for another `timeout`. Fifty listings became four hours
+                    # of a job sitting at «در حال اجرا» making no progress.
+                    #
+                    # Suppress for the rest of the window exactly as an explicit
+                    # dismissal does. The run keeps going and keeps saving
+                    # listings; it just stops asking for numbers nobody is
+                    # there to unlock.
+                    otp_store.cancel_all(otp_store.job_of(self.otp_key))
+                    logger.warning(
+                        "No one answered the code prompt — pausing OTP requests "
+                        "for the rest of this job. Listings still save; phone "
+                        "numbers will be missing until a code is entered.")
             finally:
                 # ── resume the job (code entered, timed out, or cancelled) ──
                 if paused_ok and self.on_resume:

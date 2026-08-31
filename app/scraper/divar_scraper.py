@@ -2809,6 +2809,17 @@ class DivarScraper:
                         "یا دیوار آگهی دیگری ندارد یا فیلترها خیلی تنگ‌اند"
                     )
 
+            # A run whose OTP prompts went unanswered finishes fast and looks
+            # normal, but half its listings have no phone number. Say so.
+            try:
+                from app.scraper import otp_store
+                if otp_store.is_cancelled(job.job_id):
+                    note = ("کد تأیید دیوار وارد نشد — آگهی‌ها ذخیره شدند "
+                            "ولی شمارهٔ تماس بعضی‌شان خالی است")
+                    finish_reason = f"{finish_reason}؛ {note}" if finish_reason else note
+            except Exception as e:
+                logger.warning(f"could not check OTP suppression: {e}")
+
             job.finish_reason = finish_reason
             await self.db_session.commit()
             if skip_tally:
