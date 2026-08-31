@@ -165,6 +165,9 @@ class ScrapingJobResponse(BaseModel):
     updated_items: int = 0
     failed_items: int = 0
     error_message: Optional[str] = None
+    # Why a run stopped short of what was asked for. Not an error: a healthy
+    # job that scraped a day smaller than its cap fills this in too.
+    finish_reason: Optional[str] = None
     progress: float = 0.0
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

@@ -114,6 +114,7 @@ async def init_db():
                  _migrate_advertiser_type,
                  _migrate_cookie_usage,
                  _migrate_property_quality,
+                 _migrate_job_finish_reason,
                  _migrate_sms_panel,
                  _seed_reference_data):
         try:
@@ -511,6 +512,28 @@ async def _migrate_scraping_jobs_divar_phone(conn):
             await conn.execute(text(
                 "ALTER TABLE scraping_jobs ADD COLUMN IF NOT EXISTS divar_phone VARCHAR(20)"
             ))
+    except Exception:
+        pass
+
+
+async def _migrate_job_finish_reason(conn):
+    """Idempotently add finish_reason to scraping_jobs.
+
+    No backfill: jobs that ran before this existed genuinely have no recorded
+    reason, and NULL says that honestly rather than inventing one.
+    """
+    try:
+        from loguru import logger as _log
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='scraping_jobs' AND column_name='finish_reason'"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE scraping_jobs ADD COLUMN IF NOT EXISTS finish_reason VARCHAR(300)"
+            ))
+            _log.info("Added finish_reason to scraping_jobs")
     except Exception:
         pass
 

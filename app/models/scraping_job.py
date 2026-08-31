@@ -36,6 +36,12 @@ class ScrapingJob(Base):
     # Error handling
     error_message = Column(Text)
 
+    # Why the run stopped, when it stopped short of the requested number.
+    # Finishing at 42% and saying only «completed» is indistinguishable from a
+    # fault, so a run that ran out of listings has to say that it did. Not an
+    # error — a completed job with nothing wrong still fills this in.
+    finish_reason = Column(String(300))
+
     # Timestamps
     started_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))

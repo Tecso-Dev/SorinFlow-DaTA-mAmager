@@ -2510,6 +2510,9 @@ class DivarScraper:
                    else f"will keep scraping until {max_items} are saved")
             )
             older_streak = 0  # consecutive listings older than target_day
+            # Why this run ended, in the user's words. Left None when the run
+            # simply hit its target, which needs no explanation.
+            finish_reason: Optional[str] = None
             # why listings were dropped, tallied by reason. A scrape that
             # saves nothing is otherwise indistinguishable from a broken one.
             skip_tally: Dict[str, int] = {}
@@ -2677,6 +2680,11 @@ class DivarScraper:
                                 f"{older_streak} consecutive listings older than "
                                 f"{target_day} — day exhausted, stopping"
                             )
+                            from app.services.dpa_service import to_jalali
+                            finish_reason = (
+                                f"همهٔ آگهی‌های {to_jalali(target_day)} اسکرپ شد — "
+                                "دیوار آگهی بیشتری برای آن روز ندارد"
+                            )
                             break
 
                         if skip:
@@ -2772,12 +2780,37 @@ class DivarScraper:
             logger.info(f"Scraping job completed. New: {job.new_items}, Updated: {job.updated_items}, Failed: {job.failed_items}")
             # Say so when the feed ran dry before the target was met, rather
             # than completing at «۴۰ / ۲۰۰» with no explanation.
-            if max_items and job.new_items < max_items and not date_mode:
-                logger.warning(
-                    f"Ran out of candidates: {job.new_items}/{max_items} new from a pool of "
-                    f"{len(all_listings)}. {job.updated_items} were already in the database. "
-                    "Divar has no more matching listings, or the filters are too tight."
-                )
+            #
+            # This used to skip date_mode entirely, which is the one case that
+            # most needs saying: a single day holds however many ads it holds,
+            # so a run capped at 126 finishing at 42 is the day being smaller
+            # than the cap, not a fault. Unexplained, it reads as a fault.
+            if max_items and job.new_items < max_items:
+                if date_mode:
+                    logger.info(
+                        f"Day exhausted: {job.new_items}/{max_items} new for {target_day}. "
+                        f"{job.updated_items} were already in the database."
+                    )
+                    if not finish_reason:
+                        from app.services.dpa_service import to_jalali
+                        finish_reason = (
+                            f"آن روز ({to_jalali(target_day)}) بیش از این آگهی نداشت — "
+                            f"{job.new_items} از {max_items} درخواستی"
+                        )
+                else:
+                    logger.warning(
+                        f"Ran out of candidates: {job.new_items}/{max_items} new from a pool of "
+                        f"{len(all_listings)}. {job.updated_items} were already in the database. "
+                        "Divar has no more matching listings, or the filters are too tight."
+                    )
+                    finish_reason = (
+                        f"آگهی بیشتری پیدا نشد — {job.new_items} از {max_items} درخواستی. "
+                        f"{job.updated_items} آگهی از قبل در پایگاه داده بود. "
+                        "یا دیوار آگهی دیگری ندارد یا فیلترها خیلی تنگ‌اند"
+                    )
+
+            job.finish_reason = finish_reason
+            await self.db_session.commit()
             if skip_tally:
                 breakdown = ", ".join(f"{k}={v}" for k, v in
                                       sorted(skip_tally.items(), key=lambda kv: -kv[1]))

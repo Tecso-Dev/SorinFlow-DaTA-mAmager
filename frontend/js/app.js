@@ -2781,7 +2781,13 @@ function _renderJobsTable(items) {
             <td><code>${job.job_id.substring(0, 8)}...</code></td>
             <td>${job.category_name ? `<span class="badge bg-primary">${esc(job.category_name)}</span>` : '—'}</td>
             <td>${esc(job.city_name) || '—'}</td>
-            <td><span class="badge ${statusClass}">${statusLabel}</span></td>
+            <td>
+                <span class="badge ${statusClass}">${statusLabel}</span>
+                ${job.finish_reason ? `
+                    <div style="font-size:.68rem;color:var(--text-muted,#aaa);margin-top:.3rem;max-width:190px;line-height:1.5;">
+                        ${esc(job.finish_reason)}
+                    </div>` : ''}
+            </td>
             <td>
                 <div style="min-width:90px">
                     <div class="progress" style="height:5px;background:var(--border,#333);border-radius:3px;">
