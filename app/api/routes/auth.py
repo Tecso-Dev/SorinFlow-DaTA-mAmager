@@ -270,13 +270,32 @@ async def import_cookies(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_optional),
 ):
-    """Manually import cookies exported from a browser (e.g. via EditThisCookie extension)."""
+    """Import cookies exported from a browser (e.g. the EditThisCookie extension).
+
+    The import asks Divar whether what was pasted actually works, and reports
+    that answer. It used to store the row with is_valid=True without checking
+    anything — so the panel said the session was fine, and the person only found
+    out it was not when a different screen contradicted it minutes later and
+    sent them back to the login form.
+
+    A jar with no `token` cookie is refused outright. That is the usual mistake:
+    the extension was copied while on the wrong domain, or only part of the list
+    was selected, and no amount of retrying the login will fix it.
+    """
     if not request.cookies:
-        raise HTTPException(status_code=400, detail="No cookies provided")
+        raise HTTPException(status_code=400, detail="هیچ کوکی‌ای ارسال نشد")
 
     # Find token cookie to extract expiry
     token_cookie = next((c for c in request.cookies if c.get("name") == "token"), None)
     token_value = token_cookie.get("value") if token_cookie else None
+
+    if not token_value:
+        names = [str(c.get("name")) for c in request.cookies if c.get("name")][:8]
+        raise HTTPException(
+            status_code=400,
+            detail=("کوکی «token» در آنچه وارد کردید وجود ندارد و بدون آن نشست کار نمی‌کند. "
+                    "مطمئن شوید هنگام کپی، در دامنهٔ divar.ir بوده‌اید و همهٔ کوکی‌ها را "
+                    f"انتخاب کرده‌اید. آنچه دریافت شد: {'، '.join(names) or 'خالی'}"))
 
     from app.services.divar_session import derive_expiry
     expires_at = derive_expiry(request.cookies)
@@ -304,7 +323,34 @@ async def import_cookies(
         current_user.divar_phone = request.phone_number
 
     await db.commit()
-    return {"success": True, "message": f"Cookies imported for {request.phone_number}"}
+
+    # Now actually ask Divar, and let the answer be the answer.
+    from app.services import divar_session
+    row = (await db.execute(
+        select(Cookie).where(Cookie.phone_number == request.phone_number)
+        .order_by(Cookie.updated_at.desc().nullslast()).limit(1)
+    )).scalar_one_or_none()
+
+    check = {}
+    if row is not None:
+        try:
+            check = await divar_session.check_and_record(db, row)
+        except Exception as e:
+            # A failed probe must not lose the import — the row is already
+            # saved, and the verifier loop will test it shortly.
+            logger.warning(f"[cookies] import saved but probe failed: {type(e).__name__}: {e}")
+
+    alive = check.get("alive")
+    if alive is True:
+        msg = f"کوکی‌ها وارد و توسط دیوار تأیید شدند ({request.phone_number})"
+    elif alive is False:
+        msg = ("کوکی‌ها ذخیره شدند اما دیوار آن‌ها را نپذیرفت — این نشست کار نمی‌کند. "
+               "دوباره از مرورگری که همان لحظه در دیوار وارد شده کپی بگیرید.")
+    else:
+        msg = "کوکی‌ها ذخیره شدند، اما دیوار پاسخ نداد — وضعیت هنوز نامشخص است"
+
+    return {"success": True, "alive": alive, "message": msg,
+            "expires_at": expires_at.isoformat() if expires_at else None}
 
 
 @router.delete("/cookies/{cookie_id}")

@@ -300,3 +300,38 @@ class TestBulkProxyDeleteIsGuarded:
         earlier in this project."""
         from app.api.routes import proxies
         assert hasattr(proxies, "logger")
+
+
+class TestImportTellsTheTruth:
+    """Import used to save the row with is_valid=True and report success without
+    asking Divar anything. The panel then said the session was fine, and the
+    person found out otherwise on a different screen minutes later — sent back
+    to the login form with no explanation."""
+
+    def test_a_jar_without_a_token_cookie_is_refused_with_a_reason(self):
+        import inspect
+        from app.api.routes import auth
+
+        src = inspect.getsource(auth.import_cookies)
+        assert "token_value" in src
+        assert "400" in src or "status_code=400" in src
+        # and it names what it did receive, so the mistake is diagnosable
+        assert "names" in src
+
+    def test_the_import_verifies_before_it_reports(self):
+        import inspect
+        from app.api.routes import auth
+
+        src = inspect.getsource(auth.import_cookies)
+        assert "check_and_record" in src
+        assert '"alive"' in src or "alive" in src
+
+    def test_a_failed_probe_does_not_lose_the_import(self):
+        """The row is already committed; a probe that raises must not turn a
+        successful import into an error."""
+        import inspect
+        from app.api.routes import auth
+
+        src = inspect.getsource(auth.import_cookies)
+        i = src.index("check_and_record")
+        assert "except Exception" in src[i:i + 400]

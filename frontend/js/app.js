@@ -3368,12 +3368,19 @@ async function importCookies() {
     }
 
     try {
-        await apiCall('/auth/cookies/import', {
+        // The server verifies against Divar before answering, so this reports
+        // whether the session actually works rather than merely that the text
+        // was saved. Saying «موفق» for a jar Divar rejects is what sent people
+        // back to the login form with no idea why.
+        const r = await apiCall('/auth/cookies/import', {
             method: 'POST',
             body: JSON.stringify({ phone_number: phone, cookies })
         });
-        showToast('موفق', 'کوکی‌ها با موفقیت وارد شدند', 'success');
-        document.getElementById('import-cookies-json').value = '';
+        showToast(
+            r.alive === true ? 'تأیید شد' : r.alive === false ? 'رد شد' : 'نامشخص',
+            r.message || 'کوکی‌ها وارد شدند',
+            r.alive === true ? 'success' : r.alive === false ? 'danger' : 'warning');
+        if (r.alive === true) document.getElementById('import-cookies-json').value = '';
         checkCookieStatus();
         loadCookies();
     } catch (error) {
