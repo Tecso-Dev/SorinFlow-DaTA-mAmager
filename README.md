@@ -77,7 +77,7 @@ State that lives in the process, not the database, and therefore dies with the p
 
 **What will bite you.**
 
-- **README elsewhere is stale.** It says CI does not run pytest (it does, and it has blocked a deploy), lists 9 permission keys (there are 11), calls public sign-up off by default (the cluster sets `PUBLIC_AUTH_ENABLED="true"`), and links a `graphify-out/` directory that is git-ignored and absent. `local/start.sh`, the documented dev entry point, is also git-ignored.
+- **The other documents are stale.** This file was rewritten against the code on 2026-09-02; `README.fa.md`, `INSTALL.md` and `QUICK_START_GUIDE.md` were not. `README.fa.md` documents 7 of 11 dashboard sections and never mentions the portal, SMS or email. `INSTALL.md` gives a Compose sequence that hard-errors without `POSTGRES_PASSWORD`. `QUICK_START_GUIDE.md` is a June-era fix note with two links to a file that never existed. `local/start.sh`, the documented dev entry point, is git-ignored and absent from a fresh clone.
 - **CI applies only two manifests** — `04-backend.yaml` and `05-ingress.yaml`. Namespace, Postgres, Redis and the Traefik ACME config drift silently.
 - **A Secret key with no matching `env` entry in `04-backend.yaml` never reaches the pod**, so `kubectl patch secret` for it is a silent no-op. `LLM_API_KEY`, `SUPER_ADMIN_PASSWORD` and the `GCP_*` block are in that state today.
 - **The nightly backup is unfiltered**: every table, including plaintext `users.totp_secret`, password hashes, and live Divar session JSON, gzipped and uploaded to Telegram (`app/services/backup_service.py:44-90`). There is no exclusion list and no off switch. Meanwhile `scripts/restore_backup.py` registers only 7 of the 11 model modules, so a restore silently drops `app_settings`, both portal tables and `email_logs`.
@@ -274,7 +274,7 @@ sequenceDiagram
     A-->>V: "access token (visitor)"
 
     V->>A: "POST /api/public/auth/login"
-    Note over A: "either proof is enough;<br/>staff accounts are refused here<br/>so this cannot bypass TOTP"
+    Note over A: "either proof is enough —<br/>staff accounts are refused here<br/>so this cannot bypass TOTP"
 ```
 
 `GET /api/public/auth/status` is the one endpoint in this router with no `PUBLIC_AUTH_ENABLED` gate — the login page, the landing page and the portal all read it to decide whether to show sign-up.
@@ -935,7 +935,7 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 ### Next — weeks
 
-**9. Bring the README back in line with the code.** The audit found ~40 documented statements that contradict the source. The worst: `README.md:601` says CI does not run pytest (it does, and it has already blocked a broken build from deploying); `README.md:19-21` warns in the present tense about secrets that are tracked and are not any more; `README.md:33-45` links five files under `graphify-out/`, which is git-ignored, so every link is dead for anyone who clones; nine permission keys are listed where eleven exist; seven mounted API prefixes are missing from the API table; `PUBLIC_AUTH_ENABLED` is described as off while production runs it on. `QUICK_START_GUIDE.md` is a June-era fix note with two links to a file that never existed and an unwarned `docker compose down -v` — deleting it is a smaller diff than fixing it. `README.fa.md` documents 7 of 11 dashboard sections and never mentions the portal, SMS or email. *Effort: medium. Owner: Claude.*
+**9. Bring the remaining documents in line with the code.** The audit found 74 statements across the docs that contradict the source. This file was rewritten on 2026-09-02 and `tests/test_docs.py` now guards the claims that were wrong longest. Still outstanding: `README.fa.md` documents 7 of 11 dashboard sections and never mentions the portal, SMS or email — it is the Persian-speaking user's only guide. `INSTALL.md` describes a Docker-only mid-2026 system and its documented sequence fails, because Compose hard-errors without `POSTGRES_PASSWORD` and `REDIS_PASSWORD`, neither of which it tells you to set. `QUICK_START_GUIDE.md` is a June-era fix note written in the present tense, with two links to a file that never existed and an unwarned `docker compose down -v` — deleting it is a smaller diff than fixing it. *Effort: medium. Owner: Claude.*
 
 **10. Finish the email marketing panel.** `/api/email/audiences`, `/api/email/broadcast` and `/api/email/export` exist, work, and read `marketing_opt_in` — and no UI calls any of them (`app/api/routes/email.py:278, :306, :345`). The SMS twin is fully wired (`frontend/js/app.js:8178, :8218`), so this is an unfinished port, not a design choice. Consent is being collected at every sign-up (`frontend/js/portal.js:124`) with no panel that can act on it. *Effort: medium. Owner: Claude.*
 
