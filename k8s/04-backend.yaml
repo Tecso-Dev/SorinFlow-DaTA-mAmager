@@ -113,7 +113,7 @@ spec:
             # missing entirely until now, which meant the switch could not be
             # thrown from the cluster at all.
             - name: PUBLIC_AUTH_ENABLED
-              value: "false"
+              value: "true"
             # Which channel carries the login code. verification.py falls back
             # to the other one if this fails, so this is a preference, not a
             # hard route.

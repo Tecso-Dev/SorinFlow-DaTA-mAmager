@@ -422,6 +422,7 @@ def test_boot_verification_rejects_a_half_applied_migration():
                 await _verify_auth_v2(conn)
             # and passes once they are present
             for c in ("phone TEXT", "phone_verified BOOLEAN",
+                      "email_verified BOOLEAN",
                       "marketing_opt_in BOOLEAN", "permissions TEXT"):
                 await conn.execute(text(f"ALTER TABLE users ADD COLUMN {c}"))
             await _verify_auth_v2(conn)
@@ -729,16 +730,28 @@ class TestMarketingCapture:
         assert "marketing" in MAIL_A
 
     def test_the_marketing_group_requires_consent_and_verification(self):
-        """An unverified row is a contact nobody has proven belongs to them."""
+        """An unverified row is a contact nobody has proven belongs to them.
+
+        Each channel must check its OWN proof. A code that arrives by email
+        proves the address and says nothing about the number it was nominally
+        sent to, so gating an SMS list on email_verified — or an email list on
+        phone_verified — would message people on the strength of a fact nobody
+        established. While there is no SMS provider every code goes by email,
+        which is precisely when getting this backwards would be invisible.
+        """
         import inspect
         from app.api.routes import sms, email
 
-        for mod, fn in ((sms, sms._audience_numbers), (email, email._audience_emails)):
+        for mod, fn, proof in ((sms, sms._audience_numbers, "phone_verified"),
+                               (email, email._audience_emails, "email_verified")):
             src = inspect.getsource(fn)
             block = src[src.index('"marketing"'):]
             assert "marketing_opt_in == True" in block
-            assert "phone_verified == True" in block, \
-                f"{mod.__name__} would message unverified contacts"
+            assert f"{proof} == True" in block, \
+                f"{mod.__name__} would message contacts it has no proof for"
+            wrong = "email_verified" if proof == "phone_verified" else "phone_verified"
+            assert f"{wrong} == True" not in block, \
+                f"{mod.__name__} gates on the other channel's proof"
 
     def test_a_broadcast_is_confirmed_by_count(self):
         import inspect

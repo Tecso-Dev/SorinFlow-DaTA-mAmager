@@ -193,6 +193,9 @@ OPEN_PREFIXES = (
     "/maintenance-access",  # the bypass link would be blocked by the very
                             # middleware it exists to get past
     "/favicon",
+    "/dashboard/css/fonts/",  # the notice's own webfont. Blocking it dropped a
+                              # wholly-Persian page to Tahoma at the one moment
+                              # nobody can go and fix it.
 )
 
 

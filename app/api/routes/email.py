@@ -240,16 +240,19 @@ async def _audience_emails(db, audience: str) -> list:
     if audience == "marketing":
         # Consent AND a finished verification. An unverified row is an address
         # nobody has proven belongs to them.
+        #
+        # Gated on email_verified, not phone_verified: this list is addresses,
+        # and the proof that matches an address is a code that arrived at it.
         rows = (await db.execute(
             select(User.email).where(User.email.isnot(None),
                                      User.marketing_opt_in == True,      # noqa: E712
-                                     User.phone_verified == True,        # noqa: E712
+                                     User.email_verified == True,        # noqa: E712
                                      User.is_active == True))).scalars().all()  # noqa: E712
     elif audience == "visitors":
         rows = (await db.execute(
             select(User.email).where(User.email.isnot(None),
                                      User.role == "visitor",
-                                     User.phone_verified == True,        # noqa: E712
+                                     User.email_verified == True,        # noqa: E712
                                      User.is_active == True))).scalars().all()  # noqa: E712
     elif audience == "staff":
         rows = (await db.execute(

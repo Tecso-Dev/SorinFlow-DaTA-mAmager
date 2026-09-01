@@ -34,6 +34,11 @@ class User(Base):
     # account double as a login identity.
     phone = Column(String(20), unique=True, nullable=True, index=True)
     phone_verified = Column(Boolean, default=False, nullable=False)
+    # Set only by a code that arrived at the address. Kept apart from
+    # phone_verified on purpose: while there is no SMS provider every code
+    # travels by email, and collapsing the two would have the panel promise a
+    # reachable number to whoever is about to dial it.
+    email_verified = Column(Boolean, default=False, nullable=False)
     # Email is collected for marketing, never used as the verification gate —
     # delivery from Iran is not reliable enough to stand between a user and
     # their account. Only set when the user actually ticked the box.

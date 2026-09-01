@@ -11,7 +11,7 @@
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260829b">
+    <link rel="stylesheet" href="css/style.css?v=20260902a">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -57,7 +57,7 @@
         <!-- ── Step 1 · credentials ─────────────────────────────────────────
              A real <form>: Enter submits, and the browser offers to save the
              pair. The old markup was divs with onclick, which gives neither. -->
-        <form id="login-step-1" onsubmit="event.preventDefault();doLogin()">
+        <form id="login-step-1" novalidate onsubmit="event.preventDefault();doLogin()">
             <div class="auth-field" id="f-username">
                 <label for="login-username">نام کاربری</label>
                 <div class="auth-input-row">
@@ -103,7 +103,7 @@
         </form>
 
         <!-- ── Step 2 · second factor ───────────────────────────────────── -->
-        <form id="login-step-2" class="d-none" onsubmit="event.preventDefault();verifyTotpLogin()">
+        <form id="login-step-2" class="d-none" novalidate onsubmit="event.preventDefault();verifyTotpLogin()">
             <div style="text-align:center;margin-bottom:1rem;color:var(--text-muted);font-size:.85rem;">
                 <i class="bi bi-shield-lock" style="font-size:1.9rem;color:var(--accent);display:block;margin-bottom:.45rem;"></i>
                 کد ۶ رقمی را از اپلیکیشن احراز هویت خود وارد کنید
@@ -130,7 +130,7 @@
         </form>
 
         <!-- ── Step 3 · create an account ───────────────────────────────── -->
-        <form id="login-step-register" class="d-none" onsubmit="event.preventDefault();doRegister()">
+        <form id="login-step-register" class="d-none" novalidate onsubmit="event.preventDefault();doRegister()">
             <div class="auth-field" id="f-reg-username">
                 <label for="reg-username">نام کاربری</label>
                 <div class="auth-input-row">
@@ -2634,6 +2634,7 @@
                                             <th>نقش</th>
                                             <th>دسترسی‌ها</th>
                                             <th>شماره دیوار</th>
+                                            <th>تماس</th>
                                             <th>وضعیت</th>
                                             <th>آخرین ورود</th>
                                             <th>عملیات</th>

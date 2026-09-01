@@ -64,8 +64,11 @@ async def _visitor(current_user: User = Depends(get_current_user)) -> User:
     letting them post into the visitor queue would muddle who asked for what."""
     if current_user.role != ROLE_VISITOR:
         raise HTTPException(status_code=403, detail="این بخش برای کاربران عضو سایت است")
-    if not current_user.phone_verified:
-        raise HTTPException(status_code=403, detail="ابتدا شماره خود را تأیید کنید")
+    # Either proof opens the portal. Requiring the phone specifically would
+    # shut out everyone who signed up while email is the only channel there is,
+    # which is currently everyone.
+    if not (current_user.phone_verified or current_user.email_verified):
+        raise HTTPException(status_code=403, detail="ابتدا حساب خود را تأیید کنید")
     return current_user
 
 

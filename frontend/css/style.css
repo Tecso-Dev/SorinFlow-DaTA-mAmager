@@ -35,6 +35,13 @@
    frontend/css/fonts/, add an @font-face block below, and put its
    family name at the front of this list. */
   --font-fa: 'Estedad', 'Vazirmatn', Tahoma, 'Segoe UI', sans-serif;
+  /* Bootstrap reboot puts code/kbd/pre/samp on this, and not one of its six
+     faces has Arabic coverage — so every Persian log line rendered in a
+     fallback. Estedad sits before the generic, so Persian resolves to it
+     per-glyph while Latin and digits still land on the mono faces and the
+     log columns stay aligned. */
+  --bs-font-monospace: SFMono-Regular, Menlo, Monaco, Consolas,
+                       "Liberation Mono", "Courier New", 'Estedad', monospace;
   --bg:          #000000;
   --surface:     #0a0a0c;
   --surface2:    #131316;

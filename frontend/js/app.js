@@ -16,6 +16,13 @@ const FA_FONT = (() => {
     } catch (_) { return 'Vazirmatn'; }
 })();
 
+// One default rather than a `family` on every chart: the live chart was the
+// one of five that forgot, and forgetting is silent — canvas text cannot
+// inherit from CSS, so it just paints in Helvetica. Guarded because Chart
+// comes from a CDN and an unguarded reference would take the panel down with
+// it if that request fails.
+if (window.Chart) Chart.defaults.font.family = FA_FONT;
+
 let currentPage = 1;
 let cityChart = null;
 let trendChart = null;
@@ -5310,6 +5317,22 @@ async function loadUsers() {
                   }).join('') || '<span class="text-muted small">—</span>'
                 : '<span class="text-muted small">—</span>';
 
+            // Whether the number has actually been proven, said plainly.
+            //
+            // A code that arrives by email proves the address and nothing about
+            // the phone, and until there is an SMS provider that is every code
+            // we send. Someone about to ring this number needs to know which of
+            // the two they are looking at, so each contact carries its own tick.
+            const tick = (val, ok, okText, noText) => !val ? '' :
+                `<div class="small" dir="ltr" style="white-space:nowrap">${esc(val)}
+                   <span class="badge ${ok ? 'bg-success' : 'bg-warning text-dark'}"
+                         title="${ok ? okText : noText}">${ok ? '✓' : '!'}</span>
+                 </div>`;
+            const contact =
+                (tick(u.phone, u.phone_verified, 'شماره با پیامک تأیید شده', 'شماره تأیید نشده — کدی با پیامک ارسال نشده است') +
+                 tick(u.email, u.email_verified, 'ایمیل تأیید شده', 'ایمیل تأیید نشده'))
+                || '<span class="text-muted small">---</span>';
+
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${esc(u.id)}</td>
@@ -5323,6 +5346,7 @@ async function loadUsers() {
                         <i class="bi bi-pencil-square"></i>
                     </button>
                 </td>
+                <td>${contact}</td>
                 <td>
                     <span class="badge ${u.is_active ? 'bg-success' : 'bg-secondary'}">
                         ${u.is_active ? 'فعال' : 'غیرفعال'}
@@ -7740,7 +7764,11 @@ function _liveChartInit() {
         options: {
             responsive: true, maintainAspectRatio: false, animation: false,
             interaction: { intersect: false, mode: 'index' },
-            plugins: { legend: { labels: { color: c.text, boxWidth: 10, font: { size: 10 } } } },
+            plugins: {
+                legend: { labels: { color: c.text, boxWidth: 10, font: { size: 10 } } },
+                // the other four charts all have this; this one was missed
+                tooltip: _sfTooltip(c),
+            },
             scales: {
                 x: { ticks: { color: c.tick, maxTicksLimit: 6, font: { size: 9 } },
                      grid: { color: 'transparent' } },

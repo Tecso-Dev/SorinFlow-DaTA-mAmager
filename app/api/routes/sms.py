@@ -245,6 +245,10 @@ async def _audience_numbers(db, audience: str) -> list:
         # Consent is the whole point of this group: only people who ticked the
         # box, and only ones who finished verifying. Messaging an unverified
         # row means messaging a number nobody has proven belongs to them.
+        #
+        # phone_verified only becomes true once a code has actually travelled
+        # over SMS, so this group is empty until the provider is live. That is
+        # the honest count: there is currently no number anyone has proven.
         rows = (await db.execute(
             select(User.phone).where(User.phone.isnot(None),
                                      User.marketing_opt_in == True,   # noqa: E712

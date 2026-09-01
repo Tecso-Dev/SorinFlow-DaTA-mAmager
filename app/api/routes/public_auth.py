@@ -262,12 +262,24 @@ async def portal_verify(data: PortalVerifyRequest, db: AsyncSession = Depends(ge
         raise HTTPException(status_code=400, detail="درخواست نامعتبر است")
 
     try:
-        await verify_code(PURPOSE_SIGNUP, data.phone, data.code)
+        channel = await verify_code(PURPOSE_SIGNUP, data.phone, data.code)
     except VerificationError as e:
         raise HTTPException(status_code=400, detail=e.message)
 
-    was_unverified = not user.phone_verified
-    user.phone_verified = True
+    # Credit the channel the code actually took, and only that one.
+    #
+    # While Kavenegar is unverified there are no SMS credentials, so _deliver
+    # sends every code to the address. Reading that back as a verified phone
+    # put a tick beside a number nobody had ever answered — which the panel
+    # then showed to whoever was about to ring it, and which the SMS marketing
+    # audience read as permission to text. The number is only proven once a
+    # code has travelled over SMS, which will start happening on its own the
+    # day the provider is live; until then the panel says so plainly.
+    was_unverified = not (user.phone_verified or user.email_verified)
+    if channel == "sms":
+        user.phone_verified = True
+    else:
+        user.email_verified = True
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
@@ -328,7 +340,11 @@ async def portal_login(data: PortalLoginRequest, request: Request,
     if not user.is_active:
         raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال است")
 
-    if not user.phone_verified:
+    # Either proof is enough to sign in. Gating on phone_verified alone would
+    # have locked out every account created while email is the only channel —
+    # they would be sent a fresh code, verify by email again, and still not
+    # satisfy the gate on the next attempt. A closed loop.
+    if not (user.phone_verified or user.email_verified):
         try:
             issued = await issue_code(PURPOSE_SIGNUP, user.phone, user.phone,
                                       email=user.email, db=db)

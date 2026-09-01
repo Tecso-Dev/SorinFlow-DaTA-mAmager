@@ -5,8 +5,10 @@ One shell, three variants, so they read as the same product as the landing page
 rather than three different accidents. The palette, the gradient and the glass
 panel are lifted from frontend/landing.html — same tokens, same font stack.
 
-Self-contained by rule: no CDN stylesheet, no webfont request, no script from
-anywhere. Two of these three pages exist *because* something is already broken,
+Self-contained by rule: no CDN stylesheet, no script from anywhere. The one
+outbound request is Estedad, served from this same app — and it is listed in
+maintenance.ALLOW_PREFIXES, because the middleware used to 503 it and leave
+this page in Tahoma. Two of these three pages exist *because* something is already broken,
 and a dependency that has to load before the error page renders is a way for the
 error page to fail too. The landing page pulls Vazirmatn from Google Fonts; here
 it is named first in the stack and falls back to Tahoma, so a visitor who has it
@@ -28,8 +30,8 @@ _SHELL = """<!doctype html><html lang="fa" dir="rtl"><head>
   --line:rgba(255,255,255,.08); --glass:rgba(255,255,255,.035);
   --indigo:#6366f1; --violet:#a78bfa; --cyan:#67e8f9; --pink:#f0a6ff; --gold:#fcd34d;
   --grad:linear-gradient(120deg,#a78bfa,#f0a6ff 40%,#67e8f9 80%);
-  /* Deliberately no webfont request here — see the module docstring.
-     Vazirmatn if the visitor has it, Tahoma otherwise. Same single token as
+  /* Estedad, from this app's own static mount — the only request this page
+     makes. Vazirmatn then Tahoma if it cannot be fetched. Same single token as
      the panel so a font swap reaches the error pages too. */
   --font-fa:'Estedad','Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif;
 }

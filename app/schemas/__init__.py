@@ -378,6 +378,7 @@ class UserResponse(BaseModel):
     divar_phone: Optional[str] = None
     phone: Optional[str] = None
     phone_verified: bool = False
+    email_verified: bool = False
     marketing_opt_in: bool = False
     permissions: List[str] = Field(default_factory=list)
     last_login: Optional[datetime] = None

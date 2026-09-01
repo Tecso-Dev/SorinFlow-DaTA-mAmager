@@ -678,11 +678,13 @@ async def _migrate_auth_v2(conn):
         present = {r[0] for r in (await conn.execute(text(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name='users' AND table_schema=current_schema()"))).all()}
-        if not {"phone", "phone_verified", "marketing_opt_in", "permissions"} <= present:
+        if not {"phone", "phone_verified", "email_verified",
+                "marketing_opt_in", "permissions"} <= present:
             await conn.execute(text(
                 "ALTER TABLE users "
                 "ADD COLUMN IF NOT EXISTS phone VARCHAR(20), "
                 "ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE, "
+                "ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE, "
                 "ADD COLUMN IF NOT EXISTS marketing_opt_in BOOLEAN NOT NULL DEFAULT FALSE, "
                 "ADD COLUMN IF NOT EXISTS permissions JSON"))
         # Partial index: many staff rows have no portal phone at all, and a
@@ -730,7 +732,7 @@ async def _verify_auth_v2(conn):
     """Refuse to boot if the users table is missing a column the model needs.
 
     Every other migration here swallows its errors, which is right for them:
-    they add a column some feature reads, and a feature degrades. These four
+    they add a column some feature reads, and a feature degrades. These five
     are different. The User model selects them on every single query, so a
     silently-skipped ALTER does not degrade one screen — it breaks login, the
     dashboard and the API at once, on a deploy that reported success.
@@ -741,7 +743,8 @@ async def _verify_auth_v2(conn):
     """
     from sqlalchemy import text
 
-    required = {"phone", "phone_verified", "marketing_opt_in", "permissions"}
+    required = {"phone", "phone_verified", "email_verified",
+                "marketing_opt_in", "permissions"}
     dialect = conn.engine.dialect.name
 
     if dialect == "postgresql":

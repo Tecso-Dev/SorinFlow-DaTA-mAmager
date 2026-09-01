@@ -65,6 +65,10 @@ def _keys(purpose: str, identifier: str):
         "attempts": f"{base}:attempts",
         "cooldown": f"{base}:cooldown",
         "sends": f"{base}:sends",
+        # Which route the code left by. Written after delivery succeeds and
+        # read back at verify time, because the two are separate requests and
+        # the answer decides what the code proves.
+        "channel": f"{base}:channel",
     }
 
 
@@ -134,6 +138,9 @@ async def issue_code(purpose: str, identifier: str, phone: str,
         await r.delete(keys["code"], keys["cooldown"])
         logger.error(f"[verification] delivery failed for {purpose}")
         raise VerificationError("ارسال کد ناموفق بود. کمی بعد دوباره تلاش کنید")
+
+    # Same TTL as the code: the pair is only meaningful together.
+    await r.setex(keys["channel"], ttl, used)
 
     logger.info(f"[verification] code sent purpose={purpose} via={used} ttl={ttl}s")
     # Only ever populated outside production, so a developer can finish the
@@ -206,8 +213,15 @@ async def _deliver(code: str, *, phone: str, email: str | None,
     return None
 
 
-async def verify_code(purpose: str, identifier: str, code: str) -> bool:
+async def verify_code(purpose: str, identifier: str, code: str) -> str:
     """Check a code, consuming it on success and counting failures.
+
+    Returns the channel the code actually travelled over — "sms" or "email".
+
+    The caller needs that, not just a yes: a code read out of an inbox proves
+    the address and says nothing about the number it was nominally sent to.
+    Treating the two as one claim is how a phone nobody had ever answered ended
+    up flagged verified in the panel.
 
     A wrong guess costs an attempt; running out burns the code entirely, so a
     5-digit code cannot be walked through at leisure.
@@ -234,8 +248,16 @@ async def verify_code(purpose: str, identifier: str, code: str) -> bool:
         raise VerificationError(
             f"کد وارد شده اشتباه است. {max(left, 0)} تلاش باقی مانده است")
 
-    await r.delete(keys["code"], keys["attempts"], keys["sends"])
-    return True
+    # Read before the delete, or the answer goes with it.
+    #
+    # Missing only for a code issued by the previous image during a rollout.
+    # "email" is the honest default there: it is what _deliver picks whenever
+    # SMS has no credentials, which is the state this defaulting exists for,
+    # and guessing "sms" would invent the very claim this function was changed
+    # to stop inventing.
+    channel = (await r.get(keys["channel"]) or "email")
+    await r.delete(keys["code"], keys["attempts"], keys["sends"], keys["channel"])
+    return channel
 
 
 # ── per-IP throttling ───────────────────────────────────────────────────────
