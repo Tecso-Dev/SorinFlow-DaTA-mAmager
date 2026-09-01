@@ -27,6 +27,12 @@ class Cookie(Base):
     # it applies to.
     reveals = Column(Integer, default=0, nullable=False)
     last_used_at = Column(DateTime(timezone=True))
+
+    # When Divar last actually answered about this session. Distinct from
+    # updated_at, which moves on any write: a row saved an hour ago is not a
+    # session verified an hour ago, and the panel used to present the two as
+    # the same thing.
+    last_checked_at = Column(DateTime(timezone=True))
     
     def __repr__(self):
         return f"<Cookie(id={self.id}, phone={self.phone_number}, valid={self.is_valid})>"
@@ -42,4 +48,5 @@ class Cookie(Base):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "reveals": self.reveals or 0,
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
+            "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
         }

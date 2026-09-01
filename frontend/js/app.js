@@ -2782,8 +2782,21 @@ async function checkCookieStatus() {
 
         if (session) {
             cookieStatus = { is_valid: true, has_cookies: true, phone_number: session.phone_number };
-            if (textEl) textEl.textContent = `کوکی فعال (${session.phone_number})`;
-            if (dotEl)  dotEl.className = 'dot dot-success';
+            // Say how old the answer is. «فعال» on its own was the whole
+            // problem: it read as "checked just now" for a belief that had
+            // been wrong since the previous morning.
+            const checked = session.last_checked_at ? Date.parse(session.last_checked_at) : null;
+            const ageMin = checked ? (Date.now() - checked) / 60000 : null;
+            const fresh = ageMin !== null && ageMin <= 25;
+            if (textEl) {
+                textEl.textContent = fresh
+                    ? `کوکی فعال (${session.phone_number})`
+                    : `کوکی فعال؟ (${session.phone_number}) — بررسی نشده`;
+                textEl.title = checked
+                    ? `آخرین بررسی واقعی: ${new Date(checked).toLocaleString('fa-IR')}`
+                    : 'هنوز از دیوار پرسیده نشده است';
+            }
+            if (dotEl)  dotEl.className = 'dot ' + (fresh ? 'dot-success' : 'dot-warning');
         } else {
             // check if there are any (expired) cookies
             let hasCookies = false;
@@ -8300,6 +8313,69 @@ async function refreshSmsDelivery() {
 // looks at this table. The list is cheap (database only); «بررسی واقعی» is the
 // button, because it costs a real request to Divar.
 
+// ── نشست دیوار: live state ──────────────────────────────────────────────────
+//
+// Two numbers the panel was not showing, and one it was showing dishonestly.
+//
+// «زمان باقی‌مانده» counts down in the browser from an absolute instant, so it
+// is live without a request per second. «آخرین بررسی واقعی» is the one that
+// matters most: is_valid is a stored belief, and until it carries the time
+// Divar was actually asked, the header can say «کوکی فعال» about a session
+// that has been rejected since yesterday — which is exactly what happened.
+let _ckItems = [];
+let _ckStaleAfterMin = 25;
+let _ckTicker = null;
+
+function _faDuration(sec) {
+    if (sec === null || sec === undefined) return null;
+    const s = Math.max(0, Math.floor(sec));
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60), ss = s % 60;
+    if (d) return `${faNum(d)} روز و ${faNum(h)} ساعت`;
+    if (h) return `${faNum(h)} ساعت و ${faNum(m)} دقیقه`;
+    if (m) return `${faNum(m)} دقیقه و ${faNum(ss)} ثانیه`;
+    return `${faNum(ss)} ثانیه`;
+}
+
+function _faAgo(sec) {
+    const s = Math.max(0, Math.floor(sec));
+    if (s < 60) return 'همین حالا';
+    return `${_faDuration(s)} پیش`;
+}
+
+function _ckTick() {
+    const now = Date.now();
+    for (const it of _ckItems) {
+        const left = document.getElementById(`ck-left-${it.phone}`);
+        if (left) {
+            if (it.expiresAt === null) {
+                // A session cookie with no wall-clock expiry. Saying "منقضی"
+                // here would be wrong — it has no expiry, which is not the
+                // same as having passed one.
+                left.textContent = 'بدون تاریخ انقضا';
+                left.className = 'text-muted';
+            } else {
+                const sec = (it.expiresAt - now) / 1000;
+                left.textContent = sec <= 0 ? 'منقضی شده' : _faDuration(sec);
+                left.className = sec <= 0 ? 'text-danger'
+                               : sec < 86400 ? 'text-warning' : 'text-muted';
+            }
+        }
+
+        const seen = document.getElementById(`ck-seen-${it.phone}`);
+        if (seen) {
+            if (it.checkedAt === null) {
+                seen.innerHTML = '<span class="text-warning">هرگز بررسی نشده</span>';
+            } else {
+                const ageMin = (now - it.checkedAt) / 60000;
+                const fresh = ageMin <= _ckStaleAfterMin;
+                seen.innerHTML = `<span class="${fresh ? 'text-success' : 'text-warning'}">`
+                    + `${fresh ? '✓ ' : '⚠ '}${esc(_faAgo((now - it.checkedAt) / 1000))}</span>`;
+            }
+        }
+    }
+}
+
 async function loadCookieHealth() {
     const rows = document.getElementById('ck-rows');
     const btn = document.getElementById('ck-refresh');
@@ -8338,13 +8414,32 @@ async function loadCookieHealth() {
         const badge = { active: 'bg-success', expiring: 'bg-warning text-dark', expired: 'bg-danger' };
         const label = { active: 'فعال', expiring: 'نزدیک انقضا', expired: 'باطل' };
 
+        // Absolute instants, so the ticker below counts down without asking
+        // the server again every second.
+        _ckItems = items.map(i => ({
+            phone: i.phone_number,
+            expiresAt: i.expires_at ? Date.parse(i.expires_at) : null,
+            checkedAt: i.last_checked_at ? Date.parse(i.last_checked_at) : null,
+            verified: !!i.verified,
+        }));
+        _ckStaleAfterMin = d.stale_after_minutes || 25;
+
+        // Refetching is already handled by _monTimer; this only animates the
+        // countdown between those fetches. Self-clearing, so navigating away
+        // does not leave a timer running against a detached table.
+        clearInterval(_ckTicker);
+        _ckTicker = setInterval(() => {
+            if (document.getElementById('ck-rows')) _ckTick();
+            else clearInterval(_ckTicker);
+        }, 1000);
+
         rows.innerHTML = items.map(i => `
           <tr>
             <td dir="ltr">${esc(i.phone_number)}</td>
             <td><span class="badge ${badge[i.state] || 'bg-secondary'}">${label[i.state] || esc(i.state)}</span>
                 <div class="text-muted" style="font-size:.72rem">${esc(i.note || '')}</div></td>
-            <td dir="ltr" class="text-muted">${i.expires_at ? new Date(i.expires_at).toLocaleDateString('fa-IR') : '—'}</td>
-            <td dir="ltr" class="text-muted">${i.updated_at ? new Date(i.updated_at).toLocaleString('fa-IR') : '—'}</td>
+            <td class="text-muted" id="ck-left-${esc(i.phone_number)}">—</td>
+            <td class="text-muted" id="ck-seen-${esc(i.phone_number)}">—</td>
             <td>${i.in_rotation ? '<i class="bi bi-check-circle-fill text-success"></i>'
                                 : '<i class="bi bi-x-circle text-muted"></i>'}</td>
             <td class="text-start">
@@ -8355,6 +8450,7 @@ async function loadCookieHealth() {
               <span class="small ms-2" id="ck-res-${esc(i.phone_number)}"></span>
             </td>
           </tr>`).join('');
+        _ckTick();   // paint now rather than a second from now
     } catch (e) {
         rows.innerHTML = `<tr><td colspan="6" class="text-danger">${esc(e.message || 'خطا')}</td></tr>`;
     } finally {
@@ -8377,7 +8473,22 @@ async function checkCookieSession(phone, btn) {
             out.className = 'small ms-2 ' + (d.alive === true ? 'text-success'
                                           : d.alive === false ? 'text-danger' : 'text-warning');
         }
-        if (d.alive === false) loadCookieHealth();   // it just left the pool
+        // Refresh BOTH renderers, and on either answer.
+        //
+        // The header pill and this table read the same fact from two different
+        // endpoints, and only the table was being refreshed — so a check that
+        // killed a session left the pill still saying «کوکی فعال» for the very
+        // number the row underneath had just marked باطل. It corrected itself
+        // on the 5-minute interval, which is exactly long enough to look like
+        // the panel disagreeing with itself.
+        //
+        // `true` matters as much as `false`: a revived session must clear a
+        // pill that says «کوکی منقضی». `null` is "Divar did not answer" and
+        // changes no stored state, so nothing to re-read.
+        if (d.alive === true || d.alive === false) {
+            loadCookieHealth();
+            checkCookieStatus();
+        }
     } catch (e) {
         if (out) { out.textContent = e.message || 'خطا'; out.className = 'small ms-2 text-danger'; }
     } finally {

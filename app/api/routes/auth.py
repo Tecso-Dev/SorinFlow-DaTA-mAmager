@@ -103,9 +103,8 @@ async def verify_otp(
                 existing_cookie = existing.scalar_one_or_none()
                 
                 from datetime import datetime
-                expires_at = None
-                if token_cookie and "expires" in token_cookie:
-                    expires_at = datetime.fromtimestamp(token_cookie["expires"])
+                from app.services.divar_session import derive_expiry
+                expires_at = derive_expiry(cookies)
                 
                 if existing_cookie:
                     existing_cookie.cookies = cookies
@@ -249,6 +248,10 @@ async def list_cookies(
                 "phone_number": c.phone_number,
                 "is_valid": c.is_valid,
                 "expires_at": c.expires_at.isoformat() if c.expires_at else None,
+                # When Divar last actually answered about this session. The
+                # header pill reads it so it can stop presenting an untested
+                # belief as a confirmed fact.
+                "last_checked_at": c.last_checked_at.isoformat() if c.last_checked_at else None,
                 "created_at": c.created_at.isoformat() if c.created_at else None
             }
             for c in cookies
@@ -275,14 +278,8 @@ async def import_cookies(
     token_cookie = next((c for c in request.cookies if c.get("name") == "token"), None)
     token_value = token_cookie.get("value") if token_cookie else None
 
-    expires_at = None
-    if token_cookie:
-        exp = token_cookie.get("expirationDate") or token_cookie.get("expires")
-        if exp:
-            try:
-                expires_at = datetime.fromtimestamp(float(exp))
-            except Exception:
-                pass
+    from app.services.divar_session import derive_expiry
+    expires_at = derive_expiry(request.cookies)
 
     result = await db.execute(select(Cookie).where(Cookie.phone_number == request.phone_number))
     existing = result.scalar_one_or_none()

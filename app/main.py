@@ -156,6 +156,11 @@ async def lifespan(app: FastAPI):
     # Rented leads come back as fresh files when the lease year ends
     lease_task = asyncio.create_task(_lease_expiry_checker())
 
+    # Keep the panel's session state true. is_valid is only a belief until
+    # somebody asks Divar, and for a day and a half nobody did.
+    from app.services.divar_session import verifier_loop
+    session_task = asyncio.create_task(verifier_loop())
+
     # Google Cloud export. Returns immediately when disabled, which is the
     # shipped default — and when enabled on a host that cannot reach Google it
     # backs off rather than retrying every interval.
@@ -171,6 +176,7 @@ async def lifespan(app: FastAPI):
     reminder_task.cancel()
     backup_task.cancel()
     lease_task.cancel()
+    session_task.cancel()
     gcp_task.cancel()
     from app.services.gcp import gcp_client as _gcp
     await _gcp.close()

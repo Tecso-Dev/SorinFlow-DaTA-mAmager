@@ -99,13 +99,12 @@ class DivarAuth:
             return False
         
         try:
-            # Find token expiry
-            expires_at = None
-            for cookie in cookies:
-                if cookie.get("name") == "token":
-                    if "expires" in cookie:
-                        expires_at = datetime.fromtimestamp(cookie["expires"])
-                    break
+            # Find token expiry. Shared helper — this used to read only the
+            # `expires` field and build a naive local datetime, so a jar from a
+            # browser extension got no expiry and a jar from Playwright got one
+            # that was wrong by the host's UTC offset.
+            from app.services.divar_session import derive_expiry
+            expires_at = derive_expiry(cookies)
             
             # Check if cookie exists for this phone
             result = await self.db_session.execute(
@@ -174,20 +173,24 @@ class DivarAuth:
     async def check_cookies_validity(self, cookies: List[Dict]) -> bool:
         """Check if cookies are still valid"""
         try:
+            # Shared extractor: this used to read only the `expires` field, so
+            # a jar imported from a browser extension — which writes
+            # `expirationDate` — was reported invalid however fresh it was.
+            from app.services.divar_session import cookie_expiry
+            now_utc = datetime.now(timezone.utc)
+
             # Check for token cookie first
             token_cookie = next((c for c in cookies if c.get("name") == "token"), None)
             if token_cookie:
-                if "expires" in token_cookie:
-                    expires = datetime.fromtimestamp(token_cookie["expires"])
-                    if expires > datetime.now():
-                        return True
-            
+                expires = cookie_expiry(token_cookie)
+                if expires and expires > now_utc:
+                    return True
+
             # Check for other auth cookies
             auth_cookies = [c for c in cookies if any(keyword in c.get("name", "").lower() for keyword in ["auth", "session", "user", "login", "jwt", "bearer"])]
             for cookie in auth_cookies:
-                if "expires" in cookie:
-                    expires = datetime.fromtimestamp(cookie["expires"])
-                    if expires > datetime.now():
+                expires = cookie_expiry(cookie)
+                if expires and expires > now_utc:
                         logger.info(f"Valid auth cookie found: {cookie.get('name')}")
                         return True
                 else:

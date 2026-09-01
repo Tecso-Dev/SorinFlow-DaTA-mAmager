@@ -1,0 +1,274 @@
+"""
+Divar session state — expiry derivation and what a stored `is_valid` means.
+
+Two separate bugs, both of which showed up on the same panel screenshot: the
+header said «کوکی فعال» for a session Divar had been rejecting since the
+previous morning, and every account's expiry column read «—».
+
+The first is a belief with no date on it. The second is this:
+
+    expires_at = None
+    for cookie in cookies:
+        if cookie.get("name") == "token":
+            if "expires" in cookie:
+                expires_at = datetime.fromtimestamp(cookie["expires"])
+
+Three copies of that existed. Two read only `expires`, so a jar pasted from a
+browser extension — which writes `expirationDate`, and is the documented import
+path — produced no expiry at all. All three built a naive *local* datetime and
+handed it to code that compares against naive *UTC*, so any countdown was out
+by the host's offset: three and a half hours here.
+"""
+import os
+import sys
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./_test_dsession.db")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/9")
+os.environ.setdefault("SECRET_KEY", "0123456789abcdef0123456789abcdef")
+os.environ.setdefault("LOGS_PATH", "/tmp")
+os.environ.setdefault("IMAGES_PATH", "/tmp")
+
+FUTURE = datetime(2027, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+TS = FUTURE.timestamp()
+
+
+def _jar(**kw):
+    """A jar with a token cookie carrying whatever expiry fields are given."""
+    return [{"name": "did", "value": "x", "expires": 1},
+            {"name": "token", "value": "abc", **kw}]
+
+
+class TestExpiryDerivation:
+
+    def test_playwright_style_expires_is_read(self):
+        from app.services.divar_session import derive_expiry
+        assert derive_expiry(_jar(expires=TS)) == FUTURE
+
+    def test_extension_style_expirationDate_is_read(self):
+        """The bug that made every row show «—»: the documented import path is
+        a jar pasted out of a browser extension, and it does not use `expires`."""
+        from app.services.divar_session import derive_expiry
+        assert derive_expiry(_jar(expirationDate=TS)) == FUTURE
+
+    def test_the_result_is_utc_not_naive_local(self):
+        """_cookie_state compares against naive UTC. A naive local value there
+        is silently wrong by the host's offset, which is how a countdown ends
+        up three and a half hours out in Tehran."""
+        from app.services.divar_session import derive_expiry
+        got = derive_expiry(_jar(expires=TS))
+        assert got.tzinfo is not None
+        assert got.utcoffset() == timedelta(0)
+
+    def test_milliseconds_are_recognised(self):
+        from app.services.divar_session import derive_expiry
+        assert derive_expiry(_jar(expirationDate=TS * 1000)) == FUTURE
+
+    def test_a_string_timestamp_is_accepted(self):
+        """JSON pasted by hand routinely quotes numbers."""
+        from app.services.divar_session import derive_expiry
+        assert derive_expiry(_jar(expirationDate=str(TS))) == FUTURE
+
+    @pytest.mark.parametrize("fields", [
+        {},                      # session cookie: no expiry field at all
+        {"expires": -1},         # Playwright's "session cookie"
+        {"expirationDate": 0},
+        {"expires": None},
+        {"expires": "not-a-number"},
+    ])
+    def test_no_usable_expiry_is_none_not_a_crash_and_not_expired(self, fields):
+        """A session cookie has no wall-clock expiry. That is not the same as
+        having passed one, and must not be rendered as «منقضی شده»."""
+        from app.services.divar_session import derive_expiry
+        assert derive_expiry(_jar(**fields)) is None
+
+    def test_an_empty_or_missing_jar_is_none(self):
+        from app.services.divar_session import derive_expiry
+        assert derive_expiry([]) is None
+        assert derive_expiry(None) is None
+
+    def test_only_the_auth_cookie_counts(self):
+        """Analytics cookies expire on their own schedule and say nothing about
+        whether we can still scrape. Taking the earliest in the jar would
+        understate the session's life."""
+        from app.services.divar_session import derive_expiry
+        jar = [{"name": "_ga", "value": "x", "expirationDate": 1},
+               {"name": "token", "value": "abc", "expirationDate": TS}]
+        assert derive_expiry(jar) == FUTURE
+
+    def test_there_is_exactly_one_implementation(self):
+        """Three copies drifted apart and two of them were wrong. The callers
+        must all route through this one."""
+        import inspect
+        from app.scraper import auth as scraper_auth
+        from app.api.routes import auth as route_auth
+
+        for mod in (scraper_auth, route_auth):
+            src = inspect.getsource(mod)
+            assert "derive_expiry" in src, f"{mod.__name__} does not use the helper"
+            assert 'datetime.fromtimestamp(token_cookie' not in src
+            assert 'datetime.fromtimestamp(cookie["expires"])' not in src
+
+
+class TestProbeIsHonestAboutUncertainty:
+    """alive=None is load-bearing. Divar being unreachable is not the account
+    being dead, and writing the row off for it would empty the rotation pool
+    during an outage — when the scraper can least afford it."""
+
+    class _Row:
+        def __init__(self, jar=None):
+            self.phone_number = "09120000000"
+            self.cookies = jar if jar is not None else [{"name": "token", "value": "v"}]
+            self.is_valid = True
+            self.expires_at = None
+            self.last_checked_at = None
+
+    @pytest.mark.asyncio
+    async def test_an_empty_jar_is_dead_without_asking_divar(self):
+        from app.services import divar_session
+        res = await divar_session.probe(self._Row(jar=[]))
+        assert res["alive"] is False and res["needs_login"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status,alive", [
+        (200, True), (401, False), (403, False),
+        (500, None), (429, None), (302, None),
+    ])
+    async def test_status_codes_map_to_the_right_certainty(self, monkeypatch, status, alive):
+        from app.services import divar_session
+
+        class _Resp:
+            status_code = status
+
+        class _Client:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, *a, **kw): return _Resp()
+
+        import httpx
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _Client())
+        res = await divar_session.probe(self._Row())
+        assert res["alive"] is alive
+
+    @pytest.mark.asyncio
+    async def test_a_network_error_is_unknown_not_dead(self, monkeypatch):
+        from app.services import divar_session
+
+        class _Client:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, *a, **kw): raise OSError("connection reset")
+
+        import httpx
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _Client())
+        res = await divar_session.probe(self._Row())
+        assert res["alive"] is None
+        assert res["needs_login"] is False
+
+
+class TestCheckRecordsThatWeAsked:
+
+    class _Db:
+        def __init__(self): self.commits = 0
+        async def commit(self): self.commits += 1
+
+    def _row(self, valid=True, expires=None, jar=None):
+        r = TestProbeIsHonestAboutUncertainty._Row(jar=jar)
+        r.is_valid = valid
+        r.expires_at = expires
+        return r
+
+    async def _check(self, monkeypatch, row, result):
+        from app.services import divar_session
+
+        async def fake_probe(_row):
+            return dict(result)
+        monkeypatch.setattr(divar_session, "probe", fake_probe)
+        return await divar_session.check_and_record(self._Db(), row)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("alive", [True, False, None])
+    async def test_every_answer_stamps_the_time(self, monkeypatch, alive):
+        """Including a healthy one. Recording only failures would leave a
+        working session looking exactly as unverified as an untested one."""
+        row = self._row()
+        await self._check(monkeypatch, row, {"alive": alive, "state": "x", "message": ""})
+        assert row.last_checked_at is not None
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_answer_does_not_write_the_row_off(self, monkeypatch):
+        row = self._row(valid=True)
+        await self._check(monkeypatch, row, {"alive": None, "state": "unknown", "message": ""})
+        assert row.is_valid is True
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_removes_it_from_rotation(self, monkeypatch):
+        row = self._row(valid=True)
+        await self._check(monkeypatch, row, {"alive": False, "state": "expired", "message": ""})
+        assert row.is_valid is False
+
+    @pytest.mark.asyncio
+    async def test_a_revived_session_goes_back_into_rotation(self, monkeypatch):
+        row = self._row(valid=False)
+        await self._check(monkeypatch, row, {"alive": True, "state": "active", "message": ""})
+        assert row.is_valid is True
+
+    @pytest.mark.asyncio
+    async def test_a_missing_expiry_is_backfilled_on_the_way_past(self, monkeypatch):
+        """Sessions stored before derive_expiry existed have expires_at NULL.
+        Re-deriving here fixes them without anyone logging in again."""
+        row = self._row(expires=None,
+                        jar=[{"name": "token", "value": "v", "expirationDate": TS}])
+        await self._check(monkeypatch, row, {"alive": True, "state": "active", "message": ""})
+        assert row.expires_at == FUTURE
+
+    @pytest.mark.asyncio
+    async def test_an_existing_expiry_is_left_alone(self, monkeypatch):
+        keep = FUTURE - timedelta(days=5)
+        row = self._row(expires=keep,
+                        jar=[{"name": "token", "value": "v", "expirationDate": TS}])
+        await self._check(monkeypatch, row, {"alive": True, "state": "active", "message": ""})
+        assert row.expires_at == keep
+
+
+class TestTheStateIsPresentedHonestly:
+
+    def test_the_endpoint_reports_verification_age_not_just_write_age(self):
+        """age_hours measures when we last wrote the row. Presenting that as
+        though it meant "checked" is what let the header contradict the table."""
+        import inspect
+        from app.api.routes import monitoring
+
+        src = inspect.getsource(monitoring.cookie_health)
+        assert "last_checked_at" in src
+        assert "checked_age_minutes" in src
+        assert '"verified"' in src
+        assert "seconds_left" in src
+
+    def test_the_check_endpoint_and_the_loop_share_one_probe(self):
+        import inspect
+        from app.api.routes import monitoring
+        from app.services import divar_session
+
+        src = inspect.getsource(monitoring.cookie_check)
+        assert "divar_session.check_and_record" in src
+        # and the router no longer carries its own copy
+        assert "httpx" not in src
+        assert hasattr(divar_session, "verifier_loop")
+
+    def test_the_verifier_can_be_switched_off(self):
+        from app.config import get_settings
+        assert hasattr(get_settings(), "divar_session_check_minutes")
+
+    def test_the_model_and_migration_carry_the_column(self):
+        import inspect
+        from app.models.cookie import Cookie
+        from app import database
+
+        assert hasattr(Cookie, "last_checked_at")
+        src = inspect.getsource(database._migrate_cookie_usage)
+        assert "ADD COLUMN IF NOT EXISTS last_checked_at" in src

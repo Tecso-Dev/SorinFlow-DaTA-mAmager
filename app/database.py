@@ -413,7 +413,11 @@ async def _migrate_cookie_usage(conn):
         await conn.execute(text(
             "ALTER TABLE cookies "
             "ADD COLUMN IF NOT EXISTS reveals INTEGER NOT NULL DEFAULT 0, "
-            "ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ"))
+            "ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ, "
+            # When Divar was last actually asked about this session, as opposed
+            # to when we last wrote the row. is_valid without it is a belief
+            # with no date on it, and the panel was showing it as fact.
+            "ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ"))
     except Exception as e:
         print(f"cookie usage migration skipped: {e}")
 

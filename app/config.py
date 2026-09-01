@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     # saved, so a filtered-out ad costs the account the same as a kept one.
     # 0 = never rotate.
     cookie_rotate_every: int = Field(default=100, env="COOKIE_ROTATE_EVERY")
+    # How often to ask Divar whether each stored session still works. Costs one
+    # outbound request per account per interval. 0 disables it, leaving the
+    # manual button as the only real check.
+    divar_session_check_minutes: int = Field(default=10, env="DIVAR_SESSION_CHECK_MINUTES")
     
     # Image download limits. A listing's photo list comes from Divar and is not
     # something we control, so both the count and the size of each file are

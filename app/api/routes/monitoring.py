@@ -486,6 +486,12 @@ async def monitoring_overview(db: AsyncSession = Depends(get_db)):
 _SESSION_PROBE_URL = "https://api.divar.ir/v8/user/profile"
 
 
+# Older than this and the stored answer is no longer worth presenting as
+# current. Twice the default verifier interval, so a single missed round does
+# not make a healthy session look doubtful.
+STALE_AFTER_MIN = 25
+
+
 def _cookie_state(row, now: datetime) -> tuple:
     """(state, human note) for one stored session, from the database alone."""
     if not row.is_valid:
@@ -525,6 +531,23 @@ async def cookie_health(db: AsyncSession = Depends(get_db)):
         if updated:
             u = updated.replace(tzinfo=None) if updated.tzinfo else updated
             age_h = round((now - u).total_seconds() / 3600, 1)
+
+        # Seconds until the session cookie expires. The browser counts down
+        # from this rather than the server re-sending a number every second.
+        seconds_left = None
+        if r.expires_at:
+            e = r.expires_at.replace(tzinfo=None) if r.expires_at.tzinfo else r.expires_at
+            seconds_left = int((e - now).total_seconds())
+
+        # How long ago Divar was actually asked — as opposed to when we last
+        # wrote the row, which is what age_hours measures and what used to be
+        # presented as though it meant the same thing.
+        checked_age_min, verified = None, False
+        if r.last_checked_at:
+            c = r.last_checked_at.replace(tzinfo=None) if r.last_checked_at.tzinfo else r.last_checked_at
+            checked_age_min = round((now - c).total_seconds() / 60, 1)
+            verified = checked_age_min <= STALE_AFTER_MIN
+
         items.append({
             "id": r.id,
             "phone_number": r.phone_number,
@@ -534,6 +557,14 @@ async def cookie_health(db: AsyncSession = Depends(get_db)):
             "expires_at": r.expires_at.isoformat() if r.expires_at else None,
             "updated_at": updated.isoformat() if updated else None,
             "age_hours": age_h,
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            "seconds_left": seconds_left,
+            "last_checked_at": r.last_checked_at.isoformat() if r.last_checked_at else None,
+            "checked_age_minutes": checked_age_min,
+            # False means "nobody has asked Divar recently" — the panel shows
+            # that differently from a confirmed answer, because a belief with
+            # no date on it is what made the header contradict the table.
+            "verified": verified,
             # rotation picks from exactly this set — see _load_rotation_pool
             "in_rotation": bool(r.is_valid),
         })
@@ -547,6 +578,9 @@ async def cookie_health(db: AsyncSession = Depends(get_db)):
         # will switch, so a single-account pool silently never rotates.
         "rotation_possible": usable >= 2,
         "rotate_every": getattr(settings, "cookie_rotate_every", 0) or 0,
+        # So the panel can say how live "live" actually is.
+        "check_every_minutes": int(getattr(settings, "divar_session_check_minutes", 0) or 0),
+        "stale_after_minutes": STALE_AFTER_MIN,
     }
 
 
@@ -555,10 +589,14 @@ async def cookie_check(phone: str, db: AsyncSession = Depends(get_db)):
     """Ask Divar whether this account's session still works.
 
     `phone` is a lookup key into our own table, never a host or a URL — the
-    endpoint contacted is fixed above.
+    endpoint contacted is fixed in the service.
+
+    The probe itself lives in app/services/divar_session so the background
+    verifier can run exactly the same check; two copies would drift, and the
+    one that drifted would be whichever nobody was watching.
     """
     from app.models.cookie import Cookie
-    import httpx
+    from app.services import divar_session
 
     row = (await db.execute(
         select(Cookie).where(Cookie.phone_number == phone)
@@ -567,60 +605,4 @@ async def cookie_check(phone: str, db: AsyncSession = Depends(get_db)):
     if not row:
         raise HTTPException(status_code=404, detail="no stored session for that number")
 
-    jar = row.cookies or []
-    header = "; ".join(f"{c.get('name')}={c.get('value')}" for c in jar
-                       if c.get("name") and c.get("value"))
-    if not header:
-        return {"phone_number": phone, "alive": False, "state": "expired",
-                "message": "هیچ کوکی ذخیره‌شده‌ای وجود ندارد — ورود مجدد لازم است",
-                "needs_login": True}
-
-    started = time.perf_counter()
-    try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
-            r = await client.get(_SESSION_PROBE_URL, headers={
-                "Cookie": header,
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "fa-IR,fa;q=0.9",
-                "Origin": "https://divar.ir",
-                "Referer": "https://divar.ir/",
-                "x-render-type": "CSR",
-                "x-standard-divar-error": "true",
-                "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                               "AppleWebKit/537.36 (KHTML, like Gecko) "
-                               "Chrome/120.0.0.0 Safari/537.36"),
-            })
-        took = round((time.perf_counter() - started) * 1000, 1)
-    except Exception as e:
-        # Divar unreachable is not the same as the account being dead, and
-        # marking it invalid here would empty the rotation pool during an
-        # outage — exactly when the scraper can least afford it.
-        return {"phone_number": phone, "alive": None, "state": "unknown",
-                "message": f"دیوار پاسخ نداد ({type(e).__name__}) — وضعیت نامشخص است",
-                "needs_login": False, "took_ms": round((time.perf_counter() - started) * 1000, 1)}
-
-    if r.status_code == 200:
-        # A session Divar accepts, whatever the database believed. Put it back
-        # in rotation if we had written it off.
-        if not row.is_valid:
-            row.is_valid = True
-            await db.commit()
-        return {"phone_number": phone, "alive": True, "state": "active",
-                "message": f"دیوار این نشست را پذیرفت (HTTP {r.status_code})",
-                "needs_login": False, "took_ms": took, "http_status": r.status_code}
-
-    if r.status_code in (401, 403):
-        # An explicit refusal — and the only case where writing the row off is
-        # justified, because rotation would otherwise keep choosing it.
-        if row.is_valid:
-            row.is_valid = False
-            await db.commit()
-            logger.warning(f"[session] {phone} rejected by Divar "
-                           f"(HTTP {r.status_code}) — removed from rotation")
-        return {"phone_number": phone, "alive": False, "state": "expired",
-                "message": f"دیوار این نشست را رد کرد (HTTP {r.status_code}) — ورود مجدد لازم است",
-                "needs_login": True, "took_ms": took, "http_status": r.status_code}
-
-    return {"phone_number": phone, "alive": None, "state": "unknown",
-            "message": f"پاسخ غیرمنتظره از دیوار (HTTP {r.status_code}) — وضعیت نامشخص",
-            "needs_login": False, "took_ms": took, "http_status": r.status_code}
+    return await divar_session.check_and_record(db, row)
