@@ -2964,6 +2964,10 @@ function _renderJobsTable(items) {
             <td>${job.new_items} / ${job.updated_items}</td>
             <td>${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
             <td>
+                <button class="btn btn-sm btn-outline-secondary" onclick="showJobLog('${job.job_id}')"
+                        title="گزارش این اسکرپ">
+                    <i class="bi bi-list-ul"></i>
+                </button>
                 ${['running', 'paused', 'pending'].includes(job.status) ? `
                     <button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.job_id}')"
                             title="لغو تسک">
@@ -9043,3 +9047,64 @@ document.addEventListener('DOMContentLoaded', () => {
     if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 2500 });
     else setTimeout(go, 1200);
 });
+
+// ── گزارش اسکرپ ────────────────────────────────────────────────────────────
+//
+// scraper.log cannot answer «این ران چرا نصفه ماند؟»: no line in it carries a
+// job id, so two runs in a day interleave, and it rotates at 10 MB with seven
+// days of retention — the run somebody wants is usually the one that aged out.
+// These events are written by the scraper on its own connection, so a run that
+// dies still leaves its account of what it was doing.
+
+const JOB_STAGE_FA = {
+    start:     ['شروع',        'bi-play-circle',      'text-info'],
+    session:   ['نشست دیوار',  'bi-person-badge',     'text-warning'],
+    page:      ['صفحه',        'bi-file-earmark',     'text-muted'],
+    item:      ['آگهی',        'bi-house',            'text-muted'],
+    challenge: ['چالش دیوار',  'bi-shield-exclamation', 'text-warning'],
+    pause:     ['توقف',        'bi-pause-circle',     'text-warning'],
+    resume:    ['ادامه',       'bi-play-fill',        'text-info'],
+    finish:    ['پایان',       'bi-check-circle',     'text-success'],
+    error:     ['خطا',         'bi-x-octagon',        'text-danger'],
+};
+
+async function showJobLog(jobId) {
+    const body = document.getElementById('joblog-body');
+    const el = document.getElementById('jobLogModal');
+    if (!body || !el) return;
+
+    body.innerHTML = '<div class="text-muted small">در حال بارگذاری…</div>';
+    new bootstrap.Modal(el).show();
+
+    try {
+        const d = await apiCall(`/scraper/jobs/${encodeURIComponent(jobId)}/events`);
+        if (!d.items?.length) {
+            body.innerHTML = `<div class="text-muted small">
+                برای این اسکرپ رویدادی ثبت نشده است. رانی که پیش از افزوده‌شدن این
+                گزارش اجرا شده باشد، سابقه‌ای ندارد.</div>`;
+            return;
+        }
+        body.innerHTML = d.items.map(e => {
+            const [label, icon, cls] = JOB_STAGE_FA[e.stage] || ['—', 'bi-dot', 'text-muted'];
+            const lvl = e.level === 'error' ? 'text-danger'
+                      : e.level === 'warning' ? 'text-warning' : cls;
+            const extra = Object.keys(e.details || {}).length
+                ? `<div class="text-muted" style="font-size:.72rem" dir="ltr">${
+                     esc(JSON.stringify(e.details))}</div>` : '';
+            return `<div class="d-flex gap-2 py-2" style="border-bottom:1px solid var(--border)">
+                <i class="bi ${icon} ${lvl}" style="margin-top:.15rem"></i>
+                <div class="flex-grow-1">
+                  <div class="d-flex justify-content-between gap-2">
+                    <span class="small ${lvl}">${esc(label)}</span>
+                    <span class="text-muted" style="font-size:.72rem" dir="ltr">${
+                       e.created_at ? new Date(e.created_at).toLocaleString('fa-IR') : ''}</span>
+                  </div>
+                  <div style="font-size:.85rem">${esc(e.message || '')}</div>
+                  ${extra}
+                </div>
+              </div>`;
+        }).join('');
+    } catch (err) {
+        body.innerHTML = `<div class="text-danger small">${esc(err.message || 'خطا')}</div>`;
+    }
+}

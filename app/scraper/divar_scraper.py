@@ -217,6 +217,12 @@ class DivarScraper:
                                 if _rec:
                                     phone_number = _rec.phone_number
                                     logger.info(f"Falling back to session for {phone_number}")
+                                    from app.services import job_log
+                                    await job_log.record(
+                                        self.current_job.job_id if self.current_job else None,
+                                        job_log.SESSION,
+                                        f"نشست اصلی کار نکرد — با شمارهٔ {phone_number} ادامه می‌دهیم",
+                                        level="warning", phone=phone_number)
                             except Exception as _e:
                                 logger.warning(f"Could not find fallback session: {_e}")
 
@@ -229,6 +235,12 @@ class DivarScraper:
                             logger.info(f"Session restored successfully using fallback: {phone_number}")
                         else:
                             logger.warning("No valid session found. Phone numbers will not be extracted.")
+                            from app.services import job_log
+                            await job_log.record(
+                                self.current_job.job_id if self.current_job else None,
+                                job_log.SESSION,
+                                "هیچ نشست معتبر دیواری پیدا نشد — شمارهٔ تماس آگهی‌ها استخراج نمی‌شود",
+                                level="warning")
                             return False
                     else:
                         self.active_phone = phone_number
@@ -1358,6 +1370,11 @@ class DivarScraper:
                     self.current_job.status = "paused"
                     await self.db_session.commit()
                     logger.info(f"Job {self.current_job.job_id} PAUSED — awaiting OTP code")
+                    from app.services import job_log
+                    await job_log.record(
+                        self.current_job.job_id, job_log.PAUSE,
+                        "دیوار کد تأیید خواست — اسکرپ متوقف شد تا کد وارد شود",
+                        level="warning")
 
             async def _resume_job():
                 if self.current_job:
@@ -1367,6 +1384,9 @@ class DivarScraper:
                         self.current_job.status = "running"
                         await self.db_session.commit()
                         logger.info(f"Job {self.current_job.job_id} RESUMED")
+                        from app.services import job_log
+                        await job_log.record(self.current_job.job_id, job_log.RESUME,
+                                             "کد وارد شد — اسکرپ ادامه پیدا کرد")
 
             async def _job_cancelled():
                 if not self.current_job:
@@ -2430,6 +2450,9 @@ class DivarScraper:
                 return job
             job.status = "running"
             job.started_at = datetime.now()
+            from app.services import job_log
+            await job_log.prune()
+            await job_log.record(job.job_id, job_log.START, "اسکرپ شروع شد")
         else:
             # Create new job record
             job = ScrapingJob(
@@ -2772,6 +2795,13 @@ class DivarScraper:
             job.status = "completed"
             job.completed_at = datetime.now()
             await self.db_session.commit()
+            from app.services import job_log
+            await job_log.record(
+                job.job_id, job_log.FINISH,
+                f"اسکرپ تمام شد — {job.new_items} تازه، {job.updated_items} به‌روز، "
+                f"{job.failed_items} ناموفق",
+                new=job.new_items, updated=job.updated_items,
+                failed=job.failed_items, pages=job.scraped_pages)
             
             # The account that finished the job has the freshest session of all;
             # losing it would make the next job start from a stale snapshot.
@@ -2837,6 +2867,12 @@ class DivarScraper:
             job.completed_at = datetime.now()
             await self.db_session.commit()
             logger.error(f"Scraping job failed: {e}")
+            from app.services import job_log
+            await job_log.record(
+                job.job_id, job_log.ERROR,
+                f"اسکرپ با خطا متوقف شد: {type(e).__name__}: {e}",
+                level="error", error_type=type(e).__name__,
+                new=job.new_items, updated=job.updated_items)
         
         return job
     

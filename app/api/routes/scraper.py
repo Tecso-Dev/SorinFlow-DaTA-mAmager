@@ -360,6 +360,51 @@ async def get_scraping_jobs(
     )
 
 
+@router.get("/jobs/{job_id}/events")
+async def get_job_events(
+    job_id: str,
+    level: Optional[str] = None,
+    limit: int = 500,
+    db: AsyncSession = Depends(get_db)
+):
+    """What happened during one run, in order.
+
+    Exists because scraper.log cannot answer it: no line in that file carries a
+    job id, so two runs in a day interleave with no way to separate them, and
+    it rotates at 10 MB with seven days of retention — so the run somebody
+    wants to understand is often the one that has already aged out.
+
+    These rows are written by the scraper itself on its own connection, so a
+    run that dies still leaves its account of what it was doing.
+    """
+    from app.services import job_log
+
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        # The panel also holds integer ids from the jobs table.
+        job = (await db.execute(
+            select(ScrapingJob).where(ScrapingJob.id == int(job_id))
+        )).scalar_one_or_none() if job_id.isdigit() else None
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        job_uuid = job.job_id
+
+    rows = await job_log.events_for(db, job_uuid, limit=limit, level=level)
+    return {
+        "job_id": str(job_uuid),
+        "count": len(rows),
+        "items": [{
+            "id": r.id,
+            "level": r.level,
+            "stage": (r.details or {}).get("stage"),
+            "message": r.message,
+            "details": {k: v for k, v in (r.details or {}).items() if k != "stage"},
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        } for r in rows],
+    }
+
+
 @router.get("/jobs/{job_id}", response_model=ScrapingJobResponse)
 async def get_scraping_job(
     job_id: str,
