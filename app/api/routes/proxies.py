@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
+from loguru import logger
 import httpx
 
 from app.database import get_db
@@ -100,6 +101,41 @@ async def delete_proxy(
     await db.commit()
     
     return {"success": True, "message": "Proxy deleted"}
+
+
+@router.delete("")
+@router.delete("/")
+async def delete_all_proxies(
+    confirm_count: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove every stored proxy.
+
+    Guarded by confirm_count exactly as the broadcast endpoints are: the browser
+    sends back the number it displayed, and if the table has changed since it
+    was drawn the delete is refused rather than removing rows the person never
+    saw. Without that, a stale tab is a way to wipe a list somebody else was
+    still adding to.
+
+    Declared before /{proxy_id} would be a concern in a path-matching router,
+    but these are distinct paths — "" and "/" cannot collide with an int id.
+
+    Safe for scraping: _get_working_proxy returns None when the table is empty
+    and get_context_options simply omits the proxy, so the scraper falls back
+    to a direct connection rather than failing.
+    """
+    rows = (await db.execute(select(Proxy))).scalars().all()
+    if confirm_count != len(rows):
+        raise HTTPException(
+            status_code=409,
+            detail=f"تعداد پروکسی‌ها تغییر کرده است ({len(rows)} مورد) — صفحه را تازه کنید")
+
+    for r in rows:
+        await db.delete(r)
+    await db.commit()
+
+    logger.info(f"[proxies] {len(rows)} proxy(ies) deleted in bulk")
+    return {"success": True, "deleted": len(rows)}
 
 
 @router.post("/{proxy_id}/toggle")

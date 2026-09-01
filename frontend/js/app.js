@@ -3424,6 +3424,33 @@ async function deleteCookie(id) {
 
 // ==================== Proxies ====================
 
+let _proxyCount = 0;
+
+/** Remove every proxy in one go.
+ *
+ *  Sends back the count the table was drawn with. If the list has changed since
+ *  — someone else adding one, a stale tab left open — the server refuses with a
+ *  409 rather than deleting rows this person never saw.
+ *
+ *  Scraping is unaffected: with an empty table the scraper falls back to a
+ *  direct connection rather than failing. */
+async function deleteAllProxies() {
+    if (!_proxyCount) { showToast('توجه', 'پراکسی‌ای برای حذف وجود ندارد', 'warning'); return; }
+    if (!confirm(`همهٔ ${_proxyCount} پراکسی حذف شود؟ این کار قابل بازگشت نیست.`)) return;
+
+    const btn = document.getElementById('proxy-wipe');
+    if (btn) btn.disabled = true;
+    try {
+        const r = await apiCall(`/proxies?confirm_count=${_proxyCount}`, { method: 'DELETE' });
+        showToast('موفق', `${r.deleted} پراکسی حذف شد`, 'success');
+        loadProxies();
+    } catch (e) {
+        showToast('خطا', e.message || 'حذف ناموفق بود', 'danger');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 async function loadProxies() {
     try {
         const data = await apiCall('/proxies');
@@ -3432,6 +3459,7 @@ async function loadProxies() {
         tbody.innerHTML = '';
         
         if (data.items.length === 0) {
+            _proxyCount = 0;
             tbody.innerHTML = `
                 <tr>
                     <td colspan="6" class="text-center text-muted py-4">
@@ -3442,6 +3470,8 @@ async function loadProxies() {
             return;
         }
         
+        _proxyCount = data.items.length;
+
         data.items.forEach(proxy => {
             const row = document.createElement('tr');
             row.innerHTML = `

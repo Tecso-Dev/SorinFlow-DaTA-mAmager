@@ -272,3 +272,31 @@ class TestTheStateIsPresentedHonestly:
         assert hasattr(Cookie, "last_checked_at")
         src = inspect.getsource(database._migrate_cookie_usage)
         assert "ADD COLUMN IF NOT EXISTS last_checked_at" in src
+
+
+class TestBulkProxyDeleteIsGuarded:
+    """Removing every proxy is one click, so it needs the same confirm-count
+    guard the broadcast endpoints use: a stale tab must not be able to wipe a
+    list somebody else is still adding to."""
+
+    def test_the_endpoint_refuses_a_stale_count(self):
+        import inspect
+        from app.api.routes import proxies
+
+        src = inspect.getsource(proxies.delete_all_proxies)
+        assert "confirm_count" in src
+        assert "409" in src
+
+    def test_it_is_registered_on_the_collection_not_an_id(self):
+        from app.api.routes import proxies
+        paths = {(r.path, tuple(sorted(r.methods))) for r in proxies.router.routes}
+        assert ("", ("DELETE",)) in paths or ("/", ("DELETE",)) in paths
+        # and the per-item delete still exists
+        assert any(p == "/{proxy_id}" and "DELETE" in m for p, m in paths)
+
+    def test_the_module_can_log(self):
+        """This module had no logger; referencing one would have raised
+        NameError inside the request, which is exactly how a migration failed
+        earlier in this project."""
+        from app.api.routes import proxies
+        assert hasattr(proxies, "logger")
