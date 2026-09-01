@@ -334,7 +334,11 @@ async def import_cookies(
     check = {}
     if row is not None:
         try:
-            check = await divar_session.check_and_record(db, row)
+            # confirm=True: a single 403 is not proof. Telling someone their
+            # freshly-pasted cookies were rejected, when Divar's edge simply
+            # refused one request, sends them back to re-copy a jar that was
+            # fine.
+            check = await divar_session.check_and_record(db, row, confirm=True)
         except Exception as e:
             # A failed probe must not lose the import — the row is already
             # saved, and the verifier loop will test it shortly.

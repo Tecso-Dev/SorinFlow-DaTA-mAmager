@@ -103,9 +103,58 @@ def derive_expiry(jar):
     return None
 
 
+DIVAR_HOSTS = ("divar.ir", ".divar.ir", "api.divar.ir", ".api.divar.ir")
+
+
+def divar_cookies(jar):
+    """Divar's own cookies, one entry per name, freshest kept.
+
+    Two things went wrong when this simply concatenated the whole jar.
+
+    `context.cookies()` returns every cookie the browser holds for every domain
+    it touched during the login — analytics, captcha providers, anything the
+    page embedded. Sending those to api.divar.ir is wrong on its face and makes
+    the header enormous.
+
+    Worse, `token` legitimately appears twice: Divar sets it for `.divar.ir`
+    and the page picks it up again for `divar.ir`. Joining the jar produced
+    `token=<old>; token=<new>`, Divar read whichever it liked and refused the
+    request — and a refusal is a flat 403 on *any* endpoint, including public
+    ones. So a freshly-issued, perfectly good session came back "rejected by
+    Divar", which is exactly what the panel then reported.
+    """
+    best = {}
+    for c in (jar or []):
+        name, value = c.get("name"), c.get("value")
+        if not name or not value:
+            continue
+        dom = (c.get("domain") or "").strip().lower()
+        # No domain at all: a hand-pasted jar. Keep it — refusing would break
+        # the documented import path for the sake of a field it need not have.
+        if dom and not any(dom == h or dom.endswith(".divar.ir") for h in DIVAR_HOSTS):
+            continue
+        prev = best.get(name)
+        if prev is None or _fresher(c, prev):
+            best[name] = c
+    return list(best.values())
+
+
+def _fresher(a, b) -> bool:
+    """Later expiry wins; a session cookie loses to a dated one only if the
+    dated one is still in the future."""
+    ea, eb = cookie_expiry(a), cookie_expiry(b)
+    if ea is None and eb is None:
+        return False          # keep the first seen, so the order is stable
+    if eb is None:
+        return True
+    if ea is None:
+        return False
+    return ea > eb
+
+
 def _header_from(jar) -> str:
-    return "; ".join(f"{c.get('name')}={c.get('value')}" for c in (jar or [])
-                     if c.get("name") and c.get("value"))
+    return "; ".join(f"{c.get('name')}={c.get('value')}"
+                     for c in divar_cookies(jar))
 
 
 async def probe(row) -> dict:
@@ -149,8 +198,17 @@ async def probe(row) -> dict:
             "message": f"پاسخ غیرمنتظره از دیوار (HTTP {r.status_code}) — وضعیت نامشخص"}
 
 
-async def check_and_record(db, row) -> dict:
+async def check_and_record(db, row, *, confirm: bool = False) -> dict:
     """probe(), then write down both the answer and the fact that we asked.
+
+    `confirm` re-probes once before writing a session off. A 403 from Divar is
+    not the unambiguous signal it looks like: Divar answers 403 to *any*
+    request whose token cookie it dislikes — including on endpoints that need
+    no login at all — so a transient edge refusal is indistinguishable from an
+    expired session by status code alone. The unattended loop must therefore
+    ask twice before removing an account from rotation: a false negative there
+    costs a working session and a round of SMS codes to get it back. The manual
+    button does not confirm — somebody is watching, and they asked.
 
     last_checked_at is stamped for every definite answer — including a healthy
     one. Recording only failures would leave a working session looking exactly
@@ -161,6 +219,15 @@ async def check_and_record(db, row) -> dict:
     before, and the row must not be written off for it.
     """
     res = await probe(row)
+
+    if confirm and res["alive"] is False:
+        await asyncio.sleep(3)
+        second = await probe(row)
+        if second["alive"] is not False:
+            logger.info(f"[session] {row.phone_number} failed once then "
+                        f"recovered — not writing it off")
+        res = second
+
     now = datetime.now(timezone.utc)
 
     # Backfill on the way past. Every session stored before derive_expiry
@@ -220,7 +287,7 @@ async def verifier_loop():
                         continue          # one entry per number, newest wins
                     seen.add(row.phone_number)
                     try:
-                        await check_and_record(db, row)
+                        await check_and_record(db, row, confirm=True)
                     except Exception as e:
                         # One bad row must not stop the others being checked.
                         logger.warning(

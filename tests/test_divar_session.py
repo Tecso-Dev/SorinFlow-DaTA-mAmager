@@ -335,3 +335,134 @@ class TestImportTellsTheTruth:
         src = inspect.getsource(auth.import_cookies)
         i = src.index("check_and_record")
         assert "except Exception" in src[i:i + 400]
+
+
+class TestOnlyDivarsOwnCookiesAreSent:
+    """The 403 that kept killing freshly-issued sessions.
+
+    `context.cookies()` returns every cookie the browser holds for every domain
+    it touched during a login. The whole jar was being joined into one Cookie
+    header and sent to api.divar.ir. Two consequences, and the second is fatal:
+
+      * third-party cookies (analytics, captcha providers) went to Divar
+      * `token` appears twice — Divar sets it for `.divar.ir` and the page picks
+        it up again for `divar.ir` — so the header read `token=old; token=new`
+
+    Divar answers 403 to any request whose token cookie it dislikes, on ANY
+    endpoint: `/v8/places/cities` needs no login at all and still returns 403
+    with a bad token where it returns 200 with none. So a perfectly good new
+    session came back "rejected by Divar", and the verifier then wrote it out
+    of rotation automatically.
+    """
+
+    FUTURE_TS = FUTURE.timestamp()
+
+    def test_a_duplicate_token_collapses_to_the_fresher_one(self):
+        from app.services.divar_session import _header_from
+        jar = [{"name": "token", "value": "OLD", "domain": "divar.ir",
+                "expirationDate": 1},
+               {"name": "token", "value": "NEW", "domain": ".divar.ir",
+                "expirationDate": self.FUTURE_TS}]
+        header = _header_from(jar)
+        assert header.count("token=") == 1
+        assert "NEW" in header and "OLD" not in header
+
+    def test_foreign_cookies_are_not_sent_to_divar(self):
+        from app.services.divar_session import _header_from
+        jar = [{"name": "token", "value": "t", "domain": ".divar.ir"},
+               {"name": "_ga", "value": "x", "domain": ".google-analytics.com"},
+               {"name": "cf_clearance", "value": "y", "domain": ".cloudflare.com"}]
+        header = _header_from(jar)
+        assert "_ga" not in header and "cf_clearance" not in header
+        assert "token=t" in header
+
+    def test_divar_subdomains_are_kept(self):
+        from app.services.divar_session import divar_cookies
+        jar = [{"name": "a", "value": "1", "domain": "api.divar.ir"},
+               {"name": "b", "value": "2", "domain": ".divar.ir"},
+               {"name": "c", "value": "3", "domain": "divar.ir"}]
+        assert {c["name"] for c in divar_cookies(jar)} == {"a", "b", "c"}
+
+    def test_a_hand_pasted_jar_without_domains_still_works(self):
+        """The documented import path is a paste. Requiring a `domain` field
+        would break it for the sake of a key it need not carry."""
+        from app.services.divar_session import _header_from
+        jar = [{"name": "token", "value": "t"}, {"name": "did", "value": "d"}]
+        header = _header_from(jar)
+        assert "token=t" in header and "did=d" in header
+
+    def test_valueless_and_nameless_entries_are_dropped(self):
+        from app.services.divar_session import _header_from
+        jar = [{"name": "token", "value": "t"},
+               {"name": "", "value": "x"}, {"name": "y", "value": ""}]
+        assert _header_from(jar) == "token=t"
+
+
+class TestAnUnattendedCheckAsksTwice:
+    """A 403 is ambiguous, so the loop must not act on one alone. A false
+    negative there costs a working session and a round of SMS codes."""
+
+    class _Db:
+        async def commit(self): pass
+
+    def _row(self):
+        r = TestProbeIsHonestAboutUncertainty._Row()
+        r.is_valid = True
+        return r
+
+    @pytest.mark.asyncio
+    async def test_a_single_failure_does_not_demote_when_confirming(self, monkeypatch):
+        from app.services import divar_session
+        calls = {"n": 0}
+
+        async def flaky(_row):
+            calls["n"] += 1
+            return ({"alive": False, "state": "expired", "message": ""} if calls["n"] == 1
+                    else {"alive": True, "state": "active", "message": ""})
+        monkeypatch.setattr(divar_session, "probe", flaky)
+        monkeypatch.setattr(divar_session.asyncio, "sleep", lambda *_: _noop())
+
+        row = self._row()
+        await divar_session.check_and_record(self._Db(), row, confirm=True)
+        assert calls["n"] == 2
+        assert row.is_valid is True, "a one-off refusal wrote off a live session"
+
+    @pytest.mark.asyncio
+    async def test_two_failures_do_demote(self, monkeypatch):
+        from app.services import divar_session
+
+        async def dead(_row):
+            return {"alive": False, "state": "expired", "message": ""}
+        monkeypatch.setattr(divar_session, "probe", dead)
+        monkeypatch.setattr(divar_session.asyncio, "sleep", lambda *_: _noop())
+
+        row = self._row()
+        await divar_session.check_and_record(self._Db(), row, confirm=True)
+        assert row.is_valid is False
+
+    @pytest.mark.asyncio
+    async def test_the_manual_button_does_not_second_guess(self, monkeypatch):
+        """Somebody is watching and they asked."""
+        from app.services import divar_session
+        calls = {"n": 0}
+
+        async def dead(_row):
+            calls["n"] += 1
+            return {"alive": False, "state": "expired", "message": ""}
+        monkeypatch.setattr(divar_session, "probe", dead)
+
+        row = self._row()
+        await divar_session.check_and_record(self._Db(), row)
+        assert calls["n"] == 1 and row.is_valid is False
+
+    def test_the_background_loop_confirms_but_the_route_does_not(self):
+        import inspect
+        from app.services import divar_session
+        from app.api.routes import monitoring
+
+        assert "confirm=True" in inspect.getsource(divar_session.verifier_loop)
+        assert "confirm=True" not in inspect.getsource(monitoring.cookie_check)
+
+
+async def _noop():
+    return None

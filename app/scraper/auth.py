@@ -306,7 +306,9 @@ class DivarAuth:
             if login_button:
                 await login_button.click()
                 logger.info("Login button clicked, waiting for phone input form...")
-                await asyncio.sleep(3)
+                # No sleep here on purpose: the PHONE_SELECTORS loop below is a
+                # wait_for_selector, which already polls for the form. Sleeping
+                # first only delayed the same outcome by three seconds.
             else:
                 logger.info("No login button found — assuming phone input is directly visible")
 
@@ -401,7 +403,11 @@ class DivarAuth:
             if confirm_button:
                 await confirm_button.click()
                 logger.info("Confirm button clicked — waiting for SMS...")
-                await asyncio.sleep(4)
+                # Was 4s. Nothing below waits on it — the screenshot is a debug
+                # aid and the function then returns requires_code immediately.
+                # Those four seconds were pure latency between the click and
+                # the panel telling somebody their code was on its way.
+                await asyncio.sleep(0.5)
                 try:
                     snap = Path(settings.images_path).parent / "debug" / "debug_after_phone_submit.png"
                     await self.page.screenshot(path=str(snap))
