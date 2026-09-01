@@ -31,7 +31,23 @@ settings = get_settings()
 
 # Fixed. `phone` from a request is a lookup key into our own table and never
 # reaches this value.
-PROBE_URL = "https://api.divar.ir/v8/user/profile"
+#
+# A PUBLIC endpoint, deliberately. The obvious choice — /v8/user/profile — is
+# role-gated, and answers 403 to everyone: no cookie, an unrelated cookie, a
+# junk token, and (this is the part that cost two days) a perfectly valid
+# ordinary account. Every session it was asked about came back dead, which is
+# why sessions kept being written out of rotation minutes after a good login.
+#
+# /v8/places/cities needs no login at all, and Divar's edge validates the token
+# cookie before routing:
+#
+#     no cookie          -> 200
+#     did=abc123         -> 200
+#     token=<junk>       -> 403
+#
+# So the status is a clean read on one question — will Divar accept this token
+# — with no permissions layer on top to confuse a refusal with a lack of rights.
+PROBE_URL = "https://api.divar.ir/v8/places/cities"
 
 _HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -189,6 +205,29 @@ async def probe(row) -> dict:
                 "message": f"دیوار این نشست را پذیرفت (HTTP {r.status_code})"}
 
     if r.status_code in (401, 403):
+        # Check the instrument before trusting it.
+        #
+        # The same endpoint with no cookie at all must answer 200. If it does
+        # not, then Divar — or whatever sits between us and it — is refusing
+        # everyone, and this tells us nothing about the account. Reporting
+        # "expired" there is how a working session gets written off during
+        # somebody else's outage. Twice now, a probe I had not sanity-checked
+        # deleted sessions that were fine.
+        try:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+                control = await client.get(PROBE_URL, headers=dict(_HEADERS))
+        except Exception:
+            control = None
+
+        if control is None or control.status_code != 200:
+            got = "no answer" if control is None else f"HTTP {control.status_code}"
+            logger.warning(f"[session] refusal not trusted: the same endpoint "
+                           f"without a token returned {got}")
+            return {"alive": None, "state": "unknown", "needs_login": False,
+                    "took_ms": took, "http_status": r.status_code,
+                    "message": ("دیوار به همهٔ درخواست‌ها پاسخ منفی می‌دهد — "
+                                "وضعیت این حساب نامشخص است")}
+
         return {"alive": False, "state": "expired", "needs_login": True,
                 "took_ms": took, "http_status": r.status_code,
                 "message": f"دیوار این نشست را رد کرد (HTTP {r.status_code}) — ورود مجدد لازم است"}

@@ -133,26 +133,72 @@ class TestProbeIsHonestAboutUncertainty:
         res = await divar_session.probe(self._Row(jar=[]))
         assert res["alive"] is False and res["needs_login"] is True
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("status,alive", [
-        (200, True), (401, False), (403, False),
-        (500, None), (429, None), (302, None),
-    ])
-    async def test_status_codes_map_to_the_right_certainty(self, monkeypatch, status, alive):
-        from app.services import divar_session
+    @staticmethod
+    def _client_returning(*statuses):
+        """A client whose successive GETs return the given statuses.
+
+        The probe makes a second, cookie-less request to the same endpoint
+        before it will call a session dead, so a refusal needs two entries:
+        the answer for the token, then the control.
+        """
+        seq = list(statuses)
 
         class _Resp:
-            status_code = status
+            def __init__(self, s): self.status_code = s
 
         class _Client:
             async def __aenter__(self): return self
             async def __aexit__(self, *a): return False
-            async def get(self, *a, **kw): return _Resp()
+            async def get(self, *a, **kw):
+                return _Resp(seq.pop(0) if len(seq) > 1 else seq[0])
 
+        # One class, one shared `seq`. The probe opens a SEPARATE AsyncClient
+        # for its control request, so building the class inside the factory
+        # would hand the second call a fresh sequence starting at the first
+        # status — and the control would answer with the refusal it is meant
+        # to be checking.
+        return _Client
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("statuses,alive", [
+        ((200,), True),
+        ((403, 200), False),   # refused us, but serves everyone else -> dead
+        ((401, 200), False),
+        ((500,), None),
+        ((429,), None),
+        ((302,), None),
+    ])
+    async def test_status_codes_map_to_the_right_certainty(self, monkeypatch, statuses, alive):
+        from app.services import divar_session
         import httpx
-        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _Client())
+        Client = self._client_returning(*statuses)
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: Client())
         res = await divar_session.probe(self._Row())
         assert res["alive"] is alive
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("control", [403, 500, 429])
+    async def test_a_refusal_is_not_trusted_when_divar_refuses_everyone(
+            self, monkeypatch, control):
+        """If the same endpoint says no without any token, the refusal is about
+        Divar, not about this account. Calling it "expired" is how a working
+        session gets written off during somebody else's outage."""
+        from app.services import divar_session
+        import httpx
+        Client = self._client_returning(403, control)
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: Client())
+        res = await divar_session.probe(self._Row())
+        assert res["alive"] is None
+        assert res["needs_login"] is False
+
+    def test_the_probe_endpoint_needs_no_login(self):
+        """/v8/user/profile is role-gated: it answers 403 to a valid ordinary
+        account as readily as to a junk token, so every session it was asked
+        about came back dead. The probe must isolate token validity, nothing
+        else."""
+        from app.services import divar_session
+        assert "user/profile" not in divar_session.PROBE_URL
+        assert divar_session.PROBE_URL.endswith("/places/cities")
 
     @pytest.mark.asyncio
     async def test_a_network_error_is_unknown_not_dead(self, monkeypatch):
@@ -466,3 +512,80 @@ class TestAnUnattendedCheckAsksTwice:
 
 async def _noop():
     return None
+
+
+class TestLoginBrowsersDoNotLeak:
+    """Each in-flight Divar login holds a live Chromium. It was only ever
+    closed on a SUCCESSFUL OTP, so every abandoned login left one running for
+    the life of the pod — and a second attempt for the same number overwrote
+    the dict entry, dropping the only handle to the previous browser. On a
+    single-replica box that is most of the CPU."""
+
+    @pytest.mark.asyncio
+    async def test_starting_a_second_login_closes_the_first(self):
+        import app.api.routes.auth as r
+
+        closed = []
+
+        class _Auth:
+            def __init__(self, tag): self.tag = tag
+            async def close_browser(self): closed.append(self.tag)
+
+        r.auth_instances["0912"] = _Auth("first")
+        r._auth_started["0912"] = 0.0
+        await r._discard_auth_instance("0912", "superseded")
+
+        assert closed == ["first"]
+        assert "0912" not in r.auth_instances
+        assert "0912" not in r._auth_started
+
+    @pytest.mark.asyncio
+    async def test_an_abandoned_login_is_swept(self):
+        import time
+        import app.api.routes.auth as r
+
+        closed = []
+
+        class _Auth:
+            async def close_browser(self): closed.append(True)
+
+        r.auth_instances["0913"] = _Auth()
+        r._auth_started["0913"] = time.monotonic() - (r.AUTH_INSTANCE_TTL + 5)
+        await r._sweep_auth_instances()
+        assert closed == [True] and "0913" not in r.auth_instances
+
+    @pytest.mark.asyncio
+    async def test_a_login_still_in_progress_is_left_alone(self):
+        import time
+        import app.api.routes.auth as r
+
+        class _Auth:
+            async def close_browser(self): raise AssertionError("closed too early")
+
+        r.auth_instances["0914"] = _Auth()
+        r._auth_started["0914"] = time.monotonic()
+        await r._sweep_auth_instances()
+        assert "0914" in r.auth_instances
+        r.auth_instances.pop("0914"); r._auth_started.pop("0914")
+
+    @pytest.mark.asyncio
+    async def test_a_browser_that_will_not_close_does_not_raise(self):
+        """A dead browser must not turn into a 500 on somebody else's login."""
+        import app.api.routes.auth as r
+
+        class _Auth:
+            async def close_browser(self): raise RuntimeError("already gone")
+
+        r.auth_instances["0915"] = _Auth()
+        r._auth_started["0915"] = 0.0
+        await r._discard_auth_instance("0915", "test")
+        assert "0915" not in r.auth_instances
+
+    def test_the_login_route_discards_before_it_replaces(self):
+        import inspect
+        import app.api.routes.auth as r
+
+        src = inspect.getsource(r.initiate_login)
+        i = src.index("auth_instances[phone_number] = auth")
+        assert "_discard_auth_instance" in src[:i], \
+            "a new browser is stored before the previous one is closed"

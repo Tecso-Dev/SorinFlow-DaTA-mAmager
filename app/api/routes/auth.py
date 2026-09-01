@@ -27,8 +27,44 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
 
-# Store auth instance for session persistence
+# A live Chromium per in-flight Divar login, kept between the phone step and
+# the OTP step because the session lives in that browser.
+#
+# It only ever got cleaned up on a SUCCESSFUL OTP. Every abandoned login — a
+# wrong code, a closed tab, a timeout — left a headless Chromium running for
+# the life of the pod, and starting a second attempt for the same number
+# overwrote the dict entry, dropping the only handle to the previous one. On a
+# single-replica box a handful of those is most of the CPU.
 auth_instances = {}
+_auth_started = {}          # phone -> monotonic time the browser was launched
+
+# A login nobody finished. Generous: the OTP itself has a 30s wait and people
+# go and find their phone.
+AUTH_INSTANCE_TTL = 600
+
+
+async def _discard_auth_instance(phone_number: str, why: str):
+    """Close and forget one login browser. Never raises — a browser that is
+    already gone must not turn into a 500 on somebody else's request."""
+    auth = auth_instances.pop(phone_number, None)
+    _auth_started.pop(phone_number, None)
+    if auth is None:
+        return
+    try:
+        await auth.close_browser()
+        logger.info(f"[auth] closed login browser for {phone_number} ({why})")
+    except Exception as e:
+        logger.warning(f"[auth] could not close browser for {phone_number}: "
+                       f"{type(e).__name__}: {e}")
+
+
+async def _sweep_auth_instances():
+    """Close logins nobody came back to finish."""
+    import time as _time
+    now = _time.monotonic()
+    stale = [p for p, t in _auth_started.items() if now - t > AUTH_INSTANCE_TTL]
+    for phone in stale:
+        await _discard_auth_instance(phone, f"abandoned for {AUTH_INSTANCE_TTL}s")
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -40,9 +76,15 @@ async def initiate_login(
     
     phone_number = request.phone_number
     
-    # Create auth instance
+    # Anything left from a previous attempt for this number is finished with;
+    # replacing the dict entry without closing it leaks the browser.
+    await _discard_auth_instance(phone_number, "superseded by a new login")
+    await _sweep_auth_instances()
+
+    import time as _time
     auth = DivarAuth(db)
     auth_instances[phone_number] = auth
+    _auth_started[phone_number] = _time.monotonic()
     
     try:
         result = await auth.login_with_phone(phone_number)
@@ -125,8 +167,7 @@ async def verify_otp(
                 await db.commit()
             
             # Cleanup auth instance
-            await auth.close_browser()
-            del auth_instances[phone_number]
+            await _discard_auth_instance(phone_number, "login completed")
         
         return AuthResponse(
             success=result.get("success", False),

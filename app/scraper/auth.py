@@ -179,20 +179,34 @@ class DivarAuth:
             from app.services.divar_session import cookie_expiry
             now_utc = datetime.now(timezone.utc)
 
-            # Check for token cookie first
+            # Check for token cookie first.
+            #
+            # A `token` with no expiry is a SESSION cookie, not a broken one —
+            # and that is the normal shape of what Divar issues. This branch
+            # used to fall through in that case, and "token" matches none of
+            # the keywords below, so a perfectly good session reached the
+            # catch-all and logged "No specific auth cookies found, but cookies
+            # exist" — announcing the absence of the very cookie it was
+            # holding. Two separate investigations went the wrong way on that
+            # line.
             token_cookie = next((c for c in cookies if c.get("name") == "token"), None)
-            if token_cookie:
+            if token_cookie and token_cookie.get("value"):
                 expires = cookie_expiry(token_cookie)
-                if expires and expires > now_utc:
+                if expires is None:
+                    logger.info("Session token cookie found (no expiry) — treating as valid")
                     return True
+                if expires > now_utc:
+                    return True
+                logger.info(f"Token cookie expired at {expires.isoformat()}")
+                return False
 
             # Check for other auth cookies
             auth_cookies = [c for c in cookies if any(keyword in c.get("name", "").lower() for keyword in ["auth", "session", "user", "login", "jwt", "bearer"])]
             for cookie in auth_cookies:
                 expires = cookie_expiry(cookie)
                 if expires and expires > now_utc:
-                        logger.info(f"Valid auth cookie found: {cookie.get('name')}")
-                        return True
+                    logger.info(f"Valid auth cookie found: {cookie.get('name')}")
+                    return True
                 else:
                     # If no expiration, assume it's valid (session cookie)
                     logger.info(f"Session auth cookie found: {cookie.get('name')}")
