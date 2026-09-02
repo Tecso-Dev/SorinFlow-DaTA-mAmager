@@ -125,6 +125,22 @@ class TestTheReadmeDoesNotLie:
     def test_the_orientation_sections_exist(self, section):
         assert section in _read()
 
+    def test_it_does_not_still_call_the_pace_knob_dead(self):
+        """SCRAPER_DELAY_MIN/MAX were read by nothing for months — the throttle
+        an operator reaches for after a ban, doing nothing. Wired on
+        2026-09-02, and three separate places in this file said otherwise."""
+        text = _read()
+        assert "read by nothing; the real delay is hardcoded" not in text
+        assert "SCRAPER_DELAY_MIN/MAX` are read by nothing" not in text
+        assert "StealthConfig.__post_init__" in text
+
+    def test_the_per_run_event_log_is_documented(self):
+        """A feature nobody knows exists is a feature nobody uses, and this one
+        is the answer to the question the owner asks most."""
+        text = _read()
+        assert "/jobs/{id}/events" in text
+        assert "scraping_logs" in text
+
     def test_there_is_exactly_one_tests_heading(self):
         """There were two, and they disagreed with each other."""
         assert _read().count("\n### Tests\n") <= 1
