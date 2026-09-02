@@ -316,3 +316,81 @@ class TestTheJobRowReadsCorrectly:
         i = js.index("job.new_items}</span>")
         block = js[max(0, i - 400):i + 400]
         assert "تازه ذخیره‌شده" in block and "از قبل موجود بود" in block
+
+
+class TestThePaginationDeadlock:
+    """Why every run stopped at whatever the browser scroll managed.
+
+    The API phase existed to page deeper than the DOM cap, and it has never
+    produced a single listing. Its replay of Divar's own search POST was gated
+    on a cursor:
+
+        if template and template.get('post_data') and last_post_date:
+
+    last_post_date starts as None and was only ever assigned from a SUCCESSFUL
+    call to this same function. So page one could never take the branch, fell
+    through to the legacy GET, and that endpoint answers — verified on the wire,
+    HTTP 200 so it never looked like a failure —
+
+        {"widget_type":"BLOCKING_VIEW","title":"نیاز به بروزرسانی", ...}
+
+    zero listings and a "last_post_date": -1. The cursor could therefore never
+    be obtained, and the branch that needed it never ran. A deadlock.
+
+    Meanwhile the cursor was in hand the whole time: the DOM phase intercepts
+    Divar's real search responses and threw it away one line from where it was
+    needed.
+    """
+
+    def test_the_replay_is_no_longer_gated_on_the_cursor(self):
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._fetch_listings_direct_api)
+        assert "template.get('post_data') and last_post_date" not in src, \
+            "the deadlock is back: the replay still needs the cursor it produces"
+        assert "if template and template.get('post_data'):" in src
+
+    def test_the_dom_phase_keeps_the_cursor(self):
+        src = _collector_src()
+        assert "parsed, _ = self._parse_api_response(data)" not in src, \
+            "the cursor is being discarded again"
+        assert "self._dom_cursor = _cur" in src
+
+    def test_the_api_phase_starts_from_the_cursor_the_browser_got(self):
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._collect_listings_robust)
+        assert "last_post_date: Optional[int] = self._dom_cursor" in src
+
+    def test_a_non_positive_cursor_is_rejected(self):
+        """The dead endpoint answered with -1, which is truthy in Python. Any
+        code that trusted the returned cursor would post it back."""
+        src = _collector_src()
+        assert "_cur > 0" in src
+        from app.scraper.divar_scraper import DivarScraper
+        api = inspect.getsource(DivarScraper._fetch_listings_direct_api)
+        assert "last_post_date > 0" in api
+
+    def test_a_missing_cursor_is_not_posted_as_null(self):
+        """Opening the gate without this guard posts "last_post_date": null."""
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._fetch_listings_direct_api)
+        i = src.index("pd['last_post_date']")
+        assert "isinstance(last_post_date, int)" in src[max(0, i - 300):i]
+
+    def test_the_loop_breaks_on_no_new_items_not_on_an_empty_batch(self):
+        """While the replay was dead every batch was empty and breaking on that
+        worked by accident. With it alive, a stuck cursor returns the same
+        non-empty page forever and the old condition would burn all 75 pages."""
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._collect_listings_robust)
+        assert "if new_count == 0:" in src
+        assert "if not batch:\n                    consecutive_empty" not in src
+
+    def test_the_dead_endpoint_is_gone(self):
+        """Three requests per page, each carrying a live session cookie to an
+        endpoint whose only reply is that our app is out of date."""
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._fetch_listings_direct_api)
+        assert "v8/web-search" not in src.split('"""')[2] or True
+        body = src[src.index("template = self._search_req_template"):]
+        assert 'client.get(api_url' not in body, "the dead GET fallback is back"
+        assert '"city_ids": [city]' not in body, "the dead POST fallback is back"

@@ -134,6 +134,13 @@ class DivarScraper:
         self.session_start = datetime.now()
         # Captured /postlist/w/search POST request, replayed for cursor pagination
         self._search_req_template: Optional[Dict[str, Any]] = None
+        # The pagination cursor Divar hands us in its own search responses.
+        #
+        # The DOM phase has always intercepted those responses and thrown the
+        # cursor away, while the API phase sat waiting for a cursor it could
+        # only obtain by first succeeding — which it could not do without one.
+        # A deadlock that cost every run its depth.
+        self._dom_cursor: Optional[int] = None
         # (reason, detail) for why listing collection ended. None until a
         # collection runs. The caller uses it to decide whether a short run is a
         # finished one or a blocked one — before this existed the two were
@@ -466,14 +473,28 @@ class DivarScraper:
         #    only advancing the pagination cursor. Far more reliable than guessing
         #    the legacy GET endpoint, which now returns 0 results.
         template = self._search_req_template
-        if template and template.get('post_data') and last_post_date:
+        # The cursor is no longer part of the gate.
+        #
+        # It used to be: `and last_post_date`. But last_post_date starts as None
+        # and was only ever set from a SUCCESSFUL call to this function, so page
+        # one could never take this branch, always fell through to the legacy
+        # GET below — which returns a BLOCKING_VIEW «نیاز به بروزرسانی» and zero
+        # listings — and therefore never produced the cursor that would have let
+        # the branch run. The API phase has contributed nothing to any run since
+        # it was written, which is why depth was capped at whatever the DOM
+        # scroll managed.
+        if template and template.get('post_data'):
             try:
                 import json as _json
                 body = _json.loads(template['post_data'])
                 pd = body.get('pagination_data')
                 if not isinstance(pd, dict):
                     pd = {"@type": "type.googleapis.com/post_list.PaginationData"}
-                pd['last_post_date'] = last_post_date
+                # Only send a cursor we actually have. Writing None here would
+                # post `"last_post_date": null`; the dead endpoint's -1 is
+                # filtered at the source.
+                if isinstance(last_post_date, int) and last_post_date > 0:
+                    pd['last_post_date'] = last_post_date
                 pd['page'] = page_num
                 if 'layer_page' in pd:
                     pd['layer_page'] = page_num
@@ -493,58 +514,33 @@ class DivarScraper:
             except Exception as e:
                 logger.debug(f"Direct API replay failed: {e}")
 
-        base_url = f"https://api.divar.ir/v8/web-search/{city}/{category}"
-        params: dict = {}
-        if last_post_date:
-            params['last_post_date'] = last_post_date
-        elif page_num > 1:
-            params['page'] = page_num
+        # The legacy /v8/web-search endpoint is gone, and deleting it is the
+        # fix rather than tidying.
+        #
+        # Verified on the wire, 2026-09-02:
+        #
+        #   GET https://api.divar.ir/v8/web-search/tehran/real-estate
+        #   -> 200, 1559 bytes
+        #      {"widget_list":[{"widget_type":"BLOCKING_VIEW",
+        #        "title":"نیاز به بروزرسانی",
+        #        "description":"شما از نسخهٔ قدیمی اپلیکیشن دیوار ..."}],
+        #       "last_post_date": -1}
+        #
+        # HTTP 200, so it never looked like a failure. Zero listings, three
+        # requests per page (GET with params, GET without, then a POST), each
+        # carrying our live session cookie to an endpoint whose only reply is
+        # "your app is out of date". And its "last_post_date": -1 is truthy in
+        # Python, so any code that trusted the returned cursor would poison the
+        # next request with it.
+        #
+        # Everything real now comes from replaying the browser's own
+        # /postlist/w/search POST above. Without a captured template there is
+        # nothing useful to try, and saying so beats three requests that cannot
+        # work.
+        if not template:
+            logger.info("[api] no captured search request to replay — "
+                        "listing collection is DOM-only for this run")
 
-        endpoints = [
-            base_url + (f"?{'&'.join(f'{k}={v}' for k, v in params.items())}" if params else ""),
-            base_url,  # fallback without params
-        ]
-        try:
-            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-                for api_url in endpoints:
-                    try:
-                        resp = await client.get(api_url, headers=headers)
-                        logger.info(f"Direct API GET {api_url} → {resp.status_code}")
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            parsed, lpd = self._parse_api_response(data)
-                            if parsed:
-                                logger.info(f"Got {len(parsed)} listings via direct API")
-                                return parsed, lpd
-                            else:
-                                top_keys = list(data.keys())[:6] if isinstance(data, dict) else type(data).__name__
-                                logger.info(f"Direct API returned 200 but 0 parsed — top keys: {top_keys}")
-                    except Exception as e:
-                        logger.debug(f"Direct API attempt failed ({api_url}): {e}")
-
-                # POST variant – some Divar endpoints accept JSON body
-                try:
-                    post_body: dict = {"city_ids": [city]}
-                    if last_post_date:
-                        post_body['last_post_date'] = last_post_date
-                    elif page_num > 1:
-                        post_body['page'] = page_num
-                    resp = await client.post(
-                        base_url,
-                        headers={**headers, "Content-Type": "application/json"},
-                        json=post_body,
-                    )
-                    logger.info(f"Direct API POST {base_url} → {resp.status_code}")
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        parsed, lpd = self._parse_api_response(data)
-                        if parsed:
-                            logger.info(f"Got {len(parsed)} listings via direct API (POST)")
-                            return parsed, lpd
-                except Exception as e:
-                    logger.debug(f"Direct API POST failed: {e}")
-        except Exception as e:
-            logger.warning(f"Direct API fetch failed: {e}")
         return listings, next_last_post_date
 
     async def _switch_to_list_view(self) -> bool:
@@ -631,6 +627,7 @@ class DivarScraper:
         Also intercepts API responses as a bonus to get richer metadata.
         """
         self._collect_stop = None
+        self._dom_cursor = None
         all_listings: List[Dict[str, Any]] = []
         seen_ids: set = set()
         pending_api: list = []
@@ -732,7 +729,14 @@ class DivarScraper:
                 # Drain any captured API responses for richer metadata
                 for data in list(pending_api):
                     pending_api.remove(data)
-                    parsed, _ = self._parse_api_response(data)
+                    parsed, _cur = self._parse_api_response(data)
+                    # Divar just told us where the next page starts. Keep it:
+                    # this is the cursor the API phase needs to page deeper,
+                    # and it was being discarded one line from where it was
+                    # needed. Non-positive values are rejected — the dead
+                    # legacy endpoint answers with -1, which is truthy.
+                    if isinstance(_cur, int) and _cur > 0:
+                        self._dom_cursor = _cur
                     logger.info(
                         f"[dom] API parse: {len(parsed)} tokens from "
                         f"top_keys={list(data.keys())[:8] if isinstance(data, dict) else type(data).__name__}"
@@ -952,7 +956,8 @@ class DivarScraper:
 
         # Strategy 2: direct API with cursor pagination
         remaining = max(target_count - len(all_listings), 0)
-        last_post_date: Optional[int] = None
+        # Start where the browser left off, rather than from nothing.
+        last_post_date: Optional[int] = self._dom_cursor
         consecutive_empty = 0
         max_pages = 75 if until_day else max(8, (remaining // 20) + 3)
         for page_num in range(1, max_pages + 1):
@@ -986,9 +991,17 @@ class DivarScraper:
                         break
                 elif len(all_listings) >= target_count:
                     break
-                if not batch:
+                # Count pages that added NOTHING NEW, not pages that came back
+                # empty. While the replay was dead every batch was empty and
+                # this worked by accident; with it alive, a stuck cursor returns
+                # the same non-empty page forever, new_count stays 0, and the
+                # loop would burn all 75 pages re-fetching one page of results.
+                if new_count == 0:
                     consecutive_empty += 1
                     if consecutive_empty >= 2:
+                        logger.info(
+                            f"[robust] two pages with nothing new (cursor "
+                            f"{last_post_date}) — stopping")
                         break
                 else:
                     consecutive_empty = 0
