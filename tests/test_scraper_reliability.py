@@ -286,3 +286,33 @@ class TestThePaceIsWhatItClaimsToBe:
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper._human_like_delay)
         assert "max_d * 4" in src
+
+
+class TestTheJobRowReadsCorrectly:
+    """The job list showed «39 / 3» for a run whose event log said new=3,
+    updated=39. Not a data bug — a bare "3 / 39" inside an RTL cell is
+    reordered by the bidi algorithm, so the two numbers swap places visually.
+    Someone reading the table concluded the scraper had saved 39 listings when
+    it had saved 3."""
+
+    def _row_template(self):
+        from pathlib import Path
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        i = js.index("_jobPollSnapshot[job.job_id] = { new_items")
+        return js[i:i + 6000]
+
+    def test_the_new_and_updated_cell_is_pinned_to_ltr(self):
+        from pathlib import Path
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert "${job.new_items} / ${job.updated_items}" not in js, \
+            "the bare interpolation is back and bidi will swap the numbers again"
+        i = js.index("job.new_items}</span>")
+        assert 'dir="ltr"' in js[max(0, i - 400):i]
+
+    def test_the_two_numbers_are_distinguishable(self):
+        """Identical styling on both is what let the swap go unnoticed."""
+        from pathlib import Path
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        i = js.index("job.new_items}</span>")
+        block = js[max(0, i - 400):i + 400]
+        assert "تازه ذخیره‌شده" in block and "از قبل موجود بود" in block

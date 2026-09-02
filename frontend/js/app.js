@@ -2961,7 +2961,11 @@ function _renderJobsTable(items) {
                     <div style="font-size:.72rem;color:var(--text-muted,#aaa);text-align:center;margin-top:2px;">${Math.round(job.progress)}%</div>
                 </div>
             </td>
-            <td>${job.new_items} / ${job.updated_items}</td>
+            <td dir="ltr" style="text-align:center">
+                <span class="text-success" title="تازه ذخیره‌شده">${job.new_items}</span>
+                <span class="text-muted">/</span>
+                <span class="text-muted" title="از قبل موجود بود">${job.updated_items}</span>
+            </td>
             <td>${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
             <td>
                 <button class="btn btn-sm btn-outline-secondary" onclick="showJobLog('${job.job_id}')"
