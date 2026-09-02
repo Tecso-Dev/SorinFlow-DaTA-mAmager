@@ -542,3 +542,34 @@ class TestTheNodeBudgetIsSane:
                  + req_mem("k8s/02-postgres.yaml")
                  + req_mem("k8s/03-redis.yaml"))
         assert total < 3072, f"requests total {total}Mi — too close to a 4Gi node"
+
+
+class TestCiAppliesWhatTheBudgetAssumes:
+    """The backend's limit was raised on the strength of limits for Postgres
+    and Redis that CI never applied.
+
+    Those limits lived in git and never reached the cluster, so both neighbours
+    stayed BestEffort — the first pods the kubelet evicts under node memory
+    pressure — while the backend was given room to grow into memory the node did
+    not have. The eviction would have landed on the database.
+    """
+
+    @staticmethod
+    def _workflow():
+        from pathlib import Path
+        return Path(".github/workflows/deploy.yml").read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize("manifest", [
+        "k8s/02-postgres.yaml",
+        "k8s/03-redis.yaml",
+        "k8s/04-backend.yaml",
+        "k8s/05-ingress.yaml",
+    ])
+    def test_every_manifest_the_budget_depends_on_is_applied(self, manifest):
+        assert manifest in self._workflow(), \
+            f"{manifest} is in git but CI never applies it — it will drift silently"
+
+    def test_the_workflow_still_parses(self):
+        import yaml
+        d = yaml.safe_load(self._workflow())
+        assert set(d["jobs"]) >= {"test", "build", "deploy"}

@@ -238,6 +238,23 @@ jobs:
           kubectl apply --validate=false -f k8s/05-ingress.yaml ||
             { sleep 10; kubectl apply --validate=false -f k8s/05-ingress.yaml; }
 
+          # Postgres and Redis, which CI did not apply until now.
+          #
+          # That gap was not cosmetic. Their resource limits lived in git and
+          # never reached the cluster, so both stayed BestEffort — the first
+          # pods the kubelet evicts under node memory pressure — while the
+          # backend's limit was raised on the strength of those very limits
+          # existing. The backend could grow into memory the node did not have
+          # and the eviction would land on the database.
+          #
+          # apply is idempotent: an unchanged manifest is a no-op and restarts
+          # nothing. Only a real spec change causes a restart, which is what it
+          # should do.
+          for m in k8s/02-postgres.yaml k8s/03-redis.yaml; do
+            kubectl apply --validate=false -f "$m" ||
+              { sleep 10; kubectl apply --validate=false -f "$m"; }
+          done
+
       - name: Roll out new image
         env:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
