@@ -137,30 +137,29 @@ spec:
               cpu: "200m"
               memory: "512Mi"
             limits:
-              # 3Gi of the node's 4Gi, which is now safe to take.
+              # 2.5Gi, and the reason is measured rather than assumed.
               #
-              # The budget, with everything on this node bounded:
-              #   OS + k3s + containerd   ~700Mi  (measured at idle)
-              #   redis                    256Mi  limit, ~30Mi in practice
-              #   postgres                   1Gi  limit, ~250Mi in practice
-              #   backend                    3Gi  limit
+              # On the live node (2026-09-03):
+              #   MemTotal                3910Mi   "4 GB" is nominal
+              #   k3s-server               659Mi
+              #   containerd + shims       190Mi
+              #   Runner.Listener          129Mi   the self-hosted CI runner
+              #   systemd-journal           92Mi -> capped to ~20Mi
+              #   traefik + coredns + metrics-server  108Mi
+              #   ---------------------------------------------
+              #   genuinely available    ~2400Mi
               #
-              # The limits oversubscribe on purpose — they are ceilings, not
-              # reservations — while the REQUESTS (512Mi + 256Mi + 64Mi) fit the
-              # node several times over, so the scheduler and the eviction
-              # ranking both behave.
+              # A 3Gi limit was raised on arithmetic, not measurement, and it
+              # was fiction: the cgroup would not have stopped the pod until
+              # 3072Mi, which this box does not have, so the KERNEL OOM killer
+              # would fire first — and it does not respect Kubernetes QoS, so
+              # it could pick Postgres.
               #
-              # 2Gi was where a large scrape met the OOM killer. Raising it was
-              # only safe once postgres and redis had limits of their own:
-              # before that, a backend spike ran the NODE out and the kubelet
-              # picked its own victim, which could have been the database.
-              #
-              # The ceiling still matters less than it looks. The scraper
-              # recycles Chromium at 80% of whatever this says
-              # (_check_rate_limit), so memory is bounded by the recycle, not by
-              # the kill — which is what makes a 500-item run cost the same as a
-              # 50-item one.
-              memory: "3Gi"
+              # 2560Mi puts the scraper's 80% recycle at ~2048Mi, comfortably
+              # inside what is actually free. The ceiling is not what makes a
+              # 500-item run work: the recycle is (_check_rate_limit). Raising
+              # this number does not buy capacity the machine does not have.
+              memory: "2560Mi"
           # Startup is create_all plus a migration chain, and its duration is
           # not knowable in advance. Without a startupProbe the liveness probe
           # kills the container ~150s in and it crashloops forever with no way

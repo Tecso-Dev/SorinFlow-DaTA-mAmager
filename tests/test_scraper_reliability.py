@@ -573,3 +573,55 @@ class TestCiAppliesWhatTheBudgetAssumes:
         import yaml
         d = yaml.safe_load(self._workflow())
         assert set(d["jobs"]) >= {"test", "build", "deploy"}
+
+
+class TestTheHostSetupIsInTheRepository:
+    """Every host-level setting was, at some point, typed into a live server by
+    hand — and would have been lost the moment that server was replaced. The
+    manifests described the workloads and nothing described the machine."""
+
+    @staticmethod
+    def _script():
+        from pathlib import Path
+        return Path("scripts/provision-host.sh").read_text(encoding="utf-8")
+
+    def test_it_exists_and_is_executable(self):
+        import os
+        from pathlib import Path
+        p = Path("scripts/provision-host.sh")
+        assert p.exists()
+        assert os.access(p, os.X_OK), "not executable — nobody will chmod it on a bad day"
+
+    def test_it_can_report_without_changing_anything(self):
+        """A provisioning script you cannot dry-run is one nobody dares run."""
+        s = self._script()
+        assert "--check" in s and "CHECK_ONLY" in s
+
+    def test_it_is_syntactically_valid(self):
+        import subprocess
+        r = subprocess.run(["bash", "-n", "scripts/provision-host.sh"],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+
+    @pytest.mark.parametrize("setting", [
+        "journald",          # 192MB of disk and 92MB resident, found on the live box
+        "inotify",           # was 128 instances; pods fail to start and nothing says why
+        "NTP",               # a drifted clock expires login codes early
+        "Swap",
+    ])
+    def test_it_covers_what_was_found_on_the_live_node(self, setting):
+        assert setting.lower() in self._script().lower()
+
+    def test_it_checks_the_node_is_the_size_the_manifests_assume(self):
+        """The memory budget in k8s/04-backend.yaml is sized for ~4GB. On a
+        different machine those numbers stop meaning anything, silently."""
+        s = self._script()
+        assert "MemTotal" in s
+        assert "2560Mi" in s, "the script does not name the limit it is validating"
+
+    def test_the_backend_limit_matches_what_the_script_expects(self):
+        """Two places state the budget; they must not drift apart."""
+        from pathlib import Path
+        manifest = Path("k8s/04-backend.yaml").read_text(encoding="utf-8")
+        assert 'memory: "2560Mi"' in manifest
+        assert "2560Mi" in self._script()
