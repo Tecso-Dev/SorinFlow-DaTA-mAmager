@@ -2163,7 +2163,9 @@ class DivarScraper:
             cookies = await self.auth.get_current_cookies()
             if not cookies:
                 return
-            token = next((c.get("value") for c in cookies if c.get("name") == "token"), None)
+            from app.services.divar_session import auth_cookie as _auth_cookie
+            _ac = _auth_cookie(cookies)
+            token = _ac.get("value") if _ac else None
             await self.auth.save_cookies_to_file(self.active_phone, cookies)
             if db is not None:
                 await self.auth.save_cookies_to_db(self.active_phone, cookies, token)

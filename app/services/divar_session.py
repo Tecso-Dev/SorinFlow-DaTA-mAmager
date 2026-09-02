@@ -62,10 +62,43 @@ _HEADERS = {
 }
 
 
-# The cookie that carries the session. Everything else in the jar is
-# analytics and preferences, and their expiries say nothing about whether we
-# can still scrape.
+# The cookies that carry the session. Everything else in the jar is analytics
+# and preferences, and their expiries say nothing about whether we can scrape.
+#
+# Divar has moved to SuperTokens. A login today sets:
+#
+#     cdid, csid, did, ff, referrer, resolution_width,
+#     sAccessToken, sFrontToken, sRefreshToken, theme
+#
+# and no `token` at all. Every part of this codebase was looking for `token`,
+# which is why a perfectly good login produced "No session cookie after 30s",
+# "No specific auth cookies found", an empty expiry column, and — once a stale
+# `token` from the old scheme was still in the jar — a 403 on everything.
+#
+# Order is preference: sAccessToken is the bearer SuperTokens actually checks.
+# `token` stays for sessions saved under the old scheme and for the day Divar
+# changes its mind again.
+AUTH_COOKIE_NAMES = ("sAccessToken", "token", "sRefreshToken")
+
+# Kept as the single legacy name for anything that still wants one string.
 AUTH_COOKIE = "token"
+
+
+def auth_cookie(jar):
+    """The session-bearing cookie from a jar, by preference order, or None."""
+    by_name = {c.get("name"): c for c in (jar or []) if c.get("name") and c.get("value")}
+    for name in AUTH_COOKIE_NAMES:
+        if name in by_name:
+            return by_name[name]
+    return None
+
+
+def has_auth_cookie(jar) -> bool:
+    """Whether this jar carries a session at all.
+
+    The question every caller was really asking when it looked for `token`.
+    """
+    return auth_cookie(jar) is not None
 
 
 def cookie_expiry(c):
@@ -113,10 +146,8 @@ def derive_expiry(jar):
     A missing, zero or negative expiry means a session cookie: it dies with the
     browser and has no wall-clock expiry, which is not the same as expired.
     """
-    for c in (jar or []):
-        if c.get("name") == AUTH_COOKIE:
-            return cookie_expiry(c)
-    return None
+    c = auth_cookie(jar)
+    return cookie_expiry(c) if c else None
 
 
 DIVAR_HOSTS = ("divar.ir", ".divar.ir", "api.divar.ir", ".api.divar.ir")

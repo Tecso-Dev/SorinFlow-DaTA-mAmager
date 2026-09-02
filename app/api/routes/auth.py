@@ -130,7 +130,8 @@ async def verify_otp(
             cookies = result.get("cookies", [])
             if cookies:
                 # Look for token cookie first, then other auth cookies
-                token_cookie = next((c for c in cookies if c.get("name") == "token"), None)
+                from app.services.divar_session import auth_cookie as _auth_cookie
+                token_cookie = _auth_cookie(cookies)
                 if not token_cookie:
                     # Look for other auth cookies
                     auth_cookies = [c for c in cookies if any(keyword in c.get("name", "").lower() for keyword in ["auth", "session", "user", "login", "jwt", "bearer"])]
@@ -327,16 +328,20 @@ async def import_cookies(
         raise HTTPException(status_code=400, detail="هیچ کوکی‌ای ارسال نشد")
 
     # Find token cookie to extract expiry
-    token_cookie = next((c for c in request.cookies if c.get("name") == "token"), None)
+    from app.services.divar_session import auth_cookie as _auth_cookie
+    token_cookie = _auth_cookie(request.cookies)
     token_value = token_cookie.get("value") if token_cookie else None
 
     if not token_value:
-        names = [str(c.get("name")) for c in request.cookies if c.get("name")][:8]
+        from app.services.divar_session import AUTH_COOKIE_NAMES
+        names = [str(c.get("name")) for c in request.cookies if c.get("name")][:10]
+        wanted = "، ".join(AUTH_COOKIE_NAMES)
         raise HTTPException(
             status_code=400,
-            detail=("کوکی «token» در آنچه وارد کردید وجود ندارد و بدون آن نشست کار نمی‌کند. "
-                    "مطمئن شوید هنگام کپی، در دامنهٔ divar.ir بوده‌اید و همهٔ کوکی‌ها را "
-                    f"انتخاب کرده‌اید. آنچه دریافت شد: {'، '.join(names) or 'خالی'}"))
+            detail=(f"کوکی نشست ({wanted}) در آنچه وارد کردید وجود ندارد و بدون آن "
+                    "نشست کار نمی‌کند. مطمئن شوید هنگام کپی، در دامنهٔ divar.ir وارد "
+                    "حساب بوده‌اید و همهٔ کوکی‌ها را انتخاب کرده‌اید. "
+                    f"آنچه دریافت شد: {'، '.join(names) or 'خالی'}"))
 
     from app.services.divar_session import derive_expiry
     expires_at = derive_expiry(request.cookies)

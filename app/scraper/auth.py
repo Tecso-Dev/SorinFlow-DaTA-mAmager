@@ -189,7 +189,8 @@ class DivarAuth:
             # exist" — announcing the absence of the very cookie it was
             # holding. Two separate investigations went the wrong way on that
             # line.
-            token_cookie = next((c for c in cookies if c.get("name") == "token"), None)
+            from app.services.divar_session import auth_cookie
+            token_cookie = auth_cookie(cookies)
             if token_cookie and token_cookie.get("value"):
                 expires = cookie_expiry(token_cookie)
                 if expires is None:
@@ -474,8 +475,10 @@ class DivarAuth:
         deadline = time.monotonic() + timeout
         while True:
             cookies = await self.get_current_cookies()
-            if any(c.get("name") == "token" for c in cookies):
-                logger.info("Session cookie appeared — login completed")
+            from app.services.divar_session import has_auth_cookie, auth_cookie
+            if has_auth_cookie(cookies):
+                logger.info(f"Session cookie appeared ({auth_cookie(cookies)['name']}) "
+                            "— login completed")
                 return cookies, None
 
             rejection = await self._divar_rejection_text()
@@ -519,7 +522,8 @@ class DivarAuth:
             # default 30s ("Timeout 30000ms exceeded"). Detect the already-logged-in
             # state up front and finalize immediately from the cookies we already have.
             pre_cookies = await self.get_current_cookies()
-            token_cookie = next((c for c in pre_cookies if c.get("name") == "token"), None)
+            from app.services.divar_session import auth_cookie as _auth_cookie
+            token_cookie = _auth_cookie(pre_cookies)
             if token_cookie:
                 logger.info(f"Already authenticated (url={current_url}) — token cookie present, skipping OTP form entry")
                 result["success"] = True
@@ -705,7 +709,8 @@ class DivarAuth:
                 if any(keyword in key.lower() for keyword in ["token", "auth", "jwt", "bearer", "session"]):
                     logger.info(f"sessionStorage auth item: {key} = {value[:50]}...")
             
-            token_cookie = next((c for c in cookies if c.get("name") == "token"), None)
+            from app.services.divar_session import auth_cookie as _auth_cookie2
+            token_cookie = _auth_cookie2(cookies)
             
             if token_cookie:
                 result["success"] = True

@@ -148,11 +148,14 @@ class TestTheUserIsToldWhereTheListingsWent:
         assert "duplicates=" in src
 
     def test_the_filter_breakdown_is_reported(self):
+        """There are two skip_tally blocks: one composes finish_reason, the
+        other records the event. Find the one that reports, not the first."""
         src = _run_src()
-        i = src.index("if skip_tally:")
-        block = src[i:i + 1400]
-        assert "job_log.record" in block
-        assert "با فیلترها حذف شد" in block
+        blocks = [src[i:i + 1400] for i in range(len(src))
+                  if src.startswith("if skip_tally:", i)]
+        assert blocks, "no skip_tally block at all"
+        assert any("job_log.record" in b and "با فیلترها حذف شد" in b
+                   for b in blocks), "the filter breakdown never reaches the run log"
 
     def test_saving_nothing_at_all_is_a_warning_with_the_culprit(self):
         src = _run_src()

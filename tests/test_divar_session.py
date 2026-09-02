@@ -589,3 +589,75 @@ class TestLoginBrowsersDoNotLeak:
         i = src.index("auth_instances[phone_number] = auth")
         assert "_discard_auth_instance" in src[:i], \
             "a new browser is stored before the previous one is closed"
+
+
+class TestDivarMovedToSuperTokens:
+    """A login today sets sAccessToken / sFrontToken / sRefreshToken and NO
+    `token` at all. Every part of this codebase was looking for `token`.
+
+    Observed, from a real login on 2026-09-02:
+
+        Cookie names: cdid, csid, did, ff, referrer, resolution_width,
+                      sAccessToken, sFrontToken, sRefreshToken, theme
+        Found potential auth cookies: []
+
+    That single mismatch produced: "No session cookie after 30s" on every
+    login (the wait could never succeed), "No specific auth cookies found",
+    an empty expiry column, and 403s whenever a stale `token` from the old
+    scheme was still in the jar.
+    """
+
+    SUPERTOKENS = [
+        {"name": "cdid", "value": "c"}, {"name": "csid", "value": "c"},
+        {"name": "did", "value": "d"}, {"name": "ff", "value": "f"},
+        {"name": "sAccessToken", "value": "ACCESS"},
+        {"name": "sFrontToken", "value": "FRONT"},
+        {"name": "sRefreshToken", "value": "REFRESH"},
+        {"name": "theme", "value": "dark"},
+    ]
+
+    def test_a_supertokens_jar_is_recognised_as_a_session(self):
+        from app.services.divar_session import has_auth_cookie
+        assert has_auth_cookie(self.SUPERTOKENS) is True
+
+    def test_the_access_token_is_preferred_over_the_refresh_token(self):
+        from app.services.divar_session import auth_cookie
+        assert auth_cookie(self.SUPERTOKENS)["name"] == "sAccessToken"
+
+    def test_a_legacy_token_jar_still_works(self):
+        """Sessions saved under the old scheme must not stop working."""
+        from app.services.divar_session import has_auth_cookie, auth_cookie
+        jar = [{"name": "token", "value": "OLD"}, {"name": "did", "value": "d"}]
+        assert has_auth_cookie(jar) is True
+        assert auth_cookie(jar)["name"] == "token"
+
+    def test_a_jar_with_no_session_is_not_a_session(self):
+        from app.services.divar_session import has_auth_cookie
+        assert has_auth_cookie([{"name": "theme", "value": "dark"},
+                                {"name": "did", "value": "d"}]) is False
+
+    def test_expiry_comes_from_whichever_auth_cookie_is_present(self):
+        from app.services.divar_session import derive_expiry
+        jar = [{"name": "sAccessToken", "value": "a", "expirationDate": TS}]
+        assert derive_expiry(jar) == FUTURE
+
+    def test_the_login_wait_no_longer_looks_only_for_token(self):
+        """This is the 30 seconds every login was spending on a cookie that
+        does not exist any more."""
+        import inspect
+        from app.scraper.auth import DivarAuth
+        src = inspect.getsource(DivarAuth._await_login_outcome)
+        assert 'c.get("name") == "token"' not in src
+        assert "has_auth_cookie" in src
+
+    def test_no_call_site_hard_codes_the_name_any_more(self):
+        """Seven places did, and they drifted from Divar independently."""
+        import inspect
+        from app.scraper import auth as sa
+        from app.api.routes import auth as ra
+        from app.scraper import divar_scraper as ds
+
+        for mod in (sa, ra, ds):
+            src = inspect.getsource(mod)
+            assert 'c.get("name") == "token"' not in src, \
+                f"{mod.__name__} still hard-codes the legacy cookie name"
