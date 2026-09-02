@@ -93,6 +93,27 @@ def auth_cookie(jar):
     return None
 
 
+REFRESH_COOKIE = "sRefreshToken"
+
+
+def has_refresh_cookie(jar) -> bool:
+    """Whether this jar can obtain a new access token.
+
+    SuperTokens splits the session in two: sAccessToken is short-lived —
+    an hour or so — and sRefreshToken carries the real session, here for 364
+    days. A browser swaps an expired access token for a fresh one without
+    anybody noticing.
+
+    We do not. The probe sends whatever cookie it has, and five hours after a
+    login that is an expired access token, which Divar refuses with a 403. So
+    three perfectly good sessions were marked «باطل — نیاز به ورود مجدد» while
+    the panel showed «۳۶۴ روز و ۱۶ ساعت» remaining next to them: a cookie with
+    a year left, declared dead, because the token inside it was an hour old.
+    """
+    return any(c.get("name") == REFRESH_COOKIE and c.get("value")
+               for c in (jar or []))
+
+
 def has_auth_cookie(jar) -> bool:
     """Whether this jar carries a session at all.
 
@@ -236,6 +257,23 @@ async def probe(row) -> dict:
                 "message": f"دیوار این نشست را پذیرفت (HTTP {r.status_code})"}
 
     if r.status_code in (401, 403):
+        # Checked BEFORE the control request, and before anything is concluded.
+        #
+        # A refusal with a refresh token in hand is not a dead session: it
+        # almost certainly means the short-lived access token has aged out,
+        # which is the normal state of any session more than about an hour old.
+        # A browser would exchange it and carry on; this probe cannot, so it
+        # must not pass sentence. Saying "needs login" here is what marked three
+        # good accounts «باطل» five hours after they were logged into, next to a
+        # «۳۶۴ روز» expiry that should have made the contradiction obvious.
+        #
+        # First, so it also saves the control request it would otherwise make.
+        if has_refresh_cookie(row.cookies):
+            return {"alive": None, "state": "stale", "needs_login": False,
+                    "took_ms": took, "http_status": r.status_code,
+                    "message": ("توکن دسترسی منقضی شده است — نشست هنوز معتبر است "
+                                "و در اولین استفاده توسط مرورگر تازه می‌شود")}
+
         # Check the instrument before trusting it.
         #
         # The same endpoint with no cookie at all must answer 200. If it does

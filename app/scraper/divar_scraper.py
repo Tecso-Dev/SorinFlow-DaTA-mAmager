@@ -411,9 +411,81 @@ class DivarScraper:
         except ValueError:
             return None
     
+    @staticmethod
+    def _memory_fraction() -> Optional[float]:
+        """How much of the container's memory limit is in use, 0..1, or None.
+
+        Read from the cgroup rather than psutil: inside a container psutil
+        reports the HOST's memory, so a pod at 96% of its 2Gi limit looks like
+        48% of a 4GB box and nothing appears wrong right up until the OOM
+        killer arrives. cgroup v2 first, then v1.
+        """
+        pairs = (("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory.max"),
+                 ("/sys/fs/cgroup/memory/memory.usage_in_bytes",
+                  "/sys/fs/cgroup/memory/memory.limit_in_bytes"))
+        for use_p, max_p in pairs:
+            try:
+                with open(use_p) as f:
+                    used = int(f.read().strip())
+                with open(max_p) as f:
+                    raw = f.read().strip()
+                if raw == "max":
+                    return None                      # no limit set
+                limit = int(raw)
+                # cgroup v1 writes a sentinel near 2**63 when unlimited
+                if limit <= 0 or limit > (1 << 62):
+                    return None
+                return used / limit
+            except (OSError, ValueError):
+                continue
+        return None
+
+    async def _recycle_browser(self, why: str) -> None:
+        """Close Chromium and open a fresh one, keeping the session.
+
+        Chromium does not give memory back. Over a few hundred navigations a
+        long run climbs steadily, and on a 2Gi pod that ends as an OOM kill —
+        which looks like «اسکرپر کرش کرد» and leaves the job row stuck at
+        «در حال اجرا» until the next boot marks it failed.
+        """
+        logger.warning(f"[memory] recycling the browser: {why}")
+        phone = self.active_phone
+        try:
+            await self.close()
+        except Exception as e:
+            logger.warning(f"[memory] closing the old browser failed: {e}")
+        await asyncio.sleep(2)
+        await self.initialize()
+        self.request_count = 0
+        self.session_start = datetime.now()
+        if phone:
+            try:
+                await self.auth.restore_session(phone)
+                self.active_phone = phone
+                logger.info(f"[memory] session for {phone} restored after recycle")
+            except Exception as e:
+                logger.error(f"[memory] could not restore {phone} after recycle: {e}")
+        if self.current_job is not None:
+            from app.services import job_log
+            await job_log.record(
+                self.current_job.job_id, job_log.PAGE,
+                f"مرورگر برای آزادسازی حافظه بازراه‌اندازی شد ({why})",
+                level="warning")
+
     async def _check_rate_limit(self):
         """Check and enforce rate limiting"""
         self.request_count += 1
+
+        # Recycle before the OOM killer does it for us.
+        #
+        # The request-count ceiling below is a poor proxy for memory: at 500 it
+        # never fired before a 2Gi pod ran out, because what grows is Chromium's
+        # footprint per navigation, not our request tally. This checks the thing
+        # that actually matters.
+        frac = self._memory_fraction()
+        if frac is not None and frac >= 0.80:
+            await self._recycle_browser(f"container memory at {frac:.0%}")
+            return
         
         # Check requests per minute
         elapsed = (datetime.now() - self.session_start).total_seconds()
@@ -426,12 +498,8 @@ class DivarScraper:
         
         # Check requests per session
         if self.request_count >= self.stealth_config.max_requests_per_session:
-            logger.info("Session request limit reached. Restarting browser...")
-            await self.close()
-            await asyncio.sleep(10)
-            await self.initialize()
-            self.request_count = 0
-            self.session_start = datetime.now()
+            await self._recycle_browser(
+                f"{self.request_count} requests this browser session")
     
     async def _fetch_listings_direct_api(
         self, city: str, category: str, page_num: int,
@@ -726,9 +794,15 @@ class DivarScraper:
             for scroll_n in range(max_scrolls):
                 prev = len(all_listings)
 
-                # Drain any captured API responses for richer metadata
-                for data in list(pending_api):
-                    pending_api.remove(data)
+                # Drain any captured API responses for richer metadata.
+                #
+                # Swap the list out rather than removing from it. `list.remove`
+                # searches by equality, and these are large nested dicts, so
+                # draining N responses meant N deep dict comparisons over a
+                # shrinking list — quadratic, on the biggest objects in the
+                # process, on every scroll.
+                batch_api, pending_api[:] = list(pending_api), []
+                for data in batch_api:
                     parsed, _cur = self._parse_api_response(data)
                     # Divar just told us where the next page starts. Keep it:
                     # this is the cursor the API phase needs to page deeper,
@@ -2646,6 +2720,16 @@ class DivarScraper:
                 until_day=target_day if date_mode else None,
             )
             seen_ids: set = {lst['divar_id'] for lst in all_listings}
+
+            # Collection is the heaviest thing the browser ever does: the feed
+            # page ends up holding hundreds of rendered cards and their images,
+            # and Chromium does not hand that back when we navigate away. The
+            # detail phase then runs hundreds more navigations on top of it.
+            # Starting that phase in a fresh browser is what keeps a 500-item
+            # run costing the same as a 50-item one.
+            if len(all_listings) > 40:
+                await self._recycle_browser(
+                    f"listing collection finished ({len(all_listings)} candidates)")
 
             # ── Did collection finish, or was it cut off? ──────────────────────
             #

@@ -661,3 +661,100 @@ class TestDivarMovedToSuperTokens:
             src = inspect.getsource(mod)
             assert 'c.get("name") == "token"' not in src, \
                 f"{mod.__name__} still hard-codes the legacy cookie name"
+
+
+class TestAnExpiredAccessTokenIsNotADeadSession:
+    """Sobhan, five hours after logging into three accounts: «why are the
+    cookies disabled, I logged in about 5 hours ago».
+
+    The panel showed the contradiction plainly — «باطل — نیاز به ورود مجدد»
+    beside «زمان باقی‌مانده: ۳۶۴ روز و ۱۶ ساعت». A cookie with a year left,
+    declared dead.
+
+    SuperTokens splits a session in two. sAccessToken is short-lived, about an
+    hour; sRefreshToken carries the real session, here for 364 days. A browser
+    swaps an expired access token for a fresh one without anyone noticing. Our
+    probe cannot: it sends whatever it has, and after an hour that is an expired
+    access token, which Divar refuses with a 403. The verifier then wrote three
+    working accounts out of rotation every ten minutes.
+    """
+
+    JAR = [{"name": "sAccessToken", "value": "STALE"},
+           {"name": "sRefreshToken", "value": "GOOD"},
+           {"name": "did", "value": "d"}]
+
+    class _Row:
+        def __init__(self, jar):
+            self.phone_number = "09120000000"
+            self.cookies = jar
+            self.is_valid = True
+            self.expires_at = None
+            self.last_checked_at = None
+
+    def test_a_refresh_token_is_detected(self):
+        from app.services.divar_session import has_refresh_cookie
+        assert has_refresh_cookie(self.JAR) is True
+
+    def test_a_legacy_jar_has_no_refresh_token(self):
+        from app.services.divar_session import has_refresh_cookie
+        assert has_refresh_cookie([{"name": "token", "value": "t"}]) is False
+
+    @pytest.mark.asyncio
+    async def test_a_403_with_a_refresh_token_is_not_death(self, monkeypatch):
+        """The whole bug in one assertion."""
+        from app.services import divar_session
+        import httpx
+
+        class _Resp:
+            def __init__(self, s): self.status_code = s
+
+        class _Client:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, *a, **kw): return _Resp(403)
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _Client())
+        res = await divar_session.probe(self._Row(self.JAR))
+
+        assert res["alive"] is not False, "a refreshable session was condemned"
+        assert res["needs_login"] is False, "it asked for a needless re-login"
+        assert res["state"] == "stale"
+
+    @pytest.mark.asyncio
+    async def test_a_403_without_a_refresh_token_still_is_death(self, monkeypatch):
+        """The guard must not become a blanket excuse — a jar that genuinely
+        cannot recover has to be reported."""
+        from app.services import divar_session
+        import httpx
+
+        class _Resp:
+            def __init__(self, s): self.status_code = s
+
+        seq = [403, 200]           # refusal, then the cookie-less control
+
+        class _Client:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, *a, **kw):
+                return _Resp(seq.pop(0) if len(seq) > 1 else seq[0])
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _Client())
+        res = await divar_session.probe(
+            self._Row([{"name": "token", "value": "OLD"}]))
+        assert res["alive"] is False and res["needs_login"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_stale_session_is_not_removed_from_rotation(self, monkeypatch):
+        """alive=None leaves is_valid alone, so the account keeps working."""
+        from app.services import divar_session
+
+        class _Db:
+            async def commit(self): pass
+
+        async def stale(_row):
+            return {"alive": None, "state": "stale", "message": "", "needs_login": False}
+        monkeypatch.setattr(divar_session, "probe", stale)
+
+        row = self._Row(self.JAR)
+        await divar_session.check_and_record(_Db(), row)
+        assert row.is_valid is True

@@ -394,3 +394,84 @@ class TestThePaginationDeadlock:
         body = src[src.index("template = self._search_req_template"):]
         assert 'client.get(api_url' not in body, "the dead GET fallback is back"
         assert '"city_ids": [city]' not in body, "the dead POST fallback is back"
+
+
+class TestMemoryIsBoundedNotJustLimited:
+    """«maybe I want to scrape 500 items at one time» — and that must cost the
+    same memory as 50.
+
+    A 2Gi pod was reaching 96% and being OOM-killed past ~60 listings, which
+    surfaced as «اسکرپر کرش کرد» plus a job row stuck at «در حال اجرا» until the
+    next boot marked it failed. Raising the ceiling only moves the number at
+    which it dies; the fix is that Chromium's footprint is recycled rather than
+    accumulated.
+    """
+
+    def test_memory_is_read_from_the_cgroup_not_the_host(self):
+        """Inside a container psutil reports the HOST's memory, so a pod at 96%
+        of its 2Gi limit looks like 48% of a 4GB box and nothing appears wrong
+        until the OOM killer arrives."""
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._memory_fraction)
+        assert "/sys/fs/cgroup/memory.current" in src
+        assert "memory.usage_in_bytes" in src, "cgroup v1 hosts are not handled"
+        # Check the code, not the docstring — which explains why psutil is wrong
+        # here and would otherwise fail this assertion by naming it.
+        body = src.split('"""')[2]
+        assert "psutil" not in body
+
+    def test_an_absent_or_unlimited_cgroup_reads_as_unknown(self):
+        """Better to fall back to the request-count backstop than to recycle on
+        a number that means nothing."""
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._memory_fraction)
+        assert 'raw == "max"' in src
+        assert "1 << 62" in src, "the cgroup v1 unlimited sentinel is not handled"
+        # and on a host with no cgroup files at all it must not raise
+        assert DivarScraper._memory_fraction() is None or True
+
+    def test_the_rate_limiter_recycles_on_memory(self):
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._check_rate_limit)
+        assert "_memory_fraction()" in src
+        assert "_recycle_browser" in src
+        assert "0.80" in src
+
+    def test_the_request_backstop_is_reachable_before_an_oom(self):
+        """500 never fired before a 2Gi pod ran out, because what grows is
+        Chromium's footprint per navigation, not our request tally."""
+        from app.scraper.stealth import StealthConfig
+        assert StealthConfig().max_requests_per_session <= 200
+
+    def test_the_browser_is_recycled_after_collection(self):
+        """The feed page ends up holding hundreds of rendered cards and their
+        images, and Chromium does not give that back on navigation."""
+        src = _run_src()
+        assert "listing collection finished" in src
+
+    def test_recycling_keeps_the_divar_session(self):
+        """A recycle that drops the session turns a memory fix into a run that
+        silently stops extracting phone numbers."""
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._recycle_browser)
+        assert "restore_session" in src
+        assert "self.active_phone" in src
+
+    def test_a_recycle_is_recorded_in_the_run_log(self):
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._recycle_browser)
+        assert "job_log.record" in src
+
+    def test_a_failed_close_does_not_abort_the_run(self):
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._recycle_browser)
+        i = src.index("await self.close()")
+        assert "except Exception" in src[i:i + 300]
+
+    def test_captured_api_responses_are_drained_linearly(self):
+        """list.remove searches by equality over large nested dicts — draining
+        N responses cost N deep comparisons over a shrinking list, quadratic,
+        on the biggest objects in the process, on every scroll."""
+        src = _collector_src()
+        assert "pending_api.remove(data)" not in src
+        assert "pending_api[:]" in src, "the drain is not swapping the list out"

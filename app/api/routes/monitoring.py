@@ -46,12 +46,15 @@ def _system_info() -> dict:
         "arch": platform.machine(),
         "hostname": platform.node(),
     }
-    # Ubuntu inside the Playwright image; PRETTY_NAME is the readable one
+    # This is the CONTAINER's OS — the Playwright image's Ubuntu — not the
+    # host's. The panel labelled it «سیستم‌عامل» and people read it as the
+    # server, then wondered why a box running Ubuntu 26.04 reported 22.04.
     pretty = _read_first("/etc/os-release")
     if pretty:
         for line in pretty.splitlines():
             if line.startswith("PRETTY_NAME="):
                 info["distro"] = line.split("=", 1)[1].strip().strip('"')
+                info["distro_is_container"] = True
                 break
     up = _read_first("/proc/uptime")
     if up:

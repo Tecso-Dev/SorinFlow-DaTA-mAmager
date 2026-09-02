@@ -64,7 +64,11 @@ class StealthConfig:
     
     # Request limits
     max_requests_per_minute: int = 20
-    max_requests_per_session: int = 500
+    # Chromium does not give memory back, so this is a memory ceiling wearing a
+    # request count. 500 never fired before a 2Gi pod ran out — the real guard
+    # is the cgroup check in _check_rate_limit, and this is the backstop for
+    # hosts where that file cannot be read.
+    max_requests_per_session: int = 150
     
     def get_random_user_agent(self) -> str:
         """Get a random user agent from the pool"""

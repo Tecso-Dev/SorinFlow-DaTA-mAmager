@@ -137,7 +137,17 @@ spec:
               cpu: "200m"
               memory: "512Mi"
             limits:
-              memory: "2Gi"
+              # The node has 4Gi and also runs Postgres and Redis, neither of
+              # which has a limit of its own. 2Gi was where a big scrape hit the
+              # OOM killer; 2.5Gi buys real headroom while still leaving ~1.5Gi
+              # for the database, the cache and the OS.
+              #
+              # Going higher is not a config change — it needs limits on
+              # postgres and redis first, or the node OOM killer picks a victim
+              # and it may well be the database. The scraper now recycles
+              # Chromium at 80% of whatever this says (see _check_rate_limit),
+              # so the ceiling matters much less than it did.
+              memory: "2560Mi"
           # Startup is create_all plus a migration chain, and its duration is
           # not knowable in advance. Without a startupProbe the liveness probe
           # kills the container ~150s in and it crashloops forever with no way
