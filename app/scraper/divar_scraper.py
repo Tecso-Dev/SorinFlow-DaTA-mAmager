@@ -2259,6 +2259,27 @@ class DivarScraper:
         logger.info("[rotate] no alternative account could be restored; staying on current")
         return False
 
+    # Filter names as the person who set them sees them in the panel. The
+    # tally buckets on the reason string are English field names, which are
+    # useless in a message whose whole job is to say «this is the filter that
+    # cost you the listings».
+    _FILTER_LABELS_FA = {
+        "deposit": "ودیعه",
+        "rent": "اجارهٔ ماهانه",
+        "price": "قیمت",
+        "price/m²": "قیمت هر متر",
+        "area": "متراژ",
+        "rooms": "تعداد اتاق",
+        "posted": "تاریخ انتشار",
+        "posted_at": "تاریخ انتشار",
+        "advertiser_type": "نوع آگهی‌دهنده",
+        "has_images": "داشتن عکس",
+        "has_elevator": "آسانسور",
+        "has_parking": "پارکینگ",
+        "has_storage": "انباری",
+        "has_balcony": "بالکن",
+    }
+
     # Divar's own words for what kind of ad this is, mapped to the two the
     # validator knows. 'buy' is the scraper's term and 'sale' is the
     # validator's -- without this every sale listing would be graded against
@@ -2838,6 +2859,18 @@ class DivarScraper:
                         f"{job.updated_items} آگهی از قبل در پایگاه داده بود. "
                         "یا دیوار آگهی دیگری ندارد یا فیلترها خیلی تنگ‌اند"
                     )
+
+            # Which filter actually cost the run its listings. Asking for 78 and
+            # getting 3 is not mysterious once you know 125 of 200 candidates
+            # failed the deposit band alone — but that number only ever existed
+            # in the log, so the panel showed a completed job and no reason to
+            # doubt the filters. Name the biggest offenders on the job itself.
+            if skip_tally:
+                top = sorted(skip_tally.items(), key=lambda kv: -kv[1])[:3]
+                named = "، ".join(
+                    f"{self._FILTER_LABELS_FA.get(k, k)}: {v}" for k, v in top)
+                dropped = f"{sum(skip_tally.values())} آگهی با فیلترها حذف شد ({named})"
+                finish_reason = f"{finish_reason}؛ {dropped}" if finish_reason else dropped
 
             # A run whose OTP prompts went unanswered finishes fast and looks
             # normal, but half its listings have no phone number. Say so.
