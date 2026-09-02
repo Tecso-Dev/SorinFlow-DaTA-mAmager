@@ -758,3 +758,44 @@ class TestAnExpiredAccessTokenIsNotADeadSession:
         row = self._Row(self.JAR)
         await divar_session.check_and_record(_Db(), row)
         assert row.is_valid is True
+
+
+class TestSessionsWronglyCondemnedAreRestored:
+    """The fix above stops NEW false condemnations. It does nothing for the
+    three accounts already sitting at is_valid=False because of the old
+    behaviour — and nothing else ever sets that flag back, so they would stay
+    «باطل» for ever while the code that broke them was already fixed."""
+
+    class _Db:
+        async def commit(self): pass
+
+    def _row(self):
+        r = TestAnExpiredAccessTokenIsNotADeadSession._Row(
+            TestAnExpiredAccessTokenIsNotADeadSession.JAR)
+        r.is_valid = False          # demoted by the old probe
+        return r
+
+    @pytest.mark.asyncio
+    async def test_a_stale_but_refreshable_session_returns_to_rotation(self, monkeypatch):
+        from app.services import divar_session
+
+        async def stale(_row):
+            return {"alive": None, "state": "stale", "needs_login": False, "message": ""}
+        monkeypatch.setattr(divar_session, "probe", stale)
+
+        row = self._row()
+        await divar_session.check_and_record(self._Db(), row)
+        assert row.is_valid is True, "the account is stranded out of rotation"
+
+    @pytest.mark.asyncio
+    async def test_a_genuinely_unknown_result_does_not_revive_anything(self, monkeypatch):
+        """Divar not answering is not evidence the session is good."""
+        from app.services import divar_session
+
+        async def unknown(_row):
+            return {"alive": None, "state": "unknown", "needs_login": False, "message": ""}
+        monkeypatch.setattr(divar_session, "probe", unknown)
+
+        row = self._row()
+        await divar_session.check_and_record(self._Db(), row)
+        assert row.is_valid is False

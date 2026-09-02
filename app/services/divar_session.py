@@ -350,6 +350,19 @@ async def check_and_record(db, row, *, confirm: bool = False) -> dict:
     if res["alive"] is True and not row.is_valid:
         row.is_valid = True
         logger.info(f"[session] {row.phone_number} accepted by Divar — back in rotation")
+    elif res.get("state") == "stale" and not row.is_valid:
+        # Put back what the old probe wrongly took away.
+        #
+        # "stale" means the access token aged out but the refresh token is
+        # still good — the session works, the browser just has to exchange it.
+        # Accounts demoted by the previous behaviour are sitting at
+        # is_valid=False, and leaving alive=None to "change nothing" would
+        # strand them there permanently: nothing else ever sets the flag back,
+        # so the fix would stop new false condemnations while quietly keeping
+        # every existing one.
+        row.is_valid = True
+        logger.info(f"[session] {row.phone_number} was written off for an expired "
+                    "access token — refresh token is intact, back in rotation")
     elif res["alive"] is False and row.is_valid:
         row.is_valid = False
         logger.warning(f"[session] {row.phone_number} rejected by Divar "
