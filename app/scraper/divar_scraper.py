@@ -133,6 +133,11 @@ class DivarScraper:
         self.session_start = datetime.now()
         # Captured /postlist/w/search POST request, replayed for cursor pagination
         self._search_req_template: Optional[Dict[str, Any]] = None
+        # (reason, detail) for why listing collection ended. None until a
+        # collection runs. The caller uses it to decide whether a short run is a
+        # finished one or a blocked one — before this existed the two were
+        # indistinguishable and every short run reported success.
+        self._collect_stop: Optional[tuple] = None
         # One pooled HTTP client for the whole run. Each call site used to build
         # its own, so every image and every API request paid a fresh TCP and TLS
         # handshake to a host we talk to thousands of times per job.
@@ -580,13 +585,31 @@ class DivarScraper:
         already rendered via JS, including cards that appear after scrolling.
         Also intercepts API responses as a bonus to get richer metadata.
         """
+        self._collect_stop = None
         all_listings: List[Dict[str, Any]] = []
         seen_ids: set = set()
         pending_api: list = []
 
+        # What Divar said while we were scrolling, when it was not "200 OK".
+        #
+        # This listener used to `return` on any non-200 and say nothing. So when
+        # Divar started refusing — 403 because the session had been killed, 429
+        # because we were going too fast — the scraper carried on scrolling an
+        # empty feed, collected whatever it already had, and reported the run
+        # COMPLETED. That is the whole of "it was cancelled by Divar and the log
+        # says it is OK": the one moment the truth was on the wire, we dropped it.
+        refusals: Dict[str, int] = {}
+
         async def _on_resp(response):
             try:
-                if 'api.divar.ir' not in response.url or response.status != 200:
+                if 'api.divar.ir' not in response.url:
+                    return
+                if response.status != 200:
+                    if response.status in (401, 403, 429) or response.status >= 500:
+                        refusals[str(response.status)] = refusals.get(str(response.status), 0) + 1
+                        logger.warning(
+                            f"[dom] Divar answered {response.status} during collection "
+                            f"({sum(refusals.values())} refusal(s) so far)")
                     return
                 if 'json' not in response.headers.get('content-type', ''):
                     return
@@ -748,6 +771,7 @@ class DivarScraper:
                 )
 
                 if len(all_listings) >= target_count:
+                    self._collect_stop = ("target", None)
                     break
 
                 # ── Scroll to bottom to reveal the 'آگهی‌های بیشتر' (Load More) button ──
@@ -787,7 +811,17 @@ class DivarScraper:
                     no_new_streak += 1
                     # Stop only when no new items AND no load-more button for a while
                     if no_new_streak >= 6 and no_button_streak >= 3:
-                        logger.info("[dom] no new items & no load-more button — stopping")
+                        # Two very different situations look identical from here:
+                        # the feed genuinely ended, or Divar stopped serving us.
+                        # The refusal tally is what tells them apart.
+                        if refusals:
+                            self._collect_stop = ("refused", dict(refusals))
+                            logger.warning(
+                                f"[dom] stopped after {sum(refusals.values())} refusal(s) "
+                                f"from Divar {refusals} — this is a block, not an empty feed")
+                        else:
+                            self._collect_stop = ("exhausted", None)
+                            logger.info("[dom] no new items & no load-more button — stopping")
                         break
                 else:
                     no_new_streak = 0
@@ -801,12 +835,22 @@ class DivarScraper:
                     pass
 
         except Exception as e:
+            self._collect_stop = ("error", f"{type(e).__name__}: {e}")
             logger.error(f"[dom] _collect_from_browser_dom failed: {e}")
         finally:
             self.page.remove_listener("response", _on_resp)
             self.page.remove_listener("request", _on_request)
 
-        logger.info(f"[dom] collected {len(all_listings)} listings (target={target_count})")
+        # A run that never hit any explicit break fell out of the loop bound.
+        if self._collect_stop is None:
+            self._collect_stop = ("refused", dict(refusals)) if refusals else ("loop-end", None)
+        elif refusals and self._collect_stop[0] in ("exhausted", "target"):
+            # We finished, but Divar was refusing some of it on the way. The
+            # count is short for a reason the caller must be told about.
+            self._collect_stop = ("partly-refused", dict(refusals))
+
+        logger.info(f"[dom] collected {len(all_listings)} listings "
+                    f"(target={target_count}, stop={self._collect_stop[0]})")
         return all_listings[:target_count]
 
     @staticmethod
@@ -2542,6 +2586,64 @@ class DivarScraper:
             )
             seen_ids: set = {lst['divar_id'] for lst in all_listings}
 
+            # ── Did collection finish, or was it cut off? ──────────────────────
+            #
+            # Until now these were the same thing: the collector returned a list
+            # and the caller had no way to ask whether that list was everything.
+            # A run that Divar refused at listing 42 of 250 looked exactly like a
+            # run that had genuinely reached the end of the feed, and both
+            # reported «تکمیل شده».
+            from app.services import job_log
+            _stop, _detail = (self._collect_stop or ("unknown", None))
+            _short = len(all_listings) < collect_target
+
+            if _stop in ("refused", "partly-refused"):
+                counts = ", ".join(f"HTTP {k}×{v}" for k, v in sorted((_detail or {}).items()))
+                msg = (f"دیوار در حین جمع‌آوری آگهی‌ها دسترسی را رد کرد ({counts}). "
+                       f"فقط {len(all_listings)} آگهی از فهرست خوانده شد — "
+                       "این اسکرپ کامل نیست.")
+                logger.error(f"[collect] {msg}")
+                await job_log.record(job.job_id, job_log.CHALLENGE, msg,
+                                     level="error", collected=len(all_listings),
+                                     target=collect_target, refusals=_detail)
+                # A refusal that stopped us dead is a failed run, not a short one.
+                # Saying otherwise is the bug being fixed here.
+                if _stop == "refused":
+                    job.status = "failed"
+                    job.error_message = msg
+                    job.finish_reason = msg
+                    job.completed_at = datetime.now()
+                    await self.db_session.commit()
+                    return job
+
+            elif _stop == "error":
+                msg = (f"جمع‌آوری فهرست آگهی‌ها با خطا متوقف شد ({_detail}). "
+                       f"{len(all_listings)} آگهی تا آن لحظه خوانده شده بود.")
+                logger.error(f"[collect] {msg}")
+                await job_log.record(job.job_id, job_log.ERROR, msg, level="error",
+                                     collected=len(all_listings), target=collect_target)
+                job.status = "failed"
+                job.error_message = msg
+                job.finish_reason = msg
+                job.completed_at = datetime.now()
+                await self.db_session.commit()
+                return job
+
+            elif _short:
+                # Not refused and not an error: the feed really did run out.
+                # Still worth saying, because «۴۲ از ۲۵۰» with no explanation is
+                # what made this look broken.
+                await job_log.record(
+                    job.job_id, job_log.PAGE,
+                    f"فهرست دیوار با این فیلترها {len(all_listings)} آگهی داشت "
+                    f"(ظرفیت جست‌وجو {collect_target} بود) — بیشتر از این در دیوار نبود",
+                    collected=len(all_listings), target=collect_target, stop=_stop)
+            else:
+                await job_log.record(
+                    job.job_id, job_log.PAGE,
+                    f"{len(all_listings)} آگهی از فهرست جمع‌آوری شد",
+                    collected=len(all_listings), target=collect_target)
+
             # Progress is measured against the requested target, not the raw pool,
             # so the dashboard reaches 100% exactly when max_items are saved.
             # With no numeric target (whole-day mode), progress tracks the pool.
@@ -2816,13 +2918,11 @@ class DivarScraper:
             job.status = "completed"
             job.completed_at = datetime.now()
             await self.db_session.commit()
-            from app.services import job_log
-            await job_log.record(
-                job.job_id, job_log.FINISH,
-                f"اسکرپ تمام شد — {job.new_items} تازه، {job.updated_items} به‌روز، "
-                f"{job.failed_items} ناموفق",
-                new=job.new_items, updated=job.updated_items,
-                failed=job.failed_items, pages=job.scraped_pages)
+            # The FINISH event is recorded further down, AFTER finish_reason has
+            # been composed. Written here it always said «تمام شد» with no
+            # reason attached, because the reason does not exist yet at this
+            # point — which is exactly what made a cut-short run read as a
+            # clean one in the log.
             
             # The account that finished the job has the freshest session of all;
             # losing it would make the next job start from a stale snapshot.
@@ -2885,14 +2985,50 @@ class DivarScraper:
 
             job.finish_reason = finish_reason
             await self.db_session.commit()
+
+            from app.services import job_log
+            _summary = (f"اسکرپ تمام شد — {job.new_items} تازه، "
+                        f"{job.updated_items} از قبل ذخیره شده بود، "
+                        f"{job.failed_items} ناموفق")
+            if finish_reason:
+                _summary += f"\n{finish_reason}"
+            # A run that asked for N and saved fewer is worth flagging even when
+            # the reason is benign, so it does not read as an unqualified success.
+            _short_of_target = bool(max_items and job.new_items < max_items)
+            await job_log.record(
+                job.job_id, job_log.FINISH, _summary,
+                level="warning" if _short_of_target else "info",
+                new=job.new_items, updated=job.updated_items,
+                failed=job.failed_items, pages=job.scraped_pages,
+                requested=max_items, candidates=len(all_listings),
+                skipped=(sum(skip_tally.values()) or None))
+            # Where the candidates went, per reason. This tally has always been
+            # computed and only ever written to a log file nobody reads per-job,
+            # so «۴۲ نامزد، ۳ ذخیره» looked like a fault when it was usually the
+            # filters doing exactly what they were told.
+            if job.updated_items:
+                await job_log.record(
+                    job.job_id, job_log.PAGE,
+                    f"{job.updated_items} آگهی از قبل در پایگاه داده بود و دوباره ذخیره نشد",
+                    duplicates=job.updated_items)
             if skip_tally:
                 breakdown = ", ".join(f"{k}={v}" for k, v in
                                       sorted(skip_tally.items(), key=lambda kv: -kv[1]))
                 logger.info(f"Filters dropped {sum(skip_tally.values())} listings — {breakdown}")
+                await job_log.record(
+                    job.job_id, job_log.PAGE,
+                    f"{sum(skip_tally.values())} آگهی با فیلترها حذف شد — {breakdown}",
+                    level="warning" if not job.new_items else "info",
+                    **{f"skip_{k}": v for k, v in skip_tally.items()})
                 if not job.new_items:
                     logger.warning(
                         "Job saved nothing: every candidate was dropped by a filter. "
                         f"Loosen whichever of these is doing it — {breakdown}")
+                    await job_log.record(
+                        job.job_id, job_log.FINISH,
+                        "هیچ آگهی ذخیره نشد — همهٔ نامزدها با فیلترها حذف شدند. "
+                        f"فیلتری که بیشترین حذف را کرده: {breakdown}",
+                        level="warning")
             
         except Exception as e:
             job.status = "failed"
