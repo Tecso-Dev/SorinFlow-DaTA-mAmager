@@ -155,6 +155,11 @@ class DivarScraper:
         # servers.
         self._refusals = 0
         self._cooldown_until = 0.0
+        # The running job's UUID as a string. _recycle_browser needs it to write
+        # an event, and reading it off self.current_job means an ORM attribute
+        # access — which, on a row expired by an earlier commit, is a lazy
+        # refresh in the middle of tearing a browser down.
+        self._job_id_str = None
         # One pooled HTTP client for the whole run. Each call site used to build
         # its own, so every image and every API request paid a fresh TCP and TLS
         # handshake to a host we talk to thousands of times per job.
@@ -450,12 +455,46 @@ class DivarScraper:
         """
         logger.warning(f"[memory] recycling the browser: {why}")
         phone = self.active_phone
+
+        # Replace the BROWSER, not the Playwright driver.
+        #
+        # The first version called self.close(), which also does
+        # `await self.playwright.stop()`, and then started a fresh driver. That
+        # tears down Playwright's subprocess transports on the running event
+        # loop, and the asyncpg connections live on that same loop: fifteen
+        # seconds later every query failed with "connection is closed", and
+        # SQLAlchemy's attempt to recover surfaced as MissingGreenlet. The run
+        # died at listing 1 of 222 having collected them all.
+        #
+        # Chromium is the memory, not the driver, so closing the browser is the
+        # whole point and stopping the driver bought nothing.
+        for closer, what in ((getattr(self, "page", None), "page"),
+                             (getattr(self, "context", None), "context"),
+                             (getattr(self, "browser", None), "browser")):
+            if closer is None:
+                continue
+            try:
+                await closer.close()
+            except Exception as e:
+                logger.warning(f"[memory] closing the {what} failed: {e}")
+        self.page = self.context = self.browser = None
+
+        await asyncio.sleep(1)
+
         try:
-            await self.close()
+            if self.playwright is None:
+                self.playwright = await async_playwright().start()
+            proxy = await self._get_working_proxy() if self.proxy_enabled else None
+            self.browser = await self.playwright.chromium.launch(
+                headless=self.headless, args=get_browser_args())
+            self.context = await self.browser.new_context(
+                **get_context_options(self.stealth_config, proxy))
+            await self.context.add_init_script(STEALTH_JS)
+            self.page = await self.context.new_page()
         except Exception as e:
-            logger.warning(f"[memory] closing the old browser failed: {e}")
-        await asyncio.sleep(2)
-        await self.initialize()
+            logger.error(f"[memory] could not start a fresh browser: {e}")
+            raise
+
         self.request_count = 0
         self.session_start = datetime.now()
         if phone:
@@ -465,10 +504,14 @@ class DivarScraper:
                 logger.info(f"[memory] session for {phone} restored after recycle")
             except Exception as e:
                 logger.error(f"[memory] could not restore {phone} after recycle: {e}")
-        if self.current_job is not None:
+
+        # job_id captured as a plain value, not read off the ORM object: the
+        # row may be expired after a commit, and refreshing it here would be one
+        # more piece of database IO in the middle of a browser restart.
+        if self._job_id_str:
             from app.services import job_log
             await job_log.record(
-                self.current_job.job_id, job_log.PAGE,
+                self._job_id_str, job_log.PAGE,
                 f"مرورگر برای آزادسازی حافظه بازراه‌اندازی شد ({why})",
                 level="warning")
 
@@ -2651,6 +2694,7 @@ class DivarScraper:
             job.status = "running"
             job.started_at = datetime.now()
             from app.services import job_log
+            self._job_id_str = str(job.job_id)
             await job_log.prune()
             await job_log.record(job.job_id, job_log.START, "اسکرپ شروع شد")
         else:

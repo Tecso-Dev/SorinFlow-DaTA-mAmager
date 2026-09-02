@@ -33,6 +33,19 @@ os.environ.setdefault("LOGS_PATH", "/tmp")
 os.environ.setdefault("IMAGES_PATH", "/tmp")
 
 
+def _code_only(src: str) -> str:
+    """Source with comment lines and docstrings removed.
+
+    Every assertion in this file is about what the code does. Matching raw
+    source also matches the comments explaining the choice — which has now
+    failed three tests whose subject was named in the comment defending it.
+    """
+    import re
+    src = re.sub(r'"""(?:.|\n)*?"""', "", src)
+    return "\n".join(l for l in src.splitlines()
+                      if not l.strip().startswith("#"))
+
+
 def _collector_src():
     from app.scraper.divar_scraper import DivarScraper
     return inspect.getsource(DivarScraper._collect_from_browser_dom)
@@ -463,10 +476,38 @@ class TestMemoryIsBoundedNotJustLimited:
         assert "job_log.record" in src
 
     def test_a_failed_close_does_not_abort_the_run(self):
+        """Each of page/context/browser is closed individually now, and a
+        browser that is already gone must not kill a run that is otherwise
+        fine."""
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper._recycle_browser)
-        i = src.index("await self.close()")
+        i = src.index("await closer.close()")
         assert "except Exception" in src[i:i + 300]
+
+    def test_the_recycle_does_not_stop_the_playwright_driver(self):
+        """It did, and it cost a whole run.
+
+        self.close() also does `await self.playwright.stop()`, which tears down
+        Playwright's subprocess transports on the running event loop — the same
+        loop the asyncpg connections live on. Fifteen seconds later every query
+        failed with "connection is closed" and SQLAlchemy's recovery attempt
+        surfaced as MissingGreenlet. Chromium is the memory; the driver is not.
+        """
+        from app.scraper.divar_scraper import DivarScraper
+        # Code only. The comment above the fix explains what it stopped doing
+        # and names the very calls this asserts are absent.
+        src = _code_only(inspect.getsource(DivarScraper._recycle_browser))
+        assert "await self.close()" not in src
+        assert "playwright.stop()" not in src
+
+    def test_the_recycle_does_not_touch_the_orm(self):
+        """Reading job_id off self.current_job is an attribute access on a row
+        an earlier commit may have expired — a lazy refresh in the middle of
+        tearing a browser down."""
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._recycle_browser)
+        assert "self.current_job.job_id" not in src
+        assert "self._job_id_str" in src
 
     def test_captured_api_responses_are_drained_linearly(self):
         """list.remove searches by equality over large nested dicts — draining
