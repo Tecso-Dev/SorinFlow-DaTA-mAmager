@@ -5,6 +5,7 @@ Handles scraping property listings from Divar.ir
 import asyncio
 import random
 import re
+import time
 import uuid
 from datetime import datetime, timedelta, date
 from typing import Optional, Dict, List, Any
@@ -138,6 +139,15 @@ class DivarScraper:
         # finished one or a blocked one — before this existed the two were
         # indistinguishable and every short run reported success.
         self._collect_stop: Optional[tuple] = None
+        # Divar pushing back, and how hard we back off in response.
+        #
+        # There was no backoff at all: a 429 changed nothing about the pace, so
+        # the scraper kept knocking at exactly the rate that had just been
+        # refused until the session died. Slowing down when we are asked to is
+        # both what keeps the account alive and what we owe someone else's
+        # servers.
+        self._refusals = 0
+        self._cooldown_until = 0.0
         # One pooled HTTP client for the whole run. Each call site used to build
         # its own, so every image and every API request paid a fresh TCP and TLS
         # handshake to a host we talk to thousands of times per job.
@@ -298,11 +308,46 @@ class DivarScraper:
             logger.error(f"Failed to get proxy: {e}")
             return None
     
+    def _note_refusal(self, status: int) -> None:
+        """Divar pushed back. Back off, and keep backing off if it continues.
+
+        Exponential with jitter, capped at five minutes. Jittered because a
+        fleet of clients all retrying on the same round number is precisely the
+        pattern that makes a busy server busier.
+        """
+        self._refusals += 1
+        base = min(20.0 * (2 ** (self._refusals - 1)), 300.0)
+        wait = base * random.uniform(0.7, 1.3)
+        self._cooldown_until = max(self._cooldown_until, time.monotonic() + wait)
+        logger.warning(
+            f"[pace] Divar answered {status} — refusal #{self._refusals}, "
+            f"backing off {wait:.0f}s")
+
     async def _human_like_delay(self, min_delay: float = None, max_delay: float = None):
-        """Add human-like random delay"""
+        """Wait between actions, and wait out any backoff we owe Divar.
+
+        Two changes from a flat random.uniform(0.35, 0.9):
+
+        * The cooldown is honoured first. Without it a 429 changed nothing and
+          the scraper kept knocking at the rate that had just been refused.
+        * The distribution is heavy-tailed. Real browsing is bursty: mostly
+          quick, occasionally a long pause while somebody reads something. A
+          tight uniform window is a signature in itself, and it is also simply
+          harder on the server than the same work spread out.
+        """
+        now = time.monotonic()
+        if now < self._cooldown_until:
+            owed = self._cooldown_until - now
+            logger.info(f"[pace] cooling down for {owed:.0f}s before the next request")
+            await asyncio.sleep(owed)
+
         min_d = min_delay or self.stealth_config.min_delay
         max_d = max_delay or self.stealth_config.max_delay
-        delay = random.uniform(min_d, max_d)
+        if random.random() < 0.12:
+            # the pause where a person actually reads the ad
+            delay = random.uniform(max_d, max_d * 4)
+        else:
+            delay = random.uniform(min_d, max_d)
         await asyncio.sleep(delay)
     
     async def _simulate_scroll(self):
@@ -610,6 +655,7 @@ class DivarScraper:
                         logger.warning(
                             f"[dom] Divar answered {response.status} during collection "
                             f"({sum(refusals.values())} refusal(s) so far)")
+                        self._note_refusal(response.status)
                     return
                 if 'json' not in response.headers.get('content-type', ''):
                     return

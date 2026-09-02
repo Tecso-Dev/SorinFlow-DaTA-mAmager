@@ -43,8 +43,15 @@ class StealthConfig:
     
     # Delay settings (seconds)
     # کمی کاهش داده شده برای سرعت بیشتر ولی همچنان شبیه کاربر واقعی
-    min_delay: float = 0.35
-    max_delay: float = 0.9
+    # Between actions against Divar.
+    #
+    # These were 0.35/0.9 while app/config.py declared SCRAPER_DELAY_MIN=2.0 and
+    # SCRAPER_DELAY_MAX=5.0 — and nothing read those settings, so the operator
+    # knob did nothing and the real pace was five times what it claimed. The
+    # defaults now match the documented ones, and __post_init__ below actually
+    # reads the setting.
+    min_delay: float = 2.0
+    max_delay: float = 5.0
     page_load_delay: float = 0.6
     scroll_delay: float = 0.12
     click_delay: float = 0.2
@@ -67,6 +74,25 @@ class StealthConfig:
         """Get a random delay between min and max"""
         return random.uniform(self.min_delay, self.max_delay)
     
+    def __post_init__(self):
+        """Let the documented environment settings actually take effect.
+
+        SCRAPER_DELAY_MIN / SCRAPER_DELAY_MAX have existed in app/config.py and
+        in the README for months and were read by nothing, so anyone who turned
+        the pace down to be kinder to Divar changed nothing at all.
+        """
+        try:
+            from app.config import get_settings
+            cfg = get_settings()
+            lo = float(getattr(cfg, "scraper_delay_min", self.min_delay) or self.min_delay)
+            hi = float(getattr(cfg, "scraper_delay_max", self.max_delay) or self.max_delay)
+            if lo > 0 and hi >= lo:
+                self.min_delay, self.max_delay = lo, hi
+        except Exception:
+            # A scraper that will not start because a setting could not be read
+            # is worse than one running on its defaults.
+            pass
+
     def get_random_scroll_distance(self) -> int:
         """Get a random scroll distance"""
         return random.randint(self.scroll_distance_min, self.scroll_distance_max)

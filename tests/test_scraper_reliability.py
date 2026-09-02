@@ -179,3 +179,110 @@ class TestNothingHereCanBreakTheRun:
         reason someone will look here first."""
         from app.services import job_log
         assert "raise" not in inspect.getsource(job_log.record).split("except")[-1]
+
+
+class TestTheScraperBacksOffWhenAsked:
+    """There was no backoff at all. A 429 changed nothing about the pace, so the
+    scraper kept knocking at exactly the rate that had just been refused, until
+    the session died. Slowing down when asked is what keeps the account alive
+    AND what we owe someone else's servers."""
+
+    def _scraper(self):
+        from app.scraper.divar_scraper import DivarScraper
+        s = DivarScraper.__new__(DivarScraper)
+        s._refusals = 0
+        s._cooldown_until = 0.0
+        return s
+
+    def test_a_refusal_sets_a_cooldown(self):
+        import time
+        s = self._scraper()
+        s._note_refusal(429)
+        assert s._cooldown_until > time.monotonic(), "a refusal changed nothing"
+
+    def test_repeated_refusals_back_off_further(self):
+        s = self._scraper()
+        s._note_refusal(429)
+        first = s._cooldown_until
+        s._refusals = 0          # measure the second window on its own
+        s._cooldown_until = 0.0
+        s._note_refusal(429)
+        s._note_refusal(429)
+        assert s._cooldown_until > first, "backoff does not escalate"
+
+    def test_the_backoff_is_capped(self):
+        """Escalating forever means a run that never recovers."""
+        import time
+        s = self._scraper()
+        for _ in range(20):
+            s._note_refusal(403)
+        assert s._cooldown_until - time.monotonic() <= 400
+
+    def test_the_backoff_is_jittered(self):
+        """A fleet all retrying on the same round number is the pattern that
+        makes a busy server busier."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        assert "random.uniform" in inspect.getsource(DivarScraper._note_refusal)
+
+    @pytest.mark.asyncio
+    async def test_the_delay_waits_out_the_cooldown(self, monkeypatch):
+        import time
+        from app.scraper.divar_scraper import DivarScraper
+
+        slept = []
+
+        async def fake_sleep(s):
+            slept.append(s)
+        monkeypatch.setattr("app.scraper.divar_scraper.asyncio.sleep", fake_sleep)
+
+        s = self._scraper()
+        from app.scraper.stealth import StealthConfig
+        s.stealth_config = StealthConfig()
+        s._cooldown_until = time.monotonic() + 42
+        await DivarScraper._human_like_delay(s)
+
+        assert any(x > 30 for x in slept), "the cooldown was not honoured"
+
+    def test_the_listener_reports_refusals_to_the_backoff(self):
+        assert "self._note_refusal(response.status)" in _collector_src()
+
+
+class TestThePaceIsWhatItClaimsToBe:
+    """SCRAPER_DELAY_MIN/MAX were documented in the README and declared in
+    app/config.py, and read by nothing. StealthConfig used 0.35-0.9s, so anyone
+    who turned the pace down to be kinder to Divar changed nothing at all."""
+
+    def test_the_defaults_match_the_documented_settings(self):
+        from app.scraper.stealth import StealthConfig
+        from app.config import get_settings
+        cfg, sc = get_settings(), StealthConfig()
+        assert sc.min_delay == pytest.approx(cfg.scraper_delay_min)
+        assert sc.max_delay == pytest.approx(cfg.scraper_delay_max)
+
+    def test_the_pace_is_no_longer_sub_second(self):
+        from app.scraper.stealth import StealthConfig
+        assert StealthConfig().min_delay >= 1.0, \
+            "back to hammering Divar several times a second"
+
+    def test_the_setting_is_actually_read(self):
+        import inspect
+        from app.scraper.stealth import StealthConfig
+        src = inspect.getsource(StealthConfig)
+        assert "__post_init__" in src and "scraper_delay_min" in src
+
+    def test_an_unreadable_setting_does_not_stop_the_scraper(self):
+        """Read the method itself, not a split on its name — the name also
+        appears in a comment above it, and the split landed there."""
+        import inspect
+        from app.scraper.stealth import StealthConfig
+        post = inspect.getsource(StealthConfig.__post_init__)
+        assert "except Exception" in post
+
+    def test_delays_are_heavy_tailed_not_uniform(self):
+        """A tight uniform window is a signature in itself, and spreading the
+        same work out is simply gentler."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._human_like_delay)
+        assert "max_d * 4" in src
