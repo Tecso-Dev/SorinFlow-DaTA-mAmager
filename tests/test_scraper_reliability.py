@@ -19,6 +19,7 @@ been killed — was discarded, and the scraper carried on scrolling an empty fee
 and reported success.
 """
 import inspect
+import re
 import os
 import sys
 
@@ -666,3 +667,48 @@ class TestTheHostSetupIsInTheRepository:
         manifest = Path("k8s/04-backend.yaml").read_text(encoding="utf-8")
         assert 'memory: "2560Mi"' in manifest
         assert "2560Mi" in self._script()
+
+
+class TestNoTransactionSurvivesTheSlowWork:
+    """Two full runs of 222 candidates died at listing 1 with
+
+        cannot call Transaction.commit(): the underlying connection is closed
+        greenlet_spawn has not been called
+
+    Postgres here runs idle_in_transaction_session_timeout = 60s. The loop
+    opened a transaction (refresh(job), property_exists) and then spent ten to
+    sixty seconds in the browser — loading the detail page, revealing a
+    contact, downloading images — with that transaction sitting idle. Past 60s
+    Postgres terminates the connection.
+
+    Slower pacing made it certain rather than intermittent: delays went from
+    0.35-0.9s to 2-5s, with a long-pause branch and a backoff that can reach
+    five minutes. All of that is right for Divar, and all of it is fatal held
+    inside a transaction.
+
+    idle_session_timeout is 0, so a connection idle OUTSIDE a transaction is
+    left alone indefinitely. Committing before the slow part costs nothing and
+    is the whole fix.
+    """
+
+    def test_the_transaction_is_closed_before_the_detail_scrape(self):
+        src = _run_src()
+        i = src.index("detail = await self.scrape_property_detail(")
+        before = src[max(0, i - 1400):i]
+        assert "await self.db_session.commit()" in before, \
+            "a transaction is held open across the browser work again"
+
+    def test_the_transaction_is_closed_before_every_sleep(self):
+        """The backoff can sleep for five minutes. Nothing may hold a
+        transaction across that."""
+        src = _code_only(_run_src())
+        for m in re.finditer(r"await self\._human_like_delay\(\)", src):
+            before = src[max(0, m.start() - 500):m.start()]
+            assert "commit()" in before, \
+                "a delay is reachable with a transaction still open"
+
+    def test_the_timeout_that_caused_it_is_named(self):
+        """So the next person does not spend two runs chasing MissingGreenlet,
+        which is the symptom and never mentions the cause."""
+        src = _run_src()
+        assert "idle_in_transaction_session_timeout" in src

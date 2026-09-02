@@ -2903,6 +2903,30 @@ class DivarScraper:
                         await self.db_session.commit()
                         continue
                     
+                    # Close the read transaction before the slow part.
+                    #
+                    # Postgres here runs idle_in_transaction_session_timeout =
+                    # 60s. The refresh(job) and property_exists() above open a
+                    # transaction, and scrape_property_detail then spends
+                    # anywhere from ten seconds to a minute in the browser —
+                    # loading the page, revealing a contact, downloading images
+                    # — with that transaction sitting idle. Past 60s Postgres
+                    # terminates the connection, and the run dies on the next
+                    # query with "the underlying connection is closed", which
+                    # SQLAlchemy then reports as MissingGreenlet.
+                    #
+                    # Two runs of 222 candidates died this way at listing 1.
+                    # Slower pacing made it certain: the delays went from
+                    # 0.35-0.9s to 2-5s with occasional 20s pauses, which is
+                    # the right thing for Divar and pushed the idle window past
+                    # the timeout.
+                    #
+                    # idle_session_timeout is 0, so a connection idle OUTSIDE a
+                    # transaction is left alone indefinitely. Committing here
+                    # costs nothing — there is nothing pending — and it is what
+                    # keeps the connection alive across the browser work.
+                    await self.db_session.commit()
+
                     # Scrape detail page
                     detail = await self.scrape_property_detail(
                         listing['url'], target_category=category,
@@ -3026,6 +3050,9 @@ class DivarScraper:
                             # Divar was never asked for anything on its behalf.
                             # The counter moves where the reveal happens.
                             await self.maybe_rotate_account()
+                            # Nothing may hold a transaction across a sleep —
+                            # see the note at the other delay below.
+                            await self.db_session.commit()
                             await self._human_like_delay()
                             continue
 
@@ -3086,6 +3113,15 @@ class DivarScraper:
                     # spread the load across saved Divar accounts
                     await self.maybe_rotate_account()
 
+                    # Nothing may hold a transaction across a sleep.
+                    #
+                    # maybe_rotate_account queries and can write, and the delay
+                    # below is now 2-5s normally, up to four times that on the
+                    # long-pause branch, and up to five MINUTES when Divar has
+                    # refused us and the backoff is engaged. Postgres closes a
+                    # connection idle in a transaction for 60s, so any of those
+                    # would end the run.
+                    await self.db_session.commit()
                     await self._human_like_delay()
 
                 except Exception as e:
