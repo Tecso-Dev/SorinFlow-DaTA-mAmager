@@ -19,9 +19,17 @@ _cancelled_until: Dict[str, float] = {}
 _CANCEL_WINDOW = 900  # 15 min
 
 
-def job_of(key: str) -> str:
-    """The job a request key belongs to. Keys are «{job_id}:{divar_id}»."""
-    return (key or "").split(":", 1)[0]
+def job_of(key) -> str:
+    """The job a request key belongs to. Keys are «{job_id}:{divar_id}».
+
+    Coerces rather than requiring a string. ScrapingJob.job_id is a UUID
+    column with as_uuid=True, so callers holding the row hand over a
+    uuid.UUID and `.split` on it raised AttributeError — swallowed by the
+    caller's except, which turned a broken check into a silent one. A UUID
+    stringifies to exactly the prefix the keys are built from, so accepting
+    both is correct rather than merely forgiving.
+    """
+    return str(key or "").split(":", 1)[0]
 
 
 def request(key: str, phone_hint: str = "") -> asyncio.Event:
