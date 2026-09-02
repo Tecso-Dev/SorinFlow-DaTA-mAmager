@@ -68,10 +68,6 @@ class TestDateModeIsNoLongerSilent:
         window = SCRAPER[max(0, i - 300):i]
         assert "if date_mode:" in window
 
-    def test_the_day_exhausted_break_records_a_reason(self):
-        i = SCRAPER.index("day exhausted, stopping")
-        assert "finish_reason" in SCRAPER[i:i + 400]
-
     def test_the_break_reason_is_not_overwritten_by_the_summary(self):
         """The specific reason from the break beats the generic one."""
         i = SCRAPER.index("Day exhausted:")
@@ -80,14 +76,14 @@ class TestDateModeIsNoLongerSilent:
 
 class TestItReadsAsAnExplanationNotAFault:
     def test_a_reason_is_written_in_persian(self):
-        i = SCRAPER.index("day exhausted, stopping")
-        window = SCRAPER[i:i + 400]
+        i = SCRAPER.index("Day exhausted:")
+        window = SCRAPER[i:i + 600]
         assert re.search(r"[؀-ۿ]", window), "the panel shows this to the user"
 
     def test_it_does_not_use_the_error_field(self):
         """error_message renders as a failure; this is a healthy job."""
-        i = SCRAPER.index("day exhausted, stopping")
-        assert "error_message" not in SCRAPER[i:i + 400]
+        i = SCRAPER.index("Day exhausted:")
+        assert "error_message" not in SCRAPER[i:i + 600]
 
     def test_a_run_that_hit_its_target_explains_nothing(self):
         """No message is the right message when nothing went short."""
@@ -104,3 +100,39 @@ class TestThePanelShowsIt:
         js = open(os.path.join(ROOT, "frontend/js/app.js"), encoding="utf-8").read()
         i = js.index("job.finish_reason")
         assert "esc(job.finish_reason)" in js[i:i + 400]
+
+
+class TestTheStreakEarlyStopIsGone:
+    """Date mode used to stop after 15 consecutive listings older than the
+    target day. Divar interleaves promoted and pinned posts, which are
+    routinely older, so fifteen in a row said nothing about how much of the
+    day remained — and it could only ever end a run early, never complete
+    one. A job capped at 126 finished at 42% because of it."""
+
+    def test_the_break_is_removed(self):
+        assert "day exhausted, stopping" not in SCRAPER
+        assert "older_streak" not in SCRAPER
+
+    def test_the_publish_date_filter_still_drops_older_listings(self):
+        """Removing the early stop must not stop the filtering."""
+        assert "is before" in SCRAPER
+        i = SCRAPER.index("is before")
+        assert "_skip" in SCRAPER[max(0, i - 200):i]
+
+    def test_collection_is_bounded_by_date_not_by_count(self):
+        """What makes removing the break safe: the pool is already the day."""
+        assert "until_day" in SCRAPER
+        i = SCRAPER.index("day fully covered")
+        assert "cursor_dt.date() < until_day" in SCRAPER[max(0, i - 300):i]
+
+    def test_there_is_still_a_safety_cap_on_the_pool(self):
+        """Unbounded pagination on a busy day is the failure this must not
+        trade for the one it fixes."""
+        i = SCRAPER.index("date-mode safety cap")
+        assert ">= 1500" in SCRAPER[max(0, i - 200):i]
+
+    def test_a_short_date_run_is_still_explained(self):
+        """The reason used to be set at the break; it must survive its removal."""
+        assert "Day exhausted:" in SCRAPER
+        i = SCRAPER.index("Day exhausted:")
+        assert "finish_reason" in SCRAPER[i:i + 600]

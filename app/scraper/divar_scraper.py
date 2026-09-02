@@ -2716,7 +2716,20 @@ class DivarScraper:
                 + (f"keeping {cap_label} from {target_day}" if date_mode
                    else f"will keep scraping until {max_items} are saved")
             )
-            older_streak = 0  # consecutive listings older than target_day
+            # A run in date mode used to stop after 15 consecutive listings
+            # published before the target day, on the theory that the day was
+            # exhausted. It was not a safe inference: Divar interleaves promoted
+            # and pinned posts, which are routinely older, so fifteen in a row
+            # says nothing about how much of the day is left — and a listing
+            # whose date could not be parsed neither broke the streak nor
+            # extended it, so unparsed ones silently pushed it toward the limit.
+            #
+            # Nothing is needed in its place. The collection phase already
+            # bounds itself by date rather than by count: with until_day set it
+            # paginates until the feed cursor moves past the day, so the pool
+            # holds that day and little else, and the publish-date filter below
+            # drops whatever spills over. Walking the rest of a bounded pool
+            # costs time; stopping early cost listings and reported success.
             # Why this run ended, in the user's words. Left None when the run
             # simply hit its target, which needs no explanation.
             finish_reason: Optional[str] = None
@@ -2872,27 +2885,8 @@ class DivarScraper:
                             elif posted.date() > target_day:
                                 skip = _skip(f"posted {posted.date()} is after {target_day}")
                             elif posted.date() < target_day:
-                                older_streak += 1
                                 skip = _skip(
-                                    f"posted {posted.date()} is before {target_day} "
-                                    f"(older streak {older_streak})"
-                                )
-                            else:
-                                older_streak = 0
-
-                        # Feeds are newest-first (with some promoted posts mixed in);
-                        # a long run of older posts means the target day is exhausted
-                        if date_mode and older_streak >= 15:
-                            logger.info(
-                                f"{older_streak} consecutive listings older than "
-                                f"{target_day} — day exhausted, stopping"
-                            )
-                            from app.services.dpa_service import to_jalali
-                            finish_reason = (
-                                f"همهٔ آگهی‌های {to_jalali(target_day)} اسکرپ شد — "
-                                "دیوار آگهی بیشتری برای آن روز ندارد"
-                            )
-                            break
+                                    f"posted {posted.date()} is before {target_day}")
 
                         if skip:
                             job.scraped_items = (i + 1) if pool_progress else min(job.new_items, max_items)
