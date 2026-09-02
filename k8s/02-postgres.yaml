@@ -47,6 +47,20 @@ spec:
                   key: POSTGRES_DB
           ports:
             - containerPort: 5432
+          # Without requests this pod was BestEffort — the FIRST thing the
+          # kubelet evicts under node memory pressure. The database. On a box
+          # whose other tenant runs Chromium.
+          #
+          # Requests make it Burstable, so it is now evicted after anything
+          # BestEffort and its OOM score sits below the backend's. The limit is
+          # generous for a database this size (default shared_buffers is 128Mi)
+          # and exists so a runaway query cannot take the node with it.
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              memory: "1Gi"
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data

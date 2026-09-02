@@ -35,6 +35,18 @@ spec:
             - "yes"
             - --requirepass
             - $(REDIS_PASSWORD)
+            # An unbounded Redis grows until the NODE runs out, and then the
+            # kubelet chooses what dies. 200mb is enormous for what this holds
+            # — verification codes, per-IP budgets, a little cache.
+            - --maxmemory
+            - 200mb
+            # noeviction, deliberately, NOT allkeys-lru. Everything in here
+            # either has a TTL or matters: silently evicting a login code the
+            # moment memory got tight would look like the SMS never arrived.
+            # Refusing the write is loud, and the callers already handle a
+            # Redis that says no.
+            - --maxmemory-policy
+            - noeviction
           env:
             - name: REDIS_PASSWORD
               valueFrom:
@@ -43,6 +55,14 @@ spec:
                   key: REDIS_PASSWORD
           ports:
             - containerPort: 6379
+          # Was BestEffort, like Postgres — evicted first, and it holds every
+          # in-flight login code.
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              memory: "256Mi"
           volumeMounts:
             - name: redis-data
               mountPath: /data

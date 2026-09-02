@@ -475,3 +475,70 @@ class TestMemoryIsBoundedNotJustLimited:
         src = _collector_src()
         assert "pending_api.remove(data)" not in src
         assert "pending_api[:]" in src, "the drain is not swapping the list out"
+
+
+class TestTheNodeBudgetIsSane:
+    """4Gi of RAM shared by the backend, Postgres and Redis.
+
+    Postgres and Redis had no requests and no limits, which made them
+    BestEffort — the FIRST pods the kubelet evicts under node memory pressure.
+    The database, on a node whose other tenant runs Chromium. That is also why
+    the backend could not safely be given more: a spike ran the NODE out and the
+    kubelet chose its own victim.
+    """
+
+    @staticmethod
+    def _yaml(path):
+        """The manifest with comments stripped.
+
+        Every assertion here is about what Kubernetes will read. Matching raw
+        text also matches the comments explaining the choice — which is how a
+        comment saying "NOT allkeys-lru" failed a test asserting allkeys-lru is
+        absent.
+        """
+        from pathlib import Path
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+        return "\n".join(l for l in lines if not l.strip().startswith("#"))
+
+    def test_postgres_is_not_besteffort(self):
+        y = self._yaml("k8s/02-postgres.yaml")
+        assert "resources:" in y and "requests:" in y, \
+            "the database is first in the eviction queue again"
+        assert 'memory: "1Gi"' in y
+
+    def test_redis_is_not_besteffort(self):
+        y = self._yaml("k8s/03-redis.yaml")
+        assert "resources:" in y and "requests:" in y
+        assert 'memory: "256Mi"' in y
+
+    def test_redis_will_not_silently_drop_a_login_code(self):
+        """allkeys-lru would evict verification codes under pressure and it
+        would look exactly like an SMS that never arrived."""
+        y = self._yaml("k8s/03-redis.yaml")
+        assert "--maxmemory" in y
+        assert "noeviction" in y
+        assert "allkeys-lru" not in y
+
+    def test_the_backend_limit_and_the_neighbours_fit_the_node(self):
+        """Requests are the reservation that must fit; limits may oversubscribe."""
+        import re
+        def req_mem(path):
+            """The CONTAINER's memory request.
+
+            Anchored on the requests: block that actually has a memory key —
+            04-backend.yaml opens with a PersistentVolumeClaim whose own
+            requests: block asks for storage, and reading that one finds no
+            memory at all.
+            """
+            y = self._yaml(path)
+            for m in re.finditer(r"requests:", y):
+                mm = re.search(r'memory:\s*"(\d+)(Mi|Gi)"', y[m.end():m.end() + 200])
+                if mm:
+                    n, unit = int(mm.group(1)), mm.group(2)
+                    return n * (1024 if unit == "Gi" else 1)
+            raise AssertionError(f"{path} declares no memory request")
+
+        total = (req_mem("k8s/04-backend.yaml")
+                 + req_mem("k8s/02-postgres.yaml")
+                 + req_mem("k8s/03-redis.yaml"))
+        assert total < 3072, f"requests total {total}Mi — too close to a 4Gi node"

@@ -137,17 +137,30 @@ spec:
               cpu: "200m"
               memory: "512Mi"
             limits:
-              # The node has 4Gi and also runs Postgres and Redis, neither of
-              # which has a limit of its own. 2Gi was where a big scrape hit the
-              # OOM killer; 2.5Gi buys real headroom while still leaving ~1.5Gi
-              # for the database, the cache and the OS.
+              # 3Gi of the node's 4Gi, which is now safe to take.
               #
-              # Going higher is not a config change — it needs limits on
-              # postgres and redis first, or the node OOM killer picks a victim
-              # and it may well be the database. The scraper now recycles
-              # Chromium at 80% of whatever this says (see _check_rate_limit),
-              # so the ceiling matters much less than it did.
-              memory: "2560Mi"
+              # The budget, with everything on this node bounded:
+              #   OS + k3s + containerd   ~700Mi  (measured at idle)
+              #   redis                    256Mi  limit, ~30Mi in practice
+              #   postgres                   1Gi  limit, ~250Mi in practice
+              #   backend                    3Gi  limit
+              #
+              # The limits oversubscribe on purpose — they are ceilings, not
+              # reservations — while the REQUESTS (512Mi + 256Mi + 64Mi) fit the
+              # node several times over, so the scheduler and the eviction
+              # ranking both behave.
+              #
+              # 2Gi was where a large scrape met the OOM killer. Raising it was
+              # only safe once postgres and redis had limits of their own:
+              # before that, a backend spike ran the NODE out and the kubelet
+              # picked its own victim, which could have been the database.
+              #
+              # The ceiling still matters less than it looks. The scraper
+              # recycles Chromium at 80% of whatever this says
+              # (_check_rate_limit), so memory is bounded by the recycle, not by
+              # the kill — which is what makes a 500-item run cost the same as a
+              # 50-item one.
+              memory: "3Gi"
           # Startup is create_all plus a migration chain, and its duration is
           # not knowable in advance. Without a startupProbe the liveness probe
           # kills the container ~150s in and it crashloops forever with no way
