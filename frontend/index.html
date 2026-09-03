@@ -1781,6 +1781,95 @@
             <!-- ═══ USERS ═════════════════════════ -->
             <!-- ══ هوش تصویری — CRM insights ══ -->
             <div id="section-insights" class="section-content" style="display:none;">
+                <!-- ══ what the photographs and prices actually say ══ -->
+                <ul class="nav nav-tabs mb-3" id="ins-tabs">
+                    <li class="nav-item"><a class="nav-link active" href="#"
+                        onclick="insTab('visual');return false" id="ins-tab-visual">
+                        <i class="bi bi-eye"></i> تحلیل تصویری و قیمت</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#"
+                        onclick="insTab('pipeline');return false" id="ins-tab-pipeline">
+                        <i class="bi bi-funnel"></i> قیف و عملکرد</a></li>
+                </ul>
+
+                <div id="ins-pane-visual">
+                    <div class="row g-3 mb-3">
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card s-purple">
+                                <div class="stat-value" id="vis-under">—</div>
+                                <div class="stat-label">زیر قیمت منطقه</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card s-cyan">
+                                <div class="stat-value" id="vis-dupes">—</div>
+                                <div class="stat-label">ملک تکراری</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card">
+                                <div class="stat-value" id="vis-weak">—</div>
+                                <div class="stat-label">آگهی با عکس ضعیف</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card">
+                                <div class="stat-value" id="vis-judged">—</div>
+                                <div class="stat-label">قابل ارزش‌گذاری</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info small" id="vis-coverage"></div>
+
+                    <div class="card mb-3">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-graph-down-arrow"></i> زیر قیمت منطقه</span>
+                            <span class="text-muted small">ارزان‌ترین نسبت به میانهٔ محله، اول</span>
+                        </div>
+                        <div class="card-body p-0"><div class="table-responsive" style="max-height:340px;overflow-y:auto">
+                            <table class="table mb-0"><thead><tr>
+                                <th>کد</th><th>عنوان</th><th>محله</th><th>متراژ</th>
+                                <th>قیمت هر متر</th><th>اختلاف</th><th>پایه</th>
+                            </tr></thead><tbody id="vis-under-list"></tbody></table>
+                        </div></div>
+                    </div>
+
+                    <div class="card mb-3">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-files"></i> یک ملک، چند آگهی</span>
+                            <span class="text-muted small" id="vis-dupe-note"></span>
+                        </div>
+                        <div class="card-body p-0"><div class="table-responsive" style="max-height:340px;overflow-y:auto">
+                            <table class="table mb-0"><thead><tr>
+                                <th>تشخیص</th><th>آگهی اول</th><th>آگهی دوم</th><th>اختلاف قیمت</th>
+                            </tr></thead><tbody id="vis-dupe-list"></tbody></table>
+                        </div></div>
+                    </div>
+
+                    <div class="card mb-3">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-camera"></i> کیفیت عکس‌ها</span>
+                            <span class="text-muted small" id="vis-photo-note"></span>
+                        </div>
+                        <div class="card-body p-0"><div class="table-responsive" style="max-height:300px;overflow-y:auto">
+                            <table class="table mb-0"><thead><tr>
+                                <th>کد</th><th>عنوان</th><th>تعداد عکس</th><th>بدترین</th><th>ایرادها</th>
+                            </tr></thead><tbody id="vis-photo-list"></tbody></table>
+                        </div></div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header"><i class="bi bi-info-circle"></i> این صفحه چه چیزی را نمی‌سنجد</div>
+                        <div class="card-body small text-muted" style="line-height:2">
+                            تشخیص سبک آشپزخانه، نوع کف‌پوش، متریال و برند از روی عکس، تولید پلان،
+                            و ویرایش تصویر (غروب مجازی، مبلمان مجازی) به یک مدل بینایی نیاز دارند
+                            که روی این سرور اجرا نمی‌شود.
+                            آنچه بالا می‌بینید از پیکسل‌ها و قیمت‌های واقعی اندازه‌گیری شده، نه تخمین زده شده.
+                        </div>
+                    </div>
+                </div>
+
+                <div id="ins-pane-pipeline" style="display:none">
 
                 <!-- Headline numbers. Each renders «—» until the data can
                      answer, never a zero standing in for an unknown. -->
@@ -1890,6 +1979,7 @@
                 </div>
 
                 <p class="text-muted small mt-3 mb-0" id="ins-coverage"></p>
+                </div>
             </div>
 
             <div id="section-monitoring" class="section-content" style="display:none;">

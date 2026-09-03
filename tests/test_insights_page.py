@@ -37,9 +37,12 @@ class TestTheSectionIsRegisteredEverywhere:
         assert re.search(r"insights:\s*'crm'", APP_JS)
 
     def test_the_router_loads_it(self):
+        """Through insTab, which then loads whichever half is showing — the
+        section leads with the visual tab now, so the router cannot call the
+        pipeline loader directly."""
         assert "case 'insights':" in APP_JS
         i = APP_JS.index("case 'insights':")
-        assert "loadInsights()" in APP_JS[i:i + 120]
+        assert "insTab(" in APP_JS[i:i + 120]
 
     def test_the_nav_link_exists(self):
         assert "showSection('insights')" in INDEX
@@ -165,3 +168,96 @@ class TestChartsAreReplacedNotStacked:
 
     def test_charts_follow_the_panel_theme(self):
         assert "chartColors()" in INS_JS
+
+
+class TestTheVisualHalfIsWiredUp:
+    """The page is called «هوش تصویری» and until now held nothing visual —
+    it was a CRM funnel under a name that promised photographs."""
+
+    def test_both_tabs_exist(self):
+        for t in ("ins-tab-visual", "ins-tab-pipeline"):
+            assert f'id="{t}"' in INDEX
+
+    def test_both_panes_exist(self):
+        for p in ("ins-pane-visual", "ins-pane-pipeline"):
+            assert f'id="{p}"' in INDEX
+
+    def test_the_section_opens_on_the_visual_half(self):
+        i = APP_JS.index("case 'insights':")
+        assert "insTab" in APP_JS[i:i + 120]
+
+    def test_switching_tabs_loads_that_half(self):
+        src = APP_JS[APP_JS.index("function insTab"):]
+        assert "loadVisual()" in src[:600] and "loadInsights()" in src[:600]
+
+    def test_every_visual_id_the_script_touches_exists(self):
+        ids = html_ids()
+        vis = APP_JS[APP_JS.index("هوش تصویری — the visual half"):]
+        missing = sorted({m for m in re.findall(r"getElementById\('([^']+)'\)", vis)
+                          if m not in ids})
+        assert not missing, f"visual code reaches for ids that do not exist: {missing}"
+
+    def test_the_three_tables_exist(self):
+        ids = html_ids()
+        for t in ("vis-under-list", "vis-dupe-list", "vis-photo-list"):
+            assert t in ids
+
+    def test_the_headline_cells_start_as_dashes(self):
+        for el in ("vis-under", "vis-dupes", "vis-weak", "vis-judged"):
+            i = INDEX.index(f'id="{el}"')
+            assert "—" in INDEX[i:i + 60]
+
+
+class TestTheVisualHalfSaysWhatItCannotDo:
+    """A page named «هوش تصویری» that quietly omits the vision features
+    invites the reader to assume they are there and working."""
+
+    def test_the_limits_are_stated_on_the_page(self):
+        assert "مدل بینایی" in INDEX
+
+    def test_it_names_the_things_it_does_not_measure(self):
+        i = INDEX.index("این صفحه چه چیزی را نمی‌سنجد")
+        block = INDEX[i:i + 900]
+        for claim in ("آشپزخانه", "کف‌پوش", "پلان"):
+            assert claim in block
+
+    def test_it_says_the_numbers_are_measured_not_estimated(self):
+        i = INDEX.index("این صفحه چه چیزی را نمی‌سنجد")
+        assert "اندازه‌گیری" in INDEX[i:i + 900]
+
+
+class TestTheVisualHalfShowsItsFooting:
+    def test_coverage_is_rendered_next_to_the_headline(self):
+        """«۳ زیر قیمت» means something different when only 40 of 1100
+        listings could be judged at all."""
+        assert 'id="vis-coverage"' in INDEX
+        vis = APP_JS[APP_JS.index("هوش تصویری — the visual half"):]
+        assert "vis-coverage" in vis
+        i = vis.index("vis-coverage")
+        assert "judged" in vis[i:i + 400]
+
+    def test_a_thin_valuation_sample_is_marked_on_the_row(self):
+        vis = APP_JS[APP_JS.index("هوش تصویری — the visual half"):]
+        assert "confidence === 'thin'" in vis
+
+    def test_the_duplicate_note_reports_ignored_boilerplate(self):
+        vis = APP_JS[APP_JS.index("هوش تصویری — the visual half"):]
+        assert "boilerplate_ignored" in vis
+
+    def test_empty_tables_explain_that_data_is_still_arriving(self):
+        vis = APP_JS[APP_JS.index("هوش تصویری — the visual half"):]
+        assert "اسکرپ بعدی" in vis
+
+    def test_user_content_is_escaped(self):
+        vis = APP_JS[APP_JS.index("هوش تصویری — the visual half"):]
+        for field in ("r.title", "r.district", "p.note", "w.title"):
+            assert f"esc({field}" in vis
+
+    def test_a_zero_price_gap_is_not_rendered_as_unknown(self):
+        """Two agencies quoting the same figure is a fact. 0 is falsy in JS,
+        and the first draft showed it as «—» alongside genuinely missing
+        prices — the same zero-versus-unknown confusion this page exists to
+        avoid everywhere else."""
+        vis = APP_JS[APP_JS.index("هوش تصویری — the visual half"):]
+        assert "gap === null" in vis
+        assert "gap === 0" in vis

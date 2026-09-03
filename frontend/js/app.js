@@ -814,7 +814,7 @@ function showSection(sectionName) {
         case 'auth':       checkAuthStatus(); loadCookies(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
-        case 'insights':   loadInsights(); break;
+        case 'insights':   insTab(_insTab); break;
         case 'portal':     loadPortalRequests(); break;
         case 'monitoring': loadMonitoring(); break;
         case 'sms':        loadSms(); break;
@@ -9351,5 +9351,150 @@ function _insRenderStalled(stalled) {
           <td>${esc(l.city_name || '—')}</td>
           <td><span class="badge bg-secondary-subtle text-body-secondary">${esc(l.status_label)}</span></td>
           <td><strong>${_insNum(l.idle_days)}</strong> روز</td>
+        </tr>`).join('');
+}
+
+
+/* ══════════════════════════════════════════════════════
+   هوش تصویری — the visual half
+   ══════════════════════════════════════════════════════
+
+   What the photographs and the prices actually say, measured rather than
+   estimated: listings priced away from their district, listings that look
+   like the same flat posted twice, and galleries with weak photographs.
+
+   Same rule as the pipeline half: a value the server could not compute
+   renders «—». The valuation refuses to answer without enough comparables,
+   and that refusal is shown as a count on the page rather than hidden — a
+   headline of «۳ زیر قیمت» means something very different when only 40 of
+   1100 listings could be judged at all. */
+
+let _insTab = 'visual';
+
+function insTab(which) {
+    _insTab = which;
+    for (const t of ['visual', 'pipeline']) {
+        const pane = document.getElementById(`ins-pane-${t}`);
+        const tab = document.getElementById(`ins-tab-${t}`);
+        if (pane) pane.style.display = (t === which) ? '' : 'none';
+        if (tab) tab.classList.toggle('active', t === which);
+    }
+    if (which === 'visual') loadVisual();
+    else loadInsights();
+}
+
+async function loadVisual() {
+    let d;
+    try {
+        d = await apiCall('/properties/visual/overview');
+    } catch (e) {
+        showToast('خطا', 'تحلیل تصویری بارگذاری نشد', 'error');
+        return;
+    }
+    if (!d) return;
+
+    const v = d.valuation || {}, dup = d.duplicates || {}, ph = d.photos || {};
+
+    document.getElementById('vis-under').textContent = _insNum((v.under || []).length);
+    document.getElementById('vis-dupes').textContent = _insNum(dup.total_pairs);
+    document.getElementById('vis-weak').textContent = _insNum((ph.weak || []).length);
+    document.getElementById('vis-judged').textContent = _insNum(v.judged);
+
+    // Say what the numbers rest on, in the same breath as the numbers. A
+    // headline built from 40 of 1100 listings is not wrong, but it is not
+    // what it looks like either.
+    document.getElementById('vis-coverage').innerHTML =
+        `از ${_insNum(v.total)} ملک، <strong>${_insNum(v.judged)}</strong> قابل ارزش‌گذاری بود — ` +
+        `بقیه یا متراژ ندارند یا محله‌شان هنوز به ${_insNum(v.min_comparables)} آگهی مشابه نرسیده. ` +
+        `${_insNum(v.districts_with_a_benchmark)} محله از ${_insNum(v.districts_seen)} محله پایهٔ قیمت دارد.`;
+
+    _visUnder(v.under || []);
+    _visDupes(dup);
+    _visPhotos(ph);
+}
+
+function _visUnder(rows) {
+    const tb = document.getElementById('vis-under-list');
+    if (!tb) return;
+    if (!rows.length) {
+        tb.innerHTML = '<tr><td colspan="7" class="text-muted small text-center py-4">' +
+            'هیچ ملکی به‌اندازهٔ قابل توجه زیر میانهٔ محله‌اش نیست.</td></tr>';
+        return;
+    }
+    tb.innerHTML = rows.map(r => `
+        <tr>
+          <td><code>${_insNum(r.serial_no)}</code></td>
+          <td style="max-width:260px" class="text-truncate" title="${esc(r.title)}">${esc(r.title)}</td>
+          <td>${esc(r.district || '—')}</td>
+          <td>${_insNum(r.area)}</td>
+          <td>${_insToman(r.ppm)}</td>
+          <td><span class="badge bg-success-subtle text-body-secondary">${_insNum(r.delta_pct)}٪</span></td>
+          <td class="text-muted" style="font-size:.72rem">${_insNum(r.sample)} آگهی${r.confidence === 'thin' ? ' ⚠' : ''}</td>
+        </tr>`).join('');
+}
+
+function _visDupes(dup) {
+    const tb = document.getElementById('vis-dupe-list');
+    const note = document.getElementById('vis-dupe-note');
+    if (!tb) return;
+    if (note) note.textContent =
+        `${_insNum(dup.with_hashes)} آگهی عکس اثرانگشت‌شده دارد · ` +
+        `${_insNum(dup.boilerplate_ignored)} عکس تکراری (لوگو/نما) نادیده گرفته شد`;
+    const pairs = dup.pairs || [];
+    if (!pairs.length) {
+        tb.innerHTML = '<tr><td colspan="4" class="text-muted small text-center py-4">' +
+            'ملک تکراری پیدا نشد. عکس‌ها از اسکرپ بعدی اثرانگشت می‌گیرند.</td></tr>';
+        return;
+    }
+    tb.innerHTML = pairs.map(p => {
+        // null when a price is missing; 0 when they genuinely match. Those
+        // are different answers and «—» only belongs to the first — two
+        // agencies quoting the same figure is a fact worth seeing, and the
+        // first draft rendered it as unknown because 0 is falsy.
+        const gap = (p.a.price && p.b.price) ? Math.abs(p.a.price - p.b.price) : null;
+        const cls = p.verdict === 'duplicate' ? 'bg-danger-subtle' : 'bg-warning-subtle';
+        return `
+        <tr>
+          <td><span class="badge ${cls} text-body-secondary">${esc(p.note)}</span></td>
+          <td><code>${_insNum(p.a.serial_no)}</code> ${esc(p.a.seller || '—')}<br>
+              <span class="text-muted" style="font-size:.72rem">${_insToman(p.a.price)}</span></td>
+          <td><code>${_insNum(p.b.serial_no)}</code> ${esc(p.b.seller || '—')}<br>
+              <span class="text-muted" style="font-size:.72rem">${_insToman(p.b.price)}</span></td>
+          <td>${gap === null ? '—'
+                : gap === 0 ? '<span class="text-muted">هر دو یک قیمت</span>'
+                : `<strong>${_insToman(gap)}</strong>`}</td>
+        </tr>`;
+    }).join('');
+}
+
+const PHOTO_PROBLEM_FA = { blurry: 'تار', exposure: 'نور نامناسب', small: 'رزولوشن پایین' };
+
+function _visPhotos(ph) {
+    const tb = document.getElementById('vis-photo-list');
+    const note = document.getElementById('vis-photo-note');
+    if (!tb) return;
+    const problems = ph.problems || {};
+    if (note) {
+        const parts = Object.entries(problems)
+            .map(([k, n]) => `${PHOTO_PROBLEM_FA[k] || k}: ${_insNum(n)}`);
+        note.textContent = parts.length
+            ? parts.join(' · ')
+            : `${_insNum(ph.scored_listings)} آگهی سنجیده شد`;
+    }
+    const weak = ph.weak || [];
+    if (!weak.length) {
+        tb.innerHTML = '<tr><td colspan="5" class="text-muted small text-center py-4">' +
+            'عکس ضعیفی پیدا نشد. کیفیت عکس‌ها از اسکرپ بعدی سنجیده می‌شود.</td></tr>';
+        return;
+    }
+    tb.innerHTML = weak.map(w => `
+        <tr>
+          <td><code>${_insNum(w.serial_no)}</code></td>
+          <td style="max-width:280px" class="text-truncate" title="${esc(w.title)}">${esc(w.title)}</td>
+          <td>${_insNum(w.count)}</td>
+          <td><strong>${_insNum(w.worst)}</strong></td>
+          <td>${(w.problems || []).map(p =>
+              `<span class="badge bg-warning-subtle text-body-secondary me-1">${esc(PHOTO_PROBLEM_FA[p] || p)}</span>`
+          ).join('') || '—'}</td>
         </tr>`).join('');
 }
