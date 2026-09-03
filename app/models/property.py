@@ -110,6 +110,13 @@ class Property(Base):
     seller_name = Column(String(200))
     advertiser_type = Column(String(20))  # personal, agency
     
+    # One perceptual hash per downloaded image. Two listings that share
+    # enough of these are the same flat posted by different agencies — a
+    # problem the big portals do not have, because they receive each listing
+    # once from the agent who holds it, and we read a marketplace where one
+    # apartment appears four times at four prices.
+    image_hashes = Column(JSON, default=list)   # [int, …] 64-bit dHash
+
     # Price trail. Divar listings are re-scraped, and the update path used to
     # overwrite the price and lose whatever was there before — throwing away,
     # every single day, the one signal a price-drop alert is built from. Kept

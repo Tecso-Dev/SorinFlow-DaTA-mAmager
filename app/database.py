@@ -116,6 +116,7 @@ async def init_db():
                  _migrate_property_quality,
                  _migrate_job_finish_reason,
                  _migrate_price_history,
+                 _migrate_image_hashes,
                  _migrate_sms_panel,
                  _seed_reference_data):
         try:
@@ -539,6 +540,27 @@ async def _migrate_job_finish_reason(conn):
                 "ALTER TABLE scraping_jobs ADD COLUMN IF NOT EXISTS finish_reason VARCHAR(300)"
             ))
             _log.info("Added finish_reason to scraping_jobs")
+    except Exception:
+        pass
+
+
+async def _migrate_image_hashes(conn):
+    """Idempotently add properties.image_hashes.
+
+    No backfill. Hashing the images already on disk is a job for a one-off
+    task, not for every pod at boot — a few thousand JPEGs opened during
+    startup is a rollout that times out.
+    """
+    try:
+        from loguru import logger as _log
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='properties' AND column_name='image_hashes'"))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS image_hashes JSON"))
+            _log.info("Added image_hashes to properties")
     except Exception:
         pass
 

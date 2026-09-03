@@ -2136,6 +2136,10 @@ class DivarScraper:
     ) -> List[str]:
         """Download images and return local paths"""
         local_paths = []
+        # Reset per call rather than per scraper: one property's fingerprints
+        # leaking into the next would merge two unrelated listings, which is
+        # the one failure this feature must not have.
+        self._pending_hashes: List[int] = []
         
         try:
             property_dir = self.images_dir / divar_id
@@ -2205,6 +2209,16 @@ class DivarScraper:
                                 continue
                             im = im.convert("RGB")
                             im.save(filepath, format="JPEG", quality=85)
+                            # Fingerprint here, from the decoded bitmap we
+                            # already hold. Doing it later means opening every
+                            # JPEG again from disk for no reason, and doing it
+                            # before the save would hash images we then reject.
+                            try:
+                                from app.services.image_fingerprint import dhash
+                                self._pending_hashes.append(dhash(im))
+                            except Exception as hash_err:
+                                logger.debug(
+                                    f"{divar_id}: could not fingerprint image {i+1}: {hash_err}")
                         except Exception as decode_err:
                             # not a decodable image, or a decompression bomb
                             logger.debug(f"{divar_id}: image {i+1} not usable: {decode_err}")
@@ -3281,6 +3295,11 @@ class DivarScraper:
                                 property_data['images'] = local_images
                                 property_data['thumbnail_url'] = local_images[0]
                                 property_data['images_downloaded'] = True
+                                # Fingerprints of the images we actually kept —
+                                # the ones a duplicate check compares.
+                                hashes = getattr(self, '_pending_hashes', None)
+                                if hashes:
+                                    property_data['image_hashes'] = list(hashes)
                         
                         # Grade the record before storing it. Recorded, never
                         # enforced: we already spent a contact reveal on this
