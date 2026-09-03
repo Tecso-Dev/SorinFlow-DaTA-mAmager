@@ -881,3 +881,43 @@ class TestRotationIsVisibleWhileItHappens:
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper.maybe_rotate_account)
         assert 'getattr(self, "_job_id_str", None)' in src
+
+
+class TestWeDoNotLearnTheSameFactFiveTimes:
+    """With five accounts and Divar challenging each one, a run spent
+    twenty-five minutes waiting for a code nobody was there to enter — five
+    minutes per account, five times, to discover the same thing.
+
+    The first prompt gets the full window: somebody who IS watching answers it.
+    After that we already know nobody is, so every remaining account is still
+    tried — one may not be challenged at all, and that costs nothing — but with
+    a short wait rather than the full one.
+    """
+
+    def test_the_first_prompt_still_gets_the_full_window(self):
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        src = _code_only(inspect.getsource(ContactExtractor._handle_sms_otp_if_present))
+        assert 'getattr(settings, "otp_wait_timeout", 300)' in src
+        assert "if _prior:" in src, "the full window is no longer conditional"
+
+    def test_later_prompts_in_the_same_job_wait_briefly(self):
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        src = _code_only(inspect.getsource(ContactExtractor._handle_sms_otp_if_present))
+        assert "min(timeout, 30)" in src
+
+    def test_a_successful_reveal_restores_the_full_window(self):
+        """clear_timeouts resets the strike count, so a job that starts working
+        again treats the next prompt as a first one."""
+        from app.scraper import otp_store
+        otp_store.clear_timeouts("j")
+        assert otp_store.strikes("j") == 0
+        otp_store.note_timeout("j")
+        assert otp_store.strikes("j") == 1
+        otp_store.clear_timeouts("j")
+        assert otp_store.strikes("j") == 0
+
+    def test_strikes_is_safe_without_a_job(self):
+        from app.scraper import otp_store
+        assert otp_store.strikes(None) == 0

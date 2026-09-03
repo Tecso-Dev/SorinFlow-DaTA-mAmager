@@ -392,6 +392,26 @@ class ContactExtractor:
 
             event = otp_store.request(self.otp_key, self.account_phone or "")
             timeout = getattr(settings, "otp_wait_timeout", 300)
+
+            # Wait the full time for the FIRST prompt of a job, and briefly for
+            # the rest.
+            #
+            # The first unanswered prompt already told us nobody is at the
+            # keyboard. Every account still gets tried — one of them may not be
+            # challenged at all, and that costs nothing — but waiting the full
+            # five minutes on each is how a run with five accounts spent
+            # twenty-five minutes discovering the same fact five times, while
+            # Divar's challenges kept arriving faster than the listings.
+            #
+            # Somebody who IS watching answers the first prompt, and the full
+            # timeout is theirs.
+            _prior = otp_store.strikes(otp_store.job_of(self.otp_key))
+            if _prior:
+                timeout = min(timeout, 30)
+                logger.info(
+                    f"{_prior} prompt(s) already went unanswered this job — "
+                    f"waiting {timeout}s on this account rather than the full "
+                    "window")
             logger.info(f"SMS-OTP required — PAUSING scrape, waiting up to {timeout}s for code (key={self.otp_key})")
 
             # ── pause the job while we wait for the code ──

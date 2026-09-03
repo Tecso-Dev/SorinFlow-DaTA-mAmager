@@ -35,6 +35,11 @@ def note_timeout(job_id: Optional[str]) -> int:
     return _timeouts[job_id]
 
 
+def strikes(job_id: Optional[str]) -> int:
+    """Unanswered prompts for this job since the last successful reveal."""
+    return _timeouts.get(job_id, 0) if job_id else 0
+
+
 def clear_timeouts(job_id: Optional[str]) -> None:
     """A reveal succeeded: the accounts are not all challenged after all."""
     if job_id:
