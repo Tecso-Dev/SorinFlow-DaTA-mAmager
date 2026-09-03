@@ -100,6 +100,32 @@ async def _release_orphaned_jobs() -> None:
                 logger.warning(
                     f"{result.rowcount} scraping job(s) were left running by a "
                     "previous process and have been marked failed")
+
+                # Say it in the run log too, not only in finish_reason.
+                #
+                # The گزارش timeline is where anyone looks first when a run
+                # stops, and a job killed by a deploy otherwise ends with its
+                # last ordinary event — which reads as though the scraper gave
+                # up on its own. It did not; the pod it was running in was
+                # replaced. That has now happened twice, both times during an
+                # unrelated deploy.
+                try:
+                    from app.services import job_log
+                    from app.models.scraping_job import ScrapingJob as _SJ
+                    from sqlalchemy import select as _select
+                    rows = (await db.execute(
+                        _select(_SJ.job_id).where(
+                            _SJ.finish_reason.like("سرور در میانهٔ اجرا%"))
+                        .order_by(_SJ.id.desc()).limit(result.rowcount)
+                    )).scalars().all()
+                    for jid in rows:
+                        await job_log.record(
+                            jid, job_log.ERROR,
+                            "سرور در میانهٔ این اسکرپ ری‌استارت شد (استقرار نسخهٔ "
+                            "جدید یا ری‌استارت سرویس) — تسک ادامه پیدا نکرد",
+                            level="error")
+                except Exception as e:
+                    logger.warning(f"could not log the orphan reason: {e}")
     except Exception as e:
         logger.warning(f"Could not release orphaned scraping jobs: {e}")
 

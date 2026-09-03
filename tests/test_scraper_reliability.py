@@ -1025,3 +1025,34 @@ class TestDivarDoesTheFilteringItCanDo:
         src = _run_src()
         i = src.index("build_search_query(")
         assert "except Exception" in src[i:i + 900]
+
+
+class TestARunKilledByADeploySaysSo:
+    """Two runs have now died because an unrelated deploy replaced the pod
+    underneath them — once mine, once Sahand's. The job is marked failed at the
+    next boot with a finish_reason, but the گزارش timeline just stopped at its
+    last ordinary event, which reads as though the scraper gave up on its own.
+    """
+
+    def test_orphaned_jobs_get_a_reason(self):
+        import inspect
+        from app import main
+        src = inspect.getsource(main._release_orphaned_jobs)
+        assert "سرور در میانهٔ اجرا ری‌استارت شد" in src
+        assert "finish_reason" in src
+
+    def test_the_reason_also_reaches_the_run_log(self):
+        import inspect
+        from app import main
+        src = inspect.getsource(main._release_orphaned_jobs)
+        assert "job_log.record" in src
+        assert "job_log.ERROR" in src
+
+    def test_logging_the_reason_cannot_stop_the_pod_booting(self):
+        """A stale row is cosmetic; a pod that will not start is not — the
+        function's own docstring says so."""
+        import inspect
+        from app import main
+        src = inspect.getsource(main._release_orphaned_jobs)
+        i = src.index("job_log.record")
+        assert "except Exception" in src[i:i + 500]
