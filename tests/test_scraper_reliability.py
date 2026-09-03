@@ -1096,3 +1096,38 @@ class TestWeDoNotForgeHeadersChromiumComputesCorrectly:
         """Accept-Language and Accept-Encoding really are the same on every
         request, so setting them context-wide is correct."""
         assert set(self._headers()) == {"Accept-Language", "Accept-Encoding"}
+
+
+class TestTheCodeAlertReachesSomebody:
+    """A run parked waiting for a code is silent for up to six hours. On the
+    first live test the alert found no recipient at all — no admin user had an
+    email address — so the feature would have worked perfectly and told nobody.
+    """
+
+    def test_it_falls_back_to_the_sending_account(self):
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        src = _code_only(inspect.getsource(ContactExtractor._notify_code_needed))
+        assert "resolve_config" in src
+        assert "from_email" in src and "user" in src
+
+    def test_having_nobody_to_tell_is_a_warning_not_a_shrug(self):
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        src = inspect.getsource(ContactExtractor._notify_code_needed)
+        assert "logger.warning" in src
+        assert "parked and silent" in src
+
+    def test_a_failed_alert_never_stops_the_scrape(self):
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        src = inspect.getsource(ContactExtractor._notify_code_needed)
+        assert "except Exception" in src
+
+    def test_it_is_sent_once_per_prompt(self):
+        """Not once per wait slice — that would be a mail every two seconds."""
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        src = _code_only(inspect.getsource(ContactExtractor._handle_sms_otp_if_present))
+        assert "_notified = True" in src
+        assert "not _notified" in src

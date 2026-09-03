@@ -357,7 +357,25 @@ class ContactExtractor:
                 )).scalar_one_or_none()
 
                 if not to:
-                    logger.info("[otp] nobody to notify — no admin address on file")
+                    # Fall back to the account we send FROM.
+                    #
+                    # No admin had an address on file, and an alert nobody
+                    # receives is the same as no alert — the run parks silently
+                    # for six hours and the person who could have freed it in
+                    # ten seconds never hears. The agency's own SMTP mailbox is
+                    # read by the people who would answer.
+                    cfg = await email_service.resolve_config(db)
+                    to = (cfg.get("from_email") or cfg.get("user") or "").strip()
+                    if to:
+                        logger.info(
+                            "[otp] no admin address on file — notifying the "
+                            f"sending account instead ({to})")
+
+                if not to:
+                    logger.warning(
+                        "[otp] nobody to notify: no admin email and no SMTP "
+                        "account configured. The run is parked and silent — set "
+                        "an email on an admin user, or configure the email panel.")
                     return
 
                 subject = "دیوار کد تأیید می‌خواهد — اسکرپ متوقف است"
