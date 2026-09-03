@@ -63,6 +63,19 @@ class Settings(BaseSettings):
     # The code would be entered against a request the scraper had already
     # dropped, and come back "no pending OTP request".
     otp_wait_timeout: int = Field(default=300, env="OTP_WAIT_TIMEOUT")
+    # Whether a scrape WAITS for a human when Divar asks for a code.
+    #
+    # Off: an unanswered prompt suppresses contact reveals for the job and the
+    # run finishes without phone numbers — fast, unattended, incomplete.
+    # On: the run stays paused with the prompt live until somebody enters the
+    # code, up to otp_wait_max_seconds. For a business whose product IS the
+    # phone number, waiting beats finishing without one.
+    otp_wait_for_human: bool = Field(default=True, env="OTP_WAIT_FOR_HUMAN")
+    # The cap on that wait. A run parked here holds a browser and its Divar
+    # session, so it must not wait forever on a job nobody will come back to.
+    otp_wait_max_seconds: int = Field(default=6 * 3600, env="OTP_WAIT_MAX_SECONDS")
+    # How long an unanswered prompt waits before emailing whoever can answer it.
+    otp_notify_after_seconds: int = Field(default=120, env="OTP_NOTIFY_AFTER_SECONDS")
     # How many listings one saved Divar account handles before the scraper
     # switches to the next. Counted per listing *opened*, not per listing
     # saved, so a filtered-out ad costs the account the same as a kept one.

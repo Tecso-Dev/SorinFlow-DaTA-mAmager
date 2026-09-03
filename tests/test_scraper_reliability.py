@@ -1056,3 +1056,43 @@ class TestARunKilledByADeploySaysSo:
         src = inspect.getsource(main._release_orphaned_jobs)
         i = src.index("job_log.record")
         assert "except Exception" in src[i:i + 500]
+
+
+class TestWeDoNotForgeHeadersChromiumComputesCorrectly:
+    """Playwright applies extra_http_headers to EVERY request a context makes,
+    not just navigations. The block was a copy of a Chrome *document* request,
+    so every font, image, script and XHR announced itself as a fresh top-level
+    navigation the user had just typed in:
+
+        Sec-Fetch-Dest: document   on a .webp
+        Sec-Fetch-Mode: navigate   on an XHR
+        Sec-Fetch-User: ?1         on a request nobody clicked
+
+    Not unusual — impossible. No browser emits that. Chromium computes all of
+    it correctly per request when left alone, so deleting these is removing a
+    forgery rather than adding a disguise.
+    """
+
+    @staticmethod
+    def _headers():
+        from app.scraper.stealth import get_context_options, StealthConfig
+        return get_context_options(StealthConfig())["extra_http_headers"]
+
+    @pytest.mark.parametrize("header", [
+        "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site", "Sec-Fetch-User",
+        "Upgrade-Insecure-Requests", "Accept",
+    ])
+    def test_per_request_headers_are_left_to_the_browser(self, header):
+        assert header not in self._headers(), \
+            f"{header} is forced context-wide again — it is per-request"
+
+    def test_the_cache_is_not_disabled(self):
+        """max-age=0 on every subresource asked Divar's CDN to revalidate
+        assets it had marked immutable — measured at +1.75 conditional
+        requests per page, over a 205-page run."""
+        assert "Cache-Control" not in self._headers()
+
+    def test_what_remains_is_genuinely_constant(self):
+        """Accept-Language and Accept-Encoding really are the same on every
+        request, so setting them context-wide is correct."""
+        assert set(self._headers()) == {"Accept-Language", "Accept-Encoding"}

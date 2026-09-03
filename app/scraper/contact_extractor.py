@@ -334,6 +334,52 @@ class ContactExtractor:
         logger.info("No OTP resend control on the page — relying on Divar's own send")
         return False
 
+    async def _notify_code_needed(self, waited: float) -> None:
+        """Email whoever can answer, once per prompt. Never raises.
+
+        A run parked waiting for a code is silent — it just stops advancing —
+        so without this the "wait for a human" mode only works for a human who
+        happens to be looking at the scraper page.
+        """
+        try:
+            from app.services import email_service, email_templates
+            from app.database import async_session_maker
+            from app.models.user import User
+            from sqlalchemy import select
+
+            async with async_session_maker() as db:
+                to = (await db.execute(
+                    select(User.email).where(
+                        User.email.isnot(None),
+                        User.role.in_(("root", "super_admin")),
+                        User.is_active == True,          # noqa: E712
+                    ).limit(1)
+                )).scalar_one_or_none()
+
+                if not to:
+                    logger.info("[otp] nobody to notify — no admin address on file")
+                    return
+
+                subject = "دیوار کد تأیید می‌خواهد — اسکرپ متوقف است"
+                body = (
+                    f"اسکرپر برای گرفتن شمارهٔ تماس به کد تأیید دیوار نیاز دارد "
+                    f"و {int(waited)} ثانیه است منتظر مانده.\n\n"
+                    f"شمارهٔ حساب: {self.account_phone or '—'}\n\n"
+                    "برای ادامه، وارد پنل شوید و در بخش «اسکرپر» کد پیامک‌شده را "
+                    "وارد کنید. تا آن زمان اسکرپ متوقف می‌ماند و آگهی‌ها بدون "
+                    "شمارهٔ تماس ذخیره نمی‌شوند."
+                )
+                # notification() returns (subject, html, text) — the same shape
+                # every template in that module uses.
+                subj, html, text = email_templates.notification(
+                    subject, body,
+                    cta_label="ورود به پنل", cta_url="https://sorinflow.com/dashboard/")
+                await email_service.send(to, subj, html, text, db=db)
+                logger.warning(f"[otp] emailed {to}: a Divar code is needed")
+        except Exception as e:
+            # A notification that fails must never take the scrape with it.
+            logger.warning(f"[otp] could not send the code-needed email: {e}")
+
     async def _handle_sms_otp_if_present(self) -> None:
         """Detect Divar's SMS OTP verification for contact info, wait for user code."""
         try:
@@ -406,13 +452,37 @@ class ContactExtractor:
             # Somebody who IS watching answers the first prompt, and the full
             # timeout is theirs.
             _prior = otp_store.strikes(otp_store.job_of(self.otp_key))
-            if _prior:
+
+            # Wait for a human, or get on with it? A real choice, not a guess.
+            #
+            # The old behaviour assumed an unanswered prompt meant nobody was
+            # watching, so it suppressed reveals and let the run finish without
+            # phone numbers. For a business whose product IS the phone number
+            # that is the wrong trade: «the phone number is very important —
+            # this is the feature that separates us from others».
+            #
+            # With OTP_WAIT_FOR_HUMAN on, the run parks here with the prompt
+            # live in the panel until somebody enters the code, capped by
+            # OTP_WAIT_MAX_SECONDS so a job nobody returns to does not hold a
+            # browser and a Divar session for ever. The cancel button still
+            # works — the wait loop checks it every two seconds.
+            _wait_for_human = bool(getattr(settings, "otp_wait_for_human", False))
+            if _wait_for_human:
+                timeout = max(timeout, int(getattr(settings, "otp_wait_max_seconds", 21600)))
+                logger.info(
+                    "SMS-OTP required — PAUSING and waiting for a human "
+                    f"(up to {timeout // 3600}h). Enter the code in the scraper "
+                    f"panel to continue. key={self.otp_key}")
+            elif _prior:
                 timeout = min(timeout, 30)
                 logger.info(
                     f"{_prior} prompt(s) already went unanswered this job — "
                     f"waiting {timeout}s on this account rather than the full "
                     "window")
-            logger.info(f"SMS-OTP required — PAUSING scrape, waiting up to {timeout}s for code (key={self.otp_key})")
+            else:
+                logger.info(
+                    f"SMS-OTP required — PAUSING scrape, waiting up to "
+                    f"{timeout}s for code (key={self.otp_key})")
 
             # ── pause the job while we wait for the code ──
             paused_ok = False
@@ -428,6 +498,8 @@ class ContactExtractor:
                 # Wait in short slices so a user "close"/cancel is honored promptly
                 waited = 0.0
                 slice_s = 2.0
+                _notified = False
+                _notify_after = int(getattr(settings, "otp_notify_after_seconds", 120))
                 while waited < timeout:
                     if otp_store.is_cancelled(self.otp_key):
                         logger.info("SMS-OTP wait cancelled by user")
@@ -447,6 +519,16 @@ class ContactExtractor:
                         break
                     except asyncio.TimeoutError:
                         waited += slice_s
+                        # Tell somebody, once, that the run is parked.
+                        #
+                        # Waiting for a human is only useful if the human finds
+                        # out. Nobody watches the scraper page at 3am, and the
+                        # run is otherwise silent — it simply stops advancing.
+                        if (not _notified
+                                and waited >= _notify_after
+                                and _wait_for_human):
+                            _notified = True
+                            await self._notify_code_needed(waited)
                 if not got_code and not otp_store.is_cancelled(self.otp_key):
                     logger.warning(f"SMS-OTP timeout — no code in {timeout}s")
                     otp_store.clear(self.otp_key)

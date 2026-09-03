@@ -230,20 +230,35 @@ def get_context_options(stealth_config: StealthConfig, proxy: Optional[str] = No
         "java_script_enabled": True,
         "bypass_csp": True,
         "ignore_https_errors": True,
+        # Only headers that are genuinely the same on every request.
+        #
+        # Playwright applies extra_http_headers to EVERY request the context
+        # makes, not just navigations, and this block was a copy of a Chrome
+        # *document* request. So each font, image, script and XHR announced
+        # itself as a fresh top-level navigation the user had just typed into
+        # the address bar:
+        #
+        #     Sec-Fetch-Dest: document   on a .webp
+        #     Sec-Fetch-Mode: navigate   on an XHR
+        #     Sec-Fetch-User: ?1         on a request nobody clicked
+        #
+        # That combination is not unusual, it is impossible — no browser emits
+        # it — and Chromium computes all of it correctly per request if simply
+        # left alone. Deleting these is removing a forgery, not adding a
+        # disguise.
+        #
+        # Cache-Control: max-age=0 went the same way. Measured on a local
+        # server across 8 navigations: it added 1.75 conditional requests per
+        # page, all of them If-None-Match round trips on fonts and images that
+        # the CDN had marked immutable. Over a 205-page run that is several
+        # hundred pointless round trips at Divar's expense, for nothing we
+        # keep. (JS and CSS were served from Blink's memory cache either way,
+        # so the original claim that the whole bundle was re-fetched was
+        # overstated — this is a politeness fix, and it will not change how
+        # often Divar asks for a code.)
         "extra_http_headers": {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7",
             "Accept-Encoding": "gzip, deflate, br",
-            "Cache-Control": "max-age=0",
-            "Connection": "keep-alive",
-            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="131", "Google Chrome";v="131"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Upgrade-Insecure-Requests": "1",
         }
     }
     
