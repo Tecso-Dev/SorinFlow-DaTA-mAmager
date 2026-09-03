@@ -392,3 +392,134 @@ async def fix_has_images(db: AsyncSession = Depends(get_db)):
             fixed += 1
     await db.commit()
     return {"fixed": fixed, "total": len(properties)}
+
+
+@router.get("/visual/overview")
+async def visual_overview(
+    limit: int = Query(25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """What the «هوش تصویری» page reads.
+
+    Three things measured from what we actually hold — the photographs and
+    the prices — rather than from a model this deployment cannot run:
+
+      * listings priced away from their district's median,
+      * listings that appear to be the same flat posted twice,
+      * galleries whose photographs are blurred, blown out or tiny.
+
+    Every one of them can answer «cannot say», and the page renders that as
+    «—». A young database says «cannot say» a lot, and that is the honest
+    state rather than a fault.
+    """
+    from collections import defaultdict
+    from app.services import valuation as val
+    from app.services import image_fingerprint as fp
+
+    rows = (await db.execute(
+        select(Property).where(Property.is_active == True)  # noqa: E712
+    )).scalars().all()
+
+    # ── valuation: bucket by district, then judge each listing ──────────
+    buckets = defaultdict(list)
+    for p in rows:
+        key = val.bucket_key(p)
+        ppm = val.price_per_meter(p)
+        if key and ppm:
+            buckets[key].append(ppm)
+
+    benches = {k: val.benchmark(v) for k, v in buckets.items()}
+
+    under, over, judged = [], [], 0
+    for p in rows:
+        key = val.bucket_key(p)
+        a = val.assess(p, benches.get(key) if key else None)
+        if a["verdict"] == "unknown":
+            continue
+        judged += 1
+        if a["verdict"] in ("under", "over"):
+            item = {
+                "id": p.id, "serial_no": p.serial_no, "title": p.title,
+                "district": p.district, "city_name": p.city_name,
+                "area": p.area, "ppm": a["ppm"], "median_ppm": a["median_ppm"],
+                "delta_pct": a["delta_pct"], "sample": a["sample"],
+                "confidence": a["confidence"], "note": val.describe(a),
+            }
+            (under if a["verdict"] == "under" else over).append(item)
+
+    under.sort(key=lambda x: x["delta_pct"])
+    over.sort(key=lambda x: -x["delta_pct"])
+
+    # ── duplicates ─────────────────────────────────────────────────────
+    hashed = [p for p in rows if (p.image_hashes or [])]
+    ignore = fp.boilerplate([p.image_hashes or [] for p in hashed])
+
+    pairs = []
+    for i, a in enumerate(hashed):
+        for b in hashed[i + 1:]:
+            r = fp.compare(
+                {"hashes": a.image_hashes, "area": a.area,
+                 "rooms": a.rooms, "district": a.district},
+                {"hashes": b.image_hashes, "area": b.area,
+                 "rooms": b.rooms, "district": b.district},
+                ignore=ignore)
+            if r["verdict"] == "different":
+                continue
+            pairs.append({
+                "verdict": r["verdict"],
+                "note": fp.describe(r),
+                "shared_images": r["shared_images"],
+                "a": {"id": a.id, "serial_no": a.serial_no, "title": a.title,
+                      "price": a.total_price or a.price, "seller": a.seller_name},
+                "b": {"id": b.id, "serial_no": b.serial_no, "title": b.title,
+                      "price": b.total_price or b.price, "seller": b.seller_name},
+            })
+    # A confirmed duplicate before a maybe, and the biggest price gap first —
+    # two listings for one flat at the same price is a tidiness problem; the
+    # same flat at two prices is a negotiating position.
+    def _gap(p):
+        pa, pb = p["a"]["price"], p["b"]["price"]
+        return abs(pa - pb) if pa and pb else 0
+    pairs.sort(key=lambda p: (p["verdict"] != "duplicate", -_gap(p)))
+
+    # ── photograph quality ─────────────────────────────────────────────
+    weak, problems, scored = [], {}, 0
+    for p in rows:
+        q = p.image_quality or {}
+        if not q.get("scored"):
+            continue
+        scored += 1
+        for k, n in (q.get("problems") or {}).items():
+            problems[k] = problems.get(k, 0) + n
+        if (q.get("worst") is not None and q["worst"] < 50) or q.get("problems"):
+            weak.append({
+                "id": p.id, "serial_no": p.serial_no, "title": p.title,
+                "count": q.get("count"), "worst": q.get("worst"),
+                "average": q.get("average"),
+                "problems": list((q.get("problems") or {}).keys()),
+            })
+    weak.sort(key=lambda x: (x["worst"] if x["worst"] is not None else 999))
+
+    return {
+        "generated_at": datetime.now().isoformat(),
+        "valuation": {
+            "judged": judged,
+            "total": len(rows),
+            "districts_with_a_benchmark": sum(1 for b in benches.values() if b),
+            "districts_seen": len(benches),
+            "min_comparables": val.MIN_COMPARABLES,
+            "under": under[:limit],
+            "over": over[:limit],
+        },
+        "duplicates": {
+            "pairs": pairs[:limit],
+            "total_pairs": len(pairs),
+            "with_hashes": len(hashed),
+            "boilerplate_ignored": len(ignore),
+        },
+        "photos": {
+            "scored_listings": scored,
+            "problems": problems,
+            "weak": weak[:limit],
+        },
+    }
