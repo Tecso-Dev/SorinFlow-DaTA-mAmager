@@ -115,6 +115,7 @@ async def init_db():
                  _migrate_cookie_usage,
                  _migrate_property_quality,
                  _migrate_job_finish_reason,
+                 _migrate_price_history,
                  _migrate_sms_panel,
                  _seed_reference_data):
         try:
@@ -538,6 +539,36 @@ async def _migrate_job_finish_reason(conn):
                 "ALTER TABLE scraping_jobs ADD COLUMN IF NOT EXISTS finish_reason VARCHAR(300)"
             ))
             _log.info("Added finish_reason to scraping_jobs")
+    except Exception:
+        pass
+
+
+async def _migrate_price_history(conn):
+    """Idempotently add the price-trail columns to properties.
+
+    No backfill, and none is possible: the earlier prices were overwritten as
+    each listing was re-scraped and are gone. NULL here means «no move has
+    been recorded since this shipped», which is the truth.
+    """
+    try:
+        from loguru import logger as _log
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='properties' AND column_name='price_changed_at'"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS price_history JSON"))
+            await conn.execute(text(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS previous_price BIGINT"))
+            await conn.execute(text(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS "
+                "price_changed_at TIMESTAMP WITH TIME ZONE"))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_properties_price_changed_at "
+                "ON properties (price_changed_at)"))
+            _log.info("Added the price-trail columns to properties")
     except Exception:
         pass
 

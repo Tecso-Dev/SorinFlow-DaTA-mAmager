@@ -2649,6 +2649,61 @@ class DivarScraper:
         except Exception as e:
             logger.warning(f"Could not grade {property_data.get('divar_id')}: {e}")
 
+    # How many moves to keep per listing. A price trail is read one property
+    # at a time and the recent moves are the ones anybody acts on, so this is
+    # bounded rather than unbounded — an eighteen-month history of a flat
+    # relisted weekly is a row nobody wants to load.
+    PRICE_TRAIL_MAX = 24
+
+    # The fields a "price" can live in, by listing type. Divar puts a sale
+    # price in total_price and a rental in rent+deposit, and a rental whose
+    # deposit moves while the rent holds has still moved.
+    _PRICE_FIELDS = ("total_price", "price", "rent_price", "deposit")
+
+    def _record_price_move(self, existing, incoming: Dict[str, Any]) -> None:
+        """Append to the price trail when a figure actually changed.
+
+        Only on a real change. Writing a row on every scrape would add a
+        thousand identical entries a day and bury the handful that mean
+        something. Never raises: losing the trail for one listing is a
+        regrettable gap, losing the listing is worse.
+        """
+        try:
+            moved = {}
+            for field in self._PRICE_FIELDS:
+                new = incoming.get(field)
+                if new is None:
+                    continue
+                old = getattr(existing, field, None)
+                if old is not None and int(new) != int(old):
+                    moved[field] = {"from": int(old), "to": int(new)}
+
+            if not moved:
+                return
+
+            now = datetime.now()
+            trail = list(getattr(existing, "price_history", None) or [])
+            trail.append({
+                "at": now.isoformat(),
+                **{k: v["to"] for k, v in moved.items()},
+                "from": {k: v["from"] for k, v in moved.items()},
+            })
+            existing.price_history = trail[-self.PRICE_TRAIL_MAX:]
+            existing.price_changed_at = now
+
+            # previous_price tracks the headline figure only — the one a
+            # «قیمت کم شد» alert is about. A deposit shuffle on a rental is in
+            # the trail but does not pretend to be a price cut.
+            headline = moved.get("total_price") or moved.get("price")
+            if headline:
+                existing.previous_price = headline["from"]
+                direction = "کاهش" if headline["to"] < headline["from"] else "افزایش"
+                logger.info(
+                    f"[price] {existing.divar_id}: {direction} "
+                    f"{headline['from']:,} → {headline['to']:,}")
+        except Exception as e:
+            logger.warning(f"could not record the price move: {e}")
+
     async def property_exists(self, divar_id: str) -> bool:
         """Whether this listing is stored AND already has what we came for.
 
@@ -2703,6 +2758,14 @@ class DivarScraper:
             existing = result.scalar_one_or_none()
             
             if existing:
+                # Record the move BEFORE the overwrite below destroys it.
+                #
+                # This is the whole point: a listing is re-scraped, the loop
+                # underneath setattr()s the new price over the old one, and the
+                # previous figure is gone. Every price drop this database has
+                # ever seen was thrown away at exactly this line, on a schedule.
+                self._record_price_move(existing, property_data)
+
                 # Update existing — only update owner_phone if it's not set yet
                 for key, value in property_data.items():
                     if hasattr(existing, key) and value is not None:

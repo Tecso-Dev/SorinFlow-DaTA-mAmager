@@ -110,6 +110,16 @@ class Property(Base):
     seller_name = Column(String(200))
     advertiser_type = Column(String(20))  # personal, agency
     
+    # Price trail. Divar listings are re-scraped, and the update path used to
+    # overwrite the price and lose whatever was there before — throwing away,
+    # every single day, the one signal a price-drop alert is built from. Kept
+    # here rather than in a side table: the question actually asked is «which
+    # listings moved this week», which an indexed timestamp answers without a
+    # join, and the trail itself is only ever read one property at a time.
+    price_history = Column(JSON, default=list)   # [{at, price, rent, deposit}]
+    previous_price = Column(BigInteger)          # what it was before the last move
+    price_changed_at = Column(DateTime(timezone=True), index=True)
+
     # Data quality — filled by PropertyDataValidator at scrape time. Recorded,
     # never enforced: a low score marks a listing worth looking at, it does not
     # stop it being saved, because dropping data we already paid a contact
