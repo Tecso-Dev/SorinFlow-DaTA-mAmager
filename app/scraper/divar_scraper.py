@@ -2140,6 +2140,7 @@ class DivarScraper:
         # leaking into the next would merge two unrelated listings, which is
         # the one failure this feature must not have.
         self._pending_hashes: List[int] = []
+        self._pending_quality: List[Dict[str, Any]] = []
         
         try:
             property_dir = self.images_dir / divar_id
@@ -2219,6 +2220,13 @@ class DivarScraper:
                             except Exception as hash_err:
                                 logger.debug(
                                     f"{divar_id}: could not fingerprint image {i+1}: {hash_err}")
+                            try:
+                                from app.services import image_quality as _iq
+                                self._pending_quality.append(
+                                    _iq.verdict(_iq.measure(im)))
+                            except Exception as q_err:
+                                logger.debug(
+                                    f"{divar_id}: could not score image {i+1}: {q_err}")
                         except Exception as decode_err:
                             # not a decodable image, or a decompression bomb
                             logger.debug(f"{divar_id}: image {i+1} not usable: {decode_err}")
@@ -3300,6 +3308,10 @@ class DivarScraper:
                                 hashes = getattr(self, '_pending_hashes', None)
                                 if hashes:
                                     property_data['image_hashes'] = list(hashes)
+                                graded = getattr(self, '_pending_quality', None)
+                                if graded:
+                                    from app.services import image_quality as _iq
+                                    property_data['image_quality'] = _iq.summarise(graded)
                         
                         # Grade the record before storing it. Recorded, never
                         # enforced: we already spent a contact reveal on this

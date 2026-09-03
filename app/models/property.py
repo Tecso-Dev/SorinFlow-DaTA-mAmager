@@ -117,6 +117,11 @@ class Property(Base):
     # apartment appears four times at four prices.
     image_hashes = Column(JSON, default=list)   # [int, …] 64-bit dHash
 
+    # Sharpness, exposure and resolution of the gallery, measured at download.
+    # Advisory: nothing here rejects a photograph, because that is a decision
+    # for whoever is looking at the listing rather than for a number.
+    image_quality = Column(JSON, default=dict)  # {count, scored, best, worst, average, problems}
+
     # Price trail. Divar listings are re-scraped, and the update path used to
     # overwrite the price and lose whatever was there before — throwing away,
     # every single day, the one signal a price-drop alert is built from. Kept

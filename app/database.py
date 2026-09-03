@@ -560,6 +560,8 @@ async def _migrate_image_hashes(conn):
         if result.fetchone() is None:
             await conn.execute(text(
                 "ALTER TABLE properties ADD COLUMN IF NOT EXISTS image_hashes JSON"))
+            await conn.execute(text(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS image_quality JSON"))
             _log.info("Added image_hashes to properties")
     except Exception:
         pass
