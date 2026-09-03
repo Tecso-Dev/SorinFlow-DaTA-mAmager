@@ -275,6 +275,10 @@
                 <span class="nav-icon"><i class="bi bi-people"></i></span>
                 CRM — لیدها
             </a>
+            <a class="nav-item-link" onclick="showSection('insights')" id="nav-link-insights">
+                <span class="nav-icon"><i class="bi bi-graph-up-arrow"></i></span>
+                هوش تصویری
+            </a>
 
             <div class="sidebar-section-label">تنظیمات</div>
 
@@ -1775,6 +1779,119 @@
             </div>
 
             <!-- ═══ USERS ═════════════════════════ -->
+            <!-- ══ هوش تصویری — CRM insights ══ -->
+            <div id="section-insights" class="section-content" style="display:none;">
+
+                <!-- Headline numbers. Each renders «—» until the data can
+                     answer, never a zero standing in for an unknown. -->
+                <div class="row g-3 mb-3">
+                    <div class="col-6 col-lg-3">
+                        <div class="stat-card s-purple">
+                            <div class="stat-value" id="ins-leads">—</div>
+                            <div class="stat-label">کل لیدها</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-lg-3">
+                        <div class="stat-card s-cyan">
+                            <div class="stat-value" id="ins-conv">—</div>
+                            <div class="stat-label">نرخ تبدیل به معامله</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-lg-3">
+                        <div class="stat-card">
+                            <div class="stat-value" id="ins-stalled">—</div>
+                            <div class="stat-label">لید بی‌پیگیری</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-lg-3">
+                        <div class="stat-card">
+                            <div class="stat-value" id="ins-commission">—</div>
+                            <div class="stat-label">کمیسیون وصول‌نشده</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-lg-7">
+                        <div class="card h-100">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-funnel"></i> قیف فروش</span>
+                                <span class="text-muted small" id="ins-funnel-note"></span>
+                            </div>
+                            <div class="card-body"><div id="ins-funnel"></div></div>
+                        </div>
+                    </div>
+                    <div class="col-lg-5">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="bi bi-thermometer-half"></i> دمای مشتریان</div>
+                            <div class="card-body"><div class="chart-wrap"><canvas id="ins-temp-chart"></canvas></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-lg-7">
+                        <div class="card h-100">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-activity"></i> روند لید و ملک</span>
+                                <select id="ins-window" class="form-select form-select-sm" style="width:auto"
+                                        onchange="loadInsights()">
+                                    <option value="14">۱۴ روز</option>
+                                    <option value="30" selected>۳۰ روز</option>
+                                    <option value="90">۹۰ روز</option>
+                                </select>
+                            </div>
+                            <div class="card-body"><div class="chart-wrap"><canvas id="ins-trend-chart"></canvas></div></div>
+                        </div>
+                    </div>
+                    <div class="col-lg-5">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="bi bi-geo-alt"></i> پراکندگی شهرها</div>
+                            <div class="card-body"><div class="chart-wrap"><canvas id="ins-city-chart"></canvas></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-lg-6">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="bi bi-person-badge"></i> عملکرد مشاوران</div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table mb-0">
+                                        <thead><tr>
+                                            <th>مشاور</th><th>فایل نو</th><th>بازدید</th>
+                                            <th>پیشنهاد</th><th>معامله</th><th>بازدید/معامله</th>
+                                        </tr></thead>
+                                        <tbody id="ins-agents"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="card h-100">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-hourglass-split"></i> لیدهایی که معطل مانده‌اند</span>
+                                <span class="text-muted small" id="ins-stalled-note"></span>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive" style="max-height:320px;overflow-y:auto">
+                                    <table class="table mb-0">
+                                        <thead><tr>
+                                            <th>نام</th><th>شهر</th><th>وضعیت</th><th>بی‌حرکت</th>
+                                        </tr></thead>
+                                        <tbody id="ins-stalled-list"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="text-muted small mt-3 mb-0" id="ins-coverage"></p>
+            </div>
+
             <div id="section-monitoring" class="section-content" style="display:none;">
                 <!-- Health tiles. Values arrive from /api/monitoring/overview and are
                      written with textContent, never innerHTML — everything here comes
@@ -3675,7 +3792,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260831a"></script>
+<script src="js/app.js?v=20260903b"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

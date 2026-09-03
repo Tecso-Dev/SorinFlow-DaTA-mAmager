@@ -628,7 +628,7 @@ const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'] };
 
 const SECTION_PERMISSION = {
     dashboard: 'stats', properties: 'properties', scraper: 'scraper',
-    crm: 'crm', auth: 'divar_auth', proxies: 'proxies', portal: 'portal',
+    crm: 'crm', insights: 'crm', auth: 'divar_auth', proxies: 'proxies', portal: 'portal',
     monitoring: 'monitoring', sms: 'sms', email: 'email',
 };
 
@@ -724,6 +724,7 @@ const SECTION_META = {
     properties: { title: 'لیست املاک',          subtitle: 'مدیریت و جستجوی ملک‌های اسکرپ‌شده' },
     scraper:    { title: 'اسکرپر دیوار',         subtitle: 'تنظیم و اجرای تسک‌های اسکرپینگ' },
     crm:        { title: 'CRM — مدیریت لیدها',  subtitle: 'سیستم CRM و اطلاع‌رسانی' },
+    insights:   { title: 'هوش تصویری',           subtitle: 'قیف فروش، عملکرد مشاوران و لیدهای معطل‌مانده' },
     auth:       { title: 'احراز هویت دیوار',     subtitle: 'مدیریت نشست و کوکی حساب دیوار' },
     proxies:    { title: 'مدیریت پراکسی‌ها',     subtitle: 'افزودن، تست و مدیریت پراکسی‌ها' },
     portal:     { title: 'درخواست‌های مشتریان',  subtitle: 'ملک‌هایی که بازدیدکنندگان سایت دنبالش هستند' },
@@ -813,6 +814,7 @@ function showSection(sectionName) {
         case 'auth':       checkAuthStatus(); loadCookies(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
+        case 'insights':   loadInsights(); break;
         case 'portal':     loadPortalRequests(); break;
         case 'monitoring': loadMonitoring(); break;
         case 'sms':        loadSms(); break;
@@ -9111,4 +9113,227 @@ async function showJobLog(jobId) {
     } catch (err) {
         body.innerHTML = `<div class="text-danger small">${esc(err.message || 'خطا')}</div>`;
     }
+}
+
+
+/* ══════════════════════════════════════════════════════
+   هوش تصویری — CRM insights
+   ══════════════════════════════════════════════════════
+
+   One request feeds the whole page, so nothing on it can disagree with
+   anything else because a second call landed a minute later.
+
+   The formatting rule throughout: a value the server could not compute comes
+   back as null and is rendered «—». Never 0, and never «۰٪». A zero that is
+   really an unknown is the one kind of wrong a dashboard cannot recover from,
+   because it looks exactly like an answer. */
+
+let insTempChart = null, insTrendChart = null, insCityChart = null;
+
+const INS_PALETTE = ['#a78bfa','#f0a6ff','#67e8f9','#6366f1','#fcd34d',
+                     '#fb7185','#8b5cf6','#2dd4bf','#ec4899','#64748b'];
+
+function _insNum(v) {
+    return (v === null || v === undefined) ? '—' : Number(v).toLocaleString('fa-IR');
+}
+function _insPct(v) {
+    return (v === null || v === undefined) ? '—' : `${Number(v).toLocaleString('fa-IR')}٪`;
+}
+function _insToman(v) {
+    if (v === null || v === undefined) return '—';
+    const n = Number(v);
+    if (n >= 1e9) return `${(n / 1e9).toLocaleString('fa-IR', {maximumFractionDigits: 1})} میلیارد`;
+    if (n >= 1e6) return `${(n / 1e6).toLocaleString('fa-IR', {maximumFractionDigits: 0})} میلیون`;
+    return n.toLocaleString('fa-IR');
+}
+
+async function loadInsights() {
+    const days = parseInt(document.getElementById('ins-window')?.value || '30', 10);
+    let d;
+    try {
+        d = await apiCall(`/crm/insights?days=${days}`);
+    } catch (e) {
+        showToast('خطا', 'گزارش تحلیلی بارگذاری نشد', 'error');
+        return;
+    }
+    if (!d) return;
+
+    // ── headline numbers ──
+    document.getElementById('ins-leads').textContent = _insNum(d.totals?.leads);
+    document.getElementById('ins-conv').textContent = _insPct(d.totals?.conversion_rate);
+    document.getElementById('ins-stalled').textContent = _insNum(d.stalled?.items?.length);
+    document.getElementById('ins-commission').textContent = _insToman(d.deals?.commission_due);
+
+    _insRenderFunnel(d.funnel || []);
+    _insRenderTemp(d.temperature || []);
+    _insRenderTrend(d.series || {});
+    _insRenderCities(d.cities || []);
+    _insRenderAgents(d.agents || []);
+    _insRenderStalled(d.stalled || {});
+
+    // Say what the charts are standing on. A funnel built from leads that are
+    // 40% missing a phone number is worth looking at — but only with the 40%
+    // on screen beside it.
+    const cov = d.coverage || {};
+    const parts = [];
+    if (cov.leads_with_phone !== null && cov.leads_with_phone !== undefined)
+        parts.push(`${_insPct(cov.leads_with_phone)} لیدها شمارهٔ تماس دارند`);
+    if (cov.properties_with_phone !== null && cov.properties_with_phone !== undefined)
+        parts.push(`${_insPct(cov.properties_with_phone)} املاک شمارهٔ تماس دارند`);
+    document.getElementById('ins-coverage').textContent = parts.join(' · ');
+}
+
+function _insRenderFunnel(stages) {
+    const host = document.getElementById('ins-funnel');
+    if (!host) return;
+    const max = Math.max(1, ...stages.map(s => s.count));
+    const total = stages.reduce((a, s) => a + s.count, 0);
+
+    host.innerHTML = stages.map((s, i) => {
+        const pct = Math.round(s.count / max * 100);
+        // An unexpected status gets a different colour and a marker rather
+        // than being hidden — it is a data-quality finding, not noise.
+        const colour = s.unexpected ? 'var(--warning, #f59e0b)' : INS_PALETTE[i % INS_PALETTE.length];
+        return `
+        <div style="margin-bottom:.7rem">
+          <div class="d-flex justify-content-between align-items-baseline" style="font-size:.82rem">
+            <span>${esc(s.label)}${s.unexpected ? ' <i class="bi bi-exclamation-triangle" title="وضعیت ناشناخته"></i>' : ''}</span>
+            <strong>${_insNum(s.count)}</strong>
+          </div>
+          <div style="height:10px;border-radius:6px;background:var(--surface3);overflow:hidden;margin-top:.25rem">
+            <div style="height:100%;width:${pct}%;border-radius:6px;background:${colour};transition:width .5s ease"></div>
+          </div>
+        </div>`;
+    }).join('') || '<p class="text-muted small mb-0">هنوز لیدی ثبت نشده است.</p>';
+
+    const note = document.getElementById('ins-funnel-note');
+    if (note) note.textContent = total ? `مجموع ${_insNum(total)}` : '';
+}
+
+function _insRenderTemp(buckets) {
+    const el = document.getElementById('ins-temp-chart');
+    if (!el) return;
+    if (insTempChart) insTempChart.destroy();
+    const FA = { hot: 'داغ', warm: 'گرم', cold: 'سرد' };
+    insTempChart = new Chart(el.getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: buckets.map(b => FA[b.label] || b.label),
+            datasets: [{
+                data: buckets.map(b => b.count),
+                backgroundColor: ['#fb7185', '#fcd34d', '#67e8f9', '#64748b'],
+                borderColor: chartColors().surface, borderWidth: 0,
+                borderRadius: 10, spacing: 4, hoverOffset: 14,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, cutout: '62%',
+            plugins: { legend: { position: 'bottom',
+                labels: { color: chartColors().text, font: { family: 'inherit' } } } }
+        }
+    });
+}
+
+function _insRenderTrend(series) {
+    const el = document.getElementById('ins-trend-chart');
+    if (!el) return;
+    if (insTrendChart) insTrendChart.destroy();
+    const c = chartColors();
+    const leads = series.leads || [], props = series.properties || [];
+    const labels = leads.map(p => {
+        const dt = new Date(p.date);
+        return dt.toLocaleDateString('fa-IR', { day: 'numeric', month: 'long' });
+    });
+    insTrendChart = new Chart(el.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                { label: 'لید', data: leads.map(p => p.count), borderColor: '#a78bfa',
+                  backgroundColor: 'rgba(167,139,250,.12)', fill: true, tension: .38,
+                  pointRadius: 0, borderWidth: 2 },
+                { label: 'ملک', data: props.map(p => p.count), borderColor: '#67e8f9',
+                  backgroundColor: 'rgba(103,232,249,.10)', fill: true, tension: .38,
+                  pointRadius: 0, borderWidth: 2 },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { labels: { color: c.text } } },
+            scales: {
+                x: { ticks: { color: c.tick, maxTicksLimit: 8 }, grid: { color: c.grid } },
+                y: { beginAtZero: true, ticks: { color: c.tick, precision: 0 },
+                     grid: { color: c.grid } },
+            }
+        }
+    });
+}
+
+function _insRenderCities(buckets) {
+    const el = document.getElementById('ins-city-chart');
+    if (!el) return;
+    if (insCityChart) insCityChart.destroy();
+    insCityChart = new Chart(el.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: buckets.map(b => b.label),
+            datasets: [{
+                data: buckets.map(b => b.count),
+                backgroundColor: buckets.map((b, i) =>
+                    b.is_other ? '#64748b' : INS_PALETTE[i % INS_PALETTE.length]),
+                borderRadius: 8, borderWidth: 0,
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { beginAtZero: true, ticks: { color: chartColors().tick, precision: 0 },
+                     grid: { color: chartColors().grid } },
+                y: { ticks: { color: chartColors().tick }, grid: { display: false } },
+            }
+        }
+    });
+}
+
+function _insRenderAgents(agents) {
+    const tb = document.getElementById('ins-agents');
+    if (!tb) return;
+    if (!agents.length) {
+        tb.innerHTML = '<tr><td colspan="6" class="text-muted small text-center py-4">' +
+                       'هنوز عملکرد روزانه‌ای ثبت نشده است.</td></tr>';
+        return;
+    }
+    tb.innerHTML = agents.map(a => `
+        <tr>
+          <td><strong>${esc(a.agent)}</strong>
+              <div class="text-muted" style="font-size:.7rem">${_insNum(a.days)} روز ثبت‌شده</div></td>
+          <td>${_insNum(a.new_files)}</td>
+          <td>${_insNum(a.showings)}</td>
+          <td>${_insNum(a.offers)}</td>
+          <td><strong>${_insNum(a.closed)}</strong></td>
+          <td>${a.showings_per_close === null ? '—' : _insNum(a.showings_per_close)}</td>
+        </tr>`).join('');
+}
+
+function _insRenderStalled(stalled) {
+    const tb = document.getElementById('ins-stalled-list');
+    const note = document.getElementById('ins-stalled-note');
+    if (!tb) return;
+    const items = stalled.items || [];
+    if (note) note.textContent = `بیش از ${_insNum(stalled.after_days)} روز`;
+    if (!items.length) {
+        tb.innerHTML = '<tr><td colspan="4" class="text-muted small text-center py-4">' +
+                       'هیچ لید معطلی نیست.</td></tr>';
+        return;
+    }
+    tb.innerHTML = items.map(l => `
+        <tr>
+          <td>${esc(l.seller_name || l.phone_number || '—')}</td>
+          <td>${esc(l.city_name || '—')}</td>
+          <td><span class="badge bg-secondary-subtle text-body-secondary">${esc(l.status_label)}</span></td>
+          <td><strong>${_insNum(l.idle_days)}</strong> روز</td>
+        </tr>`).join('');
 }
