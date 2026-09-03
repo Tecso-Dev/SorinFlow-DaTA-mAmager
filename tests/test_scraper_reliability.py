@@ -712,3 +712,64 @@ class TestNoTransactionSurvivesTheSlowWork:
         which is the symptom and never mentions the cause."""
         src = _run_src()
         assert "idle_in_transaction_session_timeout" in src
+
+
+class TestOneChallengedAccountDoesNotKillThePool:
+    """Sobhan, looking at 200 saved listings: «it did not get the phone number,
+    the phone number is very important».
+
+    Divar challenged the first account, nobody was awake to enter the code, and
+    the timeout handler called otp_store.cancel_all(job) — suppressing phone
+    numbers for the WHOLE job. He had three good sessions. Two of them were
+    rotated to and never revealed a thing:
+
+        09058432452  reveals=5   <- challenged, then everything stopped
+        09053833026  reveals=0
+        09017852452  reveals=0
+
+    A challenge belongs to one account. Throwing away the others is throwing
+    away rotation, which is the feature that exists for exactly this.
+    """
+
+    def test_a_single_timeout_no_longer_suppresses_the_job(self):
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        src = _code_only(inspect.getsource(ContactExtractor._handle_sms_otp_if_present))
+        i = src.index("note_timeout")
+        after = src[i:i + 700]
+        assert "if strikes >= budget:" in after, \
+            "the first unanswered prompt still cancels the whole job"
+
+    def test_it_gives_up_only_when_every_account_has_been_tried(self):
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        src = _code_only(inspect.getsource(ContactExtractor._handle_sms_otp_if_present))
+        assert "self.account_count" in src
+        assert "cancel_all" in src, "it must still give up eventually"
+
+    def test_a_successful_reveal_resets_the_strikes(self):
+        """Otherwise strikes accumulate across a long run and suppress a pool
+        that is demonstrably working."""
+        src = _run_src()
+        assert "clear_timeouts" in src
+
+    def test_the_pool_size_is_counted_from_usable_accounts(self):
+        from app.scraper.divar_scraper import DivarScraper
+        assert hasattr(DivarScraper, "_usable_account_count")
+        import inspect
+        src = inspect.getsource(DivarScraper._usable_account_count)
+        assert "is_valid == True" in src
+        assert "max(1," in src, "a pool of zero would disable the budget entirely"
+
+    def test_the_counter_survives_a_failure_to_count(self):
+        """A DB hiccup while counting accounts must not decide policy."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._usable_account_count)
+        assert "except Exception" in src and "return 1" in src
+
+    def test_otp_store_exposes_the_counter(self):
+        from app.scraper import otp_store
+        assert hasattr(otp_store, "note_timeout")
+        assert hasattr(otp_store, "clear_timeouts")
+        assert otp_store.note_timeout(None) == 0     # no job, no crash

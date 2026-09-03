@@ -1645,9 +1645,17 @@ class DivarScraper:
                 # is that it needs replacing — louder than any threshold.
                 on_challenge=self._note_account_challenged,
             )
+            # How many sessions rotation can still reach. An unanswered code
+            # prompt suppresses phone numbers for the whole job only once every
+            # account has been tried — with one account that is the old
+            # behaviour, and with five it is four more chances.
+            contact_extractor.account_count = await self._usable_account_count()
             phone_number = await contact_extractor.get_phone_number()
             if phone_number:
                 property_data["phone_number"] = phone_number
+                # A reveal worked, so the pool is not exhausted after all.
+                from app.scraper import otp_store as _os
+                _os.clear_timeouts(self._job_id_str)
 
             return property_data
             
@@ -2227,6 +2235,25 @@ class DivarScraper:
         except Exception as e:
             logger.warning(f"[rotate] could not load cookie pool: {e}")
             return []
+
+    async def _usable_account_count(self) -> int:
+        """How many Divar sessions rotation can still choose from.
+
+        Used to decide how many unanswered code prompts to absorb before
+        concluding that every account is challenged rather than just this one.
+        Never returns 0: the current session is always one.
+        """
+        try:
+            from app.models.cookie import Cookie
+            from sqlalchemy import func, select as _select
+            n = (await self.db_session.execute(
+                _select(func.count()).select_from(Cookie)
+                .where(Cookie.is_valid == True)  # noqa: E712
+            )).scalar() or 0
+            return max(1, int(n))
+        except Exception as e:
+            logger.warning(f"[rotate] could not count usable accounts: {e}")
+            return 1
 
     async def _charge_reveal(self) -> int:
         """Bill one contact reveal to the active account; return its new total.

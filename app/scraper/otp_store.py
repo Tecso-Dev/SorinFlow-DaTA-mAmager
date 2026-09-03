@@ -18,6 +18,28 @@ _store: Dict[str, Any] = {}
 _cancelled_until: Dict[str, float] = {}
 _CANCEL_WINDOW = 900  # 15 min
 
+# Unanswered code prompts per job, counted since the last successful reveal.
+#
+# A challenge belongs to ONE Divar account. Suppressing the whole job on the
+# first unanswered prompt threw away the other accounts too — which is the
+# entire point of rotation — and a run with three good sessions saved 200
+# listings with no phone number on any of them.
+_timeouts: Dict[str, int] = {}
+
+
+def note_timeout(job_id: Optional[str]) -> int:
+    """Record one unanswered prompt. Returns the count for this job."""
+    if not job_id:
+        return 0
+    _timeouts[job_id] = _timeouts.get(job_id, 0) + 1
+    return _timeouts[job_id]
+
+
+def clear_timeouts(job_id: Optional[str]) -> None:
+    """A reveal succeeded: the accounts are not all challenged after all."""
+    if job_id:
+        _timeouts.pop(job_id, None)
+
 
 def job_of(key) -> str:
     """The job a request key belongs to. Keys are «{job_id}:{divar_id}».

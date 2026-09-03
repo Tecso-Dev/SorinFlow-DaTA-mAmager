@@ -26,6 +26,10 @@ class ContactExtractor:
         self.page = page
         self.images_dir = images_dir
         self.otp_key = otp_key  # key into otp_store; set by scraper when a job is running
+        # How many Divar sessions the scraper can rotate through. Decides how
+        # many unanswered prompts to absorb before concluding that every
+        # account is challenged rather than just this one.
+        self.account_count = 1
         # Which saved Divar account is logged in right now. The SMS goes to this
         # number, and with rotation on it is not necessarily the one the user
         # started the job with — so the prompt has to name it.
@@ -426,21 +430,40 @@ class ContactExtractor:
                 if not got_code and not otp_store.is_cancelled(self.otp_key):
                     logger.warning(f"SMS-OTP timeout — no code in {timeout}s")
                     otp_store.clear(self.otp_key)
-                    # Nobody answered. Nobody is going to answer the next one
-                    # either — an unanswered prompt means no one is watching —
-                    # and every further listing that needs a code would block
-                    # for another `timeout`. Fifty listings became four hours
-                    # of a job sitting at «در حال اجرا» making no progress.
+
+                    # A challenge belongs to ONE account, so try the others
+                    # before giving up on phone numbers entirely.
                     #
-                    # Suppress for the rest of the window exactly as an explicit
-                    # dismissal does. The run keeps going and keeps saving
-                    # listings; it just stops asking for numbers nobody is
-                    # there to unlock.
-                    otp_store.cancel_all(otp_store.job_of(self.otp_key))
-                    logger.warning(
-                        "No one answered the code prompt — pausing OTP requests "
-                        "for the rest of this job. Listings still save; phone "
-                        "numbers will be missing until a code is entered.")
+                    # This used to cancel_all() on the first unanswered prompt.
+                    # The reasoning was sound as far as it went — nobody
+                    # answered, nobody will answer the next one, and every
+                    # further listing would block for another timeout — but it
+                    # threw away the other Divar accounts too, which is the
+                    # whole point of rotation. A run with three good sessions
+                    # revealed five numbers on the first account and then saved
+                    # two hundred listings with «شماره تماس ---» on every one.
+                    #
+                    # on_challenge (already called above) forces a rotation at
+                    # the next listing. So: count the unanswered prompts, and
+                    # only suppress the job once every account has had its turn
+                    # and been challenged too. A successful reveal resets the
+                    # count, because it proves the pool is not exhausted.
+                    job = otp_store.job_of(self.otp_key)
+                    strikes = otp_store.note_timeout(job)
+                    budget = max(1, int(self.account_count or 1))
+                    if strikes >= budget:
+                        otp_store.cancel_all(job)
+                        logger.warning(
+                            f"No one answered on {strikes} account(s) — every "
+                            "session has been challenged, so OTP requests are "
+                            "paused for the rest of this job. Listings still "
+                            "save; phone numbers will be missing until a code "
+                            "is entered.")
+                    else:
+                        logger.warning(
+                            f"No one answered on this account ({strikes}/{budget}) "
+                            "— rotating and trying the next session before "
+                            "giving up on phone numbers.")
             finally:
                 # ── resume the job (code entered, timed out, or cancelled) ──
                 if paused_ok and self.on_resume:
