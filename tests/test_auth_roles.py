@@ -765,3 +765,34 @@ class TestMarketingCapture:
         import inspect
         from app.api.routes import email
         assert "_super_admin" in inspect.getsource(email.export_audience)
+
+
+def test_staff_login_accepts_an_email_as_well_as_a_username():
+    """«the login should be by email, the username just shown in panel».
+
+    A portal sign-up assigns the phone number as the username, so an account
+    promoted to staff signs in as «09058432452» while its owner thinks of
+    themselves as their email address. Typing the email gave «نام کاربری یا رمز
+    عبور نادرست است» — which reads as a wrong password when the password was
+    perfectly correct and only the identifier was wrong.
+    """
+    import inspect
+    from app.api.routes import users
+
+    src = inspect.getsource(users.login)
+    assert "User.username == ident" in src
+    assert "func.lower(User.email) == ident.lower()" in src
+
+
+def test_staff_login_survives_two_rows_sharing_an_address():
+    """scalar_one_or_none() would raise MultipleResultsFound on a legacy
+    duplicate and surface as a 500 on the login page."""
+    import inspect
+    from app.api.routes import users
+    src = inspect.getsource(users.login)
+    # The comment above the lookup names scalar_one_or_none as the thing it
+    # replaced, so match the code rather than the prose explaining it.
+    code = "\n".join(l for l in src.splitlines()
+                     if not l.strip().startswith("#"))
+    assert ".first()" in code
+    assert "scalar_one_or_none()" not in code.split("verify_password")[0]

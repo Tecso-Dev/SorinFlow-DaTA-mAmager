@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_, func
 from typing import Optional
 
 import pyotp
@@ -74,8 +74,26 @@ async def login(
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(User).where(User.username == form.username))
-    user = result.scalar_one_or_none()
+    # Username OR email, because the username is often neither chosen nor
+    # memorable.
+    #
+    # A portal sign-up assigns the phone number as the username, so an account
+    # promoted to staff logs in as «09058432452» while its owner thinks of
+    # themselves as their email address. The panel remembers the last username
+    # it saw, so the box arrives prefilled with somebody else's — and typing
+    # your own password against it fails in a way that looks like a wrong
+    # password rather than a wrong account.
+    #
+    # first(), not scalar_one_or_none(): a legacy row sharing an address with
+    # another would otherwise raise MultipleResultsFound and surface as a 500
+    # on the login page.
+    ident = (form.username or "").strip()
+    user = (await db.execute(
+        select(User).where(or_(
+            User.username == ident,
+            func.lower(User.email) == ident.lower(),
+        )).limit(1)
+    )).scalars().first()
 
     if not user or not verify_password(form.password, user.hashed_password):
         raise HTTPException(
