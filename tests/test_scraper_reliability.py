@@ -921,3 +921,42 @@ class TestWeDoNotLearnTheSameFactFiveTimes:
     def test_strikes_is_safe_without_a_job(self):
         from app.scraper import otp_store
         assert otp_store.strikes(None) == 0
+
+
+class TestANewRoundStartsOnlyWhenNothingIsLeft:
+    """Live rotation log from a five-account run:
+
+        [rotate] Divar challenged 09017852452 after 1 reveals (threshold 3)
+        [rotate] 09017852452 marked spent after a Divar challenge
+        [rotate] every account had spent its budget — new round for 5
+
+    One account was spent and the pool declared all five exhausted, resetting
+    every counter to zero. That erases the least-reveals-first ordering the
+    whole rotation is built on, so it stopped spreading load and ping-ponged
+    between two accounts — 09362191758 and 09190665165 were never used once
+    across an entire run, while a spent account was returned to twice.
+    """
+
+    def test_the_decision_is_counted_not_inferred(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = _code_only(inspect.getsource(DivarScraper.maybe_rotate_account))
+        assert "_unspent_account_count(every) == 0" in src
+        assert "await self._account_reveals(candidate) >= every > 0" not in src, \
+            "one spent candidate is treated as an empty pool again"
+
+    def test_the_counter_only_counts_usable_accounts_with_budget_left(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._unspent_account_count)
+        assert "is_valid == True" in src
+        assert "< every" in src
+
+    def test_a_failed_count_assumes_there_is_budget_left(self):
+        """Erring the other way restarts the round early, which is the bug this
+        replaced."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._unspent_account_count)
+        i = src.index("except Exception")
+        assert "return 1" in src[i:]

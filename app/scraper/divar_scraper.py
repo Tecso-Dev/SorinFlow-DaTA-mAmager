@@ -2328,6 +2328,30 @@ class DivarScraper:
             except Exception:
                 pass
 
+    async def _unspent_account_count(self, every: int) -> int:
+        """Valid accounts that still have reveals left in this round.
+
+        Counted, not inferred. The caller decides whether to start a new round,
+        and starting one early throws away the ordering that makes rotation
+        spread load at all.
+        """
+        db = getattr(self, "db_session", None)
+        if db is None or every <= 0:
+            return 0
+        try:
+            from app.models.cookie import Cookie as CookieModel
+            from sqlalchemy import func as _func
+            return int((await db.execute(
+                select(_func.count()).select_from(CookieModel).where(
+                    CookieModel.is_valid == True,          # noqa: E712
+                    _func.coalesce(CookieModel.reveals, 0) < every,
+                ))).scalar() or 0)
+        except Exception as e:
+            logger.warning(f"[rotate] could not count unspent accounts: {e}")
+            # Assume something is left: a miscount that starts a new round
+            # early is the bug this replaced.
+            return 1
+
     async def _rest_all_accounts(self) -> None:
         """Start a fresh round once every account has spent its budget.
 
@@ -2511,9 +2535,22 @@ class DivarScraper:
                 _mx.scrape_rotations.labels("challenged" if forced else "threshold").inc()
                 self._reveals_since_rotation = 0
                 self._force_rotate = False
-                # If the one we just moved to is already spent, every account
-                # is — begin a new round rather than rotating in circles.
-                if await self._account_reveals(candidate) >= every > 0:
+                # Begin a new round only when there is genuinely nothing left.
+                #
+                # This used to infer it: "if the one we just moved to is already
+                # spent, every account is". With five accounts that is simply
+                # not true, and it was wrong on the very first challenge —
+                #
+                #   [rotate] Divar challenged 09017852452 after 1 reveals
+                #   [rotate] 09017852452 marked spent after a Divar challenge
+                #   [rotate] every account had spent its budget — new round for 5
+                #
+                # Resetting every counter to zero erases the "least reveals
+                # first" ordering that rotation is built on, so the pool stops
+                # spreading load and ping-pongs between whichever two accounts
+                # it happens to pick. Two of five accounts were never used at
+                # all across an entire run.
+                if every > 0 and await self._unspent_account_count(every) == 0:
                     await self._rest_all_accounts()
                 logger.info(
                     f"[rotate] switched Divar account {previous} → {candidate}"
