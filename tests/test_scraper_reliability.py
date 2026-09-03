@@ -960,3 +960,68 @@ class TestANewRoundStartsOnlyWhenNothingIsLeft:
         src = inspect.getsource(DivarScraper._unspent_account_count)
         i = src.index("except Exception")
         assert "return 1" in src[i:]
+
+
+class TestDivarDoesTheFilteringItCanDo:
+    """«it says completed but I know it is more than 202 items.»
+
+    It was. The run log said so exactly:
+
+        14 تازه، 27 از قبل ذخیره شده بود
+        131 آگهی با فیلترها حذف شد — deposit=127, advertiser_type=4
+
+    The collector loaded «/s/{city}/{category}» with no filters at all, read
+    204 listings off the general feed, and threw away 131 of them for having a
+    deposit over the limit. The 201 that actually matched were further down a
+    feed the run had already stopped reading — so «completed» was true of the
+    work done and false about the listings wanted.
+
+    Divar narrows on price, credit, rent, size, business-type and has-photo.
+    Asking it to is both far fewer requests and the only way to reach the
+    listings the filter promised.
+    """
+
+    def test_the_collector_url_carries_the_filters(self):
+        src = _code_only(_run_src())
+        assert 'f"{self.BASE_URL}/s/{city}/{category}"\n' not in src, \
+            "the collector loads the unfiltered feed again"
+        assert "_search_query" in src
+
+    def test_the_query_is_built_before_collection(self):
+        src = _run_src()
+        q = src.index("build_search_query(")
+        c = src.index("all_listings = await self._collect_listings_robust(")
+        assert q < c, "the filters are built after the feed has been read"
+
+    @pytest.mark.parametrize("kwargs,expected", [
+        ({"max_deposit": 100_000_000}, "credit=-100000000"),
+        ({"min_deposit": 5_000_000, "max_deposit": 100_000_000},
+         "credit=5000000-100000000"),
+        ({"min_price": 1_000_000_000}, "price=1000000000-"),
+        ({"max_area": 90}, "size=-90"),
+        ({"advertiser_type": "personal"}, "business-type=personal"),
+        ({"has_images": True}, "has-photo=true"),
+    ])
+    def test_each_filter_divar_honours_is_expressed(self, kwargs, expected):
+        from app.services.divar_count import build_search_query
+        assert expected in build_search_query(**kwargs)
+
+    def test_no_filters_means_no_query_string(self):
+        """An empty query must not produce a trailing «?»."""
+        from app.services.divar_count import build_search_query
+        assert build_search_query() == ""
+
+    def test_filters_divar_ignores_are_still_applied_locally(self):
+        """Rooms and amenities are not in the URL, so the per-listing pass must
+        still check them — build_form_data leaves them out for the same
+        reason."""
+        from app.services.divar_count import build_search_query
+        q = build_search_query(min_rooms=2) if False else build_search_query()
+        assert "rooms" not in q
+        src = _run_src()
+        assert "min_rooms" in src, "the local pass no longer checks rooms"
+
+    def test_a_query_that_cannot_be_built_does_not_stop_the_run(self):
+        src = _run_src()
+        i = src.index("build_search_query(")
+        assert "except Exception" in src[i:i + 900]

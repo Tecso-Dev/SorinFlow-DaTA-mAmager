@@ -101,6 +101,49 @@ def build_form_data(
     return data
 
 
+def build_search_query(
+    *,
+    advertiser_type: Optional[str] = None,
+    has_images: Optional[bool] = None,
+    min_price: Optional[int] = None, max_price: Optional[int] = None,
+    min_deposit: Optional[int] = None, max_deposit: Optional[int] = None,
+    min_rent: Optional[int] = None, max_rent: Optional[int] = None,
+    min_area: Optional[int] = None, max_area: Optional[int] = None,
+) -> str:
+    """The same filters as build_form_data, in the shape a divar.ir URL wants.
+
+    The scraper loaded «/s/{city}/{category}» with no filters at all and then
+    threw away whatever did not match. On one real run that meant collecting
+    204 listings to keep 14, with 131 dropped on deposit alone — and the 201
+    that DID match were never looked at, because they were further down a feed
+    the run had already stopped reading.
+
+    Divar narrows on exactly the fields build_form_data lists, so asking it to
+    is both far fewer requests and the only way to actually reach the listings
+    the filter promised. Ranges are «min-max», with either side allowed to be
+    empty.
+    """
+    parts = []
+    for field, lo, hi in (
+        ("price",  min_price,   max_price),
+        ("credit", min_deposit, max_deposit),   # ودیعه
+        ("rent",   min_rent,    max_rent),
+        ("size",   min_area,    max_area),      # متراژ
+    ):
+        if lo is None and hi is None:
+            continue
+        parts.append(f"{field}={'' if lo is None else int(lo)}-"
+                     f"{'' if hi is None else int(hi)}")
+
+    kind = BUSINESS_TYPES.get((advertiser_type or "").strip())
+    if kind:
+        parts.append(f"business-type={kind}")
+    if has_images:
+        parts.append("has-photo=true")
+
+    return "&".join(parts)
+
+
 def unsupported_filters(**kwargs) -> list:
     """Filters the caller asked for that Divar will not narrow on, so the
     estimate can say the real number is at most this."""

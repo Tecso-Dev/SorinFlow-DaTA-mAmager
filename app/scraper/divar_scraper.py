@@ -160,6 +160,10 @@ class DivarScraper:
         # access — which, on a row expired by an earlier commit, is a lazy
         # refresh in the middle of tearing a browser down.
         self._job_id_str = None
+        # The run's filters, in the shape a divar.ir URL wants. Set when a job
+        # starts; the collector appends them so Divar narrows the feed itself
+        # instead of us reading an unfiltered one and discarding most of it.
+        self._search_query = ""
         # One pooled HTTP client for the whole run. Each call site used to build
         # its own, so every image and every API request paid a fresh TCP and TLS
         # handshake to a host we talk to thousands of times per job.
@@ -795,7 +799,15 @@ class DivarScraper:
         self.page.on("request", _on_request)
         self.page.on("response", _on_resp)
         try:
-            url = f"{self.BASE_URL}/s/{city}/{category}"
+            # Ask Divar to apply the filters it is willing to apply.
+            #
+            # This was a bare «/s/{city}/{category}». One real run collected 204
+            # listings from that unfiltered feed and kept 14, dropping 131 on
+            # deposit alone — while the 201 that actually matched sat further
+            # down a feed the run had already stopped reading. That is the whole
+            # of «it says completed but there should be 202».
+            _q = getattr(self, "_search_query", "") or ""
+            url = f"{self.BASE_URL}/s/{city}/{category}" + (f"?{_q}" if _q else "")
             logger.info(f"[dom] Loading {url} | target={target_count}")
             await self._check_rate_limit()
             try:
@@ -2870,6 +2882,30 @@ class DivarScraper:
                 # had never been scraped, and this was additionally capped at
                 # 200, so asking for 200 new could never return 200 new.
                 collect_target = min(max(max_items * 5, max_items + 100), 1500)
+
+            # Hand Divar the filters it can apply itself, before the feed is
+            # loaded. Everything it will not narrow on (rooms, amenities) is
+            # still checked per listing after the ad is opened.
+            try:
+                from app.services.divar_count import build_search_query
+                self._search_query = build_search_query(
+                    advertiser_type=advertiser_type, has_images=has_images,
+                    min_price=min_price, max_price=max_price,
+                    min_deposit=min_deposit, max_deposit=max_deposit,
+                    min_rent=min_rent, max_rent=max_rent,
+                    min_area=min_area, max_area=max_area,
+                )
+                if self._search_query:
+                    logger.info(f"[collect] Divar-side filters: {self._search_query}")
+                    await job_log.record(
+                        job.job_id, job_log.PAGE,
+                        f"فیلترها به خود دیوار داده شد: {self._search_query}",
+                        query=self._search_query)
+            except Exception as e:
+                # A filter we cannot express is not a reason to abandon the run;
+                # it just means the local pass does more work, as before.
+                logger.warning(f"[collect] could not build the Divar query: {e}")
+                self._search_query = ""
 
             all_listings = await self._collect_listings_robust(
                 city, category, collect_target,
