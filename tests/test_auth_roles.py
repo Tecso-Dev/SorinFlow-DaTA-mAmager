@@ -796,3 +796,41 @@ def test_staff_login_survives_two_rows_sharing_an_address():
                      if not l.strip().startswith("#"))
     assert ".first()" in code
     assert "scalar_one_or_none()" not in code.split("verify_password")[0]
+
+
+def test_the_permissions_editor_never_silently_changes_a_role():
+    """The owner's root account became an admin between two screenshots, with
+    nothing in the logs but a successful PATCH.
+
+    openPermsEditor preselected the dropdown with
+
+        ['admin','visitor','super_admin'].includes(u.role) ? u.role : 'admin'
+
+    and root is in none of those. So opening the editor on a root account
+    showed «مدیر», and saving wrote it — demoting the account without anyone
+    choosing to. Root is deliberately absent from ASSIGNABLE_BY_SUPER_ADMIN, so
+    the only way back was the database.
+    """
+    from pathlib import Path
+    js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+
+    assert "['admin', 'visitor', 'super_admin'].includes(u.role) ? u.role : 'admin'" not in js, \
+        "the editor can silently demote a root account again"
+    assert "['root', 'admin', 'visitor', 'super_admin'].includes(u.role)" in js
+
+
+def test_a_root_account_shows_root_in_the_editor():
+    """The preselection can only be honest if the value exists in the list."""
+    from pathlib import Path
+    js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    i = js.index('<select id="pe-role"')
+    block = js[i:i + 600]
+    assert "u.role === 'root'" in block
+    assert 'value="root"' in block
+
+
+def test_changing_a_root_role_warns_it_is_one_way():
+    """Root cannot be handed back from this screen — only from the database."""
+    from pathlib import Path
+    js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    assert "این حساب Root است" in js

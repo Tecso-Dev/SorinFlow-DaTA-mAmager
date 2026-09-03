@@ -5455,16 +5455,32 @@ async function openPermsEditor(userId) {
         </p>
         <label class="form-label small">نقش</label>
         <select id="pe-role" class="form-select form-select-sm mb-2" onchange="syncPermsEditor()">
+            ${u.role === 'root' ? '<option value="root">Root — بالاترین سطح</option>' : ''}
             <option value="admin">مدیر — دسترسی‌های انتخابی</option>
             <option value="visitor">بازدیدکننده — فقط پورتال</option>
             <option value="super_admin">مدیر ارشد — دسترسی کامل</option>
         </select>
+        ${u.role === 'root' ? `<div class="small text-warning mb-2">
+            این حساب Root است. اگر نقش را عوض کنید، دیگر نمی‌توانید از این صفحه
+            برش گردانید — فقط از طریق پایگاه داده.</div>` : ''}
         <div id="pe-perms-wrap">
             <label class="form-label small">دسترسی‌ها</label>
             <div id="pe-perms-box" class="perm-box"></div>
         </div>`;
+    // Never silently pick a different role.
+    //
+    // This read `['admin','visitor','super_admin'].includes(u.role) ? u.role
+    // : 'admin'`, and root is in none of those — so opening this editor on a
+    // root account preselected «مدیر», and saving demoted it without anyone
+    // choosing to. That is exactly how the owner's own root account became an
+    // admin between one screenshot and the next, silently, with nothing in the
+    // logs but a successful PATCH.
+    //
+    // Root now appears in the list when the account already has it, so the
+    // preselection is the truth and saving is a no-op unless somebody
+    // deliberately picks something else.
     document.getElementById('pe-role').value =
-        ['admin', 'visitor', 'super_admin'].includes(u.role) ? u.role : 'admin';
+        ['root', 'admin', 'visitor', 'super_admin'].includes(u.role) ? u.role : 'admin';
     renderPermBox('pe-perms-box', u.permissions || [], 'pe');
     syncPermsEditor();
     document.getElementById('perms-editor-save').onclick = () => savePermsEditor(userId);
