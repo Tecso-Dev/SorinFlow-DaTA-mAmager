@@ -2477,6 +2477,20 @@ class DivarScraper:
             if restored:
                 previous = self.active_phone
                 self.active_phone = candidate
+                # Say which account we moved to, in the run log, so rotation
+                # can be watched live instead of inferred from reveal counts
+                # after the fact.
+                # getattr: the rotation tests build this object with __new__,
+                # so nothing set in __init__ can be assumed to exist — the same
+                # reason _persist_active_session guards its own attributes.
+                _jid = getattr(self, "_job_id_str", None)
+                if _jid:
+                    from app.services import job_log as _jl
+                    await _jl.record(
+                        _jid, _jl.SESSION,
+                        f"چرخش شماره: از {previous or '—'} به {candidate}",
+                        previous=previous, now=candidate)
+
                 # Save the jar the browser just refreshed.
                 #
                 # Restoring a session makes Divar hand back a new sAccessToken —
@@ -2587,12 +2601,30 @@ class DivarScraper:
             logger.warning(f"Could not grade {property_data.get('divar_id')}: {e}")
 
     async def property_exists(self, divar_id: str) -> bool:
-        """Check if property already exists in database"""
+        """Whether this listing is stored AND already has what we came for.
+
+        A stored row with no phone number is not a duplicate worth skipping —
+        it is a gap, and skipping it is why the gaps never close. 378 of 1209
+        saved properties had no number, every one of them unreachable by any
+        re-run, because the first thing the loop did was see the divar_id and
+        move on.
+
+        Phone numbers are the point of this scraper. A listing we have but
+        cannot call is worth the second visit; one we have complete is not.
+        """
         try:
             result = await self.db_session.execute(
                 select(Property).where(Property.divar_id == divar_id)
             )
-            return result.scalar_one_or_none() is not None
+            row = result.scalar_one_or_none()
+            if row is None:
+                return False
+            if not (row.phone_number or "").strip():
+                logger.info(
+                    f"{divar_id} is already stored but has no phone number — "
+                    "re-scraping to fill it in")
+                return False
+            return True
         except Exception as e:
             logger.error(f"Failed to check property existence: {e}")
             return False
@@ -3084,7 +3116,9 @@ class DivarScraper:
                                     f"posted {posted.date()} is before {target_day}")
 
                         if skip:
-                            job.scraped_items = (i + 1) if pool_progress else min(job.new_items, max_items)
+                            # Same as the other site: a filtered-out listing is
+                            # still a listing we processed.
+                            job.scraped_items = (i + 1) if pool_progress else min(i + 1, max_items)
                             await self.db_session.commit()
                             # Still ask, because this is a safe point to switch
                             # and a challenge may be pending from the previous
@@ -3150,7 +3184,13 @@ class DivarScraper:
                         job.failed_items += 1
                     # detail is False = off-category skip; don't count as failure
 
-                    job.scraped_items = (i + 1) if pool_progress else min(job.new_items, max_items)
+                    # Progress is listings PROCESSED, not listings newly saved.
+                    #
+                    # It used to be min(new_items, max_items), so a run over
+                    # listings we already had sat at «۰٪ / در حال اجرا» for its
+                    # whole length while doing real work on every one of them.
+                    # A bar that cannot move is worse than no bar.
+                    job.scraped_items = (i + 1) if pool_progress else min(i + 1, max_items)
                     await self.db_session.commit()
 
                     # spread the load across saved Divar accounts

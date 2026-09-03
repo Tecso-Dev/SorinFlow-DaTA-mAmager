@@ -796,7 +796,9 @@ class TestTheStoredJarStaysFresh:
     def test_the_jar_is_saved_after_a_rotation_restores_a_session(self):
         src = _run_src()
         i = src.index("restored = await self.auth.restore_session(candidate)")
-        after = src[i:i + 1500]
+        # widened: a rotation now also writes a run-log event naming the
+        # account it moved to, which sits between the restore and the persist.
+        after = src[i:i + 2200]
         assert "_persist_active_session()" in after, \
             "a rotation refreshes the token and then throws it away"
 
@@ -813,3 +815,69 @@ class TestTheStoredJarStaysFresh:
         for f in ("app/services/divar_session.py", "app/scraper/divar_scraper.py"):
             src = _code_only(Path(f).read_text(encoding="utf-8"))
             assert "session/refresh" not in src
+
+
+class TestAStoredListingWithNoPhoneIsAGapNotADuplicate:
+    """«the phone number is very important — this is the feature that separates
+    us from others», against a database where 378 of 1209 saved properties had
+    no number and no re-run could ever reach them.
+
+    property_exists() answered the question "have we seen this divar_id", and
+    the loop treated yes as done. So a row saved during a run where contact
+    extraction was suppressed — which is exactly what the OTP bug caused — was
+    permanently unreachable: every later run saw the id, counted it as a
+    duplicate, and moved on.
+    """
+
+    def test_a_row_without_a_phone_is_not_treated_as_complete(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = _code_only(inspect.getsource(DivarScraper.property_exists))
+        assert "phone_number" in src, \
+            "the duplicate check still ignores whether we got what we came for"
+        assert "return False" in src
+
+    def test_a_complete_row_is_still_skipped(self):
+        """The repair must not turn every run into a full re-scrape."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = _code_only(inspect.getsource(DivarScraper.property_exists))
+        assert "return True" in src
+
+    def test_saving_updates_the_existing_row(self):
+        """Re-scraping is pointless if the phone lands in a new row."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.save_property)
+        assert "existing" in src
+
+
+class TestProgressReflectsWork:
+    """A run over listings we already had sat at «۰٪ / در حال اجرا» for its
+    whole length while doing real work on every one of them, because progress
+    counted only newly-saved rows. A bar that cannot move is worse than none."""
+
+    def test_progress_counts_processed_listings(self):
+        src = _code_only(_run_src())
+        assert "min(job.new_items, max_items)" not in src, \
+            "progress is measured in new rows again"
+        assert src.count("min(i + 1, max_items)") >= 2, \
+            "both the skip path and the save path must advance the bar"
+
+
+class TestRotationIsVisibleWhileItHappens:
+    """«what shows when it scraped, so I can also monitor the cookie rotation»"""
+
+    def test_a_rotation_writes_a_run_log_event_naming_both_accounts(self):
+        src = _run_src()
+        assert "چرخش شماره: از" in src
+        i = src.index("چرخش شماره: از")
+        assert "previous=" in src[i:i + 300] and "now=" in src[i:i + 300]
+
+    def test_it_survives_a_scraper_built_without_init(self):
+        """The rotation tests construct DivarScraper with __new__, so nothing
+        set in __init__ may be assumed to exist."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.maybe_rotate_account)
+        assert 'getattr(self, "_job_id_str", None)' in src
