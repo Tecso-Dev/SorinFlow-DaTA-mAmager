@@ -2477,6 +2477,18 @@ class DivarScraper:
             if restored:
                 previous = self.active_phone
                 self.active_phone = candidate
+                # Save the jar the browser just refreshed.
+                #
+                # Restoring a session makes Divar hand back a new sAccessToken —
+                # the short-lived half of a SuperTokens session, good for about
+                # an hour. Persisting it immediately means the stored jar is the
+                # fresh one, so the panel stops reporting a session it cannot
+                # verify and, more usefully, the direct httpx calls that replay
+                # /postlist/w/search carry a token Divar will still accept.
+                #
+                # Without this the stored jar kept whatever token it had at
+                # login, and every request made outside the browser used it.
+                await self._persist_active_session()
                 # Reset here, not before the attempt. Resetting up front meant a
                 # rotation that could not find a working session still consumed
                 # the whole window, so the next try was a full threshold away —
@@ -2722,6 +2734,10 @@ class DivarScraper:
             job.started_at = datetime.now()
             from app.services import job_log
             self._job_id_str = str(job.job_id)
+            # The browser has just restored a session and Divar handed back a
+            # fresh access token; store it before anything makes an HTTP call
+            # with the old one.
+            await self._persist_active_session()
             await job_log.prune()
             await job_log.record(job.job_id, job_log.START, "اسکرپ شروع شد")
         else:

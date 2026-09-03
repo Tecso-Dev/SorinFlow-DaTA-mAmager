@@ -773,3 +773,43 @@ class TestOneChallengedAccountDoesNotKillThePool:
         assert hasattr(otp_store, "note_timeout")
         assert hasattr(otp_store, "clear_timeouts")
         assert otp_store.note_timeout(None) == 0     # no job, no crash
+
+
+class TestTheStoredJarStaysFresh:
+    """«for new accounts it says 200 but for older ones it says the access
+    token expired — shouldn't it refresh every hour?»
+
+    Not a bug: sAccessToken is designed to expire in about an hour, and
+    sRefreshToken (364 days) is the real session. The browser swaps it on first
+    use, which is why those accounts stay «فعال».
+
+    Refreshing it ourselves is the tempting fix and the wrong one: SuperTokens
+    rotates refresh tokens on use, so a mishandled call does not leave a stale
+    token, it leaves a dead account.
+
+    The safe half of the idea is worth having. Whenever the browser DOES
+    refresh, store the result — so the jar we keep is the fresh one, the panel
+    can verify it, and the direct httpx calls that replay /postlist/w/search
+    carry a token Divar still accepts.
+    """
+
+    def test_the_jar_is_saved_after_a_rotation_restores_a_session(self):
+        src = _run_src()
+        i = src.index("restored = await self.auth.restore_session(candidate)")
+        after = src[i:i + 1500]
+        assert "_persist_active_session()" in after, \
+            "a rotation refreshes the token and then throws it away"
+
+    def test_the_jar_is_saved_at_job_start(self):
+        """Before anything makes an HTTP call with the old token."""
+        src = _run_src()
+        i = src.index('self._job_id_str = str(job.job_id)')
+        assert "_persist_active_session()" in src[i:i + 500]
+
+    def test_we_do_not_roll_our_own_token_refresh(self):
+        """A guessed refresh endpoint plus single-use rotating refresh tokens is
+        a way to lose an account, not to keep one."""
+        from pathlib import Path
+        for f in ("app/services/divar_session.py", "app/scraper/divar_scraper.py"):
+            src = _code_only(Path(f).read_text(encoding="utf-8"))
+            assert "session/refresh" not in src
