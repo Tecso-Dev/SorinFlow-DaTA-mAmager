@@ -2175,3 +2175,105 @@ async def match_customers_for_property(
     items = await customers_for_property(db, prop, limit=limit)
     return {"items": items, "total": len(items),
             "source": {"id": prop.id, "title": prop.title, "serial_no": prop.serial_no}}
+
+
+@router.get("/insights")
+async def crm_insights(
+    days: int = Query(30, ge=7, le=180),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregates behind the «هوش تصویری» page.
+
+    One request rather than eight: every widget on that page reads from the
+    same moment, so the funnel and the totals beside it cannot disagree
+    because a second call landed a minute later.
+
+    Counted in the database, not in Python. Pulling every lead and every
+    property back to count them works on a demo and falls over on a real
+    CRM — and the numbers here are exactly the ones that grow.
+    """
+    from app.services import crm_insights as ins
+
+    # ── funnel ──────────────────────────────────────────────────────────
+    status_rows = (await db.execute(
+        select(Lead.status, func.count(Lead.id)).group_by(Lead.status)
+    )).all()
+    status_counts = {(s or "new"): c for s, c in status_rows}
+    total_leads = sum(status_counts.values())
+
+    # ── stalled leads: fetched, because «which ones» is the useful part ──
+    # Bounded by the same window as everything else and capped, so this stays
+    # one screen of work rather than an export.
+    cutoff = datetime.now() - timedelta(days=ins.STALE_AFTER_DAYS)
+    stale_rows = (await db.execute(
+        select(Lead)
+        .where(Lead.status.in_(ins.OPEN_STAGES))
+        .where(func.coalesce(Lead.updated_at, Lead.created_at) < cutoff)
+        .order_by(func.coalesce(Lead.updated_at, Lead.created_at).asc())
+        .limit(50)
+    )).scalars().all()
+
+    # ── daily series ────────────────────────────────────────────────────
+    since = datetime.now() - timedelta(days=days)
+    lead_days = (await db.execute(
+        select(Lead.created_at).where(Lead.created_at >= since)
+    )).scalars().all()
+    prop_days = (await db.execute(
+        select(Property.created_at).where(Property.created_at >= since)
+    )).scalars().all()
+
+    # ── distributions ───────────────────────────────────────────────────
+    city_rows = (await db.execute(
+        select(Property.city_name, func.count(Property.id))
+        .group_by(Property.city_name)
+    )).all()
+    temp_rows = (await db.execute(
+        select(Customer.temperature, func.count(Customer.id))
+        .group_by(Customer.temperature)
+    )).all()
+
+    # ── people and money ────────────────────────────────────────────────
+    dpa_rows = (await db.execute(select(DailyPerformance))).scalars().all()
+    deal_rows = (await db.execute(select(Deal))).scalars().all()
+
+    # ── how complete is the data these charts sit on ────────────────────
+    total_props = (await db.execute(
+        select(func.count(Property.id)))).scalar() or 0
+    props_with_phone = (await db.execute(
+        select(func.count(Property.id)).where(
+            and_(Property.phone_number.isnot(None), Property.phone_number != "")
+        ))).scalar() or 0
+    leads_with_phone = (await db.execute(
+        select(func.count(Lead.id)).where(
+            and_(Lead.phone_number.isnot(None), Lead.phone_number != "")
+        ))).scalar() or 0
+
+    won = status_counts.get("won", 0)
+    return {
+        "generated_at": datetime.now().isoformat(),
+        "window_days": days,
+        "funnel": ins.funnel(status_counts),
+        "totals": {
+            "leads": total_leads,
+            "properties": total_props,
+            "customers": (await db.execute(
+                select(func.count(Customer.id)))).scalar() or 0,
+            "conversion_rate": ins.conversion_rate(won, total_leads),
+        },
+        "stalled": {
+            "after_days": ins.STALE_AFTER_DAYS,
+            "items": ins.stalled_leads(stale_rows),
+        },
+        "series": {
+            "leads": ins.daily_series(lead_days, days=days),
+            "properties": ins.daily_series(prop_days, days=days),
+        },
+        "cities": ins.top_buckets(city_rows),
+        "temperature": ins.top_buckets(temp_rows, limit=4),
+        "agents": ins.agent_scoreboard(dpa_rows),
+        "deals": ins.deal_totals(deal_rows),
+        "coverage": {
+            "properties_with_phone": ins.coverage(total_props, props_with_phone),
+            "leads_with_phone": ins.coverage(total_leads, leads_with_phone),
+        },
+    }
