@@ -789,18 +789,46 @@ class DivarAuth:
             # Apply cookies
             await self.apply_cookies(cookies)
             
-            # Verify session by navigating to an authenticated page
+            # Let Divar's own frontend refresh the session, then check it did.
+            #
+            # SuperTokens splits a session in two: sAccessToken lasts about an
+            # hour, sRefreshToken 364 days. A browser silently swaps an expired
+            # access token for a fresh one. We never did, so every stored jar
+            # carried whatever access token it had at login — dead within the
+            # hour — while the panel read the *cookie's* 364-day expiry and
+            # called the session healthy. Divar let us browse and demanded an
+            # SMS code the moment we asked for a phone number, on every account,
+            # seconds after each rotation.
+            #
+            # Rather than reimplement the refresh — the endpoint is not
+            # discoverable from outside; every path, real or invented, answers
+            # 403 to a request without a session — drive the page that already
+            # knows how, and verify by watching the token itself change.
+            from app.services.divar_session import access_token_expiry, access_token_state
+
+            before = access_token_expiry(cookies)
             try:
                 await self.page.goto(
                     "https://divar.ir/my-divar",
-                    wait_until="domcontentloaded",
-                    timeout=20000,
+                    # networkidle, not domcontentloaded: the refresh is an XHR
+                    # the app fires after boot, and domcontentloaded returns
+                    # before a line of that JS has run.
+                    wait_until="networkidle",
+                    timeout=30000,
                 )
-                await asyncio.sleep(1.5)
             except Exception as nav_error:
                 logger.warning(f"Navigation slow but continuing: {nav_error}")
 
-            # If Divar redirected us back to the login/home page, cookies are expired
+            # Poll the jar rather than sleeping a fixed guess: the refresh is a
+            # round trip to Tehran and 1.5s was optimistic on a good day.
+            fresh = None
+            for _ in range(12):
+                live = await self.get_current_cookies()
+                if access_token_state(live) == "live":
+                    fresh = live
+                    break
+                await asyncio.sleep(1.0)
+
             current_url = self.page.url
             if "/login" in current_url or current_url.rstrip("/") in (
                 "https://divar.ir",
@@ -810,6 +838,31 @@ class DivarAuth:
                     f"Session invalid — redirected to {current_url}. Cookies are expired."
                 )
                 return False
+
+            if fresh is None:
+                # The URL check above passes for an unauthenticated visitor too
+                # — Divar's SPA renders its shell either way — so returning True
+                # here is how a dead session was reported as restored, and the
+                # scrape then walked into an OTP prompt on its first reveal.
+                state = access_token_state(await self.get_current_cookies())
+                logger.warning(
+                    f"{phone_number}: access token still {state} after the page "
+                    f"had its chance to refresh — treating the session as expired")
+                return False
+
+            after = access_token_expiry(fresh)
+            if before != after:
+                logger.info(
+                    f"{phone_number}: Divar issued a fresh access token "
+                    f"(valid to {after:%Y-%m-%d %H:%M} UTC)")
+                # Keep it. The stored jar is what the next rotation and every
+                # direct httpx call replay, so an unsaved refresh is no refresh.
+                await self.save_cookies_to_file(phone_number, fresh)
+                if self.db_session:
+                    from app.services.divar_session import auth_cookie
+                    tok = auth_cookie(fresh)
+                    await self.save_cookies_to_db(
+                        phone_number, fresh, tok.get("value") if tok else None)
 
             logger.info(f"Session restored successfully for {phone_number} (url={current_url})")
             return True

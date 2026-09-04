@@ -139,3 +139,45 @@ class TestItIsADifferentQuestionFromTheCookieExpiry:
         # …while the cookie-level expiry, which is what the panel showed, is
         # nearly a year out.
         assert ds.derive_expiry(j) > NOW + timedelta(days=300)
+
+
+class TestRestoreVerifiesTheRefreshHappened:
+    @pytest.fixture
+    def src(self):
+        import inspect
+        from app.scraper.auth import DivarAuth
+        return inspect.getsource(DivarAuth.restore_session)
+
+    def test_it_waits_for_the_app_to_boot_not_just_the_html(self, src):
+        """domcontentloaded returns before a line of the app's JS has run, so
+        the refresh XHR has not even been fired."""
+        assert "networkidle" in src
+        assert 'wait_until="domcontentloaded"' not in src
+
+    def test_it_polls_for_the_token_instead_of_sleeping_a_guess(self, src):
+        assert "access_token_state" in src
+        assert "for _ in range(" in src
+
+    def test_a_session_that_never_refreshes_is_refused(self, src):
+        """The URL check passes for an unauthenticated visitor too — Divar's
+        SPA renders its shell either way — so returning True there is how a
+        dead session was reported as restored."""
+        i = src.index("if fresh is None:")
+        # Generous window: the branch carries a long comment explaining why the
+        # URL check alone was not enough, and a short window measures the
+        # comment rather than the behaviour.
+        assert "return False" in src[i:i + 1400]
+
+    def test_a_refreshed_token_is_persisted(self, src):
+        """The stored jar is what the next rotation and every direct httpx call
+        replay, so an unsaved refresh is no refresh."""
+        i = src.index("before != after")
+        window = src[i:i + 700]
+        assert "save_cookies_to_file" in window
+        assert "save_cookies_to_db" in window
+
+    def test_it_does_not_invent_a_refresh_endpoint(self, src):
+        """Every path, real or invented, answers 403 to a request with no
+        session — so the endpoint is not discoverable from outside, and the
+        page that already knows how is driven instead."""
+        assert "session/refresh" not in src
