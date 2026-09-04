@@ -150,6 +150,78 @@ def cookie_expiry(c):
         return None
 
 
+def access_token_expiry(jar):
+    """When the *token inside* sAccessToken expires, as aware UTC, or None.
+
+    This is the number that decides whether Divar will accept a privileged
+    action, and until now nothing read it.
+
+    derive_expiry() below reads the **cookie's** expiry. Under SuperTokens that
+    is the 364-day refresh cookie, so the panel truthfully reported «۳۶۴ روز و
+    ۱۶ ساعت» next to five accounts whose access tokens had been dead for hours.
+    Both numbers are real; they answer different questions, and the one nobody
+    was asking is the one that matters.
+
+    The value is a JWT. The payload is read without verifying the signature,
+    deliberately — this is not authentication, it is reading the expiry stamp
+    on a credential we already hold. Verifying would need Divar's public key
+    and would tell us nothing more about when it runs out.
+    """
+    import base64
+    import json
+    from datetime import datetime as _dt, timezone as _tz
+
+    c = None
+    for entry in (jar or []):
+        if entry.get("name") == "sAccessToken" and entry.get("value"):
+            c = entry
+            break
+    if not c:
+        return None
+
+    try:
+        parts = str(c["value"]).split(".")
+        # Three, not «at least two». A JWT is header.payload.signature, and
+        # accepting two meant any dotted base64-ish string was decoded as one —
+        # reading an expiry out of something that was never a token.
+        if len(parts) != 3:
+            return None
+        payload = parts[1]
+        # base64url, and JWTs drop the padding
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+        exp = data.get("exp")
+        if not exp:
+            return None
+        exp = float(exp)
+        # Some issuers stamp milliseconds
+        if exp > 1e11:
+            exp /= 1000.0
+        return _dt.fromtimestamp(exp, tz=_tz.utc)
+    except Exception:
+        return None
+
+
+def access_token_state(jar, *, now=None, skew_seconds: int = 60) -> str:
+    """«live», «stale», or «unknown» for the access token in this jar.
+
+    A minute of skew, because a token that expires in the next few seconds is
+    already useless by the time a request lands — and acting on «live» there
+    means walking into the OTP prompt this check exists to avoid.
+
+    «unknown» when there is no sAccessToken or its payload will not decode:
+    that is not the same as expired, and treating it as expired would throw
+    away sessions over a format change.
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    exp = access_token_expiry(jar)
+    if exp is None:
+        return "unknown"
+    now = now or _dt.now(_tz.utc)
+    return "stale" if exp <= now + _td(seconds=skew_seconds) else "live"
+
+
 def derive_expiry(jar):
     """When the session cookie expires, as an aware UTC datetime, or None.
 
