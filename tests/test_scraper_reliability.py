@@ -876,14 +876,25 @@ class TestAStoredListingWithNoPhoneIsAGapNotADuplicate:
 class TestProgressReflectsWork:
     """A run over listings we already had sat at «۰٪ / در حال اجرا» for its
     whole length while doing real work on every one of them, because progress
-    counted only newly-saved rows. A bar that cannot move is worse than none."""
+    counted only newly-saved rows. A bar that cannot move is worse than none.
+
+    The first fix counted candidates but kept dividing by max_items, a target
+    of saved rows — so a pool of 119 against a target of 100 filled the bar at
+    candidate 100 and scraped on for another nineteen. The numerator was right
+    and the denominator was not."""
 
     def test_progress_counts_processed_listings(self):
         src = _code_only(_run_src())
         assert "min(job.new_items, max_items)" not in src, \
             "progress is measured in new rows again"
-        assert src.count("min(i + 1, max_items)") >= 2, \
+        assert src.count("job.scraped_items = i + 1") >= 2, \
             "both the skip path and the save path must advance the bar"
+
+    def test_it_is_divided_by_the_pool_it_walks(self):
+        src = _code_only(_run_src())
+        assert "job.total_items = len(all_listings)" in src
+        assert "min(i + 1, max_items)" not in src, \
+            "capping the numerator at the target is what filled the bar early"
 
 
 class TestRotationIsVisibleWhileItHappens:
