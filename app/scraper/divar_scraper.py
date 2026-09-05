@@ -1,4 +1,4 @@
-﻿"""
+"""
 SorinFlow Divar Scraper - Main Scraper Module
 Handles scraping property listings from Divar.ir
 """
@@ -61,9 +61,20 @@ class DivarScraper:
     CATEGORY_URL_PATTERNS: Dict[str, List[str]] = {
         # Apartment: title may use آپارتمان, واحد (unit), or مسکن (housing)
         # e.g. اجاره-واحد-۱۲۵-متر / واحد-۱۱۰-متری / اجاره-مسکن / اجاره-تک-واحدی
+        #
+        # …or none of those. «۸۵ متری، ۲ خوابه، طبقه سوم» is an ordinary way to
+        # title an apartment and names no property type at all, so the list
+        # above rejected it. These candidates arrive from a search Divar itself
+        # filtered by category, so the check here is only a guard against the
+        # promoted and related ads Divar injects into a result page — and a job
+        # ad or a plot of land does not advertise «۲ خوابه». The residential
+        # lists below have trusted exactly these signals for the same reason;
+        # the apartment lists were simply never given them.
         'rent-apartment': ['اجاره-آپارتمان', 'اجاره-اپارتمان', 'کرایه-آپارتمان',
-                           'آپارتمان', 'اپارتمان', 'واحد', 'اجاره-مسکن'],
-        'buy-apartment':  ['آپارتمان', 'اپارتمان', 'واحد'],
+                           'آپارتمان', 'اپارتمان', 'واحد', 'اجاره-مسکن',
+                           'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
+        'buy-apartment':  ['آپارتمان', 'اپارتمان', 'واحد',
+                           'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
 
         # Residential (broad): title is the property type alone — no buy/rent prefix
         # Strong residential signals (سرویس/سویس/خوابه/طبقه/نوساز) accept units
@@ -881,14 +892,30 @@ class DivarScraper:
                 # 3. Any element with data-token attribute
                 dom_items = await self.page.evaluate(r"""() => {
                     const TOKEN_RE = /^[A-Za-z0-9]{4,20}$/;
-                    const seen = new Set();
+                    const seen = new Map();   // token -> index into results
                     const results = [];
 
+                    // First one wins, EXCEPT for the title.
+                    //
+                    // Method 1 below scans __NEXT_DATA__ and can only supply
+                    // the token, so it registers every pre-loaded listing with
+                    // no title at all — and it runs first, so the rendered
+                    // link's own text could never reach the listing it belongs
+                    // to. That mattered far downstream: a listing with no title
+                    // and a bare /v/<token> URL carries no category signal at
+                    // all, and the category check drops exactly those. They
+                    // were being thrown away for having no name, not for being
+                    // the wrong kind of ad.
                     const addToken = (tok, title) => {
-                        if (tok && TOKEN_RE.test(tok) && !seen.has(tok)) {
-                            seen.add(tok);
-                            results.push({ href: 'https://divar.ir/v/' + tok, title: (title || '').substring(0, 120) });
+                        if (!tok || !TOKEN_RE.test(tok)) return;
+                        title = (title || '').trim().substring(0, 120);
+                        const at = seen.get(tok);
+                        if (at !== undefined) {
+                            if (!results[at].title && title) results[at].title = title;
+                            return;
                         }
+                        seen.set(tok, results.length);
+                        results.push({ href: 'https://divar.ir/v/' + tok, title });
                     };
 
                     const tokFromUrl = (url) => {
