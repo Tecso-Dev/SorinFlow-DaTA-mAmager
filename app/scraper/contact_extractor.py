@@ -406,6 +406,33 @@ class ContactExtractor:
             # A notification that fails must never take the scrape with it.
             logger.warning(f"[otp] could not send the code-needed email: {e}")
 
+    # Everything here is markup, not data — safe to put in a log in full.
+    _INPUT_ATTRS = ("name", "id", "type", "inputmode", "maxlength",
+                    "placeholder", "autocomplete")
+
+    async def _modal_text(self) -> str:
+        """The visible text of whichever dialog is on screen, or ''."""
+        for sel in ('.kt-new-modal', '[role="dialog"]', '.kt-modal'):
+            try:
+                el = await self.page.query_selector(sel)
+                if el and await el.is_visible():
+                    return ((await el.inner_text()) or "").strip()
+            except Exception:
+                continue
+        return ""
+
+    async def _input_attrs(self, el) -> dict:
+        """The attributes that say what a field is for. Never raises."""
+        out = {}
+        for a in self._INPUT_ATTRS:
+            try:
+                v = await el.get_attribute(a)
+            except Exception:
+                v = None
+            if v:
+                out[a] = v
+        return out
+
     async def _handle_sms_otp_if_present(self) -> None:
         """Detect Divar's SMS OTP verification for contact info, wait for user code."""
         try:
@@ -434,6 +461,19 @@ class ContactExtractor:
             if not otp_input:
                 logger.info("No SMS-OTP modal detected, continuing normally")
                 return
+
+            # What Divar actually put on the screen.
+            #
+            # This modal has been guessed at for days from the outside. It is
+            # reached headless, inside a container, so nobody can look at it —
+            # and every selector above matches «an input in a dialog», which is
+            # true of more than one Divar screen. The words are what tell them
+            # apart, so the words go in the job log where they can be read.
+            modal_text = await self._modal_text()
+            logger.info(
+                f"[otp] field {await self._input_attrs(otp_input)} | "
+                f"modal says: {modal_text[:300]!r}"
+            )
 
             if not self.otp_key:
                 logger.warning("SMS-OTP modal found but otp_key not set — phone extraction skipped")
