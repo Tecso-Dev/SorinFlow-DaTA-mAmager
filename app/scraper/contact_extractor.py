@@ -433,30 +433,161 @@ class ContactExtractor:
                 out[a] = v
         return out
 
+    # Deliberately broad: Divar's markup moves, and a challenge that goes
+    # undetected costs a phone number. Which field it is, is decided after.
+    _MODAL_INPUT_SELECTORS = (
+        'input[name="code"]',
+        'input[inputmode="numeric"]',
+        'input[maxlength="6"]',
+        '.kt-new-modal input',
+        '[role="dialog"] input',
+    )
+
+    # The sentence above the field, when the field itself says nothing useful.
+    _CODE_WORDS = ("کد تایید", "کد تأیید", "کد ورود", "کد پیامک", "رقمی",
+                   "کدی که", "verification code", "one-time")
+    _PHONE_WORDS = ("شماره موبایل", "شمارهٔ موبایل", "شماره همراه",
+                    "شمارهٔ همراه", "شماره تلفن", "شماره خود")
+
+    # login_with_phone's list, which is known to move Divar past this screen.
+    _CONFIRM_WORDS = ("تأیید", "تایید", "بعدی", "ادامه", "ورود", "ارسال",
+                      "confirm", "next", "submit", "send")
+
+    async def _find_modal_input(self):
+        """The visible field of whatever modal is up, or None."""
+        # Instant query_selector — NOT wait_for_selector (avoids N×3s delays)
+        for sel in self._MODAL_INPUT_SELECTORS:
+            try:
+                el = await self.page.query_selector(sel)
+                if el and await el.is_visible():
+                    placeholder = (await el.get_attribute('placeholder') or '').lower()
+                    if 'search' in placeholder or 'جستجو' in placeholder:
+                        continue
+                    logger.info(f"Divar SMS-OTP input detected: {sel}")
+                    return el
+            except Exception:
+                continue
+        return None
+
+    async def _modal_step(self, el, modal_text: str) -> str:
+        """«phone» while Divar is still asking who is calling, else «code».
+
+        Conservative by design. «code» is the behaviour this handler has always
+        had, so an unfamiliar modal keeps it; only a positive phone signal
+        switches. Being wrong the other way would break a working path.
+        """
+        attrs = await self._input_attrs(el)
+        soup = " ".join(f"{k}={v}" for k, v in attrs.items()).lower()
+        raw_max = attrs.get("maxlength", "")
+        maxlen = int(raw_max) if raw_max.isdigit() else None
+
+        # A field named for what it holds settles it outright.
+        if any(w in soup for w in ("code", "otp", "کد", "one-time")):
+            return "code"
+        if any(w in soup for w in ("موبایل", "شماره", "همراه", "mobile", "phone")):
+            return "phone"
+        # Failing a name: a box that cannot hold eleven digits is not holding
+        # an Iranian mobile number.
+        if maxlen is not None:
+            return "code" if maxlen <= 8 else "phone"
+
+        # Failing that, the sentence above the box. Code words are tested
+        # first because the code screen names the number it just texted, so it
+        # contains «شماره» too and testing for that first would misread it.
+        head = modal_text[:400]
+        if any(w in head for w in self._CODE_WORDS):
+            return "code"
+        if any(w in head for w in self._PHONE_WORDS):
+            return "phone"
+        return "code"
+
+    async def _click_confirm(self) -> bool:
+        """Press whatever this modal calls «next». True if something was clicked."""
+        try:
+            for el in await self.page.query_selector_all(
+                    'button, [role="button"]'):
+                try:
+                    if not await el.is_visible() or not await el.is_enabled():
+                        continue
+                    text = ((await el.inner_text()) or "").strip()
+                    if not text or not any(w in text for w in self._CONFIRM_WORDS):
+                        continue
+                    await el.click(force=True, timeout=3000)
+                    logger.info(f"[otp] pressed {text!r}")
+                    return True
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.debug(f"[otp] confirm-button lookup failed: {e}")
+        try:
+            btn = await self.page.query_selector('button[type="submit"]')
+            if btn and await btn.is_visible():
+                await btn.click(force=True, timeout=3000)
+                logger.info("[otp] pressed the modal's submit button")
+                return True
+        except Exception:
+            pass
+        return False
+
+    async def _submit_phone_step(self, el):
+        """Answer «which number?» so Divar will send a code. Returns the code
+        field it then shows, or None.
+
+        Divar's contact-reveal challenge starts one screen earlier than this
+        handler assumed. Before there is a code there is a question about who
+        is asking, and nothing is sent until it is answered — so parking here
+        is waiting for an SMS nobody requested. That is precisely what the
+        scraper did: it found an input in a dialog, called it the code box, and
+        waited five minutes for a message Divar had never been asked to send.
+
+        The two moves are login_with_phone's, which are known to work.
+        """
+        phone = (self.account_phone or "").strip()
+        if not phone:
+            logger.warning(
+                "[otp] Divar is asking which number to text and this extractor "
+                "was not told which account it is driving — cannot answer")
+            return None
+
+        logger.info(
+            f"[otp] Divar wants the account number before it will send anything "
+            f"— entering {phone[:4]}*****{phone[-2:]}")
+        try:
+            await el.click()
+            await el.fill("")
+            for ch in phone:
+                await el.type(ch, delay=random.uniform(60, 140))
+            await asyncio.sleep(0.6)
+        except Exception as e:
+            logger.warning(f"[otp] could not enter the account number: {e}")
+            return None
+
+        if not await self._click_confirm():
+            logger.warning(
+                "[otp] the number is typed but no button on this modal would "
+                "send it — the code cannot arrive")
+            return None
+
+        # Divar swaps the field rather than the page, so wait for the box to
+        # become a code box.
+        for _ in range(20):
+            await asyncio.sleep(0.5)
+            nxt = await self._find_modal_input()
+            if nxt is None:
+                continue
+            if await self._modal_step(nxt, await self._modal_text()) == "code":
+                logger.info("[otp] Divar moved to the code screen — the SMS is on its way")
+                return nxt
+
+        logger.warning(
+            f"[otp] the number went in but no code field followed; the modal "
+            f"now says: {(await self._modal_text())[:200]!r}")
+        return None
+
     async def _handle_sms_otp_if_present(self) -> None:
         """Detect Divar's SMS OTP verification for contact info, wait for user code."""
         try:
-            # Use instant query_selector — NOT wait_for_selector (avoids N×3s delays)
-            OTP_SELECTORS = [
-                'input[name="code"]',
-                'input[inputmode="numeric"]',
-                'input[maxlength="6"]',
-                '.kt-new-modal input',
-                '[role="dialog"] input',
-            ]
-            otp_input = None
-            for sel in OTP_SELECTORS:
-                try:
-                    el = await self.page.query_selector(sel)
-                    if el and await el.is_visible():
-                        placeholder = (await el.get_attribute('placeholder') or '').lower()
-                        if 'search' in placeholder or 'جستجو' in placeholder:
-                            continue
-                        otp_input = el
-                        logger.info(f"Divar SMS-OTP input detected: {sel}")
-                        break
-                except Exception:
-                    continue
+            otp_input = await self._find_modal_input()
 
             if not otp_input:
                 logger.info("No SMS-OTP modal detected, continuing normally")
@@ -496,11 +627,21 @@ class ContactExtractor:
                 logger.info("SMS-OTP suppressed for this job (dismissed earlier) — skipping phone")
                 return
 
-            # A modal can be on screen without Divar having sent anything — the
-            # previous code was consumed, or the first send was rate-limited and
-            # the form is sitting there with a «ارسال مجدد» control. Waiting on
-            # that is waiting for an SMS nobody asked for.
-            await self._request_otp_resend()
+            if await self._modal_step(otp_input, modal_text) == "phone":
+                otp_input = await self._submit_phone_step(otp_input)
+                if otp_input is None:
+                    # No code is coming. Parking for five minutes would only
+                    # stall the job; on_challenge above has already arranged
+                    # for this account to be swapped out.
+                    return
+            else:
+                # A modal can be on screen without Divar having sent anything —
+                # the previous code was consumed, or the first send was
+                # rate-limited and the form is sitting there with a «ارسال
+                # مجدد» control. Waiting on that is waiting for an SMS nobody
+                # asked for. (Skipped after a phone step: Divar has just sent
+                # one, and asking again would only trip its rate limit.)
+                await self._request_otp_resend()
 
             event = otp_store.request(self.otp_key, self.account_phone or "")
             timeout = getattr(settings, "otp_wait_timeout", 300)
