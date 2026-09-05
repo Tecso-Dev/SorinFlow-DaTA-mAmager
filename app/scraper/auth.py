@@ -51,6 +51,25 @@ class DivarAuth:
         self.page = await self.context.new_page()
         return self.page
     
+    def browser_alive(self) -> bool:
+        """Whether there is still a live page to drive.
+
+        get_current_cookies() returns [] both when the jar is empty and when
+        the browser has been torn down, and those are not the same fact. One
+        means the session needs a login; the other means there is nothing to
+        ask. Conflating them is how four healthy accounts were each declared
+        expired in turn, twelve seconds apart, against a browser that had
+        already closed.
+        """
+        try:
+            if self.browser is not None and not self.browser.is_connected():
+                return False
+            if self.page is None or self.page.is_closed():
+                return False
+            return True
+        except Exception:
+            return False
+
     async def close_browser(self):
         """Close browser and cleanup"""
         if self.page:
@@ -786,6 +805,15 @@ class DivarAuth:
             if not self.page:
                 await self.initialize_browser(headless=settings.scraper_headless)
             
+            if not self.browser_alive():
+                # Nothing below can succeed, and every step of it logs an error
+                # that reads like a session problem. Say what actually happened
+                # and get out.
+                logger.warning(
+                    f"{phone_number}: the browser is gone — cannot restore a "
+                    f"session without one. This is not an expired session.")
+                return False
+
             # Apply cookies
             await self.apply_cookies(cookies)
             
@@ -822,12 +850,24 @@ class DivarAuth:
             # Poll the jar rather than sleeping a fixed guess: the refresh is a
             # round trip to Tehran and 1.5s was optimistic on a good day.
             fresh = None
+            browser_died = False
             for _ in range(12):
+                if not self.browser_alive():
+                    # Twelve seconds of polling a closed browser tells us
+                    # nothing and costs a minute across four accounts.
+                    browser_died = True
+                    break
                 live = await self.get_current_cookies()
                 if access_token_state(live) == "live":
                     fresh = live
                     break
                 await asyncio.sleep(1.0)
+
+            if browser_died:
+                logger.warning(
+                    f"{phone_number}: the browser closed while waiting for the "
+                    f"refresh — the session is untested, not expired")
+                return False
 
             current_url = self.page.url
             if "/login" in current_url or current_url.rstrip("/") in (

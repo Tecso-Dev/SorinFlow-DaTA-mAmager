@@ -30,9 +30,17 @@ class FakeAuth:
     """Stands in for DivarAuth. Records which accounts were restored, and can be
     told to fail — the interesting cases are the ones where restoring fails."""
 
-    def __init__(self, restorable=True):
+    def __init__(self, restorable=True, alive=True):
         self.restorable = restorable
         self.restored = []
+        # Rotation now asks whether there is still a browser to rotate onto.
+        # Default True so every existing case behaves exactly as before; the
+        # False path is its own test, because a closed browser used to be
+        # reported as four expired sessions.
+        self.alive = alive
+
+    def browser_alive(self):
+        return self.alive
 
     async def restore_session(self, phone):
         self.restored.append(phone)

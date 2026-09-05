@@ -2526,6 +2526,17 @@ class DivarScraper:
         if forced and every > 0:
             await self._mark_account_spent(self.active_phone, every)
 
+        # A dead browser cannot be rotated onto. Without this the loop tried
+        # every account in turn against a closed page — four accounts, twelve
+        # seconds of polling each, and four healthy sessions reported as
+        # expired at the end of it. The pool was never the problem.
+        if not self.auth.browser_alive():
+            logger.warning(
+                "[rotate] the browser is gone — no account can be restored "
+                "onto it. Leaving the pool untouched.")
+            self._force_rotate = False
+            return False
+
         for offset in range(1, len(self._rotation_pool) + 1):
             candidate = self._rotation_pool[(idx + offset) % len(self._rotation_pool)]
             if candidate == self.active_phone:
