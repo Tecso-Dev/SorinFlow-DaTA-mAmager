@@ -3121,6 +3121,42 @@ class DivarScraper:
                     f"{len(all_listings)} آگهی از فهرست جمع‌آوری شد",
                     collected=len(all_listings), target=collect_target)
 
+            # What Divar itself says, asked again at run time and written down
+            # beside what the listing page actually gave up.
+            #
+            # «۱۱۳ آگهی با این فیلترها در دیوار هست» and «۱۱۹ نامزد جمع شد» are
+            # answers to two different questions — an estimate Divar computed
+            # when the button was pressed, and what the page yielded now — and
+            # having only one of them on screen is what made the pair read as a
+            # contradiction. Advisory only: it must not become the progress
+            # bar's denominator, because it can be larger or smaller than the
+            # pool the run actually walks, and either way the bar would lie.
+            try:
+                from app.services import divar_count as dc
+                _form = dc.build_form_data(
+                    category,
+                    advertiser_type=advertiser_type, has_images=has_images,
+                    min_price=min_price, max_price=max_price,
+                    min_deposit=min_deposit, max_deposit=max_deposit,
+                    min_rent=min_rent, max_rent=max_rent,
+                    min_area=min_area, max_area=max_area,
+                )
+                _divar_total, _count_err = await dc.fetch_post_count(city, _form)
+                if _divar_total is not None:
+                    _gap = len(all_listings) - _divar_total
+                    _msg = (f"دیوار می‌گوید {_divar_total} آگهی با این فیلترها دارد؛ "
+                            f"{len(all_listings)} نامزد جمع شد")
+                    if _gap:
+                        _msg += f" — {abs(_gap)} تا " + ("بیشتر" if _gap > 0 else "کمتر")
+                    await job_log.record(
+                        job.job_id, job_log.PAGE, _msg,
+                        divar_count=_divar_total, collected=len(all_listings))
+                elif _count_err:
+                    logger.info(f"[count] Divar's own total unavailable: {_count_err}")
+            except Exception as e:
+                # Advisory. It must never cost a run.
+                logger.warning(f"[count] could not ask Divar for its total: {e}")
+
             # Progress is position in the candidate pool.
             #
             # It used to be measured against max_items, which is a target of
