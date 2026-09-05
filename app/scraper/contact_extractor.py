@@ -22,7 +22,8 @@ class ContactExtractor:
 
     def __init__(self, page, images_dir: Path, otp_key: Optional[str] = None,
                  on_pause=None, on_resume=None, should_cancel=None,
-                 account_phone: Optional[str] = None, on_challenge=None):
+                 account_phone: Optional[str] = None, on_challenge=None,
+                 on_verified=None):
         self.page = page
         self.images_dir = images_dir
         self.otp_key = otp_key  # key into otp_store; set by scraper when a job is running
@@ -44,6 +45,13 @@ class ContactExtractor:
         # a human. The scraper uses it to rotate to a fresh account instead —
         # the challenge is this number telling us it is spent.
         self.on_challenge = on_challenge
+        # Fired once a code has been accepted. Divar has just granted this
+        # session the trust the code existed to establish, and it lives in the
+        # jar the browser now holds. Without this the scraper never saved it,
+        # so the next use of the account restored the pre-verification jar and
+        # was challenged all over again — which is why five accounts sat at
+        # nought to four reveals between them.
+        self.on_verified = on_verified
 
     async def get_phone_number(self) -> Optional[str]:
         """Click the contact button and return the extracted phone number."""
@@ -630,6 +638,24 @@ class ContactExtractor:
 
             await asyncio.sleep(2.0)
             logger.info("SMS-OTP handled, continuing phone extraction")
+
+            # Keep what the code bought.
+            #
+            # Divar issues the challenge to establish trust in this session;
+            # once it is answered, that trust is in the cookies the browser is
+            # holding right now. Persisting them is the whole point — the
+            # stored jar is what the next rotation and the next job restore,
+            # and leaving it at its pre-verification state meant every account
+            # was challenged on its first reveal, every single time.
+            #
+            # Unconditional: if the code was wrong the jar is unchanged and
+            # saving it is a no-op, which is cheaper than deciding whether the
+            # modal really went away.
+            if self.on_verified:
+                try:
+                    await self.on_verified()
+                except Exception as e:
+                    logger.warning(f"could not persist the verified session: {e}")
 
         except Exception as e:
             logger.warning(f"Error in SMS-OTP handler: {e}")

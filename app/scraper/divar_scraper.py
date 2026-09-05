@@ -1656,6 +1656,9 @@ class DivarScraper:
                 # Divar challenging this account is the strongest signal there
                 # is that it needs replacing — louder than any threshold.
                 on_challenge=self._note_account_challenged,
+                # A code that has been answered is trust Divar just granted to
+                # this jar. Save it, or the next use starts untrusted again.
+                on_verified=self._persist_active_session,
             )
             # How many sessions rotation can still reach. An unanswered code
             # prompt suppresses phone numbers for the whole job only once every
