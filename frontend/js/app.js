@@ -2963,10 +2963,15 @@ function _renderJobsTable(items) {
                     <div style="font-size:.72rem;color:var(--text-muted,#aaa);text-align:center;margin-top:2px;">${Math.round(job.progress)}%</div>
                 </div>
             </td>
-            <td dir="ltr" style="text-align:center">
-                <span class="text-success" title="تازه ذخیره‌شده">${job.new_items}</span>
+            <!-- «جدید / بروز» reads right-to-left, so «جدید» is the RIGHT
+                 column. dir="ltr" here put the new count on the LEFT, under
+                 «بروز» — the two numbers were swapped against their own
+                 header. <bdi> isolates each one so the digits stay readable
+                 while the pair follows the header's direction. -->
+            <td style="text-align:center">
+                <bdi class="text-success" title="تازه ذخیره‌شده">${job.new_items}</bdi>
                 <span class="text-muted">/</span>
-                <span class="text-muted" title="از قبل موجود بود">${job.updated_items}</span>
+                <bdi class="text-muted" title="از قبل موجود بود">${job.updated_items}</bdi>
             </td>
             <td>${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
             <td>
