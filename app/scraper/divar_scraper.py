@@ -2892,8 +2892,6 @@ class DivarScraper:
             self._rotate_every_override = max(int(rotate_every), 0)
         if not date_mode:
             max_items = max_items or 100
-        # Progress is pool-based only when there is no numeric target at all
-        pool_progress = date_mode and not max_items
         
         # Get or create job record
         if job_id:
@@ -3080,10 +3078,20 @@ class DivarScraper:
                     f"{len(all_listings)} آگهی از فهرست جمع‌آوری شد",
                     collected=len(all_listings), target=collect_target)
 
-            # Progress is measured against the requested target, not the raw pool,
-            # so the dashboard reaches 100% exactly when max_items are saved.
-            # With no numeric target (whole-day mode), progress tracks the pool.
-            job.total_items = len(all_listings) if pool_progress else max_items
+            # Progress is position in the candidate pool.
+            #
+            # It used to be measured against max_items, which is a target of
+            # *saved* listings — a different quantity from the candidates being
+            # counted into it. A pool of 119 against a target of 100 therefore
+            # read 100% at candidate 100 and then went on scraping for another
+            # nineteen. The two only ever coincided when every candidate was
+            # saved, which is the case that never happens.
+            #
+            # The loop ends when the pool runs out or the target is met,
+            # whichever comes first, so the pool is the honest denominator: the
+            # bar cannot fill early, and the completion below fills it for the
+            # run that stops at its target with candidates to spare.
+            job.total_items = len(all_listings)
             await self.db_session.commit()
 
             logger.info(
@@ -3290,7 +3298,7 @@ class DivarScraper:
                         if skip:
                             # Same as the other site: a filtered-out listing is
                             # still a listing we processed.
-                            job.scraped_items = (i + 1) if pool_progress else min(i + 1, max_items)
+                            job.scraped_items = i + 1
                             await self.db_session.commit()
                             # Still ask, because this is a safe point to switch
                             # and a challenge may be pending from the previous
@@ -3371,7 +3379,7 @@ class DivarScraper:
                     # listings we already had sat at «۰٪ / در حال اجرا» for its
                     # whole length while doing real work on every one of them.
                     # A bar that cannot move is worse than no bar.
-                    job.scraped_items = (i + 1) if pool_progress else min(i + 1, max_items)
+                    job.scraped_items = i + 1
                     await self.db_session.commit()
 
                     # spread the load across saved Divar accounts
@@ -3400,6 +3408,10 @@ class DivarScraper:
             # Complete job
             job.status = "completed"
             job.completed_at = datetime.now()
+            # A run that met its target stops with candidates left over. The
+            # work is over, so the bar reads full rather than freezing at the
+            # candidate it happened to stop on.
+            job.scraped_items = job.total_items
             await self.db_session.commit()
             # The FINISH event is recorded further down, AFTER finish_reason has
             # been composed. Written here it always said «تمام شد» with no
