@@ -2638,6 +2638,7 @@ class DivarScraper:
         "has_parking": "پارکینگ",
         "has_storage": "انباری",
         "has_balcony": "بالکن",
+        "category": "خارج از دسته‌بندی",
     }
 
     # Divar's own words for what kind of ad this is, mapped to the two the
@@ -3137,6 +3138,7 @@ class DivarScraper:
             }
             
             # Scrape each property detail
+            examined = 0
             for i, listing in enumerate(all_listings):
                 try:
                     # Stop as soon as the numeric target is reached
@@ -3150,7 +3152,13 @@ class DivarScraper:
                     if job.status == "cancelled":
                         logger.info(f"Job {job.job_id} was cancelled, stopping scraping")
                         return job
-                    
+
+                    # Counted here rather than from `i`, so that candidates the
+                    # run never reached are not reported as candidates it
+                    # dropped. The two are different answers to «where did they
+                    # go?».
+                    examined += 1
+
                     # Check if already scraped
                     if await self.property_exists(listing['divar_id']):
                         logger.info(f"Property already exists: {listing['divar_id']}")
@@ -3371,7 +3379,14 @@ class DivarScraper:
                     elif detail is None:
                         # None = real scrape error (network failure, parse error, etc.)
                         job.failed_items += 1
-                    # detail is False = off-category skip; don't count as failure
+                    elif detail is False:
+                        # Off-category. Not a failure — but not nothing either,
+                        # and until now counted nowhere at all. One run put 32
+                        # of its 119 candidates through this branch and the
+                        # panel could only say 82 had been handled, with no
+                        # account of the rest. A silent drop is indistinguishable
+                        # from a bug, which is how it was reported.
+                        skip_tally["category"] = skip_tally.get("category", 0) + 1
 
                     # Progress is listings PROCESSED, not listings newly saved.
                     #
@@ -3506,6 +3521,37 @@ class DivarScraper:
                     job.job_id, job_log.PAGE,
                     f"{job.updated_items} آگهی از قبل در پایگاه داده بود و دوباره ذخیره نشد",
                     duplicates=job.updated_items)
+
+            # Every candidate, accounted for.
+            #
+            # Asked «۱۱۳ آگهی هست ولی ۸۲ تا اسکرپ شد — کدام غلط است؟», neither
+            # number was wrong: 119 candidates became 71 saved + 11 already
+            # held + 5 filtered + 32 off-category, and only the first three of
+            # those had ever been written down. A total that does not add up
+            # reads as a fault whether or not there is one, so make it add up —
+            # and when it still does not, say that too rather than let the
+            # difference pass unremarked.
+            _dropped = sum(skip_tally.values())
+            _accounted = (job.new_items + job.updated_items
+                          + job.failed_items + _dropped)
+            _parts = [f"{job.new_items} تازه", f"{job.updated_items} تکراری"]
+            if job.failed_items:
+                _parts.append(f"{job.failed_items} ناموفق")
+            _parts += [f"{v} {self._FILTER_LABELS_FA.get(k, k)}"
+                       for k, v in sorted(skip_tally.items(), key=lambda kv: -kv[1])]
+            _unreached = len(all_listings) - examined
+            if _unreached > 0:
+                _parts.append(f"{_unreached} بررسی‌نشده")
+            _unaccounted = examined - _accounted
+            if _unaccounted > 0:
+                _parts.append(f"{_unaccounted} بی‌حساب")
+            await job_log.record(
+                job.job_id, job_log.PAGE,
+                f"{len(all_listings)} نامزد — " + "، ".join(_parts),
+                level="warning" if _unaccounted > 0 else "info",
+                candidates=len(all_listings), examined=examined,
+                unreached=(_unreached or None),
+                unaccounted=(_unaccounted if _unaccounted > 0 else None))
             if skip_tally:
                 breakdown = ", ".join(f"{k}={v}" for k, v in
                                       sorted(skip_tally.items(), key=lambda kv: -kv[1]))
