@@ -1409,10 +1409,25 @@ class DivarScraper:
                 # from the (already category-filtered) search result so bare-token
                 # listings aren't all dropped — reject only when NEITHER matches.
                 haystack = f"{decoded_url} {source_title or ''}"
+                page_title = ""
+                if not any(p in haystack for p in patterns):
+                    # Neither the URL nor the search-result title says what this
+                    # is — which is not the same as saying it is the wrong
+                    # thing. Divar's own page title does say («اجاره آپارتمان ۸۵
+                    # متری در …»), and we are already standing on the page, so
+                    # ask it before throwing the listing away. Only asked when
+                    # the cheap signals came up empty, so the common case pays
+                    # nothing for it.
+                    try:
+                        page_title = (await self.page.title()) or ""
+                    except Exception as e:
+                        logger.debug(f"could not read the page title: {e}")
+                    haystack = f"{haystack} {page_title}"
                 if not any(p in haystack for p in patterns):
                     logger.info(
                         f"Skipping off-category listing for '{target_category}' "
-                        f"(URL: {decoded_url}, title: {source_title!r})"
+                        f"(URL: {decoded_url}, title: {source_title!r}, "
+                        f"page title: {page_title!r})"
                     )
                     return False  # sentinel: category skip — not a scrape error
             else:
