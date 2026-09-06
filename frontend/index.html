@@ -129,6 +129,72 @@
             </div>
         </form>
 
+        <!-- ── Step 2b · the emailed code ───────────────────────────────── -->
+        <form id="login-step-email" class="d-none" novalidate onsubmit="event.preventDefault();verifyEmailLogin()">
+            <div style="text-align:center;margin-bottom:1rem;color:var(--text-muted);font-size:.85rem;">
+                <i class="bi bi-envelope-check" style="font-size:1.9rem;color:var(--accent);display:block;margin-bottom:.45rem;"></i>
+                کد ۶ رقمی به <span id="login-email-hint" dir="ltr"></span> فرستاده شد
+            </div>
+            <div class="auth-field" id="f-emailcode">
+                <label for="login-email-code" class="sr-only-label">کد ارسال‌شده به ایمیل</label>
+                <div class="auth-input-row">
+                    <input type="text" id="login-email-code" class="otp-input"
+                           maxlength="6" autocomplete="one-time-code" inputmode="numeric"
+                           pattern="[0-9]*" dir="ltr" required
+                           aria-describedby="e-emailcode" placeholder="······">
+                </div>
+                <div class="field-error" id="e-emailcode" role="alert"></div>
+            </div>
+            <button id="login-email-btn" class="btn-login" type="submit">
+                <i class="bi bi-check-circle"></i> تأیید و ورود
+            </button>
+            <div class="auth-links" style="margin-top:.7rem">
+                <button type="button" class="auth-link-btn" onclick="backToLogin()">بازگشت</button>
+            </div>
+        </form>
+
+        <!-- ── Step 2c · forgotten password ─────────────────────────────── -->
+        <form id="login-step-reset" class="d-none" novalidate onsubmit="event.preventDefault();submitPasswordReset()">
+            <div style="text-align:center;margin-bottom:1rem;color:var(--text-muted);font-size:.85rem;">
+                <i class="bi bi-key" style="font-size:1.9rem;color:var(--accent);display:block;margin-bottom:.45rem;"></i>
+                <span id="reset-help">نام کاربری یا ایمیل خود را بنویسید تا کد بازنشانی برایتان ایمیل شود</span>
+            </div>
+            <div class="auth-field" id="f-reset-id">
+                <label for="reset-identifier">نام کاربری یا ایمیل</label>
+                <div class="auth-input-row">
+                    <input type="text" id="reset-identifier" dir="ltr" autocomplete="username"
+                           maxlength="200" aria-describedby="e-reset-id">
+                </div>
+                <div class="field-error" id="e-reset-id" role="alert"></div>
+            </div>
+            <div id="reset-code-wrap" class="d-none">
+                <div class="auth-field" id="f-reset-code">
+                    <label for="reset-code">کد ارسال‌شده به ایمیل</label>
+                    <div class="auth-input-row">
+                        <input type="text" id="reset-code" class="otp-input" maxlength="6"
+                               autocomplete="one-time-code" inputmode="numeric" dir="ltr"
+                               aria-describedby="e-reset-code" placeholder="······">
+                    </div>
+                    <div class="field-error" id="e-reset-code" role="alert"></div>
+                </div>
+                <div class="auth-field" id="f-reset-pass">
+                    <label for="reset-password">رمز عبور تازه</label>
+                    <div class="auth-input-row">
+                        <input type="password" id="reset-password" maxlength="128"
+                               autocomplete="new-password" aria-describedby="e-reset-pass">
+                    </div>
+                    <div class="field-error" id="e-reset-pass" role="alert"></div>
+                    <div class="pw-hint">حداقل ۸ نویسه</div>
+                </div>
+            </div>
+            <button id="reset-btn" class="btn-login" type="submit">
+                <i class="bi bi-envelope-arrow-up"></i> <span id="reset-btn-label">ارسال کد بازنشانی</span>
+            </button>
+            <div class="auth-links" style="margin-top:.7rem">
+                <button type="button" class="auth-link-btn" onclick="backToLogin()">بازگشت</button>
+            </div>
+        </form>
+
         <!-- ── Step 3 · create an account ───────────────────────────────── -->
         <form id="login-step-register" class="d-none" novalidate onsubmit="event.preventDefault();doRegister()">
             <div class="auth-field" id="f-reg-username">
@@ -3826,6 +3892,23 @@
                     <span id="totp-status-badge" class="badge bg-secondary ms-auto">در حال بررسی...</span>
                 </div>
 
+                <!-- The emailed second factor: no app, no QR, no clock. -->
+                <div class="d-flex align-items-center gap-2 mb-3 p-2"
+                     style="background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
+                    <i class="bi bi-envelope-check" style="color:#818cf8;"></i>
+                    <div style="flex:1">
+                        <div style="font-size:.85rem;color:var(--text);">ورود دو مرحله‌ای با ایمیل</div>
+                        <div style="font-size:.74rem;color:var(--text-muted);">
+                            کد به <span id="email-2fa-address" dir="ltr">—</span> فرستاده می‌شود.
+                            به اپلیکیشن و ساعت دقیق نیازی ندارد.
+                        </div>
+                    </div>
+                    <div class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" id="email-2fa-toggle"
+                               onchange="toggleEmail2fa(this.checked)">
+                    </div>
+                </div>
+
                 <!-- QR / Setup panel -->
                 <div id="totp-setup-panel" class="d-none">
                     <div class="mb-3 p-2" style="background:rgba(6,182,212,.08);border:1px solid rgba(6,182,212,.2);border-radius:8px;font-size:.82rem;color:var(--text-dim);">
@@ -3906,7 +3989,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260906i"></script>
+<script src="js/app.js?v=20260906j"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

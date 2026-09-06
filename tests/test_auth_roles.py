@@ -422,7 +422,7 @@ def test_boot_verification_rejects_a_half_applied_migration():
                 await _verify_auth_v2(conn)
             # and passes once they are present
             for c in ("phone TEXT", "phone_verified BOOLEAN",
-                      "email_verified BOOLEAN",
+                      "email_verified BOOLEAN", "email_2fa_enabled BOOLEAN",
                       "marketing_opt_in BOOLEAN", "permissions TEXT"):
                 await conn.execute(text(f"ALTER TABLE users ADD COLUMN {c}"))
             await _verify_auth_v2(conn)

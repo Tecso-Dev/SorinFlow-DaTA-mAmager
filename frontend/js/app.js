@@ -157,6 +157,15 @@ async function doLogin() {
             return;
         }
 
+        if (data.requires_email_code) {
+            _emailSession = data.email_session;
+            document.getElementById('login-email-hint').textContent = data.email_hint || '';
+            document.getElementById('login-step-1').classList.add('d-none');
+            document.getElementById('login-step-email').classList.remove('d-none');
+            document.getElementById('login-email-code').focus();
+            return;
+        }
+
         if (data.requires_totp) {
             _totpSession = data.totp_session;
             document.getElementById('login-step-1').classList.add('d-none');
@@ -266,10 +275,123 @@ async function verifyTotpLogin() {
 
 function backToLogin() {
     _totpSession = null;
-    document.getElementById('login-step-2').classList.add('d-none');
+    _emailSession = null;
+    // Every step that is not step 1, or «بازگشت» from the newer ones would
+    // leave two forms on screen at once.
+    ['login-step-2', 'login-step-email', 'login-step-reset']
+        .forEach(id => document.getElementById(id)?.classList.add('d-none'));
     document.getElementById('login-step-1').classList.remove('d-none');
-    document.getElementById('login-totp-code').value = '';
+    ['login-totp-code', 'login-email-code', 'reset-code', 'reset-password']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    document.getElementById('reset-code-wrap')?.classList.add('d-none');
+    // The reset form's mode is read back off reset-code-wrap, so hiding it
+    // returns the form to step 1 — but the labels submitPasswordReset changed
+    // stay on step 2. That combination asks for a code, shows no field to type
+    // one into, and re-sends a code when pressed.
+    const rh = document.getElementById('reset-help');
+    if (rh) rh.textContent = 'نام کاربری یا ایمیل خود را بنویسید تا کد بازنشانی برایتان ایمیل شود';
+    const rb = document.getElementById('reset-btn-label');
+    if (rb) rb.textContent = 'ارسال کد بازنشانی';
     document.getElementById('login-error').classList.add('d-none');
+}
+
+// ── the emailed second factor ───────────────────────────────────────────────
+//
+// TOTP asks for an app, a scan, a phone whose clock is right, and an entry
+// nobody deletes by accident — and when any of that fails there is no way back
+// in but the database. This costs a round trip and recovers itself.
+let _emailSession = null;
+
+async function verifyEmailLogin() {
+    const el = document.getElementById('login-email-code');
+    const code = (el.value || '').trim();
+    clearAuthErrors();
+    if (!/^\d{4,8}$/.test(code)) {
+        setFieldError('emailcode', 'کد ۶ رقمی را وارد کنید');
+        return;
+    }
+    const btn = document.getElementById('login-email-btn');
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`${API_BASE}/users/token/verify-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email_session: _emailSession, code }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+            setFieldError('emailcode', _detailText(data.detail) || 'کد نادرست است');
+            el.select();
+            return;
+        }
+        await _finishLogin(data);
+    } catch (err) {
+        showAuthAlert('ارتباط با سرور برقرار نشد.', 'اتصال اینترنت را بررسی کنید.', 'warn');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// ── forgotten password ──────────────────────────────────────────────────────
+
+function showResetForm() {
+    ['login-step-1', 'login-step-2', 'login-step-email']
+        .forEach(id => document.getElementById(id)?.classList.add('d-none'));
+    document.getElementById('login-step-reset').classList.remove('d-none');
+    document.getElementById('login-error').classList.add('d-none');
+    const u = document.getElementById('login-username');
+    const r = document.getElementById('reset-identifier');
+    if (u && r && u.value) r.value = u.value;   // carry over what they typed
+    r?.focus();
+}
+
+async function submitPasswordReset() {
+    const idEl = document.getElementById('reset-identifier');
+    const codeWrap = document.getElementById('reset-code-wrap');
+    const btn = document.getElementById('reset-btn');
+    const asking = codeWrap.classList.contains('d-none');
+    clearAuthErrors();
+
+    const identifier = (idEl.value || '').trim();
+    if (!identifier) { setFieldError('reset-id', 'نام کاربری یا ایمیل را بنویسید'); return; }
+
+    btn.disabled = true;
+    try {
+        if (asking) {
+            const resp = await fetch(`${API_BASE}/users/password-reset/request`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ identifier }),
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) { setFieldError('reset-id', _detailText(data.detail) || 'خطا'); return; }
+            // The answer is deliberately the same whether or not the account
+            // exists — see the endpoint. So the UI says the same thing too.
+            document.getElementById('reset-help').textContent =
+                'اگر این حساب وجود داشته باشد، کد بازنشانی ایمیل شد. کد و رمز تازه را وارد کنید';
+            codeWrap.classList.remove('d-none');
+            document.getElementById('reset-btn-label').textContent = 'تغییر رمز عبور';
+            document.getElementById('reset-code').focus();
+            return;
+        }
+
+        const code = (document.getElementById('reset-code').value || '').trim();
+        const pw = document.getElementById('reset-password').value || '';
+        if (!/^\d{4,8}$/.test(code)) { setFieldError('reset-code', 'کد ۶ رقمی را وارد کنید'); return; }
+        if (pw.length < 8) { setFieldError('reset-pass', 'حداقل ۸ نویسه'); return; }
+
+        const resp = await fetch(`${API_BASE}/users/password-reset/confirm`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identifier, code, new_password: pw }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) { setFieldError('reset-code', _detailText(data.detail) || 'کد نادرست است'); return; }
+        backToLogin();
+        showAuthAlert('رمز عبور تغییر کرد.', 'حالا با رمز تازه وارد شوید.', 'ok');
+    } catch (err) {
+        showAuthAlert('ارتباط با سرور برقرار نشد.', 'اتصال اینترنت را بررسی کنید.', 'warn');
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 function showRegisterForm() {
@@ -453,6 +575,8 @@ async function open2FAModal() {
     document.getElementById('totp-btn-setup').classList.add('d-none');
     document.getElementById('totp-btn-disable').classList.add('d-none');
 
+    loadEmail2faState();
+
     try {
         const data = await apiCall('/users/me/totp/status');
         if (data.enabled) {
@@ -537,6 +661,39 @@ async function disableTotp() {
     } catch(e) {
         showToast('خطا', e.message, 'danger');
     }
+}
+
+async function loadEmail2faState() {
+    const box = document.getElementById('email-2fa-toggle');
+    const addr = document.getElementById('email-2fa-address');
+    box.disabled = true;
+    try {
+        const me = await apiCall('/users/me');
+        box.checked = !!me.email_2fa_enabled;
+        // No address on file means the switch would lock the account out of
+        // its own panel, so the server refuses it — say so here rather than
+        // letting the user find out by being refused.
+        addr.textContent = me.email || '—';
+        box.disabled = !me.email;
+    } catch (e) {
+        addr.textContent = '—';
+    }
+}
+
+async function toggleEmail2fa(enabled) {
+    const box = document.getElementById('email-2fa-toggle');
+    box.disabled = true;
+    try {
+        const r = await apiCall('/users/me/email-2fa', {
+            method: 'POST',
+            body: JSON.stringify({ enabled })
+        });
+        showToast('موفق', r.message, 'success');
+    } catch (e) {
+        box.checked = !enabled;   // the server said no; the switch must agree
+        showToast('خطا', e.message, 'danger');
+    }
+    box.disabled = false;
 }
 
 function copyTotpSecret() {
@@ -9022,10 +9179,11 @@ function _wireOtp(inputId, submit) {
 // accounts, so this says who can actually do it instead of linking to a page
 // that would only apologise.
 function showForgotHelp() {
-    showAuthAlert(
-        'بازیابی رمز عبور پنل توسط مدیر ارشد انجام می‌شود.',
-        'با مدیر سیستم تماس بگیرید تا رمز شما را بازنشانی کند. اگر مشتری هستید و دنبال ملک می‌گردید، از «ثبت‌نام و ورود مشتریان» استفاده کنید.',
-        'warn');
+    // There is a self-service reset now. This used to say «ask a super admin»,
+    // which is no answer at all when the account locked out IS the super admin
+    // — that was the situation the owner ended up in, and the only way back was
+    // the database.
+    showResetForm();
 }
 
 function showTotpHelp() {

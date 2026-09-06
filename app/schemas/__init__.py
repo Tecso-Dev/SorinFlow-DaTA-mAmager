@@ -374,9 +374,32 @@ class TokenResponse(BaseModel):
     role: Optional[str] = None
     username: Optional[str] = None
     full_name: Optional[str] = None
-    # 2FA fields — set when TOTP is required instead of issuing a full token
+    # 2FA fields — set when a second factor is required instead of a full token
     requires_totp: bool = False
     totp_session: Optional[str] = None
+    # The email second factor. A separate flag from requires_totp so the panel
+    # can say which one it is asking for rather than guessing.
+    requires_email_code: bool = False
+    email_session: Optional[str] = None
+    # Where it went, masked — «کد به s***n@gmail.com فرستاده شد» tells someone
+    # which inbox to open without printing the address on a shared screen.
+    email_hint: Optional[str] = None
+
+
+class EmailCodeVerifyRequest(BaseModel):
+    email_session: str
+    code: str = Field(..., min_length=4, max_length=8)
+
+
+class PasswordResetRequest(BaseModel):
+    """Who is asking. Username or email — people remember either."""
+    identifier: str = Field(..., min_length=3, max_length=200)
+
+
+class PasswordResetConfirm(BaseModel):
+    identifier: str = Field(..., min_length=3, max_length=200)
+    code: str = Field(..., min_length=4, max_length=8)
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 
 class UserResponse(BaseModel):
@@ -390,6 +413,7 @@ class UserResponse(BaseModel):
     phone: Optional[str] = None
     phone_verified: bool = False
     email_verified: bool = False
+    email_2fa_enabled: bool = False
     marketing_opt_in: bool = False
     permissions: List[str] = Field(default_factory=list)
     last_login: Optional[datetime] = None

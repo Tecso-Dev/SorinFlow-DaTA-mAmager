@@ -808,13 +808,14 @@ async def _migrate_auth_v2(conn):
         present = {r[0] for r in (await conn.execute(text(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name='users' AND table_schema=current_schema()"))).all()}
-        if not {"phone", "phone_verified", "email_verified",
+        if not {"phone", "phone_verified", "email_verified", "email_2fa_enabled",
                 "marketing_opt_in", "permissions"} <= present:
             await conn.execute(text(
                 "ALTER TABLE users "
                 "ADD COLUMN IF NOT EXISTS phone VARCHAR(20), "
                 "ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE, "
                 "ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE, "
+                "ADD COLUMN IF NOT EXISTS email_2fa_enabled BOOLEAN NOT NULL DEFAULT FALSE, "
                 "ADD COLUMN IF NOT EXISTS marketing_opt_in BOOLEAN NOT NULL DEFAULT FALSE, "
                 "ADD COLUMN IF NOT EXISTS permissions JSON"))
         # Partial index: many staff rows have no portal phone at all, and a
@@ -873,7 +874,7 @@ async def _verify_auth_v2(conn):
     """
     from sqlalchemy import text
 
-    required = {"phone", "phone_verified", "email_verified",
+    required = {"phone", "phone_verified", "email_verified", "email_2fa_enabled",
                 "marketing_opt_in", "permissions"}
     dialect = conn.engine.dialect.name
 

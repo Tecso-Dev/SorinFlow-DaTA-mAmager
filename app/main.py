@@ -404,6 +404,16 @@ async def maintenance_middleware(request: Request, call_next):
 async def api_key_middleware(request: Request, call_next):
     public_paths = {"/health", "/", "/favicon.svg", "/favicon.ico", "/api/public/stats", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info",
                     "/api/users/token", "/api/users/token/verify-totp", "/api/users/me",
+                    # The rest of the login and recovery flow. Unauthenticated
+                    # by nature — there is no token to send yet, which is the
+                    # whole point — so the API key cannot gate them. Leaving
+                    # them out 401s the panel in production while working
+                    # locally, where API_KEY is empty: the toggle turns email
+                    # 2FA ON (that call carries a bearer) and the endpoints
+                    # needed to get back IN are the ones refused.
+                    "/api/users/token/verify-email",
+                    "/api/users/password-reset/request",
+                    "/api/users/password-reset/confirm",
                     # Visitor sign-up. Unauthenticated by nature, so the API key
                     # cannot gate it — each of these is rate-limited in
                     # app/services/verification.py instead, and the whole group

@@ -147,12 +147,26 @@ class TestErrorsCarryARecovery:
         assert "login-username" in fn, "the username is not carried over to the login form"
 
     def test_recovery_paths_exist_for_password_and_second_factor(self):
+        """This used to assert that the forgot-password link named a human to
+        ask, because there was no self-service reset. That answer was no answer
+        at all when the locked-out account IS the super admin — which is where
+        the owner ended up, with the database as the only way back. There is a
+        reset now, so the assertion is that the link reaches it.
+
+        The second factor still has no self-service path on purpose: anyone who
+        could turn TOTP off from the login page has defeated the point of it."""
         html = _read(PANEL_HTML)
         assert "showForgotHelp()" in html
         assert "showTotpHelp()" in html
         js = _read(PANEL_JS)
-        # honest: there is no self-service reset, so it must say who can do it
-        assert "مدیر" in js.split("function showForgotHelp")[1][:400]
+        forgot = js.split("function showForgotHelp")[1].split("\nfunction ")[0]
+        assert "showResetForm()" in forgot
+        assert "function showResetForm" in js
+        assert "/users/password-reset/request" in js
+        assert "/users/password-reset/confirm" in js
+        # TOTP recovery is still a person, and must say so.
+        totp = js.split("function showTotpHelp")[1].split("\nfunction ")[0]
+        assert "مدیر" in totp
 
 
 class TestNoObjectObject:

@@ -26,6 +26,12 @@ class User(Base):
     # Google Authenticator 2FA
     totp_secret = Column(String(64), nullable=True)
     totp_enabled = Column(Boolean, default=False, nullable=False)
+    # A second factor that needs no app, no QR and no clock.
+    #
+    # TOTP asks someone to scan a code, keep a phone in sync and never lose the
+    # entry — and when any of that fails there is no way back in except the
+    # database. Email costs a round trip and recovers itself.
+    email_2fa_enabled = Column(Boolean, default=False, nullable=False)
 
     # ── Portal sign-up ────────────────────────────────────────────────────
     # The phone that receives the login code. Separate from divar_phone on

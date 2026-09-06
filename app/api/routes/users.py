@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
 from typing import Optional
 
+from loguru import logger
 import pyotp
 
 from app.database import get_db
@@ -28,6 +29,7 @@ from app.models.user import User
 from app.auth.jwt import (
     verify_password, get_password_hash, create_access_token, decode_token,
     TOKEN_TOTP_PENDING,
+    TOKEN_SMS_PENDING,
 )
 from app.auth.dependencies import get_current_user, _role_dep
 from app.auth.permissions import (
@@ -37,6 +39,7 @@ from app.auth.permissions import (
 from app.schemas import (
     UserResponse, UserCreate, UserRegister, UserUpdate, UserPasswordReset, TokenResponse, UserList,
     TotpSetupResponse, TotpEnableRequest, TotpDisableRequest, TotpLoginRequest,
+    EmailCodeVerifyRequest, PasswordResetRequest, PasswordResetConfirm,
 )
 
 router = APIRouter()
@@ -68,6 +71,21 @@ def _guard_role_assignment(actor: User, role: str | None) -> None:
 
 
 # ── Public ────────────────────────────────────────────────────────────────────
+
+PURPOSE_EMAIL_2FA = "email_2fa"
+PURPOSE_PWD_RESET = "pwd_reset"
+
+
+def _mask_email(addr: str) -> str:
+    """s***n@gmail.com — enough to know which inbox, not enough to read out."""
+    addr = (addr or "").strip()
+    if "@" not in addr:
+        return ""
+    local, _, domain = addr.partition("@")
+    if len(local) <= 2:
+        return f"{local[:1]}***@{domain}"
+    return f"{local[0]}***{local[-1]}@{domain}"
+
 
 @router.post("/token", response_model=TokenResponse)
 async def login(
@@ -104,6 +122,40 @@ async def login(
     if not user.is_active:
         raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال است")
 
+    # Email second factor — only when TOTP is NOT the account's factor.
+    #
+    # This branch used to run first, so that an account with both was not asked
+    # for two codes. That let the WEAKER factor decide: turning this toggle on
+    # silently retired the authenticator, and from then on read access to the
+    # mailbox was read access to the panel — the same mailbox that can now also
+    # reset the password. Mailbox compromise alone became root.
+    #
+    # TOTP wins where it is set up. The escape hatch the old ordering was for
+    # still exists and is deliberate: somebody locked out of their authenticator
+    # turns TOTP off and leaves this on.
+    if (getattr(user, "email_2fa_enabled", False)
+            and (user.email or "").strip()
+            and not (user.totp_enabled and user.totp_secret)):
+        from app.services.verification import issue_code, VerificationError
+        try:
+            await issue_code(PURPOSE_EMAIL_2FA, user.username, "",
+                             email=user.email, channel="email", db=db)
+        except VerificationError as e:
+            # A code we could not send is not a reason to let somebody past the
+            # second factor, but it must say so rather than looking like a
+            # wrong password.
+            raise HTTPException(status_code=503, detail=e.message)
+
+        return TokenResponse(
+            requires_email_code=True,
+            email_session=create_access_token(
+                {"sub": user.username, "email_pending": True},
+                expires_minutes=10,
+                token_type=TOKEN_SMS_PENDING,
+            ),
+            email_hint=_mask_email(user.email),
+        )
+
     if user.totp_enabled and user.totp_secret:
         # Return a short-lived TOTP session token — no full JWT yet
         # typ marks this as a half-finished login. get_current_user refuses
@@ -126,6 +178,123 @@ async def login(
         username=user.username,
         full_name=user.full_name,
     )
+
+
+@router.post("/token/verify-email", response_model=TokenResponse)
+async def verify_email_login(
+    data: EmailCodeVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Finish a login that owed an emailed code.
+
+    Mirrors verify-totp: the session token proves the password was already
+    accepted, and is refused as a full credential by get_current_user because
+    its `typ` is not an access token.
+    """
+    from app.auth.jwt import decode_token
+    from app.services.verification import verify_code, VerificationError
+
+    try:
+        payload = decode_token(data.email_session)
+    except Exception:
+        raise HTTPException(status_code=401, detail="نشست ورود نامعتبر یا منقضی است")
+    if payload.get("typ") != TOKEN_SMS_PENDING or not payload.get("email_pending"):
+        raise HTTPException(status_code=401, detail="نشست ورود نامعتبر است")
+
+    username = payload.get("sub")
+    user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="حساب کاربری در دسترس نیست")
+
+    try:
+        await verify_code(PURPOSE_EMAIL_2FA, username, data.code)
+    except VerificationError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+
+    user.last_login = datetime.now(timezone.utc)
+    await db.commit()
+    return TokenResponse(
+        access_token=create_access_token({"sub": user.username, "role": user.role}),
+        token_type="bearer",
+        role=user.role,
+        username=user.username,
+        full_name=user.full_name,
+    )
+
+
+@router.post("/password-reset/request")
+async def password_reset_request(
+    data: PasswordResetRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a reset code to the address on file.
+
+    Always answers the same, whether or not the account exists. Saying «no such
+    user» here turns this endpoint into a way to ask which addresses have
+    accounts, and this panel's users are named after their phone numbers.
+
+    Until now there was no self-service reset at all: the only recovery was a
+    super_admin, and when the account locked out IS the super_admin the only
+    way back was the database.
+    """
+    from app.services.verification import issue_code, VerificationError
+
+    ident = (data.identifier or "").strip()
+    user = (await db.execute(
+        select(User).where(or_(
+            User.username == ident,
+            func.lower(User.email) == ident.lower(),
+        )).limit(1)
+    )).scalars().first()
+
+    same_answer = {"sent": True,
+                   "message": "اگر این حساب وجود داشته باشد، کد بازنشانی به ایمیلش فرستاده شد"}
+
+    if not user or not (user.email or "").strip() or not user.is_active:
+        return same_answer
+
+    try:
+        await issue_code(PURPOSE_PWD_RESET, user.username, "",
+                         email=user.email, channel="email", db=db)
+    except VerificationError as e:
+        # Throttling is the one thing worth saying out loud: silence would have
+        # somebody pressing the button until they are locked out for an hour.
+        raise HTTPException(status_code=429, detail=e.message)
+    except Exception as e:
+        logger.warning(f"[reset] could not send to {user.username}: {e}")
+    return same_answer
+
+
+@router.post("/password-reset/confirm")
+async def password_reset_confirm(
+    data: PasswordResetConfirm,
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a new password against a code from the reset email."""
+    from app.services.verification import verify_code, VerificationError
+
+    ident = (data.identifier or "").strip()
+    user = (await db.execute(
+        select(User).where(or_(
+            User.username == ident,
+            func.lower(User.email) == ident.lower(),
+        )).limit(1)
+    )).scalars().first()
+
+    # The code is keyed on the username, so a wrong identifier cannot verify —
+    # but answer identically either way, for the same reason as the request.
+    if not user:
+        raise HTTPException(status_code=400, detail="کد نادرست یا منقضی است")
+
+    try:
+        await verify_code(PURPOSE_PWD_RESET, user.username, data.code)
+    except VerificationError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+
+    user.hashed_password = get_password_hash(data.new_password)
+    await db.commit()
+    logger.info(f"[reset] password changed for {user.username}")
+    return {"success": True, "message": "رمز عبور تغییر کرد — حالا وارد شوید"}
 
 
 @router.post("/token/verify-totp", response_model=TokenResponse)
@@ -265,6 +434,34 @@ async def totp_enable(
     current_user.totp_enabled = True
     await db.commit()
     return {"success": True, "message": "احراز هویت دو مرحله‌ای فعال شد"}
+
+
+@router.post("/me/email-2fa")
+async def set_email_2fa(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Turn the emailed second factor on or off for the caller's own account.
+
+    Refused without an address on file: enabling it otherwise locks the account
+    out of its own panel, and the only way back would be the database — which
+    is precisely the hole this feature exists to close.
+    """
+    want = bool(data.get("enabled"))
+    if want and not (current_user.email or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="برای این کار باید ایمیل حسابتان ثبت شده باشد")
+
+    current_user.email_2fa_enabled = want
+    await db.commit()
+    return {
+        "enabled": want,
+        "email": _mask_email(current_user.email or ""),
+        "message": ("ورود دو مرحله‌ای با ایمیل فعال شد"
+                    if want else "ورود دو مرحله‌ای با ایمیل غیرفعال شد"),
+    }
 
 
 @router.patch("/me/divar-phone", response_model=UserResponse)
