@@ -181,3 +181,74 @@ class TestCalendar:
     def test_it_sends_nothing_when_no_type_is_chosen(self):
         i = APP_JS.index("function exportCalendarExcel()")
         assert "_calType ?" in APP_JS[i:i + 700]
+
+
+class TestProperties:
+    """لیست املاک — the last of the six, and the one whose gap was partial:
+    four of its six filters travelled and the two rental bands did not."""
+
+    def _export(self):
+        from app.api.routes import properties
+        return properties.export_properties_excel
+
+    def test_the_export_accepts_both_rental_bands(self):
+        got = params(self._export())
+        for p in ("min_deposit", "max_deposit", "min_rent_price", "max_rent_price"):
+            assert p in got, p
+
+    def test_it_still_accepts_the_four_that_already_worked(self):
+        got = params(self._export())
+        for p in ("city", "category", "listing_type", "search"):
+            assert p in got, p
+
+    def test_it_applies_them(self):
+        src = inspect.getsource(self._export())
+        assert "Property.deposit >= min_deposit" in src
+        assert "Property.deposit <= max_deposit" in src
+        assert "Property.rent_price >= min_rent_price" in src
+        assert "Property.rent_price <= max_rent_price" in src
+
+    def test_the_export_and_the_list_name_the_bands_identically(self):
+        """min_rent_price, not min_rent — one letter apart from the scraper's
+        own name for the same idea, and a mismatch here is silent."""
+        from app.api.routes import properties
+        listed = set(params(properties.list_properties)) if hasattr(
+            properties, "list_properties") else None
+        if listed:
+            for p in ("min_deposit", "max_deposit", "min_rent_price", "max_rent_price"):
+                assert p in listed, p
+
+    def test_the_button_sends_all_four(self):
+        i = APP_JS.index("function exportPropertiesExcel()")
+        block = APP_JS[i:i + 1400]
+        for p in ("min_deposit", "max_deposit", "min_rent_price", "max_rent_price"):
+            assert p in block, p
+
+    def test_it_reads_the_same_controls_the_list_does(self):
+        i = APP_JS.index("function exportPropertiesExcel()")
+        block = APP_JS[i:i + 1400]
+        for el in ("filter-min-deposit", "filter-max-deposit",
+                   "filter-min-rent", "filter-max-rent"):
+            assert el in block, el
+
+
+class TestEverySurfaceIsCovered:
+    """The audit that found these, kept as a list so a new export cannot be
+    added without someone deciding whether it needs filters."""
+
+    SURFACES = ("leads", "customers", "contacts", "deals", "dpa",
+                "calendar", "properties")
+
+    def test_each_has_an_export_that_takes_at_least_one_filter(self):
+        from app.api.routes import properties
+        fns = {
+            "leads": crm.export_leads_excel,
+            "customers": crm.export_customers_excel,
+            "contacts": crm.export_contacts_excel,
+            "deals": crm.export_deals_excel,
+            "dpa": crm.export_dpa_excel,
+            "calendar": crm.export_calendar_excel,
+            "properties": properties.export_properties_excel,
+        }
+        for name in self.SURFACES:
+            assert params(fns[name]), f"{name} export takes no filters"

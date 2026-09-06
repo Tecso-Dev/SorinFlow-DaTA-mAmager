@@ -6248,6 +6248,15 @@ function exportPropertiesExcel() {
     if (category) params.set('category', category);
     if (search) params.set('search', search);
     if (type === 'buy' || type === 'rent') params.set('listing_type', type);
+    // The two rental bands were on the screen and not in the file, so a list
+    // narrowed by ودیعه or اجاره exported everything.
+    for (const [id, param] of [['filter-min-deposit', 'min_deposit'],
+                               ['filter-max-deposit', 'max_deposit'],
+                               ['filter-min-rent', 'min_rent_price'],
+                               ['filter-max-rent', 'max_rent_price']]) {
+        const v = document.getElementById(id)?.value;
+        if (v) params.set(param, v);
+    }
     _downloadExport(`${API_BASE}/properties/export/excel?${params}`, 'properties.xlsx');
 }
 

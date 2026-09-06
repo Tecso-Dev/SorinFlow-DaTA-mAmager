@@ -161,9 +161,17 @@ async def export_properties_excel(
     category: Optional[str] = None,
     listing_type: Optional[str] = None,
     search: Optional[str] = None,
+    min_deposit: Optional[int] = None,
+    max_deposit: Optional[int] = None,
+    min_rent_price: Optional[int] = None,
+    max_rent_price: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Excel counterpart of the properties JSON export (same filters)."""
+    """Excel counterpart of the properties list, filtered as the screen is.
+
+    The two rental bands used to be missing here while the screen sent them,
+    so exporting a list narrowed by ودیعه or اجاره handed back everything.
+    """
     query = select(Property).where(Property.is_active == True).order_by(Property.serial_no.desc())
     if city:
         query = query.where(Property.city_name.ilike(f"%{city}%"))
@@ -171,6 +179,14 @@ async def export_properties_excel(
         query = query.where(Property.category_name.ilike(f"%{category}%"))
     if listing_type:
         query = query.where(Property.listing_type == listing_type)
+    if min_deposit is not None:
+        query = query.where(Property.deposit >= min_deposit)
+    if max_deposit is not None:
+        query = query.where(Property.deposit <= max_deposit)
+    if min_rent_price is not None:
+        query = query.where(Property.rent_price >= min_rent_price)
+    if max_rent_price is not None:
+        query = query.where(Property.rent_price <= max_rent_price)
     if search:
         term = f"%{search}%"
         query = query.where(or_(Property.title.ilike(term), Property.description.ilike(term)))
