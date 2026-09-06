@@ -360,6 +360,19 @@ async def get_scraping_jobs(
     )
 
 
+async def _job_uuid_from(job_id: str, db: AsyncSession):
+    """Accept either the job UUID or the integer row id the panel also holds."""
+    try:
+        return uuid.UUID(job_id)
+    except ValueError:
+        job = (await db.execute(
+            select(ScrapingJob).where(ScrapingJob.id == int(job_id))
+        )).scalar_one_or_none() if job_id.isdigit() else None
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job.job_id
+
+
 @router.get("/jobs/{job_id}/events")
 async def get_job_events(
     job_id: str,
@@ -400,6 +413,49 @@ async def get_job_events(
             "stage": (r.details or {}).get("stage"),
             "message": r.message,
             "details": {k: v for k, v in (r.details or {}).items() if k != "stage"},
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        } for r in rows],
+    }
+
+
+@router.get("/jobs/{job_id}/skipped")
+async def get_job_skipped(
+    job_id: str,
+    reason: Optional[str] = None,
+    limit: int = 1000,
+    db: AsyncSession = Depends(get_db)
+):
+    """The listings this run saw and did not save, with their Divar links.
+
+    The finish line already says how many went and why — «۳۲ خارج از
+    دسته‌بندی، ۲ ودیعه، ۳ ناموفق» — but a count can only be checked for
+    arithmetic. This is the listings themselves, so they can be looked at and,
+    where the run was wrong to drop one, scraped again on their own.
+    """
+    from app.services import skipped_listings
+
+    job_uuid = await _job_uuid_from(job_id, db)
+    rows = await skipped_listings.for_job(db, job_uuid, limit=limit, reason=reason)
+    counts = await skipped_listings.counts_for_job(db, job_uuid)
+
+    from app.scraper.divar_scraper import DivarScraper
+    labels = DivarScraper._FILTER_LABELS_FA
+
+    return {
+        "job_id": str(job_uuid),
+        "count": len(rows),
+        # {bucket: {label, count}} — the panel groups by this without having
+        # to know the scraper's vocabulary.
+        "by_reason": {k: {"label": labels.get(k, k), "count": v}
+                      for k, v in sorted(counts.items(), key=lambda kv: -kv[1])},
+        "items": [{
+            "id": r.id,
+            "divar_id": r.divar_id,
+            "url": r.url,
+            "title": r.title,
+            "reason": r.reason,
+            "reason_label": labels.get(r.reason, r.reason),
+            "detail": r.detail,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         } for r in rows],
     }
