@@ -113,6 +113,7 @@ async def init_db():
                  _migrate_filing,
                  _migrate_advertiser_type,
                  _migrate_advertiser_signals,
+                 _backfill_advertiser_signals,
                  _migrate_cookie_usage,
                  _migrate_property_quality,
                  _migrate_job_finish_reason,
@@ -244,21 +245,68 @@ async def _migrate_advertiser_signals(conn):
 
     Divar's own declaration already has a column; these two sit beside it
     because Divar returns agency listings under a «شخصی» filter, and the
-    disagreement is the thing worth seeing. Existing rows land FALSE/NULL:
-    nothing rescans the archive, so an old row simply says nothing rather
-    than claiming to be private.
+    disagreement is the thing worth seeing.
+
+    Deliberately NO default, so existing rows land NULL rather than FALSE.
+    NULL means «not looked at yet» and FALSE means «looked at, private», and
+    the backfill below needs to tell those apart — a DEFAULT FALSE would have
+    silently declared the whole archive private before anything read a word
+    of it.
     """
     try:
         from sqlalchemy import text
         await conn.execute(text(
             "ALTER TABLE properties "
-            "ADD COLUMN IF NOT EXISTS agency_suspected BOOLEAN DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS agency_suspected BOOLEAN, "
             "ADD COLUMN IF NOT EXISTS agency_evidence VARCHAR(100)"))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_properties_agency_suspected "
             "ON properties (agency_suspected)"))
     except Exception as e:
         print(f"advertiser signals migration skipped: {e}")
+
+
+# One boot's worth. Small enough that a rollout never waits on it, large
+# enough that an archive of a few thousand is done on the first restart.
+_ADVERTISER_BACKFILL_BATCH = 5000
+
+
+async def _backfill_advertiser_signals(conn):
+    """Read the label onto the listings already stored.
+
+    The scraper labels what it saves from here on, but the listing that
+    prompted all this — «املاک هستم», filed as شخصی — was scraped weeks ago
+    and is one of about twelve hundred already in the table. A label that
+    only applies to future rows would leave the panel quietly saying nothing
+    about the ones somebody is actually looking at.
+
+    Pure text over rows already held: no network, no files, no Divar. Capped
+    per boot and driven off `agency_suspected IS NULL`, so it converges and
+    then costs one indexed count forever after.
+    """
+    try:
+        from sqlalchemy import text
+        from app.services import advertiser_signals
+
+        rows = (await conn.execute(text(
+            "SELECT id, title, description FROM properties "
+            "WHERE agency_suspected IS NULL LIMIT :n"
+        ), {"n": _ADVERTISER_BACKFILL_BATCH})).all()
+        if not rows:
+            return
+
+        flagged = 0
+        for r in rows:
+            looks, phrase = advertiser_signals.detect(r.description, r.title)
+            if looks:
+                flagged += 1
+            await conn.execute(text(
+                "UPDATE properties SET agency_suspected = :s, agency_evidence = :e "
+                "WHERE id = :i"
+            ), {"s": looks, "e": phrase, "i": r.id})
+        print(f"advertiser backfill: {len(rows)} read, {flagged} look like agencies")
+    except Exception as e:
+        print(f"advertiser backfill skipped: {e}")
 
 
 async def _migrate_filing(conn):

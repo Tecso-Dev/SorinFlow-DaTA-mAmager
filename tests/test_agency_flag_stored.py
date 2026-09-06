@@ -80,13 +80,15 @@ class TestTheMigration:
         block = DB[i:DB.index("async def _migrate_filing", i)]
         assert "except Exception" in block
 
-    def test_old_rows_are_left_saying_nothing(self):
-        """Nothing rescans the archive, so FALSE here means «not checked», and
-        the docstring has to say so or someone will read it as «private»."""
+    def test_old_rows_land_unknown_rather_than_private(self):
+        """NULL is «not looked at yet» and FALSE is «looked at, private». A
+        DEFAULT FALSE would declare the whole archive private before anything
+        read a word of it — and leave no way to find the rows still owed a
+        reading, which is what the backfill selects on."""
         i = DB.index("async def _migrate_advertiser_signals")
-        block = DB[i:DB.index("async def _migrate_filing", i)]
-        assert "claiming to be private" in block
-        assert "Existing rows land FALSE/NULL" in block
+        block = DB[i:DB.index("_ADVERTISER_BACKFILL_BATCH", i)]
+        assert "agency_suspected BOOLEAN DEFAULT" not in block
+        assert "not looked at yet" in block
 
 
 class TestTheScraperLabelsEveryRecord:
