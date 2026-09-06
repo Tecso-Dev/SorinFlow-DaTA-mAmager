@@ -76,7 +76,7 @@ def _apply_lead_filters(
     *,
     status=None, city=None, category=None, search=None, notified=None,
     date_from=None, date_to=None, price_min=None, price_max=None,
-    property_kind=None,
+    property_kind=None, advertiser=None,
 ):
     """Every filter the leads list understands, in one place.
 
@@ -125,6 +125,24 @@ def _apply_lead_filters(
         query = query.where(Lead.price >= price_min)
     if price_max is not None:
         query = query.where(Lead.price <= price_max)
+    # ── آگهی‌دهنده ────────────────────────────────────────────────────────
+    # Two sources, either of which is enough: what Divar declared, and what
+    # the ad's own words say. Divar's is missing on plenty of rows and wrong
+    # on some of the rest — a listing that ends «املاک هستم» came back through
+    # a «شخصی» filter — so «املاکی» is the union rather than either alone.
+    #
+    # «شخصی» is then the complement, which also takes in hand-entered leads
+    # with no linked property: nothing about them says agency, and dropping
+    # them from the view would read as the filter losing rows.
+    if (advertiser or "").strip() in ("agency", "personal"):
+        looks_agency = select(Property.id).where(
+            Property.id == Lead.property_id,
+            or_(Property.agency_suspected.is_(True),
+                Property.advertiser_type == "agency"),
+        ).correlate(Lead).exists()
+        query = query.where(
+            looks_agency if advertiser.strip() == "agency" else not_(looks_agency))
+
     # ── نوع ملک ──────────────────────────────────────────────────────────
     # «خرید مسکونی» on Divar holds apartments, villas and کلنگی together, so
     # the category alone cannot separate them. The kind lives on the linked
@@ -174,6 +192,7 @@ async def list_leads(
     price_min: Optional[int] = None,
     price_max: Optional[int] = None,
     property_kind: Optional[str] = None,
+    advertiser: Optional[str] = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -184,6 +203,7 @@ async def list_leads(
         status=status, city=city, category=category, search=search,
         notified=notified, date_from=date_from, date_to=date_to,
         price_min=price_min, price_max=price_max, property_kind=property_kind,
+        advertiser=advertiser,
     )
 
     count_result = await db.execute(select(func.count()).select_from(query.subquery()))
@@ -379,6 +399,7 @@ async def export_leads_excel(
     price_min: Optional[int] = None,
     price_max: Optional[int] = None,
     property_kind: Optional[str] = None,
+    advertiser: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -392,6 +413,7 @@ async def export_leads_excel(
         status=status, city=city, category=category, search=search,
         notified=notified, date_from=date_from, date_to=date_to,
         price_min=price_min, price_max=price_max, property_kind=property_kind,
+        advertiser=advertiser,
     )
     items = (await db.execute(query.limit(5000))).scalars().all()
 

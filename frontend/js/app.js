@@ -4089,6 +4089,8 @@ function clearLeadsFilter() {
     if (catEl) catEl.value = '';
     const kindEl = document.getElementById('crm-filter-kind');
     if (kindEl) kindEl.value = '';
+    const advEl = document.getElementById('crm-filter-advertiser');
+    if (advEl) advEl.value = '';
     _resetLeadsPriceInputs();
     clearLeadsDateFilter();          // reloads the list
 }
@@ -4254,6 +4256,7 @@ function _leadsQueryString() {
     const search   = document.getElementById('crm-filter-search')?.value.trim() || '';
     const category = document.getElementById('crm-filter-category')?.value || '';
     const kind     = document.getElementById('crm-filter-kind')?.value || '';
+    const adv      = document.getElementById('crm-filter-advertiser')?.value || '';
     // _intOrNull reads the field itself so it can strip the «/» separators
     const priceMin = _intOrNull('crm-filter-price-min');
     const priceMax = _intOrNull('crm-filter-price-max');
@@ -4264,6 +4267,7 @@ function _leadsQueryString() {
     if (search)           parts.push(`search=${encodeURIComponent(search)}`);
     if (category)         parts.push(`category=${encodeURIComponent(category)}`);
     if (kind)             parts.push(`property_kind=${encodeURIComponent(kind)}`);
+    if (adv)              parts.push(`advertiser=${encodeURIComponent(adv)}`);
     if (_leadsDateFrom)   parts.push(`date_from=${_leadsDateFrom}`);
     if (_leadsDateTo)     parts.push(`date_to=${_leadsDateTo}`);
     if (priceMin != null) parts.push(`price_min=${priceMin}`);

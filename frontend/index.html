@@ -1443,6 +1443,15 @@
                                         <option value="shop">مغازه</option>
                                         <option value="office">دفتر کار</option>
                                     </select>
+                                    <!-- «املاکی» = یا دیوار گفته مشاور املاک، یا متن
+                                         خودِ آگهی. دیوار روی خیلی از آگهی‌ها چیزی
+                                         نمی‌گوید و روی بعضی اشتباه می‌گوید. -->
+                                    <select id="crm-filter-advertiser" class="form-select form-select-sm" style="width:150px;"
+                                            onchange="reloadLeadsFromFilter()">
+                                        <option value="">همه آگهی‌دهنده‌ها</option>
+                                        <option value="personal">شخصی</option>
+                                        <option value="agency">املاکی</option>
+                                    </select>
                                     <select id="crm-filter-status" class="form-select form-select-sm" style="width:140px;">
                                         <option value="">همه وضعیت‌ها</option>
                                         <option value="new">جدید</option>
@@ -3897,7 +3906,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260906c"></script>
+<script src="js/app.js?v=20260906d"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">
