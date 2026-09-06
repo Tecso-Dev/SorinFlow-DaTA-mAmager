@@ -138,3 +138,47 @@ class TestBackToLoginFullyResetsTheForm:
         js = _code_only(APP_JS)
         fn = js.split("function backToLogin")[1].split("\nfunction ")[0]
         assert "_totpSession = null" in fn and "_emailSession = null" in fn
+
+
+class TestEveryCodeFieldTakesPersianDigits:
+    """This panel is Persian and most of its users type on a Persian keyboard.
+    An unwired field sends ۱۲۳۴۵, the server rejects it, and the message says
+    the code is wrong — which points the user at the code rather than at the
+    keyboard. _wireOtp already existed; the new fields simply were not given it."""
+
+    CODE_INPUTS = ["login-totp-code", "login-email-code", "reset-code"]
+
+    def test_every_code_input_is_wired(self):
+        js = _code_only(APP_JS)
+        missing = [i for i in self.CODE_INPUTS if f"_wireOtp('{i}'" not in js]
+        assert not missing, f"code fields with no Persian-digit handling: {missing}"
+
+    def test_the_field_length_matches_the_code_the_server_makes(self):
+        """maxlength drives the auto-submit (`value.length === maxLength`), so a
+        field one digit too long simply never fires it."""
+        from app.config import get_settings
+        n = max(4, min(8, get_settings().auth_code_length))
+        html = Path("frontend/index.html").read_text(encoding="utf-8")
+        for eid in ("login-email-code", "reset-code"):
+            m = re.search(r'<input[^>]*id="%s"[^>]*?maxlength="(\d+)"' % eid, html, re.S)
+            assert m, f"{eid} has no maxlength"
+            assert int(m.group(1)) == n, (
+                f"{eid} accepts {m.group(1)} digits but generate_code() makes {n}")
+
+
+class TestShowLoginPageResetsEveryStep:
+    """backToLogin was fixed for this; showLoginPage — the path a logout takes —
+    was not, so it hid step 2 and the register form but left the email and reset
+    steps visible, stacking two forms on the login page."""
+
+    def test_it_hides_all_the_non_default_steps(self):
+        js = _code_only(APP_JS)
+        fn = js.split("function showLoginPage")[1].split("\nfunction ")[0]
+        for step in ("login-step-2", "login-step-register",
+                     "login-step-email", "login-step-reset"):
+            assert step in fn, f"showLoginPage leaves {step} on screen"
+
+    def test_it_drops_both_pending_sessions(self):
+        js = _code_only(APP_JS)
+        fn = js.split("function showLoginPage")[1].split("\nfunction ")[0]
+        assert "_totpSession = null" in fn and "_emailSession = null" in fn

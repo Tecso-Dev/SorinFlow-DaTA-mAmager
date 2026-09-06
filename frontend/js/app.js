@@ -747,6 +747,12 @@ function showLoginPage() {
     document.getElementById('login-step-1')?.classList.remove('d-none');
     document.getElementById('login-step-2')?.classList.add('d-none');
     document.getElementById('login-step-register')?.classList.add('d-none');
+    // The email and reset steps too. Missing them leaves the login page
+    // showing two forms at once after a logout from an email-2FA account.
+    document.getElementById('login-step-email')?.classList.add('d-none');
+    document.getElementById('login-step-reset')?.classList.add('d-none');
+    _totpSession = null;
+    _emailSession = null;
     document.getElementById('login-error')?.classList.add('d-none');
     document.getElementById('login-toggle-link') && (document.getElementById('login-toggle-link').style.display = '');
     document.getElementById('register-toggle-link') && (document.getElementById('register-toggle-link').style.display = 'none');
@@ -9198,6 +9204,13 @@ document.addEventListener('DOMContentLoaded', () => {
     _watchCaps('reg-password', 'caps-reg');
     const pw = document.getElementById('reg-password');
     if (pw) pw.addEventListener('input', _paintStrength);
+    // Every code field, not just the authenticator's. The two added with the
+    // email second factor were left unwired, so on a Persian keyboard — the
+    // default for this audience — the digits went up as ۱۲۳۴۵ and came back
+    // «کد نادرست است», which reads as the code being wrong rather than the
+    // keyboard.
+    _wireOtp('login-email-code', () => verifyEmailLogin());
+    _wireOtp('reset-code', () => {});
     _wireOtp('login-totp-code', () => {
         const b = document.getElementById('login-totp-btn');
         if (b && !b.disabled) verifyTotpLogin();
