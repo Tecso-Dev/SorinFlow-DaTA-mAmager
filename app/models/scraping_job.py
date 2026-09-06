@@ -99,3 +99,34 @@ class ScrapingLog(Base):
     
     def __repr__(self):
         return f"<ScrapingLog(id={self.id}, level={self.level}, message={self.message[:30]}...)>"
+
+
+class SkippedListing(Base):
+    """A candidate a run saw and did not save, kept so it can be retried.
+
+    Every run drops listings for reasons that are usually correct — a filter
+    said no, the category did not match, the page would not open — and until
+    now the only trace was a number in the finish line. «۳۲ خارج از دسته‌بندی»
+    is not something anyone can check or act on: the listings themselves were
+    gone.
+
+    One row per drop, with the Divar link, so the panel can show them and a
+    single scrape can pick one up afterwards.
+    """
+    __tablename__ = "skipped_listings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("scraping_jobs.job_id"), index=True)
+    divar_id = Column(String(32), index=True)
+    url = Column(String(400))
+    title = Column(String(300))
+    # The tally bucket the run counted it under — «category», «deposit»,
+    # «failed» — so the panel can name it with the labels it already has.
+    reason = Column(String(64), index=True)
+    # The specific one, where there is a specific one: «صفحه باز نشد», or the
+    # filter's own words.
+    detail = Column(String(300))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<SkippedListing({self.divar_id} {self.reason})>"
