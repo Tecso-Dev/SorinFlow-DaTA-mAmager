@@ -67,7 +67,10 @@ class TestTheRunTalliesThem:
         assert '"نامعلوم"' in self._none_branch()
 
     def test_a_failed_save_is_its_own_reason(self):
-        assert 'fail_tally["ذخیره نشد"]' in SCRAPER
+        """Grouped by what the database said, so five of one problem read as
+        five of one problem."""
+        assert "fail_tally[_save_why]" in SCRAPER
+        assert '"ذخیره نشد"' in SCRAPER
 
     def test_a_raised_listing_is_recorded_by_exception_type(self):
         assert "fail_tally[type(e).__name__]" in SCRAPER

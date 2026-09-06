@@ -54,7 +54,7 @@ class TestAllThreeRoutesAreCovered:
 
     def test_a_failed_save_is_recorded(self):
         assert "skipped_listings.record(" in \
-            between('fail_tally["ذخیره نشد"]', "elif detail is None:")
+            between("fail_tally[_save_why]", "elif detail is None:")
 
     def test_a_listing_that_threw_is_recorded(self):
         assert "skipped_listings.record(" in \
