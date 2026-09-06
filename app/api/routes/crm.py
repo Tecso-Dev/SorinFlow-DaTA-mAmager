@@ -686,12 +686,15 @@ async def export_customers_excel(
 
 @router.get("/dpa/export/excel")
 async def export_dpa_excel(
+    search: Optional[str] = None,
+    date_jalali: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Excel export of daily performance records with the score breakdown."""
-    items = (await db.execute(
-        select(DailyPerformance).order_by(DailyPerformance.created_at.desc()).limit(5000)
+    items = (await db.execute(_apply_dpa_filters(
+        select(DailyPerformance).order_by(DailyPerformance.created_at.desc()),
+        search=search, date_jalali=date_jalali).limit(5000)
     )).scalars().all()
 
     headers = ["#", "تاریخ", "مشاور", "نقش", "فایل جدید", "بازدید", "آفر", "قرارداد",
@@ -1223,6 +1226,19 @@ def _apply_dpa_payload(dpa: DailyPerformance, data: dict) -> None:
         dpa.activities = cleaned
 
 
+def _apply_dpa_filters(query, *, search=None, date_jalali=None):
+    """Every filter the daily-performance list understands, in one place.
+
+    The Excel export took neither, so searching for one agent and exporting
+    handed back the whole team's records.
+    """
+    if search:
+        query = query.where(DailyPerformance.agent_name.ilike(f"%{search.strip()}%"))
+    if date_jalali:
+        query = query.where(DailyPerformance.date_jalali == date_jalali.strip())
+    return query
+
+
 @router.get("/dpa")
 async def list_dpa(
     search: Optional[str] = None,
@@ -1231,11 +1247,9 @@ async def list_dpa(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(DailyPerformance).order_by(DailyPerformance.created_at.desc())
-    if search:
-        query = query.where(DailyPerformance.agent_name.ilike(f"%{search.strip()}%"))
-    if date_jalali:
-        query = query.where(DailyPerformance.date_jalali == date_jalali.strip())
+    query = _apply_dpa_filters(
+        select(DailyPerformance).order_by(DailyPerformance.created_at.desc()),
+        search=search, date_jalali=date_jalali)
     count = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
     items = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
     return {"items": [d.to_dict() for d in items], "total": count}
@@ -2035,11 +2049,19 @@ async def upcoming_events(
 async def export_calendar_excel(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    event_type: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Excel counterpart of the calendar (appointments only, not overlays)."""
+    """Excel counterpart of the calendar (appointments only, not overlays).
+
+    Filtered as the screen is: the type dropdown narrows the calendar and used
+    to be dropped here, so exporting a month of «بازدید ملک» handed back every
+    appointment in it.
+    """
     q = select(CalendarEvent).order_by(CalendarEvent.start_at.asc())
+    if event_type:
+        q = q.where(CalendarEvent.event_type == event_type)
     for value, column, op in ((date_from, CalendarEvent.start_at, "ge"),
                               (date_to, CalendarEvent.start_at, "lt")):
         if value:

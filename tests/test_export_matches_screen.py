@@ -124,7 +124,60 @@ class TestTheGenericExportIsNotSilentlyReintroduced:
     """exportExcel(type) sends no filters at all. Every list that has filters
     needs its own, so this pins which lists may still use the generic one."""
 
-    def test_only_dpa_still_uses_it(self):
+    def test_no_filtered_list_uses_it_any_more(self):
         import re
         used = set(re.findall(r"exportExcel\('([a-z]+)'\)", INDEX))
-        assert used <= {"dpa"}, f"a filtered list is back on the generic export: {used}"
+        assert used == set(), \
+            f"a filtered list is back on the filterless export: {used}"
+
+
+class TestDailyPerformance:
+    def test_the_export_takes_the_list_s_filters(self):
+        listed = set(params(crm.list_dpa)) - {"limit", "offset"}
+        assert set(params(crm.export_dpa_excel)) == listed
+
+    def test_both_go_through_one_helper(self):
+        for fn in (crm.list_dpa, crm.export_dpa_excel):
+            assert "_apply_dpa_filters(" in inspect.getsource(fn), fn.__name__
+
+    def test_searching_one_agent_no_longer_exports_the_team(self):
+        src = inspect.getsource(crm._apply_dpa_filters)
+        assert "DailyPerformance.agent_name.ilike" in src
+
+    def test_the_panel_shares_one_query_string(self):
+        assert "function _dpaQueryString()" in APP_JS
+        for fn in ("async function loadDpa()", "function exportDpaExcel()"):
+            i = APP_JS.index(fn)
+            assert "_dpaQueryString()" in APP_JS[i:i + 300], fn
+
+
+class TestCalendar:
+    def test_the_export_accepts_the_type_the_screen_filters_by(self):
+        assert "event_type" in params(crm.export_calendar_excel)
+
+    def test_it_applies_it(self):
+        src = inspect.getsource(crm.export_calendar_excel)
+        assert "CalendarEvent.event_type == event_type" in src
+
+    def test_the_screen_and_the_file_filter_on_the_same_column(self):
+        """The screen filters inside _calendar_rows, which the export cannot
+        reuse — it deliberately excludes the task/reminder overlays. So the
+        one thing to pin is that both narrow on the same column."""
+        rows = inspect.getsource(crm._calendar_rows)
+        assert "CalendarEvent.event_type == event_type" in rows
+        assert "CalendarEvent.event_type == event_type" in \
+            inspect.getsource(crm.export_calendar_excel)
+
+    def test_the_export_still_excludes_the_overlays(self):
+        """Tasks and reminders are drawn on the calendar but are not
+        appointments; the file is appointments."""
+        assert "include_overlay" not in inspect.getsource(crm.export_calendar_excel)
+
+    def test_the_button_sends_the_current_type(self):
+        i = APP_JS.index("function exportCalendarExcel()")
+        block = APP_JS[i:i + 700]
+        assert "_calType" in block and "event_type=" in block
+
+    def test_it_sends_nothing_when_no_type_is_chosen(self):
+        i = APP_JS.index("function exportCalendarExcel()")
+        assert "_calType ?" in APP_JS[i:i + 700]

@@ -4901,10 +4901,20 @@ function updateDpaScore() {
     totalEl.className = 'h3 mb-0 ' + (s.total >= target ? 'text-success' : 'text-primary');
 }
 
-async function loadDpa() {
+/** The daily-performance list's filters, shared with its export. */
+function _dpaQueryString() {
     const search = document.getElementById('dpa-search')?.value.trim() || '';
-    let url = '/crm/dpa?limit=100';
-    if (search) url += `&search=${encodeURIComponent(search)}`;
+    return search ? `search=${encodeURIComponent(search)}` : '';
+}
+
+function exportDpaExcel() {
+    const f = _dpaQueryString();
+    _downloadExport(`${API_BASE}/crm/dpa/export/excel${f ? '?' + f : ''}`, 'dpa.xlsx');
+}
+
+async function loadDpa() {
+    const f = _dpaQueryString();
+    let url = `/crm/dpa?limit=100${f ? '&' + f : ''}`;
 
     try {
         const data = await apiCall(url);
@@ -6243,8 +6253,11 @@ function exportPropertiesExcel() {
 
 function exportCalendarExcel() {
     const { start, end } = _calRange();
+    // The type dropdown narrows the calendar; the file has to be narrowed the
+    // same way or it silently contains appointments the screen was hiding.
+    const type = _calType ? `&event_type=${encodeURIComponent(_calType)}` : '';
     _downloadExport(
-        `${API_BASE}/crm/calendar/export/excel?date_from=${_isoLocal(start)}&date_to=${_isoLocal(end)}`,
+        `${API_BASE}/crm/calendar/export/excel?date_from=${_isoLocal(start)}&date_to=${_isoLocal(end)}${type}`,
         'calendar.xlsx');
 }
 
