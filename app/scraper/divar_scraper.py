@@ -1415,12 +1415,13 @@ class DivarScraper:
             decoded_url = unquote(actual_url)
 
             # ── Category-specific URL check (tight) ──────────────────────────
+            category_unconfirmed = False
+            patterns = self.CATEGORY_URL_PATTERNS.get(target_category or "", ())
             # When a target category is known, we require the redirected URL to
             # contain at least one of the expected substrings for that category.
             # This blocks job ads, factory listings, etc. that share keywords
             # with real-estate (e.g. "دفتری" matching "دفتر").
-            if target_category and target_category in self.CATEGORY_URL_PATTERNS:
-                patterns = self.CATEGORY_URL_PATTERNS[target_category]
+            if patterns:
                 # Listing URLs are built as bare /v/<token>; Divar only adds a
                 # descriptive slug for some of them on redirect, so the URL alone
                 # carries no category signal for the rest. Fall back to the title
@@ -1442,18 +1443,26 @@ class DivarScraper:
                         logger.debug(f"could not read the page title: {e}")
                     haystack = f"{haystack} {page_title}"
                 if not self._category_matches(haystack, patterns):
+                    # Nothing here says what this is — and that is not the same
+                    # as saying it is the wrong thing.
+                    #
+                    # Dropping on it cost one run seventeen listings, and the
+                    # panel's own list of them showed all seventeen were real
+                    # Urmia apartment rentals: «گلشهر ۲ تمام رهن», «اجاره رهن
+                    # ۱۴۵متر», «۲۰۰ متر بر دانشکده». None names a property type
+                    # because ads written by people often do not, and the page
+                    # title was «سایت دیوار» because React had not replaced it
+                    # yet at domcontentloaded.
+                    #
+                    # Divar's own breadcrumb does say, authoritatively, and the
+                    # parse below already reads it. So do not decide here on an
+                    # absence — carry the doubt to where the answer is.
                     logger.info(
-                        f"Skipping off-category listing for '{target_category}' "
+                        f"Category unconfirmed for '{target_category}' "
                         f"(URL: {decoded_url}, title: {source_title!r}, "
-                        f"page title: {page_title!r})"
+                        f"page title: {page_title!r}) — deferring to the breadcrumb"
                     )
-                    # What was thrown away, in words, for the run to show. «۳۲
-                    # خارج از دسته‌بندی» can be the guard working exactly as
-                    # intended or it can be thirty-two real apartments, and the
-                    # count alone does not say which. A name does.
-                    self._last_category_drop = (
-                        page_title or source_title or decoded_url)[:80]
-                    return False  # sentinel: category skip — not a scrape error
+                    category_unconfirmed = True
             else:
                 # Fallback broad check when no category is known
                 REAL_ESTATE_URL_KEYWORDS = [
@@ -1641,6 +1650,30 @@ class DivarScraper:
                         property_data['listing_type'] = 'buy'
             except Exception:
                 pass
+
+            # Divar's own answer, now that the page has been parsed.
+            #
+            # This is where the doubt raised above is settled. The breadcrumb
+            # is Divar's own words for what this ad is («املاک › اجاره مسکونی ›
+            # اجاره آپارتمان»), so it is worth more than any keyword we could
+            # look for in a title. Placed before the contact reveal on purpose:
+            # a reveal costs the account an SMS and a listing about to be
+            # dropped must not spend one.
+            if category_unconfirmed:
+                leaf = property_data.get("category_name") or ""
+                if leaf and not self._category_matches(leaf, patterns):
+                    logger.info(
+                        f"Skipping off-category listing for '{target_category}' "
+                        f"— Divar's breadcrumb says {leaf!r}")
+                    self._last_category_drop = f"{leaf} — {source_title or decoded_url}"[:80]
+                    return False  # sentinel: category skip — not a scrape error
+                # No breadcrumb either. Keep it: this listing came out of a
+                # search Divar itself filtered by category, and that is better
+                # evidence than a word we could not find.
+                if not leaf:
+                    logger.info(
+                        f"No breadcrumb for {property_data.get('divar_id')} — keeping it; "
+                        f"Divar's own category filter is the better evidence")
 
             # Infer listing_type (buy/rent) from the parsed price fields when the
             # breadcrumb didn't supply it (e.g. job category missing).

@@ -35,10 +35,12 @@ class TestTheDropIsNamed:
     def test_the_detail_scrape_records_what_it_dropped(self):
         assert "self._last_category_drop" in DETAIL
 
-    def test_it_prefers_the_page_title(self):
-        """«اجاره آپارتمان ۸۵ متری» tells the reader more than a token URL."""
+    def test_it_names_what_divar_called_the_ad(self):
+        """The breadcrumb leaf is Divar's own word for the category, which is
+        the thing the reader needs in order to judge the drop."""
         i = DETAIL.index("self._last_category_drop")
-        assert "page_title or source_title or decoded_url" in DETAIL[i:i + 200]
+        assert "leaf" in DETAIL[i:i + 200]
+        assert "source_title or decoded_url" in DETAIL[i:i + 200]
 
     def test_it_is_recorded_before_the_listing_is_abandoned(self):
         i = DETAIL.index("self._last_category_drop")

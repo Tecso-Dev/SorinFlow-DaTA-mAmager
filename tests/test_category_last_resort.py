@@ -39,25 +39,30 @@ class TestTheFallbackExists:
         the listings that were never in doubt."""
         i = SRC.index("haystack = f\"{decoded_url}")
         j = SRC.index("await self.page.title()")
-        between = SRC[i:j]
-        assert "if not any(p in haystack for p in patterns):" in between
+        assert "if not self._category_matches(haystack, patterns):" in SRC[i:j]
 
     def test_it_joins_the_haystack_rather_than_replacing_it(self):
         i = SRC.index("await self.page.title()")
         assert 'haystack = f"{haystack} {page_title}"' in SRC[i:i + 400]
 
-    def test_the_listing_is_still_dropped_when_nothing_says_otherwise(self):
-        assert "return False  # sentinel: category skip" in SRC
+    def test_a_page_title_that_matches_settles_it_there_and_then(self):
+        """When it does say what the ad is, nothing further is needed."""
+        assert SRC.count("self._category_matches(haystack, patterns)") == 2
+
+    def test_a_page_title_that_says_nothing_no_longer_drops_the_listing(self):
+        """It is «سایت دیوار» more often than not — React has not replaced it
+        at domcontentloaded — and that is not a category."""
+        i = SRC.index("await self.page.title()")
+        assert "category_unconfirmed = True" in SRC[i:SRC.index("else:", i)]
 
     def test_an_unreadable_title_does_not_take_the_run_with_it(self):
         i = SRC.index("await self.page.title()")
         assert "except Exception" in SRC[i - 200:i + 300]
 
-    def test_the_page_title_is_named_in_the_drop_log(self):
-        """Otherwise the log says a listing was dropped and shows only the two
-        signals that were empty."""
-        i = SRC.index("Skipping off-category listing")
-        assert "page title" in SRC[i:i + 400]
+    def test_the_page_title_is_named_where_the_doubt_is_raised(self):
+        """Otherwise the log records doubt and shows none of what caused it."""
+        i = SRC.index("Category unconfirmed for")
+        assert "page title" in SRC[i:SRC.index("category_unconfirmed = True", i)]
 
 
 class TestWhatThePageTitleRecovers:
