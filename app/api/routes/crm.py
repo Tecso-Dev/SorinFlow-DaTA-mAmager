@@ -865,16 +865,12 @@ async def match_properties_for_customer(
 # CONTACTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.get("/contacts")
-async def list_contacts(
-    search: Optional[str] = None,
-    contact_type: Optional[str] = None,
-    category: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
-):
-    query = select(Contact).order_by(Contact.created_at.desc())
+def _apply_contact_filters(query, *, search=None, contact_type=None, category=None):
+    """Every filter the phone book understands, in one place.
+
+    Both exports took none of them, so a book narrowed to «مالک» handed back
+    every contact in it — in Excel and in JSON.
+    """
     if search:
         query = query.where(or_(
             Contact.name.ilike(f"%{search}%"),
@@ -885,6 +881,21 @@ async def list_contacts(
         query = query.where(Contact.contact_type == contact_type)
     if category:
         query = query.where(Contact.category == category)
+    return query
+
+
+@router.get("/contacts")
+async def list_contacts(
+    search: Optional[str] = None,
+    contact_type: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    query = _apply_contact_filters(
+        select(Contact).order_by(Contact.created_at.desc()),
+        search=search, contact_type=contact_type, category=category)
     count = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
     items = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
     return {"items": [c.to_dict() for c in items], "total": count}
@@ -920,6 +931,9 @@ async def create_contact(data: dict, db: AsyncSession = Depends(get_db)):
 
 @router.get("/contacts/export/excel")
 async def export_contacts_excel(
+    search: Optional[str] = None,
+    contact_type: Optional[str] = None,
+    category: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -929,7 +943,10 @@ async def export_contacts_excel(
     except ImportError:
         raise HTTPException(status_code=500, detail="openpyxl not installed")
 
-    items = (await db.execute(select(Contact).order_by(Contact.name))).scalars().all()
+    items = (await db.execute(_apply_contact_filters(
+        select(Contact).order_by(Contact.name),
+        search=search, contact_type=contact_type, category=category
+    ))).scalars().all()
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "مخاطبین"
@@ -964,10 +981,16 @@ async def export_contacts_excel(
 
 @router.get("/contacts/export/json")
 async def export_contacts_json(
+    search: Optional[str] = None,
+    contact_type: Optional[str] = None,
+    category: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = require_super_admin,
 ):
-    items = (await db.execute(select(Contact).order_by(Contact.name))).scalars().all()
+    items = (await db.execute(_apply_contact_filters(
+        select(Contact).order_by(Contact.name),
+        search=search, contact_type=contact_type, category=category
+    ))).scalars().all()
     import json
     data = json.dumps([c.to_dict() for c in items], ensure_ascii=False, default=str, indent=2)
     return StreamingResponse(
@@ -1483,6 +1506,19 @@ async def delete_task(
 # DEALS
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _apply_deal_filters(query, *, status=None, deal_type=None):
+    """Every filter the deals list understands, in one place.
+
+    The exports took neither, so a list narrowed to «در حال مذاکره» handed
+    back every deal ever recorded.
+    """
+    if status:
+        query = query.where(Deal.status == status)
+    if deal_type:
+        query = query.where(Deal.deal_type == deal_type)
+    return query
+
+
 @router.get("/deals")
 async def list_deals(
     status: Optional[str] = None,
@@ -1491,11 +1527,9 @@ async def list_deals(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Deal).order_by(Deal.created_at.desc())
-    if status:
-        query = query.where(Deal.status == status)
-    if deal_type:
-        query = query.where(Deal.deal_type == deal_type)
+    query = _apply_deal_filters(
+        select(Deal).order_by(Deal.created_at.desc()),
+        status=status, deal_type=deal_type)
     count = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
     items = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
     result = []
@@ -1547,6 +1581,8 @@ async def create_deal(data: dict, db: AsyncSession = Depends(get_db)):
 
 @router.get("/deals/export/excel")
 async def export_deals_excel(
+    status: Optional[str] = None,
+    deal_type: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1556,7 +1592,9 @@ async def export_deals_excel(
     except ImportError:
         raise HTTPException(status_code=500, detail="openpyxl not installed")
 
-    items = (await db.execute(select(Deal).order_by(Deal.created_at.desc()))).scalars().all()
+    items = (await db.execute(_apply_deal_filters(
+        select(Deal).order_by(Deal.created_at.desc()),
+        status=status, deal_type=deal_type))).scalars().all()
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "معاملات"
@@ -1583,10 +1621,14 @@ async def export_deals_excel(
 
 @router.get("/deals/export/json")
 async def export_deals_json(
+    status: Optional[str] = None,
+    deal_type: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = require_super_admin,
 ):
-    items = (await db.execute(select(Deal).order_by(Deal.created_at.desc()))).scalars().all()
+    items = (await db.execute(_apply_deal_filters(
+        select(Deal).order_by(Deal.created_at.desc()),
+        status=status, deal_type=deal_type))).scalars().all()
     import json
     data = json.dumps([d.to_dict() for d in items], ensure_ascii=False, default=str, indent=2)
     return StreamingResponse(

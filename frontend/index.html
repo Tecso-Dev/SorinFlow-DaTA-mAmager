@@ -1246,7 +1246,7 @@
                                         <option value="cold">سرد</option>
                                     </select>
                                     <button class="btn btn-sm btn-success" onclick="openContactModal()"><i class="bi bi-plus-lg"></i> مخاطب جدید</button>
-                                    <button class="btn btn-sm btn-outline-success" onclick="exportExcel('contacts')"><i class="bi bi-file-earmark-excel"></i> خروجی اکسل</button>
+                                    <button class="btn btn-sm btn-outline-success" onclick="exportContactsExcel()"><i class="bi bi-file-earmark-excel"></i> خروجی اکسل</button>
                                     <button class="btn btn-sm btn-outline-info crm-superadmin-only" onclick="exportJson('contacts')" style="display:none;"><i class="bi bi-filetype-json"></i> خروجی JSON</button>
                                 </div>
                             </div>
@@ -1274,7 +1274,7 @@
                                         <option value="cancelled">لغو شده</option>
                                     </select>
                                     <button class="btn btn-sm btn-success" onclick="openDealModal()"><i class="bi bi-plus-lg"></i> معامله جدید</button>
-                                    <button class="btn btn-sm btn-outline-success" onclick="exportExcel('deals')"><i class="bi bi-file-earmark-excel"></i> خروجی اکسل</button>
+                                    <button class="btn btn-sm btn-outline-success" onclick="exportDealsExcel()"><i class="bi bi-file-earmark-excel"></i> خروجی اکسل</button>
                                     <button class="btn btn-sm btn-outline-info crm-superadmin-only" onclick="exportJson('deals')" style="display:none;"><i class="bi bi-filetype-json"></i> خروجی JSON</button>
                                 </div>
                             </div>
@@ -3906,7 +3906,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260906f"></script>
+<script src="js/app.js?v=20260906g"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

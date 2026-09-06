@@ -5774,14 +5774,27 @@ async function markTaskDone(id) {
 //  CRM — CONTACTS
 // ═══════════════════════════════════════════════════════════════
 
-async function loadContacts() {
+/** The phone book's filters as a query string, shared with its exports. */
+function _contactsQueryString() {
     const search = document.getElementById('contact-search')?.value.trim() || '';
     const type = document.getElementById('contact-filter-type')?.value || '';
     const category = document.getElementById('contact-filter-category')?.value || '';
-    let url = '/crm/contacts?limit=200';
-    if (search) url += `&search=${encodeURIComponent(search)}`;
-    if (type) url += `&contact_type=${type}`;
-    if (category) url += `&category=${category}`;
+    const parts = [];
+    if (search) parts.push(`search=${encodeURIComponent(search)}`);
+    if (type) parts.push(`contact_type=${encodeURIComponent(type)}`);
+    if (category) parts.push(`category=${encodeURIComponent(category)}`);
+    return parts.join('&');
+}
+
+function exportContactsExcel() {
+    const f = _contactsQueryString();
+    _downloadExport(`${API_BASE}/crm/contacts/export/excel${f ? '?' + f : ''}`,
+                    'contacts.xlsx');
+}
+
+async function loadContacts() {
+    const f = _contactsQueryString();
+    let url = `/crm/contacts?limit=200${f ? '&' + f : ''}`;
     try {
         const data = await apiCall(url);
         const tbody = document.getElementById('contacts-table');
@@ -5894,10 +5907,21 @@ function quickSmsToContact(phone) {
 //  CRM — DEALS
 // ═══════════════════════════════════════════════════════════════
 
-async function loadDeals() {
+/** The deals list's filters as a query string, shared with its export. */
+function _dealsQueryString() {
     const status = document.getElementById('deal-filter-status')?.value || '';
-    let url = '/crm/deals?limit=100';
-    if (status) url += `&status=${status}`;
+    return status ? `status=${encodeURIComponent(status)}` : '';
+}
+
+function exportDealsExcel() {
+    const f = _dealsQueryString();
+    _downloadExport(`${API_BASE}/crm/deals/export/excel${f ? '?' + f : ''}`,
+                    'deals.xlsx');
+}
+
+async function loadDeals() {
+    const f = _dealsQueryString();
+    let url = `/crm/deals?limit=100${f ? '&' + f : ''}`;
     try {
         const data = await apiCall(url);
         const tbody = document.getElementById('deals-table');
