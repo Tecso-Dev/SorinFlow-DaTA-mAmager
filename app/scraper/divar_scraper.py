@@ -1381,6 +1381,7 @@ class DivarScraper:
         search results, used as a fallback category signal when Divar serves a
         bare /v/<token> URL with no descriptive slug.
         """
+        self._last_detail_error = None
         try:
             logger.info(f"Scraping property detail: {url}")
 
@@ -1391,6 +1392,7 @@ class DivarScraper:
             actual_url = self.page.url
             if '/v/' not in actual_url:
                 logger.warning(f"Detail page redirected away from property: {url} → {actual_url}, skipping")
+                self._last_detail_error = "صفحه باز نشد"
                 return None
 
             from urllib.parse import unquote
@@ -1440,6 +1442,7 @@ class DivarScraper:
                 ]
                 if not any(kw in decoded_url for kw in REAL_ESTATE_URL_KEYWORDS):
                     logger.info(f"Skipping non-real-estate listing (URL: {decoded_url})")
+                    self._last_detail_error = "ملک نبود"
                     return None
 
             await asyncio.sleep(0.6)
@@ -1718,6 +1721,7 @@ class DivarScraper:
             
         except Exception as e:
             logger.error(f"Failed to scrape property detail: {e}")
+            self._last_detail_error = f"{type(e).__name__}"
             return None
     
     def _extract_location(self, soup) -> Dict[str, Any]:
@@ -3198,6 +3202,7 @@ class DivarScraper:
             # why listings were dropped, tallied by reason. A scrape that
             # saves nothing is otherwise indistinguishable from a broken one.
             skip_tally: Dict[str, int] = {}
+            fail_tally: Dict[str, int] = {}
             # Handed to each detail scrape so it can tell, before asking Divar
             # for contact info, whether this ad is going to be discarded anyway.
             _listing_type = CATEGORIES.get(category, {}).get('type', 'unknown')
@@ -3454,9 +3459,15 @@ class DivarScraper:
                                         "stopping this run rather than writing nonsense counters")
                                     raise
                             job.failed_items += 1
+                            fail_tally["ذخیره نشد"] = fail_tally.get("ذخیره نشد", 0) + 1
                     elif detail is None:
                         # None = real scrape error (network failure, parse error, etc.)
                         job.failed_items += 1
+                        # …and «۳ ناموفق» with no reason beside it is a number
+                        # nobody can act on. A page Divar bounced us off is a
+                        # different problem from a page that threw.
+                        _why = getattr(self, "_last_detail_error", None) or "نامعلوم"
+                        fail_tally[_why] = fail_tally.get(_why, 0) + 1
                     elif detail is False:
                         # Off-category. Not a failure — but not nothing either,
                         # and until now counted nowhere at all. One run put 32
@@ -3492,6 +3503,7 @@ class DivarScraper:
                 except Exception as e:
                     logger.error(f"Failed to process listing: {e}")
                     job.failed_items += 1
+                    fail_tally[type(e).__name__] = fail_tally.get(type(e).__name__, 0) + 1
                     try:
                         await self.db_session.rollback()
                         await self.db_session.commit()
@@ -3614,7 +3626,10 @@ class DivarScraper:
                           + job.failed_items + _dropped)
             _parts = [f"{job.new_items} تازه", f"{job.updated_items} تکراری"]
             if job.failed_items:
-                _parts.append(f"{job.failed_items} ناموفق")
+                _named = "، ".join(f"{k}: {v}" for k, v in
+                                   sorted(fail_tally.items(), key=lambda kv: -kv[1]))
+                _parts.append(f"{job.failed_items} ناموفق"
+                              + (f" ({_named})" if _named else ""))
             _parts += [f"{v} {self._FILTER_LABELS_FA.get(k, k)}"
                        for k, v in sorted(skip_tally.items(), key=lambda kv: -kv[1])]
             _unreached = len(all_listings) - examined
