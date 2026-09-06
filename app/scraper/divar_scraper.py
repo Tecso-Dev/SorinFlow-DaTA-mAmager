@@ -1431,6 +1431,12 @@ class DivarScraper:
                         f"(URL: {decoded_url}, title: {source_title!r}, "
                         f"page title: {page_title!r})"
                     )
+                    # What was thrown away, in words, for the run to show. «۳۲
+                    # خارج از دسته‌بندی» can be the guard working exactly as
+                    # intended or it can be thirty-two real apartments, and the
+                    # count alone does not say which. A name does.
+                    self._last_category_drop = (
+                        page_title or source_title or decoded_url)[:80]
                     return False  # sentinel: category skip — not a scrape error
             else:
                 # Fallback broad check when no category is known
@@ -3203,6 +3209,7 @@ class DivarScraper:
             # saves nothing is otherwise indistinguishable from a broken one.
             skip_tally: Dict[str, int] = {}
             fail_tally: Dict[str, int] = {}
+            category_drops: List[str] = []   # a handful, for the log
             # Handed to each detail scrape so it can tell, before asking Divar
             # for contact info, whether this ad is going to be discarded anyway.
             _listing_type = CATEGORIES.get(category, {}).get('type', 'unknown')
@@ -3476,6 +3483,9 @@ class DivarScraper:
                         # account of the rest. A silent drop is indistinguishable
                         # from a bug, which is how it was reported.
                         skip_tally["category"] = skip_tally.get("category", 0) + 1
+                        _what = getattr(self, "_last_category_drop", None)
+                        if _what and len(category_drops) < 6:
+                            category_drops.append(_what)
 
                     # Progress is listings PROCESSED, not listings newly saved.
                     #
@@ -3645,6 +3655,13 @@ class DivarScraper:
                 candidates=len(all_listings), examined=examined,
                 unreached=(_unreached or None),
                 unaccounted=(_unaccounted if _unaccounted > 0 else None))
+            if category_drops:
+                await job_log.record(
+                    job.job_id, job_log.PAGE,
+                    "نمونه‌ای از آگهی‌هایی که خارج از دسته‌بندی شمرده شدند: "
+                    + "؛ ".join(category_drops),
+                    samples=len(category_drops))
+
             if skip_tally:
                 breakdown = ", ".join(f"{k}={v}" for k, v in
                                       sorted(skip_tally.items(), key=lambda kv: -kv[1]))
