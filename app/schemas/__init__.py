@@ -72,6 +72,12 @@ class PropertyResponse(PropertyBase):
     # and clean — the two are deliberately different answers.
     quality_score: Optional[float] = None
     quality_issues: Optional[str] = None
+    # Who posted it, from both sources. Divar's declaration was never on this
+    # schema, so «آگهی‌دهنده» in the property modal has always rendered blank
+    # no matter what the column held; the two beside it would have joined it.
+    advertiser_type: Optional[str] = None        # as Divar declared it
+    agency_suspected: Optional[bool] = None      # as the ad's own words read
+    agency_evidence: Optional[str] = None        # the phrase that said so
     scraped_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     
