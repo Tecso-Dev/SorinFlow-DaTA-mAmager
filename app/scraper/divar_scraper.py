@@ -25,6 +25,7 @@ from app.models.proxy import Proxy
 from app.scraper.stealth import StealthConfig, STEALTH_JS, get_browser_args, get_context_options
 from app.scraper.auth import DivarAuth
 from app.scraper.contact_extractor import ContactExtractor
+from app.services import skipped_listings
 
 
 def _mx_images(outcome: str, n: int = 1) -> None:
@@ -2970,6 +2971,7 @@ class DivarScraper:
             # with the old one.
             await self._persist_active_session()
             await job_log.prune()
+            await skipped_listings.prune()
             await job_log.record(job.job_id, job_log.START, "اسکرپ شروع شد")
         else:
             # Create new job record
@@ -3298,10 +3300,18 @@ class DivarScraper:
 
                         did = listing['divar_id']
 
+                        _why: Dict[str, str] = {}
+
                         def _skip(reason: str) -> bool:
                             logger.info(f"Skipping {did}: {reason}")
                             bucket = reason.split()[0] if reason else "other"
                             skip_tally[bucket] = skip_tally.get(bucket, 0) + 1
+                            # Kept for the row written below. _skip is called
+                            # from a dozen places and stays synchronous; making
+                            # it async to write here would mean an await on
+                            # every one of them and a missed await on the first
+                            # one anybody adds.
+                            _why["bucket"], _why["detail"] = bucket, reason
                             return True
 
                         skip = False
@@ -3398,6 +3408,15 @@ class DivarScraper:
                             # still a listing we processed.
                             job.scraped_items = i + 1
                             await self.db_session.commit()
+                            # …and one somebody may want to look at by hand. A
+                            # filter saying no is usually right and occasionally
+                            # is the filter being wrong; either way the listing
+                            # should still be reachable afterwards.
+                            await skipped_listings.record(
+                                job.job_id, divar_id=did, url=listing.get('url'),
+                                title=listing.get('title'),
+                                reason=_why.get("bucket", "other"),
+                                detail=_why.get("detail"))
                             # Still ask, because this is a safe point to switch
                             # and a challenge may be pending from the previous
                             # listing. It no longer *advances* anything: a
@@ -3467,14 +3486,22 @@ class DivarScraper:
                                     raise
                             job.failed_items += 1
                             fail_tally["ذخیره نشد"] = fail_tally.get("ذخیره نشد", 0) + 1
+                            await skipped_listings.record(
+                                job.job_id, divar_id=listing['divar_id'],
+                                url=listing.get('url'), title=listing.get('title'),
+                                reason="failed", detail="ذخیره نشد")
                     elif detail is None:
                         # None = real scrape error (network failure, parse error, etc.)
                         job.failed_items += 1
                         # …and «۳ ناموفق» with no reason beside it is a number
                         # nobody can act on. A page Divar bounced us off is a
                         # different problem from a page that threw.
-                        _why = getattr(self, "_last_detail_error", None) or "نامعلوم"
-                        fail_tally[_why] = fail_tally.get(_why, 0) + 1
+                        _reason = getattr(self, "_last_detail_error", None) or "نامعلوم"
+                        fail_tally[_reason] = fail_tally.get(_reason, 0) + 1
+                        await skipped_listings.record(
+                            job.job_id, divar_id=listing['divar_id'],
+                            url=listing.get('url'), title=listing.get('title'),
+                            reason="failed", detail=_reason)
                     elif detail is False:
                         # Off-category. Not a failure — but not nothing either,
                         # and until now counted nowhere at all. One run put 32
@@ -3486,6 +3513,11 @@ class DivarScraper:
                         _what = getattr(self, "_last_category_drop", None)
                         if _what and len(category_drops) < 6:
                             category_drops.append(_what)
+                        await skipped_listings.record(
+                            job.job_id, divar_id=listing['divar_id'],
+                            url=listing.get('url'),
+                            title=listing.get('title') or _what,
+                            reason="category", detail=_what)
 
                     # Progress is listings PROCESSED, not listings newly saved.
                     #
@@ -3514,6 +3546,13 @@ class DivarScraper:
                     logger.error(f"Failed to process listing: {e}")
                     job.failed_items += 1
                     fail_tally[type(e).__name__] = fail_tally.get(type(e).__name__, 0) + 1
+                    try:
+                        await skipped_listings.record(
+                            job.job_id, divar_id=listing.get('divar_id'),
+                            url=listing.get('url'), title=listing.get('title'),
+                            reason="failed", detail=type(e).__name__)
+                    except Exception:
+                        pass
                     try:
                         await self.db_session.rollback()
                         await self.db_session.commit()

@@ -54,13 +54,17 @@ class TestTheRunTalliesThem:
     def test_there_is_a_tally(self):
         assert "fail_tally: Dict[str, int] = {}" in SCRAPER
 
-    def test_a_scrape_error_goes_in_it(self):
+    def _none_branch(self):
+        """Bounded by the next branch, not by a character count — a fixed
+        window measures whichever comment happens to fall inside it."""
         i = SCRAPER.index("elif detail is None:")
-        assert "fail_tally[_why]" in SCRAPER[i:i + 700]
+        return SCRAPER[i:SCRAPER.index("elif detail is False:", i)]
+
+    def test_a_scrape_error_goes_in_it(self):
+        assert "fail_tally[_reason]" in self._none_branch()
 
     def test_a_missing_reason_is_called_unknown_rather_than_dropped(self):
-        i = SCRAPER.index("elif detail is None:")
-        assert '"نامعلوم"' in SCRAPER[i:i + 700]
+        assert '"نامعلوم"' in self._none_branch()
 
     def test_a_failed_save_is_its_own_reason(self):
         assert 'fail_tally["ذخیره نشد"]' in SCRAPER
