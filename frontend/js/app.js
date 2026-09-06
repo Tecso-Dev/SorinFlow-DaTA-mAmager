@@ -5076,18 +5076,31 @@ const CUSTOMER_SOURCE_LABELS = { in_person: 'حضوری', divar: 'دیوار', r
 const SHOWING_STEP_LABELS = { meeting: 'نشست', archive: 'بایگانی', second_visit: 'بازدید دوم' };
 let _customerEditId = null;
 
-async function loadCustomers() {
+/** The customer list's filters as a query string. Shared with the Excel
+ *  export so the file cannot stop matching the screen. */
+function _customersQueryString() {
     const search = document.getElementById('customer-search')?.value.trim() || '';
     const temp   = document.getElementById('customer-filter-temp')?.value || '';
     const source = document.getElementById('customer-filter-source')?.value || '';
+    const sort   = document.getElementById('customer-sort')?.value || 'newest';
 
-    const sort = document.getElementById('customer-sort')?.value || 'newest';
+    const parts = [];
+    if (search) parts.push(`search=${encodeURIComponent(search)}`);
+    if (temp)   parts.push(`temperature=${encodeURIComponent(temp)}`);
+    if (source) parts.push(`source=${encodeURIComponent(source)}`);
+    parts.push(`sort=${encodeURIComponent(sort)}`);
+    return parts.join('&');
+}
 
-    let url = '/crm/customers?limit=100';
-    if (search) url += `&search=${encodeURIComponent(search)}`;
-    if (temp)   url += `&temperature=${temp}`;
-    if (source) url += `&source=${source}`;
-    url += `&sort=${sort}`;
+function exportCustomersExcel() {
+    const filters = _customersQueryString();
+    _downloadExport(
+        `${API_BASE}/crm/customers/export/excel${filters ? '?' + filters : ''}`,
+        'customers.xlsx');
+}
+
+async function loadCustomers() {
+    let url = `/crm/customers?limit=100&${_customersQueryString()}`;
 
     try {
         const data = await apiCall(url);

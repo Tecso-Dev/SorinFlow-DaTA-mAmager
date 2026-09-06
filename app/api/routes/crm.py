@@ -645,12 +645,18 @@ async def upload_lead_image(file: UploadFile = File(...)):
 
 @router.get("/customers/export/excel")
 async def export_customers_excel(
+    search: Optional[str] = None,
+    temperature: Optional[str] = None,
+    source: Optional[str] = None,
+    sort: str = "newest",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Excel export of the customer intake list."""
+    """Excel export of the customer intake list, filtered as the screen is."""
     items = (await db.execute(
-        select(Customer).order_by(Customer.created_at.desc()).limit(5000)
+        _apply_customer_filters(
+            select(Customer), search=search, temperature=temperature,
+            source=source, sort=sort).limit(5000)
     )).scalars().all()
 
     temp_fa = {"hot": "داغ", "warm": "گرم", "cold": "سرد"}
@@ -1061,22 +1067,20 @@ def _apply_customer_payload(customer: Customer, data: dict) -> None:
             data["followups"], ("date", "time", "action"))
 
 
-@router.get("/customers")
-async def list_customers(
-    search: Optional[str] = None,
-    temperature: Optional[str] = None,
-    source: Optional[str] = None,
-    sort: str = "newest",
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
-):
+def _apply_customer_filters(query, *, search=None, temperature=None,
+                            source=None, sort="newest"):
+    """Every filter the customer list understands, in one place.
+
+    The Excel export used to take none of them, so exporting a list narrowed
+    to «داغ» handed back every customer on file. Both callers go through this
+    now, the way the leads list and its export already do.
+    """
     order = {
         "newest": Customer.created_at.desc(),
         "oldest": Customer.created_at.asc(),
         "name": Customer.full_name.asc(),
     }.get(sort, Customer.created_at.desc())
-    query = select(Customer).order_by(order)
+    query = query.order_by(order)
     if search:
         term = f"%{search.strip()}%"
         query = query.where(or_(
@@ -1090,6 +1094,22 @@ async def list_customers(
         query = query.where(Customer.temperature == temperature)
     if source:
         query = query.where(Customer.source == source)
+    return query
+
+
+@router.get("/customers")
+async def list_customers(
+    search: Optional[str] = None,
+    temperature: Optional[str] = None,
+    source: Optional[str] = None,
+    sort: str = "newest",
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    query = _apply_customer_filters(
+        select(Customer), search=search, temperature=temperature,
+        source=source, sort=sort)
     count = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
     items = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
     return {"items": [c.to_dict() for c in items], "total": count}
