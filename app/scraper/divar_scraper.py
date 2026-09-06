@@ -3510,6 +3510,19 @@ class DivarScraper:
                                     from app.services import image_quality as _iq
                                     property_data['image_quality'] = _iq.summarise(graded)
                         
+                        # Who actually posted this, according to the ad.
+                        #
+                        # Divar's own answer is already in advertiser_type and
+                        # is not always right — a listing whose description
+                        # ends «املاک هستم» arrived through a «شخصی» filter.
+                        # This adds ours beside it rather than over it.
+                        from app.services import advertiser_signals
+                        advertiser_signals.annotate(property_data)
+                        if advertiser_signals.disagrees_with_divar(property_data):
+                            logger.info(
+                                f"{did}: Divar says personal, the ad says "
+                                f"{property_data.get('agency_evidence')!r}")
+
                         # Grade the record before storing it. Recorded, never
                         # enforced: we already spent a contact reveal on this
                         # listing, so a flagged row beats a dropped one. The

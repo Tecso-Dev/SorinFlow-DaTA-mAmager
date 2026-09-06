@@ -108,7 +108,12 @@ class Property(Base):
     # Contact
     phone_number = Column(String(20), index=True)
     seller_name = Column(String(200))
-    advertiser_type = Column(String(20))  # personal, agency
+    advertiser_type = Column(String(20))  # personal, agency — as Divar declared it
+    # …and as the ad's own words suggest. Kept separate on purpose: Divar
+    # returns agency listings under a «شخصی» filter, and overwriting its answer
+    # would hide the disagreement instead of showing it.
+    agency_suspected = Column(Boolean, default=False, index=True)
+    agency_evidence = Column(String(100))   # the phrase that gave it away
     
     # One perceptual hash per downloaded image. Two listings that share
     # enough of these are the same flat posted by different agencies — a
@@ -212,6 +217,8 @@ class Property(Base):
             "quality_score": self.quality_score,
             "quality_issues": self.quality_issues,
             "phone_number": self.phone_number,
+            "agency_suspected": bool(self.agency_suspected),
+            "agency_evidence": self.agency_evidence,
             "seller_name": self.seller_name,
             "url": self.url,
             "images": self.images,

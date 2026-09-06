@@ -112,6 +112,7 @@ async def init_db():
                  _migrate_customer_criteria,
                  _migrate_filing,
                  _migrate_advertiser_type,
+                 _migrate_advertiser_signals,
                  _migrate_cookie_usage,
                  _migrate_property_quality,
                  _migrate_job_finish_reason,
@@ -236,6 +237,28 @@ async def _migrate_sms_panel(conn):
             "ON crm_sms_logs (campaign, sent_at DESC)"))
     except Exception as e:
         print(f"SMS panel migration skipped: {e}")
+
+
+async def _migrate_advertiser_signals(conn):
+    """What the ad's own words say about who posted it.
+
+    Divar's own declaration already has a column; these two sit beside it
+    because Divar returns agency listings under a «شخصی» filter, and the
+    disagreement is the thing worth seeing. Existing rows land FALSE/NULL:
+    nothing rescans the archive, so an old row simply says nothing rather
+    than claiming to be private.
+    """
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE properties "
+            "ADD COLUMN IF NOT EXISTS agency_suspected BOOLEAN DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS agency_evidence VARCHAR(100)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_properties_agency_suspected "
+            "ON properties (agency_suspected)"))
+    except Exception as e:
+        print(f"advertiser signals migration skipped: {e}")
 
 
 async def _migrate_filing(conn):
