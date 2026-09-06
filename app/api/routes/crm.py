@@ -295,6 +295,7 @@ async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse
             Property.price_per_meter, Property.total_price, Property.price, Property.area,
             Property.document_type, Property.has_parking, Property.has_elevator,
             Property.building_direction, Property.corner_type,
+            Property.agency_suspected, Property.agency_evidence,
         ).where(Property.id.in_(prop_ids))
     )).all()
     by_id = {r.id: r for r in rows}
@@ -314,6 +315,10 @@ async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse
         item.building_direction = p.building_direction
         item.corner_type = p.corner_type
         item.district = item.district or p.district
+        # A lead the CRM will chase should say up front whether the number on
+        # the other end belongs to an agency.
+        item.agency_suspected = bool(p.agency_suspected)
+        item.agency_evidence = p.agency_evidence
     return items
 
 

@@ -305,6 +305,10 @@ class LeadResponse(BaseModel):
     has_elevator: Optional[bool] = None          # آسانسور
     building_direction: Optional[str] = None     # جهت
     corner_type: Optional[str] = None            # نبش
+    # Who the ad reads as having been posted by. Divar's own declaration is
+    # not always right, so this travels with every lead the CRM shows.
+    agency_suspected: Optional[bool] = None      # آگهی مشاور املاک؟
+    agency_evidence: Optional[str] = None        # عبارتی که این را گفت
     # Full snapshot of the linked property (same data the املاک modal shows).
     # NOT named `property` — that collides with Lead.property (a SQLAlchemy
     # relationship), which from_attributes would try to coerce into a dict.
