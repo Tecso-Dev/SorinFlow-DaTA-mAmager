@@ -313,6 +313,7 @@ class LeadResponse(BaseModel):
     corner_type: Optional[str] = None            # نبش
     # Who the ad reads as having been posted by. Divar's own declaration is
     # not always right, so this travels with every lead the CRM shows.
+    lead_advertiser_type: Optional[str] = None   # آنچه دیوار اعلام کرده
     agency_suspected: Optional[bool] = None      # آگهی مشاور املاک؟
     agency_evidence: Optional[str] = None        # عبارتی که این را گفت
     # Full snapshot of the linked property (same data the املاک modal shows).

@@ -316,6 +316,7 @@ async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse
             Property.document_type, Property.has_parking, Property.has_elevator,
             Property.building_direction, Property.corner_type,
             Property.agency_suspected, Property.agency_evidence,
+            Property.advertiser_type,
         ).where(Property.id.in_(prop_ids))
     )).all()
     by_id = {r.id: r for r in rows}
@@ -339,6 +340,10 @@ async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse
         # the other end belongs to an agency.
         item.agency_suspected = bool(p.agency_suspected)
         item.agency_evidence = p.agency_evidence
+        # Divar's own declaration travels too, or the panel can never tell a
+        # listing that slipped through a «شخصی» filter from one an agency
+        # posted openly — which is the whole distinction the badge draws.
+        item.lead_advertiser_type = p.advertiser_type
     return items
 
 

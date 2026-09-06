@@ -73,3 +73,34 @@ class TestTheLeadDetailAlreadyHadIt:
         from app.models.property import Property
         assert "agency_suspected" in Property().to_dict()
         assert "agency_evidence" in Property().to_dict()
+
+
+class TestDivarsDeclarationTravelsToo:
+    """Without it the CRM badge can never go red — every listing that slipped
+    through a «شخصی» filter reads the same as an agency that posted openly,
+    which is the one distinction the badge exists to draw."""
+
+    def test_the_response_carries_it_under_its_own_name(self):
+        """`Lead` has no advertiser_type column of its own; naming the copied
+        one the same way is how the two get confused."""
+        assert "lead_advertiser_type" in LeadResponse.model_fields
+
+    def test_the_column_is_selected(self):
+        import inspect
+        from app.api.routes import crm as _crm
+        for name in ("_attach_property_columns", "_attach_property_fields"):
+            fn = getattr(_crm, name, None)
+            if fn:
+                src = inspect.getsource(fn)
+                break
+        assert "Property.advertiser_type," in src
+        assert "item.lead_advertiser_type = p.advertiser_type" in src
+
+    def test_the_badge_reads_either_name(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        js = open(os.path.join(root, "frontend/js/app.js"), encoding="utf-8").read()
+        i = js.index("function agencyBadge(p) {")
+        block = js[i:i + 900]
+        assert "p.advertiser_type || p.lead_advertiser_type" in block
+        assert "declared === 'personal'" in block

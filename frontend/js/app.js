@@ -4420,7 +4420,11 @@ async function savePropertyField(propId, field, value, el) {
  * nobody can check is a label nobody will trust. */
 function agencyBadge(p) {
     if (!p || !p.agency_suspected) return '';
-    const clash = (p.advertiser_type || '') === 'personal';
+    // On a lead row Divar's declaration arrives under its own name: `Lead`
+    // has no advertiser_type of its own, and reusing the property's name for
+    // a column copied off the linked property is how the two get confused.
+    const declared = p.advertiser_type || p.lead_advertiser_type || '';
+    const clash = declared === 'personal';
     const evidence = p.agency_evidence ? ` — «${p.agency_evidence}»` : '';
     const title = clash
         ? `متن آگهی می‌گوید مشاور املاک است${evidence}؛ ولی دیوار آن را «شخصی» ثبت کرده`
