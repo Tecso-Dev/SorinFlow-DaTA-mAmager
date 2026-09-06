@@ -2872,21 +2872,30 @@ class DivarScraper:
             return False
     
     async def save_property(self, property_data: Dict[str, Any]) -> Optional[Property]:
-        """Save property to database"""
+        """Save property to database.
+
+        Sets _last_save_error on every path that gives up, so the run can put
+        the reason on the skipped row. Six listings came back as «ذخیره نشد»
+        with nothing else, and «ذخیره نشد» is the observation, not the cause.
+        """
+        self._last_save_error = None
         try:
             divar_id = property_data.get('divar_id')
             
             # Validate required fields
             if not divar_id:
                 logger.warning("Cannot save property: missing divar_id")
+                self._last_save_error = "شناسهٔ آگهی نبود"
                 return None
-            
+
             if not property_data.get('title'):
                 logger.warning(f"Cannot save property {divar_id}: missing title")
+                self._last_save_error = "عنوان نبود"
                 return None
-            
+
             if not property_data.get('url'):
                 logger.warning(f"Cannot save property {divar_id}: missing url")
+                self._last_save_error = "آدرس نبود"
                 return None
             
             # Check if exists
@@ -2945,6 +2954,7 @@ class DivarScraper:
                 
         except Exception as e:
             logger.error(f"Failed to save property: {e}")
+            self._last_save_error = type(e).__name__
             await self.db_session.rollback()
             return None
     
@@ -3533,11 +3543,14 @@ class DivarScraper:
                                         "stopping this run rather than writing nonsense counters")
                                     raise
                             job.failed_items += 1
-                            fail_tally["ذخیره نشد"] = fail_tally.get("ذخیره نشد", 0) + 1
+                            _save_why = getattr(self, "_last_save_error", None)
+                            _save_why = (f"ذخیره نشد — {_save_why}" if _save_why
+                                         else "ذخیره نشد")
+                            fail_tally[_save_why] = fail_tally.get(_save_why, 0) + 1
                             await skipped_listings.record(
                                 job.job_id, divar_id=listing['divar_id'],
                                 url=listing.get('url'), title=listing.get('title'),
-                                reason="failed", detail="ذخیره نشد")
+                                reason="failed", detail=_save_why)
                     elif detail is None:
                         # None = real scrape error (network failure, parse error, etc.)
                         job.failed_items += 1
