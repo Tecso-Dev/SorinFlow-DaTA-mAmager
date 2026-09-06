@@ -1291,7 +1291,7 @@ async function loadProperties() {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td><span class="serial-badge">${formatSerial(property.serial_no)}</span></td>
-                <td title="${esc(property.title)}">${esc(property.title.substring(0, 40))}...</td>
+                <td title="${esc(property.title)}">${esc(property.title.substring(0, 40))}... ${agencyBadge(property)}</td>
                 <td>${property.city_name || '---'}</td>
                 <td>${formatNumber(property.area)} متر</td>
                 <td>${property.rooms != null ? property.rooms : '---'}</td>
@@ -4316,7 +4316,7 @@ async function loadLeads() {
                 <td>${lead.serial_no != null
                         ? `<span class="serial-badge" title="کد ملک — همان کدی که در لیست املاک است">${formatSerial(lead.serial_no)}</span>`
                         : '<span class="text-muted" title="ملک این لید حذف شده است">—</span>'}</td>
-                <td title="${esc(lead.property_title)}">${esc((lead.property_title || '---').substring(0, 35))}...</td>
+                <td title="${esc(lead.property_title)}">${esc((lead.property_title || '---').substring(0, 35))}... ${agencyBadge(lead)}</td>
                 <td>${lead.city_name || '---'}</td>
                 <td>
                     <div>${formatPrice(lead.price)}</div>
@@ -4405,6 +4405,27 @@ async function savePropertyField(propId, field, value, el) {
     }
 }
 
+/* «املاکی» — what the ad says about who posted it.
+ *
+ * Divar asks the poster to declare this and the answer is not always right:
+ * a listing whose description ends «املاک هستم» came back from a search
+ * filtered to «شخصی», and Divar's own site returns it there too. So the two
+ * answers are shown as two answers. Red is the disagreement — the ad arrived
+ * through a «شخصی» filter and should not have; grey is an agency that said
+ * so itself. The phrase that gave it away is in the tooltip, because a label
+ * nobody can check is a label nobody will trust. */
+function agencyBadge(p) {
+    if (!p || !p.agency_suspected) return '';
+    const clash = (p.advertiser_type || '') === 'personal';
+    const evidence = p.agency_evidence ? ` — «${p.agency_evidence}»` : '';
+    const title = clash
+        ? `متن آگهی می‌گوید مشاور املاک است${evidence}؛ ولی دیوار آن را «شخصی» ثبت کرده`
+        : `متن آگهی می‌گوید مشاور املاک است${evidence}`;
+    return `<span class="badge ${clash ? 'bg-danger' : 'bg-secondary'}"
+                  style="font-size:.65rem;vertical-align:middle"
+                  title="${esc(title)}">املاکی</span>`;
+}
+
 // Full property details block — identical data to the لیست املاک modal,
 // reused inside the CRM lead modal.
 function _renderPropertyDetails(p) {
@@ -4435,7 +4456,14 @@ function _renderPropertyDetails(p) {
         row('وضعیت واحد', esc(p.unit_status)),
         row('نوع سند', esc(p.document_type)),
         row('نوع کاربری', esc(p.usage_type)),
-        row('آگهی‌دهنده', p.advertiser_type === 'agency' ? 'مشاور املاک' : p.advertiser_type === 'personal' ? 'شخصی' : ''),
+        row('آگهی‌دهنده (دیوار)',
+            p.advertiser_type === 'agency' ? 'مشاور املاک'
+            : p.advertiser_type === 'personal' ? 'شخصی' : ''),
+        // Our own reading, next to Divar's, never over it.
+        row('آگهی‌دهنده (متن آگهی)', p.agency_suspected
+            ? `مشاور املاک ${agencyBadge(p)}${p.agency_evidence
+                 ? `<div class="text-muted" style="font-size:.72rem">«${esc(p.agency_evidence)}»</div>` : ''}`
+            : ''),
     ].join('');
 
     const prices = [
@@ -4642,7 +4670,7 @@ async function viewLead(id) {
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="text-muted small">عنوان ملک</label>
-                    <div class="fw-bold">${esc(lead.property_title) || '---'}</div>
+                    <div class="fw-bold">${esc(lead.property_title) || '---'} ${agencyBadge(lead)}</div>
                 </div>
                 <div class="col-md-6">
                     <label class="text-muted small">لینک</label>
