@@ -1368,6 +1368,21 @@ class DivarScraper:
                 return f"{key} must be absent"
         return None
 
+    @staticmethod
+    def _category_matches(text: str, patterns) -> bool:
+        """Does this text carry one of the category's words?
+
+        Divar writes the same phrase two ways — «اجاره-آپارتمان» in a URL slug
+        and «اجاره آپارتمان» in a title — and the pattern lists were written
+        for slugs. So «اجاره-مسکن» could never match a real ad titled «اجاره
+        مسکن مهر کوثر»: the hyphen was doing the rejecting, not the words.
+        Both sides collapse to single spaces before comparing.
+        """
+        if not text:
+            return False
+        flat = " ".join(text.replace("-", " ").replace("_", " ").split())
+        return any(" ".join(p.replace("-", " ").split()) in flat for p in patterns)
+
     async def scrape_property_detail(
         self, url: str, target_category: Optional[str] = None,
         source_title: Optional[str] = None,
@@ -1413,7 +1428,7 @@ class DivarScraper:
                 # listings aren't all dropped — reject only when NEITHER matches.
                 haystack = f"{decoded_url} {source_title or ''}"
                 page_title = ""
-                if not any(p in haystack for p in patterns):
+                if not self._category_matches(haystack, patterns):
                     # Neither the URL nor the search-result title says what this
                     # is — which is not the same as saying it is the wrong
                     # thing. Divar's own page title does say («اجاره آپارتمان ۸۵
@@ -1426,7 +1441,7 @@ class DivarScraper:
                     except Exception as e:
                         logger.debug(f"could not read the page title: {e}")
                     haystack = f"{haystack} {page_title}"
-                if not any(p in haystack for p in patterns):
+                if not self._category_matches(haystack, patterns):
                     logger.info(
                         f"Skipping off-category listing for '{target_category}' "
                         f"(URL: {decoded_url}, title: {source_title!r}, "
