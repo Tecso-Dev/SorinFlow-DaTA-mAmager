@@ -2979,6 +2979,10 @@ function _renderJobsTable(items) {
                         title="گزارش این اسکرپ">
                     <i class="bi bi-list-ul"></i>
                 </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="showSkipped('${job.job_id}')"
+                        title="آگهی‌هایی که این اسکرپ ذخیره نکرد">
+                    <i class="bi bi-slash-circle"></i>
+                </button>
                 ${['running', 'paused', 'pending'].includes(job.status) ? `
                     <button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.job_id}')"
                             title="لغو تسک">
@@ -9133,6 +9137,131 @@ async function showJobLog(jobId) {
         }).join('');
     } catch (err) {
         body.innerHTML = `<div class="text-danger small">${esc(err.message || 'خطا')}</div>`;
+    }
+}
+
+
+/* ══════════════════════════════════════════════════════
+   آگهی‌های اسکرپ‌نشده
+   ══════════════════════════════════════════════════════
+
+   A run reports «۳۲ خارج از دسته‌بندی، ۲ ودیعه، ۳ ناموفق» and that number
+   can be checked for arithmetic and nothing else — whether those 32 were
+   promoted junk or 32 real apartments is not something a count can say.
+   This is the listings themselves, each with the link that lets one be
+   scraped again on its own.                                              */
+
+let _skippedRows = [];      // what the open modal is showing
+let _skippedFilter = null;  // the bucket being shown, or null for all
+
+async function showSkipped(jobId) {
+    const body = document.getElementById('skipped-body');
+    const summary = document.getElementById('skipped-summary');
+    const el = document.getElementById('skippedModal');
+    if (!body || !el) return;
+
+    _skippedFilter = null;
+    summary.innerHTML = '';
+    body.innerHTML = '<div class="text-muted small">در حال بارگذاری…</div>';
+    new bootstrap.Modal(el).show();
+
+    try {
+        const d = await apiCall(`/scraper/jobs/${encodeURIComponent(jobId)}/skipped`);
+        _skippedRows = d.items || [];
+        if (!_skippedRows.length) {
+            summary.innerHTML = '';
+            body.innerHTML = `<div class="text-muted small">
+                این اسکرپ همهٔ آگهی‌هایی را که دید ذخیره کرد — چیزی کنار گذاشته نشد.
+                رانی که پیش از افزوده‌شدن این بخش اجرا شده باشد هم سابقه‌ای ندارد.</div>`;
+            return;
+        }
+        renderSkippedSummary(d.by_reason || {});
+        renderSkippedRows();
+    } catch (err) {
+        body.innerHTML = `<div class="text-danger small">${esc(err.message || 'خطا')}</div>`;
+    }
+}
+
+function renderSkippedSummary(byReason) {
+    const summary = document.getElementById('skipped-summary');
+    const total = _skippedRows.length;
+    const chip = (key, label, count) => `
+        <button class="btn btn-sm ${_skippedFilter === key ? 'btn-primary' : 'btn-outline-secondary'}"
+                onclick="filterSkipped(${key === null ? 'null' : `'${key}'`})">
+            ${esc(label)} <bdi class="badge bg-secondary">${count}</bdi>
+        </button>`;
+    summary.innerHTML = `<div class="d-flex flex-wrap gap-2 align-items-center">
+        ${chip(null, 'همه', total)}
+        ${Object.entries(byReason).map(([k, v]) => chip(k, v.label, v.count)).join('')}
+        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="copySkippedLinks()">
+            <i class="bi bi-clipboard"></i> کپی همهٔ لینک‌ها
+        </button>
+    </div>`;
+}
+
+function filterSkipped(reason) {
+    _skippedFilter = reason;
+    const byReason = {};
+    _skippedRows.forEach(r => {
+        byReason[r.reason] = byReason[r.reason]
+            || { label: r.reason_label || r.reason, count: 0 };
+        byReason[r.reason].count++;
+    });
+    renderSkippedSummary(byReason);
+    renderSkippedRows();
+}
+
+function visibleSkipped() {
+    return _skippedFilter
+        ? _skippedRows.filter(r => r.reason === _skippedFilter)
+        : _skippedRows;
+}
+
+function renderSkippedRows() {
+    const body = document.getElementById('skipped-body');
+    const rows = visibleSkipped();
+    if (!rows.length) {
+        body.innerHTML = '<div class="text-muted small">موردی با این دلیل نیست.</div>';
+        return;
+    }
+    body.innerHTML = rows.map(r => `
+        <div class="d-flex gap-2 py-2 align-items-start"
+             style="border-bottom:1px solid var(--border)">
+          <div class="flex-grow-1" style="min-width:0">
+            <div style="font-size:.85rem">${esc(r.title || r.divar_id || '—')}</div>
+            <div class="text-muted" style="font-size:.72rem">
+              ${esc(r.reason_label || r.reason || '')}${r.detail ? ' — ' + esc(r.detail) : ''}
+            </div>
+          </div>
+          <a class="btn btn-sm btn-outline-secondary" href="${esc(r.url)}"
+             target="_blank" rel="noopener" title="باز کردن در دیوار">
+            <i class="bi bi-box-arrow-up-left"></i>
+          </a>
+          <button class="btn btn-sm btn-outline-primary"
+                  onclick="rescrapeSkipped('${esc(r.url)}')" title="اسکرپ تکی این آگهی">
+            <i class="bi bi-arrow-repeat"></i>
+          </button>
+        </div>`).join('');
+}
+
+function rescrapeSkipped(url) {
+    const input = document.getElementById('single-url');
+    if (input) input.value = url;
+    const el = document.getElementById('skippedModal');
+    const modal = el && bootstrap.Modal.getInstance(el);
+    if (modal) modal.hide();
+    // The single-scrape box is where this ends up either way; filling it and
+    // running it is the same two steps done by hand.
+    scrapeSingle();
+}
+
+async function copySkippedLinks() {
+    const links = visibleSkipped().map(r => r.url).join('\n');
+    try {
+        await navigator.clipboard.writeText(links);
+        showToast('کپی شد', `${visibleSkipped().length} لینک در حافظه است`, 'success');
+    } catch (e) {
+        showToast('خطا', 'مرورگر اجازهٔ کپی نداد', 'warning');
     }
 }
 
