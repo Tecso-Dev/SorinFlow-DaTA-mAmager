@@ -135,3 +135,31 @@ class TestItIsReadable:
             if False else Path("frontend/js/app.js").read_text(encoding="utf-8")
         assert re.search(r"loadSmsMessages\(\);\s*\n\s*loadSmsEvents\(\);", js), \
             "the log is never loaded, so the card renders empty"
+
+
+class TestThe412AdviceFitsThePathThatFailed:
+    """412 reaches the panel from two different places, and the advice that
+    fixes one does nothing for the other.
+
+    A login code goes through verify/lookup and needs no sender line, so «make
+    a template» is the right answer there. A single or group send goes through
+    sms/send and sms/sendarray, which require one — telling somebody to make
+    another template after a failed campaign sends them to do work that cannot
+    possibly help."""
+
+    def test_it_names_the_line_as_the_fix_for_sending(self):
+        from app.services.sms_service import STATUS_FA
+        msg = STATUS_FA[412]
+        assert "خط داخلی" in msg, \
+            "412 does not say a domestic line is what a send needs"
+
+    def test_it_still_explains_the_template_route_for_codes(self):
+        from app.services.sms_service import STATUS_FA
+        assert "الگو" in STATUS_FA[412]
+
+    def test_it_does_not_tell_a_failed_campaign_to_go_make_a_template(self):
+        """The previous wording ended on that instruction, so a group send —
+        which a template cannot carry at all — read as «build a template»."""
+        from app.services.sms_service import STATUS_FA
+        msg = STATUS_FA[412]
+        assert "در «الگوی کد ورود» بگذارید" not in msg
