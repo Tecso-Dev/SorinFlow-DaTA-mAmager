@@ -2428,6 +2428,38 @@
                     </div>
                 </div>
 
+                <!-- service event log: why a send failed, and who changed what -->
+                <div class="card mb-3" id="sms-events-card">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <i class="bi bi-journal-text"></i> رویدادهای سرویس پیامک
+                        <select id="sms-events-stage" class="form-select form-select-sm ms-2"
+                                style="width:auto" onchange="loadSmsEvents()">
+                            <option value="">همه</option>
+                            <option value="send">ارسال</option>
+                            <option value="test">آزمایشی</option>
+                            <option value="settings">تنظیمات</option>
+                            <option value="template">الگو</option>
+                            <option value="error">خطا</option>
+                        </select>
+                        <button class="btn btn-outline-secondary btn-sm ms-auto" onclick="loadSmsEvents()">
+                            <i class="bi bi-arrow-clockwise"></i> تازه‌سازی
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height:340px;overflow-y:auto">
+                            <table class="table table-sm mb-0 align-middle">
+                                <thead><tr>
+                                    <th style="width:11rem">زمان</th>
+                                    <th style="width:6rem">نوع</th>
+                                    <th>شرح</th>
+                                    <th style="width:8rem">کاربر</th>
+                                </tr></thead>
+                                <tbody id="sms-events-table"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="row g-3 mb-3">
                     <!-- single send -->
                     <div class="col-lg-5">
@@ -3989,7 +4021,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260908b"></script>
+<script src="js/app.js?v=20260908c"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

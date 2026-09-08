@@ -13,6 +13,7 @@ Two rules hold this together:
     is irreversible and costs real money, so the panel makes you look at the
     number first.
 """
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -31,6 +32,7 @@ from app.models.crm_models import Contact, SmsLog
 from app.models.portal import PropertyRequest
 from app.models.user import User
 from app.services import sms_service as sms
+from app.services import sms_log
 
 router = APIRouter()
 settings = get_settings()
@@ -114,6 +116,20 @@ async def put_sms_settings(payload: SmsSettingsIn,
         await sms.put_setting(db, sms.KEY_ENABLED,
                               "true" if payload.enabled else "false", actor)
 
+    # Which fields moved, never their values — an API key must not end up in a
+    # table the panel renders. "a panel that worked yesterday and not today"
+    # is the question this answers, and the field names are enough to answer it.
+    changed = [name for name, v in (("کلید API", payload.api_key),
+                                    ("شمارهٔ فرستنده", payload.sender),
+                                    ("الگوی کد ورود", payload.otp_template),
+                                    ("امضا", payload.signature),
+                                    ("فعال/غیرفعال", payload.enabled))
+               if v is not None]
+    if changed:
+        await sms_log.record(sms_log.SETTINGS,
+                             "تنظیمات تغییر کرد: " + "، ".join(changed),
+                             actor=actor, fields=changed)
+
     return await get_sms_settings(db, user)
 
 
@@ -149,17 +165,26 @@ async def sms_test(to: str = Query(..., description="mobile number"),
     # است» forever — including after the template that makes login codes work
     # was approved and configured. A test that cannot pass is worse than no
     # test: it reports a broken system that is not broken.
+    # The two have different contracts: send_sms RETURNS {"success": False},
+    # send_verify RAISES SmsError. Mixing them turned a template that is still
+    # «در حال بررسی» — which answers 424 — into a bare "Internal server error"
+    # on the panel, with the real reason only in the pod log.
     tpl = await sms.resolve_otp_template(db)
     if tpl:
         text = f"کد آزمایشی از طریق الگوی «{tpl}»"
-        result = await sms.send_verify(number, "12345", tpl, db=db)
         via = f"الگوی «{tpl}» (verify/lookup — بدون خط فرستنده)"
+        try:
+            result = await sms.send_verify(number, "12345", tpl, db=db)
+        except Exception as e:
+            result = {"success": False, "provider": "kavenegar",
+                      "response": getattr(e, "message", None) or str(e)}
     else:
         text = "پیام آزمایشی از پنل سورین‌فلو. تنظیمات پیامک درست کار می‌کند."
         result = await sms.send_sms(number, text, db=db)
         via = "ارسال ساده (sms/send — نیازمند خط فرستنده)"
 
-    await _log(db, number, text, result, user.username, kind="manual")
+    await _log(db, number, text, result, user.username, kind="test",
+               route="verify" if tpl else "sms")
     if not result.get("success"):
         return {"ok": False, "via": via, "error": result.get("response")}
     return {"ok": True, "via": via, "message_id": result.get("messageid"),
@@ -170,7 +195,8 @@ async def sms_test(to: str = Query(..., description="mobile number"),
 
 async def _log(db, number: str, body: Optional[str], result: dict,
                actor: str, *, kind: str = "manual",
-               campaign: Optional[str] = None) -> SmsLog:
+               campaign: Optional[str] = None,
+               route: str = "sms") -> SmsLog:
     """Record one send. Never raises — a logging failure must not look like a
     delivery failure to the caller."""
     try:
@@ -188,6 +214,11 @@ async def _log(db, number: str, body: Optional[str], result: dict,
         )
         db.add(row)
         await db.commit()
+        # The service-level event, on its own session. crm_sms_logs says a
+        # message was attempted; this says why it did or did not work, which is
+        # the part that is missing when somebody asks «چرا پیامک نرفت؟».
+        await sms_log.record_send(number, result, route=route,
+                                  actor=actor, kind=kind)
         return row
     except Exception as e:
         logger.warning(f"[sms] could not write the send log: {e}")
@@ -469,6 +500,39 @@ async def refresh_delivery(limit: int = Query(100, le=200),
         updated += 1
     await db.commit()
     return {"ok": True, "checked": len(rows), "updated": updated}
+
+
+@router.get("/events")
+async def sms_events(limit: int = Query(100, ge=1, le=500),
+                     stage: Optional[str] = None,
+                     level: Optional[str] = None,
+                     db: AsyncSession = Depends(get_db),
+                     _: User = Depends(get_current_user)):
+    """What the SMS service has been doing — sends, failures with their reason,
+    settings changes, template state.
+
+    Separate from /messages, which lists messages. This lists events: the
+    question «چرا پیامک نرفت؟» is answered here, not there.
+    """
+    rows = await sms_log.events(db, limit=limit, stage=stage, level=level)
+    out = []
+    for r in rows:
+        try:
+            details = json.loads(r.details) if r.details else {}
+        except Exception:
+            details = {}
+        out.append({
+            "id": r.id,
+            "at": r.created_at.isoformat() if r.created_at else None,
+            "stage": r.stage,
+            "level": r.level,
+            "message": r.message,
+            "route": r.route,
+            "status": r.status,
+            "actor": r.actor,
+            "details": details,
+        })
+    return {"events": out, "count": len(out)}
 
 
 @router.get("/stats")

@@ -8389,6 +8389,51 @@ async function loadSms() {
     loadSmsAudiences();
     _smsOffset = 0;
     loadSmsMessages();
+    loadSmsEvents();
+}
+
+const SMS_STAGE_FA = {
+    send: 'ارسال', test: 'آزمایشی', settings: 'تنظیمات',
+    template: 'الگو', credit: 'اعتبار', delivery: 'تحویل', error: 'خطا',
+};
+
+async function loadSmsEvents() {
+    const tb = document.getElementById('sms-events-table');
+    if (!tb) return;
+    const stage = document.getElementById('sms-events-stage')?.value || '';
+    tb.innerHTML = '<tr><td colspan="4" class="text-muted small p-3">در حال بارگذاری…</td></tr>';
+    try {
+        const q = stage ? `?limit=100&stage=${encodeURIComponent(stage)}` : '?limit=100';
+        const d = await apiCall('/sms/events' + q);
+        const rows = d.events || [];
+        if (!rows.length) {
+            tb.innerHTML = '<tr><td colspan="4" class="text-muted small p-3">رویدادی ثبت نشده است</td></tr>';
+            return;
+        }
+        tb.innerHTML = rows.map(e => {
+            const cls = e.level === 'error' ? 'text-danger'
+                      : e.level === 'warning' ? 'text-warning' : '';
+            // The reason is the whole point of this table — a failure whose
+            // cause is only in the pod log is what this exists to replace.
+            const why = e.details && e.details.reason
+                ? `<div class="small text-muted">${esc(e.details.reason)}</div>` : '';
+            const via = e.route === 'verify' ? ' <span class="badge bg-info-subtle text-info">الگو</span>'
+                      : e.route === 'sms' ? ' <span class="badge bg-secondary-subtle text-secondary">ارسال ساده</span>' : '';
+            const when = e.at
+                ? new Date(e.at).toLocaleString('fa-IR', {
+                    month: 'numeric', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit' })
+                : '—';
+            return `<tr>
+                <td class="small text-muted" dir="ltr">${esc(when)}</td>
+                <td class="small">${esc(SMS_STAGE_FA[e.stage] || e.stage)}</td>
+                <td class="small ${cls}">${esc(e.message)}${via}${why}</td>
+                <td class="small text-muted">${esc(e.actor || '—')}</td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        tb.innerHTML = `<tr><td colspan="4" class="text-danger small p-3">${esc(err.message || 'خطا')}</td></tr>`;
+    }
 }
 
 async function loadSmsCredit() {
