@@ -141,12 +141,28 @@ async def sms_test(to: str = Query(..., description="mobile number"),
     if not number:
         raise HTTPException(400, "شماره موبایل معتبر نیست")
 
-    text = "پیام آزمایشی از پنل سورین‌فلو. تنظیمات پیامک درست کار می‌کند."
-    result = await sms.send_sms(number, text, db=db)
+    # Test the route a login code actually takes.
+    #
+    # This always used plain send, which needs a sender line that can address
+    # the destination. On an account whose only line is international or
+    # shared it cannot, so the button answered «[412] شماره فرستنده نامعتبر
+    # است» forever — including after the template that makes login codes work
+    # was approved and configured. A test that cannot pass is worse than no
+    # test: it reports a broken system that is not broken.
+    tpl = await sms.resolve_otp_template(db)
+    if tpl:
+        text = f"کد آزمایشی از طریق الگوی «{tpl}»"
+        result = await sms.send_verify(number, "12345", tpl, db=db)
+        via = f"الگوی «{tpl}» (verify/lookup — بدون خط فرستنده)"
+    else:
+        text = "پیام آزمایشی از پنل سورین‌فلو. تنظیمات پیامک درست کار می‌کند."
+        result = await sms.send_sms(number, text, db=db)
+        via = "ارسال ساده (sms/send — نیازمند خط فرستنده)"
+
     await _log(db, number, text, result, user.username, kind="manual")
     if not result.get("success"):
-        return {"ok": False, "error": result.get("response")}
-    return {"ok": True, "message_id": result.get("messageid"),
+        return {"ok": False, "via": via, "error": result.get("response")}
+    return {"ok": True, "via": via, "message_id": result.get("messageid"),
             "cost": result.get("cost")}
 
 

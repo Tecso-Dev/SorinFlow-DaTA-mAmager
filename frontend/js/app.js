@@ -8482,7 +8482,12 @@ async function sendSmsTest() {
     try {
         const d = await apiCall(`/sms/test?to=${encodeURIComponent(to)}`, { method: 'POST' });
         if (out) {
-            out.textContent = d.ok ? 'ارسال شد' : (d.error || 'ناموفق');
+            // Name the route. The two behave differently on this account
+            // — a template needs no sender line, a plain send does — so a
+            // bare «ناموفق» sends the reader back to the sender field for
+            // a failure that has nothing to do with it.
+            const via = d.via ? ' — از راه ' + d.via : '';
+            out.textContent = (d.ok ? 'ارسال شد' : (d.error || 'ناموفق')) + via;
             out.className = 'small ' + (d.ok ? 'text-success' : 'text-danger');
         }
         loadSmsMessages(); loadSmsCredit();

@@ -143,3 +143,34 @@ class TestTheServiceWorkerIsReachable:
         panel = Path("frontend/index.html").read_text(encoding="utf-8")
         assert "cdn.kavenegar.com" not in panel, \
             "the admin panel should not load a third-party script into an authenticated session"
+
+
+class TestTheTestButtonTestsTheConfiguredRoute:
+    """It always used plain send, which needs a sender line that can address
+    the destination. On this account no such line exists, so the button
+    answered «[412] شماره فرستنده نامعتبر است» permanently — including after
+    the template that makes login codes work was configured. A test that can
+    never pass reports a broken system that is not broken."""
+
+    def test_it_prefers_the_template(self):
+        src = open("app/api/routes/sms.py", encoding="utf-8").read()
+        fn = src.split("async def sms_test")[1].split("\n@router")[0]
+        assert "resolve_otp_template" in fn, "the test never asks whether a template exists"
+        assert "send_verify" in fn, "the test cannot exercise the template route"
+
+    def test_plain_send_is_still_there_for_accounts_with_a_real_line(self):
+        src = open("app/api/routes/sms.py", encoding="utf-8").read()
+        fn = src.split("async def sms_test")[1].split("\n@router")[0]
+        assert "send_sms" in fn
+
+    def test_the_response_names_the_route(self):
+        """«ناموفق» alone points the reader at the sender field, which is the
+        wrong place when the template route was the one that ran."""
+        src = open("app/api/routes/sms.py", encoding="utf-8").read()
+        fn = src.split("async def sms_test")[1].split("\n@router")[0]
+        assert '"via"' in fn or "'via'" in fn
+
+    def test_the_panel_shows_it(self):
+        js = open("frontend/js/app.js", encoding="utf-8").read()
+        fn = js.split("async function sendSmsTest")[1].split("\nasync function ")[0]
+        assert "d.via" in fn, "the panel discards the route the server reported"
