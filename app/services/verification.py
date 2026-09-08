@@ -186,9 +186,21 @@ async def _deliver(code: str, *, phone: str, email: str | None,
             # Plain send stays as the fallback for an account that has a real
             # sender line but no approved template.
             tpl = await resolve_otp_template(db)
+            res = None
             if tpl:
-                res = await send_verify(phone, code, tpl, db=db)
-            else:
+                try:
+                    res = await send_verify(phone, code, tpl, db=db)
+                except Exception as e:
+                    # A template is a live dependency on Kavenegar's review
+                    # queue: it sits «در حال بررسی» before approval, and can be
+                    # rejected or withdrawn later. Any of those turns every
+                    # login code into a failure with no second try, so a
+                    # template that does not work falls back rather than
+                    # becoming a single point of failure for logging in.
+                    logger.warning(f"[verification] template {tpl!r} failed, "
+                                   f"falling back to plain send: "
+                                   f"{type(e).__name__}: {e}")
+            if not (res or {}).get("success"):
                 res = await send_sms(phone, text, provider=settings.auth_sms_provider, db=db)
         except Exception as e:
             logger.warning(f"[verification] sms leg raised: {type(e).__name__}: {e}")

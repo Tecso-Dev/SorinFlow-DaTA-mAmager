@@ -426,7 +426,12 @@ async def api_key_middleware(request: Request, call_next):
                     # all — including the link meant to get back in. The POST
                     # to /api/maintenance is still super_admin-only by its own
                     # dependency; it is only exempt from the API-key check.
-                    "/api/maintenance", "/maintenance-access"}
+                    "/api/maintenance", "/maintenance-access",
+                    # Fetched by the browser with no credentials of any kind,
+                    # and by Kavenegar's own connection check. Left out, it
+                    # 401s in production and works locally — the same way the
+                    # login endpoints did.
+                    "/kvn-push-sw.js"}
     is_dashboard = (request.url.path.startswith("/dashboard")
                     or request.url.path.startswith("/images")
                     or request.url.path == "/portal")
@@ -874,6 +879,30 @@ async def portal_page():
         return HTMLResponse(page.read_text(encoding="utf-8"),
                             headers={"Cache-Control": "no-cache, must-revalidate"})
     return HTMLResponse("portal not found", status_code=404)
+
+
+@app.get("/kvn-push-sw.js", include_in_schema=False)
+async def kavenegar_push_service_worker():
+    """Kavenegar's web-push service worker, served from the ORIGIN ROOT.
+
+    A service worker can only control pages at or below its own path, so this
+    one has to answer at /kvn-push-sw.js — mounting it under /dashboard would
+    scope it to the panel and Kavenegar's «بررسی اتصال» would not find it.
+
+    Service-Worker-Allowed is sent explicitly: without it a browser refuses any
+    registration asking for a scope broader than the script's own directory,
+    which is the failure people hit when the file is served correctly and the
+    registration still will not take.
+    """
+    return FileResponse(
+        "frontend/kvn-push-sw.js",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/",
+                 # The SDK it imports is versioned upstream; caching this
+                 # one-line shim for a day is enough and keeps a stale worker
+                 # from outliving a change here.
+                 "Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/favicon.svg", include_in_schema=False)

@@ -125,6 +125,12 @@ input[dir="ltr"]{direction:ltr;text-align:left}
 @media (prefers-reduced-motion: reduce){.spinner{animation-duration:2s}}
 </style>
 <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
+<!-- Kavenegar web push. The service worker it registers is served from the
+     origin root by app/main.py (/kvn-push-sw.js); a worker under /dashboard
+     could only ever control the panel. Public pages only — the admin panel
+     has no use for visitor push and no reason to load a third-party script
+     into an authenticated session. -->
+<script src="https://cdn.kavenegar.com/sdk/page.js?appId=85f66023-2ddd-4874-b4a8-4a771313d239" defer charset="utf-8"></script>
 </head>
 <body>
 
