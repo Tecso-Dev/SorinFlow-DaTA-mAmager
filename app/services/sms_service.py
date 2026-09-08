@@ -74,7 +74,14 @@ STATUS_FA = {
     407: "دسترسی به اطلاعات مورد نظر برای شما امکان‌پذیر نیست",
     409: "سرور قادر به پاسخگویی نیست، بعدا تلاش کنید",
     411: "شماره گیرنده نامعتبر است",
-    412: "شماره فرستنده نامعتبر است",
+    # Kavenegar's own wording sends the reader to the sender field, which is
+    # usually filled in correctly — as it was here. 412 also comes back when
+    # the line is real but cannot address the destination: an international or
+    # shared line sending to an Iranian mobile. So the message names both.
+    412: ("شماره فرستنده نامعتبر است یا اجازهٔ ارسال به این مقصد را ندارد — "
+          "خط بین‌المللی/اشتراکی نمی‌تواند به شماره‌های ایران پیامک بفرستد. "
+          "برای کد ورود، یک «الگو» در پنل کاوه‌نگار بسازید و نامش را در "
+          "«الگوی کد ورود» بگذارید؛ الگو به خط فرستنده نیاز ندارد."),
     413: "متن پیام خالی یا بیش از حد طولانی است",
     414: "حجم درخواست بیشتر از حد مجاز است",
     415: "ایندکس مورد نظر خارج از محدوده است",
@@ -173,6 +180,26 @@ async def resolve_credentials(db=None) -> tuple:
             logger.warning(f"[sms] could not read saved credentials: {e}")
     return api_key, sender
 
+
+
+async def resolve_otp_template(db=None) -> str:
+    """The verify/lookup template name — environment first, then the panel.
+
+    Empty means no template is approved, and one-time codes fall back to a
+    plain send. That fallback needs a sender line which can address the
+    destination; on an account whose only line is international and shared it
+    cannot, and every code comes back «[412] شماره فرستنده نامعتبر است».
+    """
+    tpl = (settings.kavenegar_otp_template or "").strip()
+    if tpl:
+        return tpl
+    if db is not None:
+        try:
+            v = await _get_settings_rows(db, [KEY_OTP_TEMPLATE])
+            tpl = (v.get(KEY_OTP_TEMPLATE) or "").strip()
+        except Exception as e:
+            logger.warning(f"[sms] could not read the OTP template: {e}")
+    return tpl
 
 # ── the Kavenegar wire ──────────────────────────────────────────────────────
 

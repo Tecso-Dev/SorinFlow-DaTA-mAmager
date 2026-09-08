@@ -19,7 +19,7 @@ from loguru import logger
 
 from app.config import get_settings
 from app.database import get_redis
-from app.services.sms_service import send_sms
+from app.services.sms_service import send_sms, send_verify, resolve_otp_template
 
 settings = get_settings()
 
@@ -172,7 +172,24 @@ async def _deliver(code: str, *, phone: str, email: str | None,
         if not phone:
             return False
         try:
-            res = await send_sms(phone, text, provider=settings.auth_sms_provider, db=db)
+            # A template first, when one is configured.
+            #
+            # verify/lookup is the channel Kavenegar intends for one-time
+            # codes: it carries no sender of its own, so it works on an account
+            # whose only line cannot address the destination — which is exactly
+            # this account, whose single line is international and shared, and
+            # which answered every login code with «[412] شماره فرستنده
+            # نامعتبر است». send_verify was written for this and then never
+            # called by anything, so every code took the plain-send path and
+            # failed.
+            #
+            # Plain send stays as the fallback for an account that has a real
+            # sender line but no approved template.
+            tpl = await resolve_otp_template(db)
+            if tpl:
+                res = await send_verify(phone, code, tpl, db=db)
+            else:
+                res = await send_sms(phone, text, provider=settings.auth_sms_provider, db=db)
         except Exception as e:
             logger.warning(f"[verification] sms leg raised: {type(e).__name__}: {e}")
             return False
