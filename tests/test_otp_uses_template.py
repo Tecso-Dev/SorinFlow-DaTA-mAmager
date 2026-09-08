@@ -121,8 +121,17 @@ class TestTheServiceWorkerIsReachable:
     def test_it_is_served_from_the_origin_root(self):
         import re
         src = open("app/main.py", encoding="utf-8").read()
-        assert re.search(r'@app\.get\(\s*["\']/kvn-push-sw\.js["\']', src), \
+        assert re.search(r'@app\.(get|api_route)\(\s*["\']/kvn-push-sw\.js["\']', src), \
             "no root route serves the service worker"
+
+    def test_head_is_allowed_too(self):
+        """A checker asking «does this file exist» often sends HEAD, and
+        @app.get registers GET alone — so HEAD answered 405 on a file that
+        served perfectly over GET."""
+        import re
+        src = open("app/main.py", encoding="utf-8").read()
+        m = re.search(r'@app\.api_route\(\s*["\']/kvn-push-sw\.js["\'][^)]*\)', src)
+        assert m and "HEAD" in m.group(0), "HEAD is not accepted for the service worker"
 
     def test_it_is_in_the_api_key_allowlist(self):
         src = open("app/main.py", encoding="utf-8").read()

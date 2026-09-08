@@ -881,7 +881,10 @@ async def portal_page():
     return HTMLResponse("portal not found", status_code=404)
 
 
-@app.get("/kvn-push-sw.js", include_in_schema=False)
+# GET and HEAD. FastAPI's @app.get registers GET alone, so a HEAD — which
+# is what a checker reaching for "does this file exist" often sends — came
+# back 405, on a file that serves perfectly over GET.
+@app.api_route("/kvn-push-sw.js", methods=["GET", "HEAD"], include_in_schema=False)
 async def kavenegar_push_service_worker():
     """Kavenegar's web-push service worker, served from the ORIGIN ROOT.
 
