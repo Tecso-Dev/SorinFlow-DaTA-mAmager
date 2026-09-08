@@ -391,6 +391,18 @@ class EmailCodeVerifyRequest(BaseModel):
     code: str = Field(..., min_length=4, max_length=8)
 
 
+class PhoneVerifyRequest(BaseModel):
+    """Confirm the caller's own number with the code that was texted to it."""
+    code: str = Field(..., min_length=4, max_length=8)
+
+
+class PhoneChangeRequest(BaseModel):
+    """Ask for a code. The number is optional: sending one changes the number
+    on file first, which is the only way to correct a wrong one — an unverified
+    number nobody can replace is a dead end."""
+    phone: Optional[str] = Field(None, max_length=20)
+
+
 class PasswordResetRequest(BaseModel):
     """Who is asking. Username or email — people remember either."""
     identifier: str = Field(..., min_length=3, max_length=200)

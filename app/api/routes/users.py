@@ -40,6 +40,7 @@ from app.schemas import (
     UserResponse, UserCreate, UserRegister, UserUpdate, UserPasswordReset, TokenResponse, UserList,
     TotpSetupResponse, TotpEnableRequest, TotpDisableRequest, TotpLoginRequest,
     EmailCodeVerifyRequest, PasswordResetRequest, PasswordResetConfirm,
+    PhoneVerifyRequest, PhoneChangeRequest,
 )
 
 router = APIRouter()
@@ -74,6 +75,7 @@ def _guard_role_assignment(actor: User, role: str | None) -> None:
 
 PURPOSE_EMAIL_2FA = "email_2fa"
 PURPOSE_PWD_RESET = "pwd_reset"
+PURPOSE_PHONE = "phone_verify"
 
 
 def _mask_email(addr: str) -> str:
@@ -376,6 +378,95 @@ async def register_user(
 
 
 # ── Authenticated ─────────────────────────────────────────────────────────────
+
+@router.post("/me/phone/request")
+async def request_phone_code(data: PhoneChangeRequest,
+                             current_user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    """Text a code to the caller's own number, so they can prove they hold it.
+
+    SMS only, never email. A code that arrives in an inbox says nothing
+    whatsoever about who holds the phone, and «تأیید شده» next to a number has
+    to mean the number was answered — otherwise the badge is decoration and the
+    panel is lying, which is the thing it was added to stop doing.
+
+    Passing a number changes the one on file first. Without that an account
+    whose number is wrong can never be corrected: the code would go to whoever
+    actually owns the mistyped number.
+    """
+    from app.api.routes.sms import normalize_mobile
+    from app.services.verification import issue_code, VerificationError
+
+    if data.phone:
+        number = normalize_mobile(data.phone)
+        if not number:
+            raise HTTPException(400, "شمارهٔ موبایل معتبر نیست")
+        # unique=True on the column, so a clash is a 500 at flush time unless
+        # it is caught here.
+        clash = (await db.execute(
+            select(User).where(User.phone == number, User.id != current_user.id)
+        )).scalars().first()
+        if clash:
+            raise HTTPException(409, "این شماره قبلاً برای حساب دیگری ثبت شده است")
+        if number != (current_user.phone or ""):
+            current_user.phone = number
+            current_user.phone_verified = False
+            await db.commit()
+
+    if not (current_user.phone or "").strip():
+        raise HTTPException(400, "ابتدا شمارهٔ موبایل خود را وارد کنید")
+    if current_user.phone_verified:
+        return {"sent": False, "verified": True,
+                "message": "این شماره قبلاً تأیید شده است"}
+
+    try:
+        issued = await issue_code(
+            PURPOSE_PHONE, current_user.username, current_user.phone,
+            message_template="کد تأیید شمارهٔ شما در سورین‌فلو: {code}",
+            channel="sms", db=db)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message)
+
+    if not issued.channel:
+        # The code was created and burned but never travelled. Say so plainly:
+        # «ارسال شد» over a message that did not send is how somebody ends up
+        # waiting for an SMS that is never coming.
+        raise HTTPException(
+            status_code=503,
+            detail="پیامک ارسال نشد — تنظیمات پیامک را در پنل بررسی کنید")
+
+    return {"sent": True, "verified": False, "phone": current_user.phone,
+            "message": "کد تأیید پیامک شد"}
+
+
+@router.post("/me/phone/verify")
+async def confirm_phone_code(data: PhoneVerifyRequest,
+                             current_user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    """Confirm the texted code and mark the number verified."""
+    from app.services.verification import verify_code, VerificationError
+
+    try:
+        used = await verify_code(PURPOSE_PHONE, current_user.username, data.code)
+    except VerificationError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+
+    # verify_code returns the route the code actually travelled, and this is
+    # the one place that has to care. The request asks for SMS, but a code that
+    # somehow arrived by email proves the inbox and says nothing about who
+    # holds the phone — and «تأیید شده» beside a number has to mean the number
+    # was answered. verification.py warns about precisely this: it is how a
+    # phone nobody had ever answered ended up flagged verified here before.
+    if used and used != "sms":
+        raise HTTPException(
+            status_code=400,
+            detail="این کد از راه پیامک نرسیده بود، پس تأیید شماره نیست")
+
+    current_user.phone_verified = True
+    await db.commit()
+    logger.info(f"[phone] {current_user.username} verified their number")
+    return {"verified": True, "message": "شمارهٔ موبایل تأیید شد"}
+
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):

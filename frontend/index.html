@@ -3924,6 +3924,48 @@
                     <span id="totp-status-badge" class="badge bg-secondary ms-auto">در حال بررسی...</span>
                 </div>
 
+                <!-- Proving the number on file is actually yours. The panel
+                     shows «تأیید نشده» beside it until a texted code comes
+                     back, and until now there was no way to make that badge
+                     go away from inside the panel. -->
+                <div class="p-2 mb-3"
+                     style="background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-phone" style="color:#818cf8;"></i>
+                        <div style="flex:1">
+                            <div style="font-size:.85rem;color:var(--text);">شمارهٔ موبایل</div>
+                            <div style="font-size:.74rem;color:var(--text-muted);">
+                                <span id="phone-current" dir="ltr">—</span>
+                                <span id="phone-badge" class="badge bg-secondary ms-1">—</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-outline-primary btn-sm" id="phone-verify-btn"
+                                onclick="requestPhoneCode()">تأیید شماره</button>
+                    </div>
+
+                    <!-- change the number: an unverified number nobody can
+                         replace is a dead end, because the code would go to
+                         whoever owns the mistyped number -->
+                    <div class="mt-2" id="phone-edit-wrap">
+                        <div class="input-group input-group-sm">
+                            <input type="text" id="phone-new" class="form-control form-control-sm"
+                                   dir="ltr" inputmode="numeric" maxlength="13"
+                                   placeholder="برای تغییر شماره، شمارهٔ تازه را بنویسید">
+                        </div>
+                    </div>
+
+                    <!-- the code -->
+                    <div class="mt-2 d-none" id="phone-code-wrap">
+                        <label class="form-label small mb-1" for="phone-code">کد پیامک‌شده</label>
+                        <div class="d-flex gap-2">
+                            <input type="text" id="phone-code" class="form-control form-control-sm otp-input"
+                                   dir="ltr" inputmode="numeric" maxlength="5" placeholder="·····">
+                            <button class="btn btn-primary btn-sm" onclick="confirmPhoneCode()">تأیید</button>
+                        </div>
+                    </div>
+                    <div class="small mt-2" id="phone-result"></div>
+                </div>
+
                 <!-- The emailed second factor: no app, no QR, no clock. -->
                 <div class="d-flex align-items-center gap-2 mb-3 p-2"
                      style="background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
@@ -4021,7 +4063,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260908c"></script>
+<script src="js/app.js?v=20260908d"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

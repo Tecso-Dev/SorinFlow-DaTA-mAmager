@@ -576,6 +576,7 @@ async function open2FAModal() {
     document.getElementById('totp-btn-disable').classList.add('d-none');
 
     loadEmail2faState();
+    loadPhoneState();
 
     try {
         const data = await apiCall('/users/me/totp/status');
@@ -660,6 +661,73 @@ async function disableTotp() {
         bootstrap.Modal.getInstance(document.getElementById('twoFAModal'))?.hide();
     } catch(e) {
         showToast('خطا', e.message, 'danger');
+    }
+}
+
+async function loadPhoneState() {
+    const cur = document.getElementById('phone-current');
+    const badge = document.getElementById('phone-badge');
+    const btn = document.getElementById('phone-verify-btn');
+    const out = document.getElementById('phone-result');
+    if (out) out.textContent = '';
+    document.getElementById('phone-code-wrap')?.classList.add('d-none');
+    try {
+        const me = await apiCall('/users/me');
+        if (cur) cur.textContent = me.phone || '—';
+        if (badge) {
+            const ok = !!me.phone_verified;
+            badge.textContent = !me.phone ? 'ثبت نشده' : (ok ? 'تأیید شده' : 'تأیید نشده');
+            badge.className = 'badge ms-1 ' + (ok ? 'bg-success' : (me.phone ? 'bg-warning text-dark' : 'bg-secondary'));
+            // A verified number needs no button; leaving one there invites
+            // somebody to burn a code proving what is already proved.
+            if (btn) btn.classList.toggle('d-none', ok);
+            document.getElementById('phone-edit-wrap')?.classList.toggle('d-none', ok);
+        }
+    } catch (e) {
+        if (cur) cur.textContent = '—';
+    }
+}
+
+async function requestPhoneCode() {
+    const out = document.getElementById('phone-result');
+    const btn = document.getElementById('phone-verify-btn');
+    const fresh = (document.getElementById('phone-new')?.value || '').trim();
+    if (btn) btn.disabled = true;
+    if (out) { out.textContent = 'در حال ارسال…'; out.className = 'small mt-2 text-muted'; }
+    try {
+        const d = await apiCall('/users/me/phone/request', {
+            method: 'POST',
+            body: JSON.stringify(fresh ? { phone: fresh } : {})
+        });
+        if (d.verified) {           // already done; nothing was sent
+            if (out) { out.textContent = d.message; out.className = 'small mt-2 text-success'; }
+            loadPhoneState();
+            return;
+        }
+        document.getElementById('phone-code-wrap')?.classList.remove('d-none');
+        document.getElementById('phone-code')?.focus();
+        if (out) { out.textContent = d.message; out.className = 'small mt-2 text-success'; }
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'خطا'; out.className = 'small mt-2 text-danger'; }
+    }
+    if (btn) btn.disabled = false;
+}
+
+async function confirmPhoneCode() {
+    const out = document.getElementById('phone-result');
+    const code = (document.getElementById('phone-code')?.value || '').trim();
+    if (!code) return;
+    if (out) { out.textContent = 'در حال بررسی…'; out.className = 'small mt-2 text-muted'; }
+    try {
+        const d = await apiCall('/users/me/phone/verify', {
+            method: 'POST', body: JSON.stringify({ code })
+        });
+        if (out) { out.textContent = d.message; out.className = 'small mt-2 text-success'; }
+        loadPhoneState();
+        // the users list carries the same badge
+        if (typeof loadUsers === 'function') loadUsers();
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'کد نادرست است'; out.className = 'small mt-2 text-danger'; }
     }
 }
 
@@ -9260,6 +9328,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // «کد نادرست است», which reads as the code being wrong rather than the
     // keyboard.
     _wireOtp('login-email-code', () => verifyEmailLogin());
+    _wireOtp('phone-code', () => confirmPhoneCode());
     _wireOtp('reset-code', () => {});
     _wireOtp('login-totp-code', () => {
         const b = document.getElementById('login-totp-btn');
