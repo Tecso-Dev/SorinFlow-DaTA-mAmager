@@ -4,6 +4,7 @@ Handles click-to-reveal phone numbers and captcha solving.
 """
 import re
 import asyncio
+import time
 import random
 from pathlib import Path
 from typing import Optional, List
@@ -728,7 +729,27 @@ class ContactExtractor:
                 slice_s = 2.0
                 _notified = False
                 _notify_after = int(getattr(settings, "otp_notify_after_seconds", 120))
+                _resend_after = int(getattr(settings, "otp_resend_after_seconds", 90) or 0)
+                _auto_resends = 0
+                _next_auto = float(_resend_after) if _resend_after > 0 else float("inf")
                 while waited < timeout:
+                    # No code after otp_resend_after_seconds: press Divar's
+                    # «ارسال مجدد» ourselves, at most twice per challenge.
+                    # Divar accepts a contact code for ~120s, so a first SMS the
+                    # carrier lost is worth asking again for well inside that
+                    # window. The request's clock restarts so the inbound
+                    # endpoint's staleness check measures against THIS send —
+                    # a late first code must not land on a fresh resend. The
+                    # total wait is not extended: `waited` keeps counting.
+                    if waited >= _next_auto and _auto_resends < 2:
+                        _auto_resends += 1
+                        _next_auto = waited + _resend_after
+                        sent = await self._request_otp_resend()
+                        otp_store.restart_clock(self.otp_key)
+                        logger.info(
+                            f"no code after {int(waited)}s — automatic resend "
+                            f"{_auto_resends}/2 "
+                            + ("(Divar's control clicked)" if sent else "(no control on the page)"))
                     # Did the operator press «ارسال دوباره»? Only this loop can
                     # act on it: Divar's resend control lives on the page the
                     # browser is parked on, and nothing outside can reach it.
@@ -821,6 +842,18 @@ class ContactExtractor:
             if not code:
                 logger.warning("OTP event fired but no code found in store")
                 return
+            # SMS sent -> typed here, when a forwarder told us the send time.
+            # The one number a forwarder is judged by; carrier delivery is
+            # inside it, and only the phone->server hop is ours to fix.
+            _sent_at = otp_store.pop_sent_stamp(self.otp_key)
+            if _sent_at:
+                try:
+                    from app import metrics as _mx
+                    _delivery = max(time.time() - _sent_at, 0.0)
+                    _mx.otp_delivery_seconds.observe(_delivery)
+                    logger.info(f"[otp] forwarded code typed {_delivery:.1f}s after Divar sent it")
+                except Exception:
+                    pass
 
             logger.info(f"OTP code received, entering into page")
             await otp_input.click()

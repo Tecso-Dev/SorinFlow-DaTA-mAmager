@@ -829,6 +829,52 @@ python -m pytest -q
 
 Native application execution is not turnkey: default service hosts are Compose names (`db` and `redis`), while several runtime paths are fixed under `/app`. Prefer Docker for running the complete system.
 
+## SMS forwarder — Divar codes without touching the panel
+
+Divar asks the scraping account for an SMS code on the contact-info click.
+With a phone-side forwarder, that code reaches the waiting browser within
+seconds and is typed automatically; the panel prompt stays as the fallback.
+
+Two endpoints take the phone's traffic. Both are outside the API-key gate and
+authenticate themselves: `X-Signature` is HMAC-SHA256 of the raw body with
+`OTP_INBOUND_SECRET`; `X-OTP-Secret: <secret>` is the simpler fallback.
+Unset secret → 503, and nothing changes for manual entry.
+
+| endpoint | body |
+|---|---|
+| `POST /api/scraper/otp-inbound` | `{"kind":"contact"\|"login","account":"<divar phone>","code":"<6 digits or empty>","text":"<raw sms>","sim":"…","sentStamp":<ms>,"receivedStamp":<ms>}` |
+| `POST /api/scraper/forwarder-heartbeat` | `{"account":"…","battery":<int>,"network":"…","version":"…"}` (every 5 min) |
+| `GET /api/scraper/forwarders` | who is online — `online` = seen in the last 10 min |
+
+What the server does with a `contact` SMS: normalises Persian digits, pulls
+the code with `Code:\s*(\d{6})`, finds the **pending request for that
+account** (never «latest pending» — two accounts can be waiting), rejects a
+code whose `sentStamp` predates the request (a late first SMS must not land on
+a fresh resend), and hands it to `otp_store` on the same rail the panel uses.
+A `login` SMS is parked 3 minutes under `GET /api/scraper/login-code/{account}`.
+Every SMS, matched or not, is a row in the SMS event log with both timestamps.
+
+`sorinflow_otp_delivery_seconds` is the histogram from Divar's send to the
+code being typed. If its p95 is over a minute, read the event rows: sent →
+received is the carrier; received → server is the phone — only the second is
+fixable.
+
+With no code after `OTP_RESEND_AFTER_SECONDS` (90) the browser presses Divar's
+«ارسال مجدد» itself, at most twice per challenge, without extending the wait.
+
+### Stock forwarder app — two rules
+
+Any SMS-to-webhook app works. For [android_income_sms_gateway_webhook](https://github.com/bogkonstantin/android_income_sms_gateway_webhook):
+
+1. sender `Divar`, text filter `اطلاعات تماس`, URL `https://sorinflow.com/api/scraper/otp-inbound`, HMAC on with the secret, body
+   `{"kind":"contact","account":"<phone>","code":"%Regex=Code:\\s*(\\d{6})%","text":"%text%","sim":"%sim%","sentStamp":%sentStamp%,"receivedStamp":%receivedStamp%}`
+2. the same with text filter `کد تایید` and `"kind":"login"`.
+
+**Xiaomi / HyperOS** will kill it unless: Settings → Apps → *Allow restricted
+settings*; grant SMS; Battery → *No restrictions*; Autostart on; lock the app
+in Recents; turn off *Manage app if unused*; turn off RCS in Google Messages
+(RCS swallows the SMS before the broadcast fires).
+
 ## Operations
 
 ### Common commands

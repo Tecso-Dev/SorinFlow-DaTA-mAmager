@@ -4,7 +4,7 @@ Background scraper tasks register a wait; the API endpoint resolves it.
 """
 import asyncio
 import time
-from typing import Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any
 
 _store: Dict[str, Any] = {}
 
@@ -108,13 +108,82 @@ def restart_clock(key: str) -> None:
         entry["ts"] = time.time()
 
 
-def submit(key: str, code: str) -> bool:
+def submit(key: str, code: str, sent_stamp_ms: Optional[int] = None,
+           source: str = "panel") -> bool:
     entry = _store.get(key)
     if not entry or entry["event"].is_set():
         return False
     entry["code"] = code
+    entry["source"] = source
+    # When the SMS was sent, if the forwarder told us. The extractor reads it
+    # back after it types the code, and that difference is the one number a
+    # forwarder is judged by.
+    if sent_stamp_ms:
+        _sent[key] = float(sent_stamp_ms) / 1000.0
     entry["event"].set()
     return True
+
+
+_sent: Dict[str, float] = {}
+
+
+def pop_sent_stamp(key: str) -> Optional[float]:
+    """Epoch seconds Divar sent the SMS, once, for the code just typed."""
+    return _sent.pop(key, None)
+
+
+def _digits(s: Optional[str]) -> str:
+    """Just the digits, Persian and Arabic forms included, last 10 kept — so
+    +98912…, 0098912… and 0912… are all the same phone."""
+    t = str(s or "").translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    d = "".join(ch for ch in t if ch.isdigit())
+    return d[-10:]
+
+
+def find_pending_for_account(account: Optional[str]) -> Optional[Tuple[str, dict]]:
+    """The open request whose account matches — by ACCOUNT, never «latest».
+
+    Two accounts can be waiting at once (two jobs, or a rotation mid-pause),
+    and a code belongs to the SIM it arrived on. Handing it to whichever
+    prompt is newest would type account A's code into account B's modal.
+    """
+    want = _digits(account)
+    if not want:
+        return None
+    now = time.time()
+    window = wait_window()
+    best = None
+    for k, v in list(_store.items()):
+        if v["event"].is_set() or now - v["ts"] >= window:
+            continue
+        if _digits(v.get("phone_hint")) == want:
+            if best is None or v["ts"] > best[1]["ts"]:
+                best = (k, v)
+    return best
+
+
+# ── login codes ──
+#
+# Divar's login flow (auth.py) is driven by a person in the panel, so a
+# forwarded login code has nowhere to go immediately. It is parked here for a
+# short while so the panel can pick it up instead of the person re-typing what
+# the phone already sent. Nothing waits on it; unclaimed codes simply expire.
+_login_codes: Dict[str, Tuple[str, float]] = {}
+LOGIN_CODE_TTL = 180
+
+
+def put_login_code(account: Optional[str], code: str) -> None:
+    acct = _digits(account)
+    if acct and code:
+        _login_codes[acct] = (code, time.time())
+
+
+def take_login_code(account: Optional[str]) -> Optional[str]:
+    acct = _digits(account)
+    hit = _login_codes.pop(acct, None)
+    if not hit or time.time() - hit[1] > LOGIN_CODE_TTL:
+        return None
+    return hit[0]
 
 
 def wait_window() -> int:

@@ -31,6 +31,7 @@ TEMPLATE = "template"    # a template was configured, or started/stopped working
 CREDIT = "credit"        # balance observed, or too low to keep sending
 DELIVERY = "delivery"    # a delivery-status poll changed what we believe
 ERROR = "error"          # a call failed in a way that is not any of the above
+INBOUND = "inbound"      # a Divar SMS forwarded from a phone, matched or not
 
 RETENTION_DAYS = 90
 

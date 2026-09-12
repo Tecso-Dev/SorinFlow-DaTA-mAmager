@@ -3339,6 +3339,11 @@ async function pollDivarOtp() {
         document.getElementById('divar-otp-key').value = item.key;
         const phoneEl = document.getElementById('otp2-phone');
         if (phoneEl) phoneEl.textContent = item.phone_hint || 'دیوار';
+        // Is a phone forwarding this account's SMS? Then the code will most
+        // likely type itself and this modal is a fallback; say so, because a
+        // person who reaches for their phone is racing a machine that will
+        // win by twenty seconds.
+        _otp2SetMode(item.phone_hint, data.forwarders || {});
         initOtp2Boxes();
         _otp2Reset();
         // the request started before the poll saw it — count what is left
@@ -3347,6 +3352,26 @@ async function pollDivarOtp() {
         modal.addEventListener('shown.bs.modal', () => _otp2Els()[0]?.focus(), { once: true });
         new bootstrap.Modal(modal).show();
     } catch(e) { /* silent */ }
+}
+
+function _otp2SetMode(phone, forwarders) {
+    const el = document.getElementById('otp2-mode');
+    if (!el) return;
+    const digits = String(phone || '').replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/\D/g, '').slice(-10);
+    const fw = forwarders[digits];
+    if (fw && fw.online) {
+        el.className = 'badge bg-success';
+        el.textContent = 'خودکار — گوشی متصل است' + (fw.battery != null ? ` · ${formatNumber(fw.battery)}٪` : '');
+        el.title = 'کد از گوشی به‌طور خودکار می‌رسد؛ اگر نیامد، دستی وارد کنید';
+    } else if (fw) {
+        el.className = 'badge bg-warning text-dark';
+        el.textContent = 'گوشی آفلاین — دستی وارد کنید';
+        el.title = 'آخرین تماس گوشی بیش از ۱۰ دقیقه پیش بود';
+    } else {
+        el.className = 'badge bg-secondary';
+        el.textContent = 'دستی';
+        el.title = 'برای این شماره گوشی‌ای متصل نیست';
+    }
 }
 
 /** The request is gone: stop the clock and stop accepting digits for it. */

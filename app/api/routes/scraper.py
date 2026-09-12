@@ -1,7 +1,10 @@
 """
 SorinFlow Divar Scraper - Scraper API Routes
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+import re
+import json
+import time
+from fastapi import Request, APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, false
 from typing import Optional, List
@@ -652,7 +655,7 @@ async def get_otp_pending():
     actually wait.
     """
     from app.scraper import otp_store
-    return {"pending": otp_store.get_pending(), "timeout": otp_store.wait_window()}
+    return {"forwarders": await list_forwarders(), "pending": otp_store.get_pending(), "timeout": otp_store.wait_window()}
 
 
 class OtpSubmitRequest(BaseModel):
@@ -667,6 +670,237 @@ async def submit_otp_code(key: str, body: OtpSubmitRequest):
     if not ok:
         raise HTTPException(status_code=404, detail="No pending OTP request for this key")
     return {"success": True}
+
+
+# ── automatic OTP intake from a phone-side SMS forwarder ───────────────────
+#
+# A phone with the Divar SIM runs a forwarder app. Every SMS from sender
+# «Divar» is POSTed here within seconds, signed with a shared secret. The code
+# is handed to the waiting extractor exactly as a hand-typed one would be —
+# same otp_store.submit, same event — so the browser types it without anybody
+# opening the panel. Manual entry keeps working; this is a faster path onto
+# the same rail, not a replacement.
+
+_PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+_CODE_RE = re.compile(r"Code:\s*(\d{6})")
+_ANY6_RE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
+
+
+def extract_otp_code(text: Optional[str]) -> Optional[str]:
+    """Six digits after «Code:», Persian digits normalised first. Falls back
+    to any standalone six-digit run — Divar's wording has moved before."""
+    t = (text or "").translate(_PERSIAN_DIGITS)
+    m = _CODE_RE.search(t) or _ANY6_RE.search(t)
+    return m.group(1) if m else None
+
+
+def detect_otp_kind(text: Optional[str]) -> Optional[str]:
+    """«اطلاعات تماس» is the contact-info challenge; «کد تایید» (either
+    spelling of the hamza) is a login code."""
+    t = (text or "").replace("أ", "ا").replace("ٔ", "")
+    if "اطلاعات تماس" in t:
+        return "contact"
+    if "کد تایید" in t or "کد تاييد" in t:
+        return "login"
+    return None
+
+
+def _inbound_secret() -> str:
+    return (getattr(settings, "otp_inbound_secret", "") or "").strip()
+
+
+async def _verify_forwarder(request: Request, raw: bytes) -> None:
+    """HMAC-SHA256 of the raw body in X-Signature, or the secret itself in
+    X-OTP-Secret. Constant-time on both. 503 when nothing is configured —
+    that is «feature off», not «bad credentials»."""
+    import hashlib
+    import hmac as _hmac
+    secret = _inbound_secret()
+    if not secret:
+        raise HTTPException(status_code=503, detail="OTP_INBOUND_SECRET is not configured")
+    sig = (request.headers.get("X-Signature") or "").strip().lower()
+    if sig:
+        want = _hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
+        if _hmac.compare_digest(sig, want):
+            return
+    plain = request.headers.get("X-OTP-Secret") or ""
+    if plain and _hmac.compare_digest(plain.encode("utf-8"), secret.encode("utf-8")):
+        return
+    raise HTTPException(status_code=401, detail="bad signature")
+
+
+async def _forwarder_rate_limit(request: Request, limit: int = 20) -> None:
+    """~20 requests a minute per source IP. A phone sends a handful an hour;
+    anything faster is a misconfigured retry loop or somebody probing."""
+    try:
+        from app.database import get_redis
+        r = await get_redis()
+        ip = request.client.host if request.client else "?"
+        key = f"otp_inbound:rl:{ip}"
+        n = await r.incr(key)
+        if n == 1:
+            await r.expire(key, 60)
+        if n > limit:
+            raise HTTPException(status_code=429, detail="too many requests")
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Redis down must not turn the forwarder off.
+        logger.warning(f"[otp-inbound] rate limit unavailable: {e}")
+
+
+class OtpInbound(BaseModel):
+    kind: Optional[str] = None
+    account: Optional[str] = None
+    code: Optional[str] = None
+    text: Optional[str] = None
+    sim: Optional[str] = None
+    sentStamp: Optional[int] = None
+    receivedStamp: Optional[int] = None
+    battery: Optional[int] = None
+    network: Optional[str] = None
+
+
+def _mask_code(code: Optional[str]) -> str:
+    c = code or ""
+    return ("*" * max(len(c) - 2, 0)) + c[-2:] if c else ""
+
+
+@router.post("/otp-inbound")
+async def otp_inbound(request: Request):
+    """A Divar SMS, forwarded from the phone that holds the SIM."""
+    from app.scraper import otp_store
+    from app.services import sms_log
+
+    raw = await request.body()
+    await _verify_forwarder(request, raw)
+    await _forwarder_rate_limit(request)
+    try:
+        body = OtpInbound.model_validate_json(raw)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"bad body: {type(e).__name__}")
+
+    now_ms = int(time.time() * 1000)
+    code = (body.code or "").translate(_PERSIAN_DIGITS).strip() or extract_otp_code(body.text)
+    kind = body.kind if body.kind in ("contact", "login", "test") else detect_otp_kind(body.text)
+    ip = request.client.host if request.client else "?"
+    latency_ms = (now_ms - int(body.sentStamp)) if body.sentStamp else None
+
+    matched = False
+    matched_key = "no_pending"
+    reason = None
+
+    if kind == "test":
+        reason = "test"
+    elif not code:
+        reason = "no_code_in_text"
+    elif kind == "login":
+        otp_store.put_login_code(body.account, code)
+        reason = "parked_for_login"
+    elif kind == "contact":
+        hit = otp_store.find_pending_for_account(body.account)
+        if not hit:
+            reason = "no_pending_for_account"
+        else:
+            key, entry = hit
+            # A late FIRST code must not overwrite a fresh resend: the
+            # request's clock restarts on every resend, so a stamp older than
+            # it belongs to an SMS the extractor already gave up on. 10s of
+            # slack for the phone's clock.
+            if body.sentStamp and (int(body.sentStamp) / 1000.0) < (entry["ts"] - 10):
+                reason = "stale_code"
+            elif otp_store.submit(key, code, sent_stamp_ms=body.sentStamp, source="forwarder"):
+                matched, matched_key, reason = True, key, "matched"
+            else:
+                reason = "already_answered"
+    else:
+        reason = "unknown_kind"
+
+    await sms_log.record(
+        sms_log.INBOUND,
+        (f"کد {kind or '?'} از {otp_store._digits(body.account) or '؟'} — "
+         + ("به اسکرپر داده شد" if matched else f"استفاده نشد ({reason})")),
+        level="info" if matched or kind in ("login", "test") else "warning",
+        route="forwarder", actor=f"forwarder@{ip}",
+        account=otp_store._digits(body.account) or None, kind=kind,
+        code=_mask_code(code), sent_stamp=body.sentStamp, received_stamp=body.receivedStamp,
+        server_ms=now_ms, matched_key=matched_key, reason=reason, latency_ms=latency_ms,
+        sim=body.sim, battery=body.battery, network=body.network,
+    )
+    logger.info(f"[otp-inbound] kind={kind} account={otp_store._digits(body.account)} "
+                f"{reason} latency_ms={latency_ms}")
+    return {"matched": matched, "kind": kind, "reason": reason, "latency_ms": latency_ms}
+
+
+class ForwarderHeartbeat(BaseModel):
+    account: Optional[str] = None
+    battery: Optional[int] = None
+    network: Optional[str] = None
+    version: Optional[str] = None
+
+
+_HB_TTL = 900          # a phone that has not spoken in 15 min is forgotten
+_HB_ONLINE = 600       # ...and reads as offline after 10
+
+
+@router.post("/forwarder-heartbeat")
+async def forwarder_heartbeat(request: Request):
+    from app.scraper import otp_store
+    raw = await request.body()
+    await _verify_forwarder(request, raw)
+    await _forwarder_rate_limit(request)
+    try:
+        body = ForwarderHeartbeat.model_validate_json(raw)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"bad body: {type(e).__name__}")
+    acct = otp_store._digits(body.account)
+    if not acct:
+        raise HTTPException(status_code=422, detail="account is required")
+    try:
+        from app.database import get_redis
+        r = await get_redis()
+        await r.set(f"forwarder:{acct}", json.dumps({
+            "account": acct, "battery": body.battery, "network": body.network,
+            "version": body.version, "last_seen": time.time(),
+        }), ex=_HB_TTL)
+    except Exception as e:
+        logger.warning(f"[forwarder] heartbeat not stored: {e}")
+        raise HTTPException(status_code=503, detail="store unavailable")
+    return {"ok": True}
+
+
+async def list_forwarders() -> dict:
+    """{account: {online, battery, network, version, last_seen}}."""
+    out = {}
+    try:
+        from app.database import get_redis
+        r = await get_redis()
+        now = time.time()
+        async for k in r.scan_iter(match="forwarder:*"):
+            v = await r.get(k)
+            if not v:
+                continue
+            d = json.loads(v)
+            d["online"] = (now - float(d.get("last_seen") or 0)) < _HB_ONLINE
+            out[d.get("account")] = d
+    except Exception as e:
+        logger.debug(f"[forwarder] list unavailable: {e}")
+    return out
+
+
+@router.get("/forwarders")
+async def get_forwarders():
+    """Which phones are forwarding, and whether each is alive."""
+    return {"forwarders": await list_forwarders(), "online_after_seconds": _HB_ONLINE}
+
+
+@router.get("/login-code/{account}")
+async def take_login_code(account: str):
+    """A forwarded LOGIN code parked for this account, consumed on read, so
+    the login form can fill itself in instead of the person re-typing what
+    the phone already sent. None if nothing arrived in the last 3 minutes."""
+    from app.scraper import otp_store
+    return {"code": otp_store.take_login_code(account)}
 
 
 @router.post("/otp/{key}/resend")

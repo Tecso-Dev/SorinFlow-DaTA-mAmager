@@ -129,6 +129,17 @@ class Settings(BaseSettings):
     proxy_enabled: bool = Field(default=False, env="PROXY_ENABLED")
     # Re-test every active proxy this often. 0 disables the loop.
     proxy_refresh_hours: float = Field(default=24.0, env="PROXY_REFRESH_HOURS")
+
+    # ── automatic OTP intake from a phone-side SMS forwarder ──
+    # Shared secret the forwarder signs each POST with (HMAC-SHA256 of the raw
+    # body in X-Signature, or the secret itself in X-OTP-Secret). Empty = the
+    # inbound endpoints answer 503 and manual entry is the only path.
+    otp_inbound_secret: str = Field(default="", env="OTP_INBOUND_SECRET")
+    # With no code after this many seconds, press Divar's «ارسال مجدد» once
+    # (twice at most per challenge). Divar accepts a contact code for ~120s,
+    # so a first SMS the carrier lost is worth asking again for well inside
+    # that window rather than after it.
+    otp_resend_after_seconds: int = Field(default=90, env="OTP_RESEND_AFTER_SECONDS")
     proxy_list: str = Field(default="", env="PROXY_LIST")
     
     # Divar Login

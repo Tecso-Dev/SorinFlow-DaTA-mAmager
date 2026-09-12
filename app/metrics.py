@@ -60,6 +60,16 @@ scrape_rotations = Counter(
     "sorinflow_scraper_account_rotations_total", "Divar account switches",
     ["reason"], registry=REGISTRY,           # threshold | challenged
 )
+# SMS sent by Divar -> code typed into the modal by the extractor. The number
+# a forwarder is judged by: carrier delivery is in here too, and only the
+# phone->server hop is ours to fix, so the sms_events rows carry both stamps.
+otp_delivery_seconds = Histogram(
+    "sorinflow_otp_delivery_seconds",
+    "Seconds from Divar sending the SMS to the code being typed",
+    buckets=(5, 10, 20, 30, 45, 60, 90, 120, 180, 300),
+    registry=REGISTRY,
+)
+
 scrape_challenges = Counter(
     "sorinflow_scraper_otp_challenges_total",
     "Times Divar demanded an SMS code", registry=REGISTRY,

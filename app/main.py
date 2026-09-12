@@ -437,7 +437,14 @@ async def api_key_middleware(request: Request, call_next):
                     # and by Kavenegar's own connection check. Left out, it
                     # 401s in production and works locally — the same way the
                     # login endpoints did.
-                    "/kvn-push-sw.js"}
+                    "/kvn-push-sw.js",
+                    # The phone-side SMS forwarder. Signs every POST with a
+                    # shared secret (HMAC in X-Signature) and carries neither a
+                    # bearer nor the API key — it is a phone, not the panel.
+                    # Its own auth is inside the route; this only keeps the
+                    # API-key gate from 401ing it in production the way it did
+                    # the login endpoints.
+                    "/api/scraper/otp-inbound", "/api/scraper/forwarder-heartbeat"}
     is_dashboard = (request.url.path.startswith("/dashboard")
                     or request.url.path.startswith("/images")
                     or request.url.path == "/portal")

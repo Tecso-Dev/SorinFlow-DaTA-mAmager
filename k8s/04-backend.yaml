@@ -120,6 +120,13 @@ spec:
             # in the panel for days and never used by a single request.
             - name: PROXY_ENABLED
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: PROXY_ENABLED, optional: true } }
+            # ── phone-side SMS forwarder ──
+            # The forwarder app signs each POST with this. Unset = the inbound
+            # endpoints answer 503 and codes are entered by hand, as before.
+            - name: OTP_INBOUND_SECRET
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: OTP_INBOUND_SECRET, optional: true } }
+            - name: OTP_RESEND_AFTER_SECONDS
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: OTP_RESEND_AFTER_SECONDS, optional: true } }
             # ── the visitor portal ──
             #
             # Ships OFF. With it false, /portal redirects to the dashboard and
