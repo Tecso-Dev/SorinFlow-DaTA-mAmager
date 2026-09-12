@@ -145,3 +145,95 @@ class TestTheCodeAlertReachesEveryAdmin:
         src = inspect.getsource(ContactExtractor._notify_code_needed)
         assert "for addr in targets:" in src
         assert "email_service.send(addr," in src
+
+
+class TestThePanelsDeadlineIsTheBrowsersDeadline:
+    """The panel said «مهلت این کد تمام شد — اسکرپر بدون این شماره ادامه داد»
+    five minutes in, while the browser was parked for another five hours and
+    fifty-five. The entry was still in _store and a code would still have been
+    accepted; the operator was told it was too late and handed a disabled
+    button, so the run stayed paused because of the message rather than
+    because of Divar."""
+
+    def test_the_window_follows_wait_for_human(self, monkeypatch):
+        from app.scraper import otp_store
+        from app.config import get_settings
+        cfg = get_settings()
+        monkeypatch.setattr(cfg, "otp_wait_timeout", 300, raising=False)
+        monkeypatch.setattr(cfg, "otp_wait_for_human", True, raising=False)
+        monkeypatch.setattr(cfg, "otp_wait_max_seconds", 21600, raising=False)
+        assert otp_store.wait_window() == 21600
+
+    def test_without_wait_for_human_it_is_the_plain_timeout(self, monkeypatch):
+        from app.scraper import otp_store
+        from app.config import get_settings
+        cfg = get_settings()
+        monkeypatch.setattr(cfg, "otp_wait_timeout", 300, raising=False)
+        monkeypatch.setattr(cfg, "otp_wait_for_human", False, raising=False)
+        assert otp_store.wait_window() == 300
+
+    def test_it_is_the_same_expression_the_extractor_uses(self):
+        """Two places deriving one deadline is what broke it."""
+        import inspect
+        from app.scraper import otp_store
+        from app.scraper.contact_extractor import ContactExtractor
+        ext = inspect.getsource(ContactExtractor._handle_sms_otp_if_present)
+        win = inspect.getsource(otp_store.wait_window)
+        for token in ("otp_wait_for_human", "otp_wait_max_seconds", "max("):
+            assert token in ext and token in win, f"{token} is in only one of the two"
+
+
+class TestAskingDivarForAnotherCode:
+    """The only way to get a second code was to let the prompt fail and wait
+    for the scraper to reach the next listing."""
+
+    def setup_method(self):
+        from app.scraper import otp_store
+        otp_store._store.clear()
+
+    def test_a_resend_is_flagged_then_consumed_once(self):
+        from app.scraper import otp_store
+        otp_store.request("j:1", "0912")
+        assert otp_store.ask_resend("j:1")["ok"] is True
+        assert otp_store.take_resend("j:1") is True
+        assert otp_store.take_resend("j:1") is False, "one press, one resend"
+
+    def test_it_is_capped(self):
+        from app.scraper import otp_store
+        otp_store.request("j:1", "0912")
+        for _ in range(otp_store.MAX_RESENDS):
+            assert otp_store.ask_resend("j:1")["ok"] is True
+            otp_store.take_resend("j:1")
+        out = otp_store.ask_resend("j:1")
+        assert out["ok"] is False and out["reason"] == "limit"
+
+    def test_a_closed_request_cannot_be_resent(self):
+        from app.scraper import otp_store
+        otp_store.request("j:1", "0912")
+        otp_store.submit("j:1", "123456")
+        assert otp_store.ask_resend("j:1")["ok"] is False
+        assert otp_store.ask_resend("nope:1")["ok"] is False
+
+    def test_the_clock_restarts_so_the_countdown_matches_the_new_code(self):
+        import time
+        from app.scraper import otp_store
+        otp_store.request("j:1", "0912")
+        otp_store._store["j:1"]["ts"] = time.time() - 120
+        otp_store.restart_clock("j:1")
+        assert time.time() - otp_store._store["j:1"]["ts"] < 2
+
+    def test_only_the_parked_browser_can_press_it(self):
+        """Divar's resend control is on the page the browser is sitting on."""
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        src = inspect.getsource(ContactExtractor._handle_sms_otp_if_present)
+        assert "take_resend" in src and "_request_otp_resend" in src
+        assert "restart_clock" in src
+
+    def test_the_panel_has_the_button_and_the_route(self):
+        html = open("frontend/index.html", encoding="utf-8").read()
+        js = open("frontend/js/app.js", encoding="utf-8").read()
+        api = open("app/api/routes/scraper.py", encoding="utf-8").read()
+        assert 'id="otp2-resend"' in html and "ارسال دوباره کد" in html
+        assert "function resendDivarOtp" in js and "/resend" in js
+        assert '@router.post("/otp/{key}/resend")' in api

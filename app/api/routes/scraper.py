@@ -669,6 +669,23 @@ async def submit_otp_code(key: str, body: OtpSubmitRequest):
     return {"success": True}
 
 
+@router.post("/otp/{key}/resend")
+async def resend_otp_code(key: str):
+    """Ask Divar to send the code again, for a prompt that is still open.
+
+    The click happens in the parked browser — Divar's «ارسال مجدد» is on the
+    page it is sitting on — so this only raises the flag; the wait loop acts
+    on it within a couple of seconds and restarts the countdown.
+
+    Capped: every press is a real SMS Divar sends on the account's behalf.
+    """
+    from app.scraper import otp_store
+    result = otp_store.ask_resend(key)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("message"))
+    return result
+
+
 @router.post("/otp-cancel")
 async def cancel_otp(key: Optional[str] = None, job_id: Optional[str] = None):
     """Dismiss a pending OTP prompt.

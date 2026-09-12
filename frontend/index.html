@@ -3898,6 +3898,10 @@
                 <button class="btn btn-primary otp2-submit" id="otp2-submit" onclick="submitDivarOtp()">
                     <i class="bi bi-check-circle"></i> تأیید و ادامه اسکرپ
                 </button>
+                <button class="btn btn-outline-primary otp2-resend" id="otp2-resend"
+                        onclick="resendDivarOtp()">
+                    <i class="bi bi-arrow-repeat"></i> <span id="otp2-resend-label">ارسال دوباره کد</span>
+                </button>
                 <button class="btn btn-outline-secondary otp2-skip" onclick="dismissDivarOtp()">
                     رد کردن و ادامه بدون شماره
                 </button>
@@ -4064,7 +4068,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260912b"></script>
+<script src="js/app.js?v=20260912c"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

@@ -3262,11 +3262,18 @@ function _otp2StartTimer(remaining = _otp2Window) {
         const left = Math.max(Math.round((_otp2Deadline - Date.now()) / 1000), 0);
         const el = document.getElementById('otp2-timer');
         if (el) {
-            const m = String(Math.floor(left / 60)).padStart(2, '0');
+            const h = Math.floor(left / 3600);
+            const m = String(Math.floor((left % 3600) / 60)).padStart(2, '0');
             const s = String(left % 60).padStart(2, '0');
+            // The window is six hours when wait-for-human is on, and "360:12"
+            // is not a duration anybody reads.
+            const clock = h > 0
+                ? `${formatNumber(h)}:${formatNumber(m)}:${formatNumber(s)}`
+                : `${formatNumber(m)}:${formatNumber(s)}`;
             el.textContent = left > 0
-                ? `⏳ مهلت ورود کد: ${formatNumber(m)}:${formatNumber(s)}`
+                ? `⏳ مهلت ورود کد: ${clock}`
                 : 'مهلت تمام شد — اسکرپر بدون این شماره ادامه می‌دهد';
+            el.classList.toggle('text-danger', left <= 0);
         }
         if (left <= 0) _otp2StopTimer();
     };
@@ -3351,6 +3358,33 @@ function _otp2MarkExpired() {
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-x-circle"></i> منقضی شد'; }
     const t = document.getElementById('otp2-timer');
     if (t) t.textContent = 'برای شمارهٔ بعدی دوباره پرسیده می‌شود';
+}
+
+async function resendDivarOtp() {
+    const key = document.getElementById('divar-otp-key')?.value;
+    if (!key) return;
+    const btn = document.getElementById('otp2-resend');
+    const label = document.getElementById('otp2-resend-label');
+    if (btn) btn.disabled = true;
+    if (label) label.textContent = 'در حال درخواست…';
+    try {
+        const r = await apiCall(`/scraper/otp/${encodeURIComponent(key)}/resend`, { method: 'POST' });
+        showToast('ارسال دوباره', r.message || 'درخواست ثبت شد', 'success');
+        // The browser presses Divar's button within a couple of seconds and
+        // restarts its own clock; restart ours to match rather than leaving a
+        // countdown that belongs to the code which never arrived.
+        _otp2StartTimer(_otp2Window);
+        const st = document.getElementById('otp2-status-text');
+        if (st) st.textContent = 'کد دوباره خواسته شد — چند لحظه صبر کنید';
+    } catch (e) {
+        showToast('ارسال دوباره نشد', e.message || 'خطا', 'warning');
+    } finally {
+        // A short lock-out, because each press is a real SMS Divar sends.
+        setTimeout(() => {
+            if (btn) btn.disabled = false;
+            if (label) label.textContent = 'ارسال دوباره کد';
+        }, 15000);
+    }
 }
 
 async function dismissDivarOtp() {

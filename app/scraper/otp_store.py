@@ -61,8 +61,51 @@ def job_of(key) -> str:
 
 def request(key: str, phone_hint: str = "") -> asyncio.Event:
     evt = asyncio.Event()
-    _store[key] = {"event": evt, "code": None, "phone_hint": phone_hint, "ts": time.time()}
+    _store[key] = {"event": evt, "code": None, "phone_hint": phone_hint,
+                   "ts": time.time(), "resend": False, "resends": 0}
     return evt
+
+
+# Asking again is worth a hard cap. Each one is a real SMS Divar sends on our
+# behalf, and a panel button that can be held down is a way to get an account
+# rate-limited by its owner rather than by Divar.
+MAX_RESENDS = 3
+
+
+def ask_resend(key: str) -> dict:
+    """Ask the parked browser to press Divar's «ارسال مجدد».
+
+    Only the browser can do it — the control lives on the page it is sitting
+    on — so this raises a flag the wait loop picks up within its next slice.
+    Returns what to tell the operator.
+    """
+    entry = _store.get(key)
+    if not entry or entry["event"].is_set():
+        return {"ok": False, "reason": "no_request",
+                "message": "این درخواست دیگر باز نیست — اسکرپر رد شده و برای آگهی بعدی دوباره می‌پرسد"}
+    if entry.get("resends", 0) >= MAX_RESENDS:
+        return {"ok": False, "reason": "limit",
+                "message": f"بیشتر از {MAX_RESENDS} بار نمی‌شود کد خواست"}
+    entry["resend"] = True
+    return {"ok": True, "message": "درخواست ارسال دوباره ثبت شد"}
+
+
+def take_resend(key: str) -> bool:
+    """Consume a pending resend request. Called only by the wait loop."""
+    entry = _store.get(key)
+    if not entry or not entry.get("resend"):
+        return False
+    entry["resend"] = False
+    entry["resends"] = entry.get("resends", 0) + 1
+    return True
+
+
+def restart_clock(key: str) -> None:
+    """A fresh code deserves a fresh window — otherwise the countdown the
+    panel shows belongs to the code that never arrived."""
+    entry = _store.get(key)
+    if entry:
+        entry["ts"] = time.time()
 
 
 def submit(key: str, code: str) -> bool:
@@ -75,15 +118,29 @@ def submit(key: str, code: str) -> bool:
 
 
 def wait_window() -> int:
-    """How long a request stays open, from the one setting that decides it.
+    """How long a request stays open — the SAME number the browser waits.
 
-    This used to be hardcoded to 300 here while the scraper actually gave up at
-    otp_wait_timeout (120), so the dashboard kept offering a prompt whose
-    request had already been dropped — the code went in and came back "no
-    pending OTP request for this key".
+    It was otp_wait_timeout alone, and that stopped being the browser's
+    answer when wait-for-human arrived: contact_extractor waits
+    max(otp_wait_timeout, otp_wait_max_seconds) when otp_wait_for_human is
+    on, which is 6 hours against this function's 5 minutes.
+
+    So get_pending() dropped the prompt after five minutes and the panel
+    said «مهلت این کد تمام شد — اسکرپر بدون این شماره ادامه داد» while the
+    browser sat parked for another five hours and fifty-five, with the entry
+    still in _store and a code still perfectly acceptable. The operator was
+    told it was too late and given a disabled button; the run stayed paused
+    because of the message, not because of Divar.
+
+    The expression is copied from the extractor deliberately. Two places
+    deriving one deadline is what broke it; if this ever moves, move both.
     """
     from app.config import get_settings
-    return int(getattr(get_settings(), "otp_wait_timeout", 300) or 300)
+    cfg = get_settings()
+    base = int(getattr(cfg, "otp_wait_timeout", 300) or 300)
+    if bool(getattr(cfg, "otp_wait_for_human", False)):
+        return max(base, int(getattr(cfg, "otp_wait_max_seconds", 21600) or 21600))
+    return base
 
 
 def get_pending() -> list:
@@ -96,6 +153,8 @@ def get_pending() -> list:
             # the countdown is the server's to state: the browser cannot know
             # when the request was registered, only when it noticed
             "remaining": max(int(window - (now - v["ts"])), 0),
+            "resends": v.get("resends", 0),
+            "resends_left": max(MAX_RESENDS - v.get("resends", 0), 0),
         }
         for k, v in list(_store.items())
         if not v["event"].is_set() and now - v["ts"] < window

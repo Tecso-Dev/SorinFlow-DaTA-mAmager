@@ -729,6 +729,18 @@ class ContactExtractor:
                 _notified = False
                 _notify_after = int(getattr(settings, "otp_notify_after_seconds", 120))
                 while waited < timeout:
+                    # Did the operator press «ارسال دوباره»? Only this loop can
+                    # act on it: Divar's resend control lives on the page the
+                    # browser is parked on, and nothing outside can reach it.
+                    if otp_store.take_resend(self.otp_key):
+                        sent = await self._request_otp_resend()
+                        otp_store.restart_clock(self.otp_key)
+                        waited = 0.0
+                        _notified = False
+                        logger.info(
+                            "OTP resend requested from the panel — "
+                            + ("Divar's control was clicked" if sent
+                               else "no control on the page; Divar may still resend on its own"))
                     if otp_store.is_cancelled(self.otp_key):
                         logger.info("SMS-OTP wait cancelled by user")
                         otp_store.clear(self.otp_key)
