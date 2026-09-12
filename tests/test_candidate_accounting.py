@@ -138,3 +138,52 @@ class TestAListingWithoutAPhoneIsNotASuccess:
         from app.scraper.divar_scraper import DivarScraper
         assert DivarScraper._FILTER_LABELS_FA["no_phone"] == "بدون شماره"
         assert DivarScraper._FILTER_LABELS_FA["failed"] == "ناموفق"
+
+
+class TestNewMeansCreatedAndUpdatedMeansAlreadyHeld:
+    """Measured against the database, 2026-09-12:
+
+        job 106  counter new=32 updated=25   reality created=28 updated=5
+        job 102  counter new=50 updated=79   reality created=43 updated=5
+
+    Two separate lies. save_property returns a Property whether it INSERTed
+    or UPDATEd, and the caller counted every success as «جدید» — so every
+    re-scrape of a stored listing that had no phone number (which
+    property_exists deliberately lets through for a second visit) was
+    reported as a new listing. And «بروز» was incremented on the skip path,
+    where nothing is written at all."""
+
+    def test_save_property_reports_which_it_did(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.save_property)
+        assert "self._last_save_created = True" in src, "the insert branch does not report"
+        assert "self._last_save_created = False" in src, "the update branch does not report"
+
+    def test_only_a_created_row_counts_as_new(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.start_scraping_job)
+        blk = src[src.index("saved = await self.save_property(property_data)"):][:3000]
+        assert '_last_save_created' in blk.split("job.new_items += 1")[0], \
+            "new_items is incremented without checking whether a row was created"
+
+    def test_an_update_lands_in_updated_not_new(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.start_scraping_job)
+        blk = src[src.index("saved = await self.save_property(property_data)"):][:3000]
+        after_new = blk.split("job.new_items += 1", 1)[1]
+        # The very next branch, before the failure branch: a save that was an
+        # update must land somewhere, and that somewhere is updated_items.
+        next_branch = after_new.split("else:", 1)[0]
+        assert "job.updated_items += 1" in next_branch, \
+            "a successful save that was an update falls through to the failure branch"
+
+    def test_the_default_is_new_when_the_marker_is_missing(self):
+        """The rotation/accounting tests build the scraper with __new__, so the
+        attribute can be absent; absent must not silently mean «update»."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.start_scraping_job)
+        assert 'getattr(self, "_last_save_created", True)' in src

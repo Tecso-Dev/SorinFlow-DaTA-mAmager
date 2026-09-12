@@ -3017,6 +3017,10 @@ class DivarScraper:
         with nothing else, and «ذخیره نشد» is the observation, not the cause.
         """
         self._last_save_error = None
+        # Which of the two things this call did. The caller cannot tell from
+        # the returned Property — an update and an insert both return a row —
+        # and it was counting every success as «جدید».
+        self._last_save_created = False
         try:
             divar_id = property_data.get('divar_id')
             
@@ -3062,6 +3066,7 @@ class DivarScraper:
                     existing.has_images = True
                 existing.updated_at = datetime.now()
                 await self.db_session.commit()
+                self._last_save_created = False
                 logger.info(f"Updated property: {divar_id}")
                 return existing
             else:
@@ -3079,6 +3084,7 @@ class DivarScraper:
                 new_property = Property(**property_data)
                 self.db_session.add(new_property)
                 await self.db_session.commit()
+                self._last_save_created = True
                 logger.info(f"Saved new property: {divar_id} with tag {property_data['tag_number']}")
 
                 # Trigger CRM pipeline (lead + notification)
@@ -3449,6 +3455,9 @@ class DivarScraper:
 
                     # Check if already scraped
                     if await self.property_exists(listing['divar_id']):
+                        # Already stored AND complete: nothing is written here.
+                        # «بروز» counts «از قبل موجود بود» — which is what the
+                        # column's own tooltip says — not «was refreshed».
                         logger.info(f"Property already exists: {listing['divar_id']}")
                         job.updated_items += 1
                         await self.db_session.commit()
@@ -3686,8 +3695,17 @@ class DivarScraper:
                                 reason="no_phone",
                                 detail="ذخیره شد ولی شمارهٔ تماس گرفته نشد — در اجرای بعدی دوباره تلاش می‌شود")
                             logger.warning(f"{did}: saved without a phone number — counted as failed, not new")
-                        elif saved:
+                        elif saved and getattr(self, "_last_save_created", True):
                             job.new_items += 1
+                        elif saved:
+                            # An UPDATE, not an insert. save_property returns a
+                            # Property either way, so every success was counted
+                            # as «جدید» — and the row most often updated is a
+                            # stored listing that had no phone number, which
+                            # property_exists deliberately lets through for a
+                            # second visit. Job 106 reported 32 new against 28
+                            # rows actually created; job 102, 50 against 43.
+                            job.updated_items += 1
                         else:
                             # save_property rolled back the shared session, which
                             # expires `job`. Refreshing re-reads it so the counter

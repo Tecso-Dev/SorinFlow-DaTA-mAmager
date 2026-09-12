@@ -3200,9 +3200,9 @@ function _renderJobsTable(items) {
                  header. <bdi> isolates each one so the digits stay readable
                  while the pair follows the header's direction. -->
             <td style="text-align:center">
-                <bdi class="text-success" title="تازه ذخیره‌شده">${job.new_items}</bdi>
+                <bdi class="text-success" title="ردیف تازه — قبلاً در پایگاه داده نبود">${job.new_items}</bdi>
                 <span class="text-muted">/</span>
-                <bdi class="text-muted" title="از قبل موجود بود">${job.updated_items}</bdi>
+                <bdi class="text-muted" title="از قبل موجود بود — یا همان بود و رد شد، یا با اطلاعات تازه به‌روز شد">${job.updated_items}</bdi>
             </td>
             <td>${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
             <td>

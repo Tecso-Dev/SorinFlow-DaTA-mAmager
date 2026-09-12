@@ -348,9 +348,16 @@ class TestTheJobRowReadsCorrectly:
         assert cell.index("job.new_items") < cell.index("job.updated_items")
 
     def test_the_two_numbers_are_distinguishable(self):
-        """Identical styling on both is what let the swap go unnoticed."""
+        """Identical styling on both is what let the swap go unnoticed.
+
+        The wording is asserted loosely because it was sharpened once the
+        counters were corrected: «بروز» covers both a row skipped as already
+        complete and one refreshed with new data, and the tooltip now says
+        so."""
         cell = self._cell()
-        assert "تازه ذخیره‌شده" in cell and "از قبل موجود بود" in cell
+        assert "text-success" in cell and "text-muted" in cell
+        assert "title=" in cell
+        assert "تازه" in cell and "از قبل موجود بود" in cell
 
 
 class TestThePaginationDeadlock:
