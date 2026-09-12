@@ -176,3 +176,66 @@ def test_single_account_does_not_re_query_the_pool_forever():
     reveals(s, 100)
     assert s.active_phone == "0911"
     assert calls["n"] <= 12, f"queried the account pool {calls['n']} times for one account"
+
+
+class TestAHeavyChallengedAccountRests:
+    """From run 104, the first on rotation that worked:
+
+        challenged 0914*****65 after   1 reveals    cold — verified once, then clean
+        challenged 0914*****08 after 225 reveals    burned — challenged on every entry
+
+    Six accounts in between rotated through without a prompt. «Spent» was
+    reveals = max(reveals, 10): a no-op at 225. And _rest_all_accounts zeroed
+    everyone including the burned one, so it came back looking freshest."""
+
+    def _scraper(self, rows):
+        from app.scraper.divar_scraper import DivarScraper
+        s = DivarScraper.__new__(DivarScraper)
+
+        class _Res:
+            def __init__(self, rows): self._rows = rows
+            def scalars(self): return self
+            def all(self): return self._rows
+
+        class _DB:
+            async def execute(self, q): return _Res(rows)
+        s.db_session = _DB()
+        return s
+
+    def _row(self, phone, reveals, challenged_hours_ago=None):
+        from datetime import datetime, timedelta, timezone
+        class R: pass
+        r = R(); r.phone_number = phone; r.reveals = reveals; r.is_valid = True
+        r.last_used_at = None
+        r.challenged_at = (datetime.now(timezone.utc) - timedelta(hours=challenged_hours_ago)
+                           if challenged_hours_ago is not None else None)
+        return r
+
+    @pytest.mark.asyncio
+    async def test_a_heavy_recently_challenged_account_is_left_out(self):
+        s = self._scraper([self._row("0914", 225, challenged_hours_ago=1),
+                           self._row("0905", 5), self._row("0912", 114)])
+        assert await s._load_rotation_pool() == ["0905", "0912"]
+
+    @pytest.mark.asyncio
+    async def test_a_cold_account_that_was_challenged_is_not_rested(self):
+        """Its first challenge is a one-time verification, after which it is
+        trusted on its device. Resting it would waste a good account."""
+        s = self._scraper([self._row("0914", 1, challenged_hours_ago=1), self._row("0905", 5)])
+        assert await s._load_rotation_pool() == ["0914", "0905"]
+
+    @pytest.mark.asyncio
+    async def test_the_rest_expires(self):
+        s = self._scraper([self._row("0914", 225, challenged_hours_ago=30), self._row("0905", 5)])
+        assert "0914" in await s._load_rotation_pool()
+
+    @pytest.mark.asyncio
+    async def test_a_resting_account_beats_no_account(self):
+        s = self._scraper([self._row("0914", 225, challenged_hours_ago=1)])
+        assert await s._load_rotation_pool() == ["0914"]
+
+    def test_a_challenge_stamps_the_time(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._mark_account_spent)
+        assert "row.challenged_at = " in src

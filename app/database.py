@@ -111,6 +111,7 @@ async def init_db():
                  _migrate_property_corner,
                  _migrate_calendar_sms,
                  _migrate_proxy_exit,
+                 _migrate_cookie_challenged_at,
                  _migrate_customer_criteria,
                  _migrate_filing,
                  _migrate_advertiser_type,
@@ -593,6 +594,17 @@ async def _migrate_scraping_jobs_divar_phone(conn):
             ))
     except Exception:
         pass
+
+
+async def _migrate_cookie_challenged_at(conn):
+    """Idempotently add cookies.challenged_at — see Cookie.challenged_at."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE cookies ADD COLUMN IF NOT EXISTS challenged_at TIMESTAMPTZ"))
+    except Exception as e:
+        from loguru import logger as _log
+        _log.warning(f"[migrate] cookies.challenged_at: {e}")
 
 
 async def _migrate_proxy_exit(conn):

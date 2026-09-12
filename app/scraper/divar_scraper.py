@@ -7,7 +7,7 @@ import random
 import re
 import time
 import uuid
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from typing import Optional, Dict, List, Any
 from pathlib import Path
 from urllib.parse import urljoin
@@ -231,16 +231,12 @@ class DivarScraper:
                         # all landed on the same number. One account absorbed
                         # every reveal while the others sat idle, which is what
                         # the constant SMS was.
-                        _res = await self.db_session.execute(
-                            _select(CookieModel)
-                            .where(CookieModel.is_valid == True)
-                            .order_by(CookieModel.reveals.asc(),
-                                      CookieModel.last_used_at.asc().nullsfirst())
-                            .limit(1)
-                        )
-                        _rec = _res.scalar_one_or_none()
-                        if _rec:
-                            phone_number = _rec.phone_number
+                        # The same ordering and the same rest rule rotation
+                        # uses, so the first account of a run is chosen the
+                        # way every later one is.
+                        _pool = await self._load_rotation_pool()
+                        if _pool:
+                            phone_number = _pool[0]
                             logger.info(f"Auto-selected Divar session for {phone_number}")
                     except Exception as _e:
                         logger.warning(f"Could not auto-select session: {_e}")
@@ -2414,13 +2410,29 @@ class DivarScraper:
                 .order_by(CookieModel.reveals.asc(),
                           CookieModel.last_used_at.asc().nullsfirst())
             )).scalars().all()
+            # A heavy account Divar recently challenged is resting. Handing it
+            # back every cycle was how one account with 225 reveals kept
+            # collecting a code prompt on every entry while light accounts
+            # rotated through clean. Only rested when the pool has others —
+            # a resting account beats no account.
+            rest_after = int(getattr(settings, "rest_after_reveals", 50) or 0)
+            rest_h = float(getattr(settings, "rest_hours", 24) or 0)
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=rest_h)
+            def _resting(r) -> bool:
+                if rest_after <= 0 or rest_h <= 0 or not r.challenged_at:
+                    return False
+                ch = r.challenged_at if r.challenged_at.tzinfo else r.challenged_at.replace(tzinfo=timezone.utc)
+                return (r.reveals or 0) >= rest_after and ch > cutoff
             # de-dupe while keeping order (one entry per phone)
-            seen, pool = set(), []
+            seen, pool, resting = set(), [], []
             for r in rows:
-                if r.phone_number and r.phone_number not in seen:
-                    seen.add(r.phone_number)
-                    pool.append(r.phone_number)
-            return pool
+                if not r.phone_number or r.phone_number in seen:
+                    continue
+                seen.add(r.phone_number)
+                (resting if _resting(r) else pool).append(r.phone_number)
+            if resting and pool:
+                logger.info(f"[rotate] resting {len(resting)} heavy account(s): {', '.join(resting)}")
+            return pool or resting
         except Exception as e:
             logger.warning(f"[rotate] could not load cookie pool: {e}")
             return []
@@ -2508,8 +2520,12 @@ class DivarScraper:
                 return
             row.reveals = max(row.reveals or 0, budget)
             row.last_used_at = datetime.now()
+            row.challenged_at = datetime.now(timezone.utc)
             await db.commit()
-            logger.info(f"[rotate] {phone} marked spent after a Divar challenge")
+            heavy = (row.reveals or 0) >= int(getattr(settings, "rest_after_reveals", 50) or 0)
+            logger.info(f"[rotate] {phone} marked spent after a Divar challenge"
+                        + (f" — heavy account ({row.reveals} reveals), resting it "
+                           f"{getattr(settings, 'rest_hours', 24)}h" if heavy else ""))
         except Exception as e:
             logger.warning(f"[rotate] could not mark {phone} spent: {e}")
             try:

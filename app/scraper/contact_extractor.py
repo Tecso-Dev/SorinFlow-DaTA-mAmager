@@ -356,13 +356,27 @@ class ContactExtractor:
             from sqlalchemy import select
 
             async with async_session_maker() as db:
-                to = (await db.execute(
+                # EVERY admin with an address, not one of them.
+                #
+                # This was .limit(1) with no ORDER BY: one admin, chosen by
+                # whatever row Postgres returned first. On the live system that
+                # was a developer's inbox, and the owner — the person who
+                # actually enters the codes — never heard. A run sat paused
+                # for fifty minutes while the one person who could free it in
+                # ten seconds was told nothing.
+                rows = (await db.execute(
                     select(User.email).where(
                         User.email.isnot(None),
                         User.role.in_(("root", "super_admin")),
                         User.is_active == True,          # noqa: E712
-                    ).limit(1)
-                )).scalar_one_or_none()
+                    )
+                )).scalars().all()
+                recipients = []
+                for addr in rows:
+                    addr = (addr or "").strip()
+                    if addr and addr not in recipients:
+                        recipients.append(addr)
+                to = recipients[0] if recipients else None
 
                 if not to:
                     # Fall back to the account we send FROM.
@@ -400,8 +414,15 @@ class ContactExtractor:
                 subj, html, text = email_templates.notification(
                     subject, body,
                     cta_label="ورود به پنل", cta_url="https://sorinflow.com/dashboard/")
-                await email_service.send(to, subj, html, text, db=db)
-                logger.warning(f"[otp] emailed {to}: a Divar code is needed")
+                targets = recipients if recipients else [to]
+                sent = []
+                for addr in targets:
+                    try:
+                        await email_service.send(addr, subj, html, text, db=db)
+                        sent.append(addr)
+                    except Exception as se:
+                        logger.warning(f"[otp] could not email {addr}: {se}")
+                logger.warning(f"[otp] emailed {', '.join(sent) or 'nobody'}: a Divar code is needed")
         except Exception as e:
             # A notification that fails must never take the scrape with it.
             logger.warning(f"[otp] could not send the code-needed email: {e}")

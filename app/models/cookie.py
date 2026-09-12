@@ -33,6 +33,10 @@ class Cookie(Base):
     # session verified an hour ago, and the panel used to present the two as
     # the same thing.
     last_checked_at = Column(DateTime(timezone=True))
+    # When Divar last asked this account for a code. A heavily used account
+    # that keeps being challenged is Divar saying «not this one, not today»;
+    # rotation rests it rather than handing it back every cycle.
+    challenged_at = Column(DateTime(timezone=True))
     
     def __repr__(self):
         return f"<Cookie(id={self.id}, phone={self.phone_number}, valid={self.is_valid})>"

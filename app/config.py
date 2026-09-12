@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     # saved, so a filtered-out ad costs the account the same as a kept one.
     # 0 = never rotate.
     cookie_rotate_every: int = Field(default=100, env="COOKIE_ROTATE_EVERY")
+    # An account challenged by Divar after this many reveals is rested for
+    # SCRAPER_REST_HOURS before rotation may pick it again. Light accounts are
+    # not rested: a cold account's first challenge is a one-time verification,
+    # after which it is trusted on its device. A heavy one being challenged is
+    # Divar saying «not this one, not today».
+    rest_after_reveals: int = Field(default=50, env="SCRAPER_REST_AFTER_REVEALS")
+    rest_hours: float = Field(default=24.0, env="SCRAPER_REST_HOURS")
     # How often to ask Divar whether each stored session still works. Costs one
     # outbound request per account per interval. 0 disables it, leaving the
     # manual button as the only real check.

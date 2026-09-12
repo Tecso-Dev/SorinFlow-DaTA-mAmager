@@ -123,3 +123,25 @@ class TestItIsLoggedBeforeTheRunParks:
     def test_the_words_themselves_are_logged_not_a_summary(self, src):
         i = src.index("_modal_text()")
         assert "modal says" in src[i:i + 400]
+
+
+class TestTheCodeAlertReachesEveryAdmin:
+    """It reached one. `.limit(1)` with no ORDER BY picked whichever admin
+    Postgres returned first — a developer — and the owner, who enters the
+    codes, sat unaware while a run stayed paused for fifty minutes."""
+
+    def test_no_limit_one_on_the_recipient_query(self):
+        import inspect, re
+        from app.scraper.contact_extractor import ContactExtractor
+        src = inspect.getsource(ContactExtractor._notify_code_needed)
+        # Code only: the comment explaining the fix names the old call too.
+        code = "\n".join(l for l in src.splitlines() if not l.strip().startswith("#"))
+        assert ".limit(1)" not in code
+        assert ".scalars().all()" in code
+
+    def test_every_recipient_is_sent_to(self):
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        src = inspect.getsource(ContactExtractor._notify_code_needed)
+        assert "for addr in targets:" in src
+        assert "email_service.send(addr," in src
