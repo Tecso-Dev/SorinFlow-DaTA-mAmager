@@ -24,6 +24,14 @@ from app.auth.dependencies import get_current_user_optional
 from app.models.user import User
 
 router = APIRouter()
+
+# The phone-side SMS forwarder's two endpoints. `router` above is included
+# with dependencies=_perm("scraper") — every route on it needs a logged-in
+# user — and a phone is not a user. These live on their own router, mounted
+# at the same prefix without that gate; their auth is the HMAC check inside
+# each route. Found live: signed and unsigned alike answered «Not
+# authenticated» from the permission dependency before the handler ran.
+machine_router = APIRouter()
 settings = get_settings()
 
 # Store active scraping job IDs for tracking
@@ -766,7 +774,7 @@ def _mask_code(code: Optional[str]) -> str:
     return ("*" * max(len(c) - 2, 0)) + c[-2:] if c else ""
 
 
-@router.post("/otp-inbound")
+@machine_router.post("/otp-inbound")
 async def otp_inbound(request: Request):
     """A Divar SMS, forwarded from the phone that holds the SIM."""
     from app.scraper import otp_store
@@ -843,7 +851,7 @@ _HB_TTL = 900          # a phone that has not spoken in 15 min is forgotten
 _HB_ONLINE = 600       # ...and reads as offline after 10
 
 
-@router.post("/forwarder-heartbeat")
+@machine_router.post("/forwarder-heartbeat")
 async def forwarder_heartbeat(request: Request):
     from app.scraper import otp_store
     raw = await request.body()

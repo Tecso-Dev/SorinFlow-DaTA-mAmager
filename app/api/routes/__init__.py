@@ -39,6 +39,9 @@ def _perm(key: str):
 
 router.include_router(properties.router, prefix="/properties", tags=["Properties"], dependencies=_perm("properties"))
 router.include_router(scraper.router, prefix="/scraper", tags=["Scraper"], dependencies=_perm("scraper"))
+# Machine-authenticated (HMAC in the route), so no permission dependency:
+# the SMS forwarder is a phone, not a user. See scraper.machine_router.
+router.include_router(scraper.machine_router, prefix="/scraper", tags=["Scraper"])
 router.include_router(auth.router, prefix="/auth", tags=["Authentication"], dependencies=_perm("divar_auth"))
 router.include_router(stats.router, prefix="/stats", tags=["Statistics"], dependencies=_perm("stats"))
 router.include_router(proxies.router, prefix="/proxies", tags=["Proxies"], dependencies=_perm("proxies"))

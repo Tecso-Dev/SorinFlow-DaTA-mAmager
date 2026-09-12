@@ -308,3 +308,31 @@ class TestMaintenanceDoesNotEatTheCode:
         from app.services.maintenance import is_open_path
         assert not is_open_path("/api/scraper/otp-pending")
         assert not is_open_path("/api/scraper/start")
+
+
+class TestThePhoneIsNotAUser:
+    """Found live after the maintenance fix: every POST, signed or not,
+    answered «Not authenticated». The scraper router is included with
+    dependencies=_perm("scraper") — a logged-in user with the permission —
+    and the two phone endpoints inherited it, so the permission check ran
+    before the HMAC check ever could."""
+
+    def test_the_two_endpoints_are_on_the_ungated_router(self):
+        from app.api.routes import scraper as S
+        gated = {r.path for r in S.router.routes}
+        machine = {r.path for r in S.machine_router.routes}
+        assert {"/otp-inbound", "/forwarder-heartbeat"} <= machine
+        assert not ({"/otp-inbound", "/forwarder-heartbeat"} & gated)
+
+    def test_the_panel_reads_stay_gated(self):
+        """/forwarders and /login-code are for the panel; they must still
+        require a user."""
+        from app.api.routes import scraper as S
+        gated = {r.path for r in S.router.routes}
+        assert "/forwarders" in gated and "/login-code/{account}" in gated
+
+    def test_the_ungated_router_is_mounted_without_a_permission(self):
+        src = open("app/api/routes/__init__.py", encoding="utf-8").read()
+        # The call, not the comment above it that also names the router.
+        line = [l for l in src.splitlines() if "include_router(scraper.machine_router" in l][0]
+        assert 'prefix="/scraper"' in line and "dependencies=" not in line
