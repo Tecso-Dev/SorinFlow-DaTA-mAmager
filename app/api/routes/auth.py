@@ -10,6 +10,7 @@ from sqlalchemy import select
 from typing import Any, List, Optional
 
 from app.database import get_db
+from app.auth.dependencies import get_current_user
 from app.models.cookie import Cookie
 from app.models.user import User
 from app.scraper.auth import DivarAuth

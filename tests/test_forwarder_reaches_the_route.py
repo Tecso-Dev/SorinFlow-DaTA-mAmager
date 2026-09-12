@@ -42,8 +42,26 @@ def client(monkeypatch):
     monkeypatch.setattr(m.settings, "api_key", "prod-like-api-key", raising=False)
     monkeypatch.setattr(m.settings, "otp_inbound_secret", SECRET, raising=False)
 
+    # A real State, built from the dataclass's own fields: _maintenance_allows
+    # only unpacks three values, but the 503 branch renders the page from the
+    # object (state.message, state.seconds_left), so a bare tuple blew up
+    # there — which is a fault the middleware swallows by letting the request
+    # THROUGH, i.e. the control would have passed for the wrong reason.
+    import dataclasses
+    kw = {}
+    for f in dataclasses.fields(mt.State):
+        if f.name == "enabled":
+            kw[f.name] = True
+        elif f.name == "message":
+            kw[f.name] = "سایت در حال بروزرسانی می‌باشد"
+        elif f.name == "bypass":
+            kw[f.name] = ""
+        elif f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING:
+            kw[f.name] = None
+    closed_state = mt.State(**kw)
+
     async def _closed(db, **kw):
-        return (True, "سایت در حال بروزرسانی می‌باشد", "")   # enabled, message, bypass
+        return closed_state
     monkeypatch.setattr(mt, "get_state", _closed)
 
     # No context manager: no lifespan, so no migrations and no background
