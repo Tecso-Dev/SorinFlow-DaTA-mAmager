@@ -196,6 +196,16 @@ OPEN_PREFIXES = (
     "/dashboard/css/fonts/",  # the notice's own webfont. Blocking it dropped a
                               # wholly-Persian page to Tahoma at the one moment
                               # nobody can go and fix it.
+    "/api/users/password-reset/",   # also the way back in. A super_admin locked
+                                    # out during maintenance had no route at all.
+    # The phone-side SMS forwarder. It carries no bearer and no bypass cookie —
+    # it is a phone — so this middleware answered its POSTs with the
+    # maintenance page and the Divar code it was carrying was dropped on the
+    # floor. Maintenance was on for most of a day while a scrape ran; every
+    # code that day would have gone missing, and the run would have parked
+    # for six hours each time. Its own HMAC check is inside the route.
+    "/api/scraper/otp-inbound",
+    "/api/scraper/forwarder-heartbeat",
 )
 
 

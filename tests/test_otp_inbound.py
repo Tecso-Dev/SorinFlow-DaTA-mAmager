@@ -285,3 +285,26 @@ class TestItIsReachableInProduction:
         for needle in ("/api/scraper/otp-inbound", "/api/scraper/forwarder-heartbeat",
                        "OTP_INBOUND_SECRET", "X-Signature", "sorinflow_otp_delivery_seconds"):
             assert needle in text, needle
+
+
+class TestMaintenanceDoesNotEatTheCode:
+    """Found live: with maintenance on, all three forwarder POSTs got the
+    503 notice page. A phone has no bearer and no bypass cookie. Maintenance
+    was on for most of the day the scraper ran; every code would have been
+    dropped and the run parked six hours each time."""
+
+    @pytest.mark.parametrize("path", [
+        "/api/scraper/otp-inbound",
+        "/api/scraper/forwarder-heartbeat",
+        "/api/users/password-reset/request",
+        "/api/users/password-reset/confirm",
+    ])
+    def test_stays_open_during_maintenance(self, path):
+        from app.services.maintenance import is_open_path
+        assert is_open_path(path), f"{path} would answer the maintenance page"
+
+    def test_the_panel_itself_is_still_closed(self):
+        """The exemption must be the phone's two paths, not the whole API."""
+        from app.services.maintenance import is_open_path
+        assert not is_open_path("/api/scraper/otp-pending")
+        assert not is_open_path("/api/scraper/start")
