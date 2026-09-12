@@ -7,6 +7,8 @@ from sqlalchemy import select
 from datetime import datetime
 from loguru import logger
 import httpx
+from pydantic import BaseModel
+from typing import Optional
 
 from app.database import get_db
 from app.models.proxy import Proxy
@@ -167,135 +169,38 @@ async def test_proxy(
     proxy_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """Test proxy connectivity"""
-    result = await db.execute(
-        select(Proxy).where(Proxy.id == proxy_id)
-    )
+    """Test one proxy against Divar and learn where it exits."""
+    from app.services import proxy_pool
+    result = await db.execute(select(Proxy).where(Proxy.id == proxy_id))
     proxy = result.scalar_one_or_none()
-    
     if not proxy:
         raise HTTPException(status_code=404, detail="Proxy not found")
-    
-    # Test proxy
-    test_url = "https://divar.ir"
-    start_time = datetime.now()
-    
-    try:
-        async with httpx.AsyncClient(
-            proxy=proxy.url,
-            timeout=30.0
-        ) as client:
-            response = await client.get(test_url)
-            elapsed = (datetime.now() - start_time).total_seconds()
-            
-            if response.status_code == 200:
-                proxy.is_working = True
-                proxy.success_count += 1
-                proxy.avg_response_time = elapsed
-                proxy.last_checked = datetime.now()
-                await db.commit()
-                
-                return {
-                    "success": True,
-                    "response_time": elapsed,
-                    "status_code": response.status_code
-                }
-            else:
-                proxy.is_working = False
-                proxy.fail_count += 1
-                proxy.last_checked = datetime.now()
-                await db.commit()
-                
-                return {
-                    "success": False,
-                    "status_code": response.status_code,
-                    "message": "Proxy returned non-200 status"
-                }
-                
-    except Exception as e:
-        proxy.is_working = False
-        proxy.fail_count += 1
-        proxy.last_checked = datetime.now()
-        await db.commit()
-        
-        return {
-            "success": False,
-            "error": str(e)
-        }
+    outcome = await proxy_pool.probe(proxy)
+    await db.commit()
+    return outcome
 
 
 @router.post("/test-all")
 async def test_all_proxies(
     db: AsyncSession = Depends(get_db)
 ):
-    """Test all active proxies"""
-    result = await db.execute(
-        select(Proxy).where(Proxy.is_active == True)
-    )
+    """Test every active proxy. The same probe the daily loop runs."""
+    from app.services import proxy_pool
+    result = await db.execute(select(Proxy).where(Proxy.is_active == True))  # noqa: E712
     proxies = result.scalars().all()
-    
-    results = []
-    
-    for proxy in proxies:
-        test_url = "https://divar.ir"
-        start_time = datetime.now()
-        
-        try:
-            async with httpx.AsyncClient(
-                proxy=proxy.url,
-                timeout=30.0
-            ) as client:
-                response = await client.get(test_url)
-                elapsed = (datetime.now() - start_time).total_seconds()
-                
-                if response.status_code == 200:
-                    proxy.is_working = True
-                    proxy.success_count += 1
-                    proxy.avg_response_time = elapsed
-                    results.append({
-                        "proxy_id": proxy.id,
-                        "address": f"{proxy.address}:{proxy.port}",
-                        "success": True,
-                        "response_time": elapsed
-                    })
-                else:
-                    proxy.is_working = False
-                    proxy.fail_count += 1
-                    results.append({
-                        "proxy_id": proxy.id,
-                        "address": f"{proxy.address}:{proxy.port}",
-                        "success": False,
-                        "status_code": response.status_code
-                    })
-                    
-        except Exception as e:
-            proxy.is_working = False
-            proxy.fail_count += 1
-            results.append({
-                "proxy_id": proxy.id,
-                "address": f"{proxy.address}:{proxy.port}",
-                "success": False,
-                "error": str(e)
-            })
-        
-        proxy.last_checked = datetime.now()
-    
+    results = [await proxy_pool.probe(p) for p in proxies]
     await db.commit()
-    
-    working = sum(1 for r in results if r["success"])
-    
-    return {
-        "total": len(results),
-        "working": working,
-        "failed": len(results) - working,
-        "results": results
-    }
+    working = sum(1 for r in results if r.get("success"))
+    iranian = sum(1 for r in results if r.get("success") and r.get("exit_country") == "IR")
+    return {"total": len(results), "working": working, "iranian": iranian, "results": results}
 
-
-from pydantic import BaseModel
 
 class ProxyImportRequest(BaseModel):
-    proxy_list: str
+    proxy_list: Optional[str] = None
+    url: Optional[str] = None
+    # Probe what was imported right away, so the panel shows Divar's verdict
+    # without a second click.
+    test: bool = True
 
 
 @router.post("/import")
@@ -303,55 +208,36 @@ async def import_proxies(
     request: ProxyImportRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    """Import proxies from a list (format: ip:port or ip:port:user:pass)"""
-    
-    lines = request.proxy_list.strip().split("\n")
-    imported = 0
-    skipped = 0
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
+    """Import proxies from a pasted list, or from a URL that serves one.
+
+    Accepts ip:port, ip:port:user:pass, or scheme://[user:pass@]host:port.
+    Imported rows start untested (is_working=False): nothing reaches the
+    scraper until the Divar probe has passed it. That gate is the whole
+    defence against a list of dead or foreign exits — and a free list is
+    mostly both.
+    """
+    from app.services import proxy_pool
+
+    text = request.proxy_list or ""
+    if request.url:
+        try:
+            text = await proxy_pool.fetch_list(request.url)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"could not fetch the list: {type(e).__name__}")
+
+    imported = skipped = 0
+    for entry in proxy_pool.parse_list(text):
+        exists = (await db.execute(
+            select(Proxy).where(Proxy.address == entry["address"], Proxy.port == entry["port"])
+        )).scalar_one_or_none()
+        if exists:
+            skipped += 1
             continue
-        
-        parts = line.split(":")
-        
-        if len(parts) >= 2:
-            try:
-                address = parts[0]
-                port = int(parts[1])
-                username = parts[2] if len(parts) > 2 else None
-                password = parts[3] if len(parts) > 3 else None
-                
-                # Check if exists
-                result = await db.execute(
-                    select(Proxy).where(
-                        Proxy.address == address,
-                        Proxy.port == port
-                    )
-                )
-                
-                if result.scalar_one_or_none():
-                    skipped += 1
-                    continue
-                
-                proxy = Proxy(
-                    address=address,
-                    port=port,
-                    username=username,
-                    password=password
-                )
-                db.add(proxy)
-                imported += 1
-                
-            except ValueError:
-                skipped += 1
-                continue
-    
+        db.add(Proxy(**entry, is_working=False))
+        imported += 1
     await db.commit()
-    
-    return {
-        "imported": imported,
-        "skipped": skipped,
-        "message": f"Imported {imported} proxies, skipped {skipped}"
-    }
+
+    tested = None
+    if request.test and imported:
+        tested = await proxy_pool.refresh_all()
+    return {"imported": imported, "skipped": skipped, "tested": tested}

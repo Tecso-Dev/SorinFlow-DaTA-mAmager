@@ -201,10 +201,7 @@ class DivarScraper:
         try:
             self.playwright = await async_playwright().start()
 
-            # Get proxy if enabled
-            proxy = None
-            if self.proxy_enabled:
-                proxy = await self._get_working_proxy()
+            proxy = None  # chosen per account, below, once the account is known
 
             # The browser is opened AFTER the account is chosen (below), because
             # the device it presents as is derived from the account. Opening it
@@ -244,7 +241,12 @@ class DivarScraper:
                     except Exception as _e:
                         logger.warning(f"Could not auto-select session: {_e}")
 
-                # Now the account is known, so the device is — open the browser.
+                # Now the account is known, so the device is — and the proxy,
+                # which is sticky per account. Open the browser.
+                if self.proxy_enabled:
+                    proxy = await self._get_working_proxy(phone_number)
+                    if proxy is None:
+                        logger.warning("[proxy] PROXY_ENABLED but no proxy reaches Divar — going direct")
                 await self._open_browser_for(phone_number, proxy)
 
                 if phone_number:
@@ -333,18 +335,13 @@ class DivarScraper:
         except Exception as e:
             logger.error(f"Error closing scraper: {e}")
     
-    async def _get_working_proxy(self) -> Optional[str]:
-        """Get a working proxy from the database"""
+    async def _get_working_proxy(self, account: Optional[str] = None) -> Optional[str]:
+        """The proxy for this account — sticky, so one account is always one
+        address. Used to take the single best proxy for everybody."""
         try:
-            result = await self.db_session.execute(
-                select(Proxy).where(
-                    and_(Proxy.is_active == True, Proxy.is_working == True)
-                ).order_by(Proxy.success_count.desc()).limit(1)
-            )
-            proxy = result.scalar_one_or_none()
-            if proxy:
-                return proxy.url
-            return None
+            from app.services import proxy_pool
+            return await proxy_pool.pick_for_account(
+                self.db_session, account or getattr(self, "active_phone", None))
         except Exception as e:
             logger.error(f"Failed to get proxy: {e}")
             return None
@@ -501,8 +498,8 @@ class DivarScraper:
         try:
             if self.playwright is None:
                 self.playwright = await async_playwright().start()
-            proxy = await self._get_working_proxy() if self.proxy_enabled else None
-            # Same account, same device: the recycle must be invisible to
+            proxy = await self._get_working_proxy(phone) if self.proxy_enabled else None
+            # Same account, same device, same proxy: the recycle must be invisible to
             # Divar, and it is only invisible if the fresh browser presents
             # exactly as the old one did.
             await self._open_browser_for(phone, proxy)

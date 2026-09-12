@@ -114,6 +114,12 @@ spec:
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: LLM_BASE_URL, optional: true } }
             - name: LLM_MODEL
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: LLM_MODEL, optional: true } }
+            # ── proxies ──
+            # Default false in config.py. Without this entry the switch could
+            # not be thrown from the cluster: a proxy was configured and tested
+            # in the panel for days and never used by a single request.
+            - name: PROXY_ENABLED
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: PROXY_ENABLED, optional: true } }
             # ── the visitor portal ──
             #
             # Ships OFF. With it false, /portal redirects to the dashboard and

@@ -110,6 +110,7 @@ async def init_db():
                  _migrate_property_serial,
                  _migrate_property_corner,
                  _migrate_calendar_sms,
+                 _migrate_proxy_exit,
                  _migrate_customer_criteria,
                  _migrate_filing,
                  _migrate_advertiser_type,
@@ -592,6 +593,25 @@ async def _migrate_scraping_jobs_divar_phone(conn):
             ))
     except Exception:
         pass
+
+
+async def _migrate_proxy_exit(conn):
+    """Idempotently add proxies.exit_country / exit_ip / is_hosting.
+
+    Learned on every test. A proxy that reaches Divar from Iceland passes the
+    reachability check and is still the least convincing thing a visitor to an
+    Iranian site can be; the panel needs to be able to say so.
+    """
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE proxies "
+            "ADD COLUMN IF NOT EXISTS exit_country VARCHAR(2), "
+            "ADD COLUMN IF NOT EXISTS exit_ip VARCHAR(45), "
+            "ADD COLUMN IF NOT EXISTS is_hosting BOOLEAN"))
+    except Exception as e:
+        from loguru import logger as _log
+        _log.warning(f"[migrate] proxies exit columns: {e}")
 
 
 async def _migrate_job_finish_reason(conn):

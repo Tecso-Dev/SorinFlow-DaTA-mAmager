@@ -26,6 +26,13 @@ class Proxy(Base):
     fail_count = Column(Integer, default=0)
     success_count = Column(Integer, default=0)
     avg_response_time = Column(Float)
+    # Where the proxy EXITS, learned on test. For an Iranian classifieds site
+    # this is the number that matters most and the one nobody could see: the
+    # only proxy configured today answers Divar fine and exits from a hosting
+    # provider in Reykjavik. ISO-2 code; NULL until tested.
+    exit_country = Column(String(2))
+    exit_ip = Column(String(45))
+    is_hosting = Column(Boolean)   # datacenter/hosting ASN, as ip-api reports it
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
@@ -52,4 +59,7 @@ class Proxy(Base):
             "success_count": self.success_count,
             "avg_response_time": self.avg_response_time,
             "last_checked": self.last_checked.isoformat() if self.last_checked else None,
+            "exit_country": self.exit_country,
+            "exit_ip": self.exit_ip,
+            "is_hosting": self.is_hosting,
         }

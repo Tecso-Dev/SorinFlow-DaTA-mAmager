@@ -120,6 +120,8 @@ class Settings(BaseSettings):
 
     # Proxy Settings
     proxy_enabled: bool = Field(default=False, env="PROXY_ENABLED")
+    # Re-test every active proxy this often. 0 disables the loop.
+    proxy_refresh_hours: float = Field(default=24.0, env="PROXY_REFRESH_HOURS")
     proxy_list: str = Field(default="", env="PROXY_LIST")
     
     # Divar Login

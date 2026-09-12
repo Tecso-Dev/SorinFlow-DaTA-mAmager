@@ -3708,6 +3708,22 @@ async function deleteAllProxies() {
     }
 }
 
+// Where a proxy comes out, and whether that helps.
+//
+// «فعال» only means Divar answered. For an Iranian site the exit country is
+// the number that decides whether the proxy makes us look more like a person
+// or less: a foreign hosting IP passes the test and is the least convincing
+// thing a visitor can be. Say it in the row, not in a tooltip.
+function _proxyExitCell(p) {
+    if (!p.exit_country) return '<span class="text-muted small">— تست نشده</span>';
+    const ir = p.exit_country === 'IR';
+    const kind = p.is_hosting ? 'دیتاسنتر' : 'خانگی/موبایل';
+    const cls = ir && !p.is_hosting ? 'bg-success' : ir ? 'bg-warning text-dark' : 'bg-danger';
+    const note = ir ? '' : ' — برای دیوار مناسب نیست';
+    return `<span class="badge ${cls}" title="${esc(p.exit_ip || '')}">${esc(p.exit_country)} · ${kind}</span>` +
+           `<span class="small text-muted">${note}</span>`;
+}
+
 async function loadProxies() {
     try {
         const data = await apiCall('/proxies');
@@ -3719,7 +3735,7 @@ async function loadProxies() {
             _proxyCount = 0;
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" class="text-center text-muted py-4">
+                    <td colspan="7" class="text-center text-muted py-4">
                         هیچ پراکسی‌ای وجود ندارد
                     </td>
                 </tr>
@@ -3739,6 +3755,7 @@ async function loadProxies() {
                         ${proxy.is_working ? 'فعال' : 'غیرفعال'}
                     </span>
                 </td>
+                <td>${_proxyExitCell(proxy)}</td>
                 <td>${proxy.success_count} / ${proxy.fail_count}</td>
                 <td>${proxy.avg_response_time ? proxy.avg_response_time.toFixed(2) + 's' : '---'}</td>
                 <td>

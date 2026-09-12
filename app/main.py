@@ -186,6 +186,11 @@ async def lifespan(app: FastAPI):
     # somebody asks Divar, and for a day and a half nobody did.
     from app.services.divar_session import verifier_loop
     session_task = asyncio.create_task(verifier_loop())
+    # The proxy pool is re-tested on a schedule for the same reason sessions
+    # are: «working» is a belief, and one only corrected by a button is wrong
+    # most of the time.
+    from app.services.proxy_pool import refresh_loop as _proxy_refresh_loop
+    proxy_task = asyncio.create_task(_proxy_refresh_loop())
 
     # Google Cloud export. Returns immediately when disabled, which is the
     # shipped default — and when enabled on a host that cannot reach Google it
@@ -203,6 +208,7 @@ async def lifespan(app: FastAPI):
     backup_task.cancel()
     lease_task.cancel()
     session_task.cancel()
+    proxy_task.cancel()
     gcp_task.cancel()
     from app.services.gcp import gcp_client as _gcp
     await _gcp.close()
