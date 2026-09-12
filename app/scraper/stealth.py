@@ -36,6 +36,7 @@ What replaced it, measured the same way (see tests/test_fingerprint.py):
 Delay and request-limit settings are unchanged; other code reads them.
 """
 import hashlib
+import os
 import random
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -153,7 +154,7 @@ class StealthConfig:
     # request count. 500 never fired before a 2Gi pod ran out — the real guard
     # is the cgroup check in _check_rate_limit, and this is the backstop for
     # hosts where that file cannot be read.
-    max_requests_per_session: int = 150
+    max_requests_per_session: int = 1000
     
     def get_random_delay(self) -> float:
         """Get a random delay between min and max"""
@@ -275,26 +276,117 @@ async def apply_device(page, device: Device) -> None:
     page._sorinflow_device = device
 
 
+# One Chromium may hold a user_data_dir at a time. Two jobs on the same
+# account would otherwise fail inside Chromium with an unreadable error.
+_PROFILES_IN_USE: set = set()
+
+
+def profile_dir(account: Optional[str]) -> "Path":
+    """Where this account's browser profile lives, on the PVC.
+
+    /app/data is the persistent volume, so a profile outlives the pod. That is
+    the point: Divar's «this device already verified» lives in localStorage,
+    IndexedDB and a device id inside the profile, not in the cookie jar, and a
+    fresh profile carrying old cookies reads as a known account on an unknown
+    machine — which is exactly when it asks for a code.
+    """
+    from pathlib import Path
+    base = Path(os.environ.get("SCRAPER_PROFILE_DIR", "/app/data/profiles"))
+    safe = "".join(c for c in (account or "") if c.isalnum()) or "_anonymous"
+    return base / safe
+
+
 async def open_browser(playwright, *, headless: bool, proxy=None,
                        account: Optional[str] = None,
                        stealth_config: Optional[StealthConfig] = None):
-    """Launch Chromium, open one context and one page, and present as the
-    account's device. Every launch site goes through here so the three of
-    them cannot drift apart again — they had.
+    """Open this account's PERSISTENT browser and present as its device.
 
-    Returns (browser, context, page, device).
+    Every launch site goes through here, so the three of them cannot drift
+    apart again — they had.
+
+    Persistent, not a fresh context, and that is the whole point. Measured on
+    the live pod: a run recycled the browser at 15:34:04, restored the cookie
+    jar successfully at 15:34:08, and Divar demanded an SMS code at 15:34:37.
+    The cookies were right; the device was new. Worse, `initialize()` opens a
+    browser per run, so one account was three different machines in one
+    afternoon.
+
+    Returns (browser_or_none, context, page, device). A persistent context has
+    no separate Browser object — `context.browser` is None — so callers must
+    judge liveness from the context, never from the browser handle.
     """
     sc = stealth_config or StealthConfig()
     device = Device.for_account(account)
-    # Always headless=False at the Playwright layer. When `headless` is wanted
-    # the --headless=new flag provides it (real Chrome); when it is not, the
-    # window is simply shown. Playwright's own headless=True is the old mode
-    # and must never be used — see get_browser_args.
-    browser = await playwright.chromium.launch(
-        headless=False,
-        args=get_browser_args(headless=headless),
-    )
-    context = await browser.new_context(**get_context_options(sc, proxy, device))
-    page = await context.new_page()
+    udd = profile_dir(account)
+    udd.mkdir(parents=True, exist_ok=True)
+
+    key = str(udd)
+    if key in _PROFILES_IN_USE:
+        raise RuntimeError(
+            f"profile {key} is already open in this process — two jobs cannot "
+            f"share one account's browser profile")
+
+    # A crash leaves Chromium's SingletonLock behind and the next launch hangs
+    # on it. The lock names the pid that took it; if that process is gone the
+    # lock is a leftover and removing it is correct.
+    for stale in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        lk = udd / stale
+        if lk.is_symlink() or lk.exists():
+            try:
+                lk.unlink()
+            except OSError:
+                pass
+
+    opts = get_context_options(sc, proxy, device)
+    _PROFILES_IN_USE.add(key)
+    try:
+        context = await playwright.chromium.launch_persistent_context(
+            str(udd),
+            # Always headless=False at the Playwright layer. When `headless` is
+            # wanted the --headless=new flag provides it (real Chrome); when it
+            # is not, the window is simply shown. Playwright's own
+            # headless=True is the OLD mode and must never be used — see
+            # get_browser_args.
+            headless=False,
+            args=get_browser_args(headless=headless),
+            **opts,
+        )
+    except Exception:
+        _PROFILES_IN_USE.discard(key)
+        raise
+
+    # A persistent context opens with one page already.
+    page = context.pages[0] if context.pages else await context.new_page()
     await apply_device(page, device)
-    return browser, context, page, device
+
+    # So close_context() can release the guard without re-deriving the path.
+    context._sorinflow_profile_key = key
+    return context.browser, context, page, device
+
+
+async def close_context(context) -> None:
+    """Close a persistent context and release its profile guard.
+
+    Closing the context closes the browser too — there is no separate handle
+    to close, and calling .close() on the None that `context.browser` returns
+    is how this change would break the recycle path.
+    """
+    key = getattr(context, "_sorinflow_profile_key", None)
+    try:
+        await context.close()
+    finally:
+        if key:
+            _PROFILES_IN_USE.discard(key)
+
+
+def context_alive(context) -> bool:
+    """Whether a (possibly persistent) context is still usable."""
+    if context is None:
+        return False
+    try:
+        # An open context has a pages list; a closed one raises or is empty of
+        # usable pages. browser is None for persistent contexts, so it cannot
+        # be the test.
+        return any(not p.is_closed() for p in context.pages)
+    except Exception:
+        return False

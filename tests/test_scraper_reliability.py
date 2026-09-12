@@ -476,11 +476,22 @@ class TestMemoryIsBoundedNotJustLimited:
         assert "_recycle_browser" in src
         assert "0.80" in src
 
-    def test_the_request_backstop_is_reachable_before_an_oom(self):
-        """500 never fired before a 2Gi pod ran out, because what grows is
-        Chromium's footprint per navigation, not our request tally."""
+    def test_the_request_backstop_exists_but_no_longer_forces_early_recycles(self):
+        """This was <= 200, from when a recycle was cheap to trigger and the
+        request tally was the only guard anyone trusted.
+
+        Two things changed. Memory was measured on the live pod mid-run at 26%
+        of 2560Mi, so the cgroup check — the real guard — is nowhere near
+        firing and the tally was never the thing standing between us and an
+        OOM. And a recycle now reopens the account's PERSISTENT profile, so it
+        no longer costs Divar's trust; there is no reason to force one every
+        150 navigations.
+
+        It stays bounded: the backstop still exists for a host whose cgroup
+        files cannot be read, which is the only case it was ever for."""
         from app.scraper.stealth import StealthConfig
-        assert StealthConfig().max_requests_per_session <= 200
+        n = StealthConfig().max_requests_per_session
+        assert 200 < n <= 2000, "the backstop is either gone or back to forcing early recycles"
 
     def test_the_browser_is_recycled_after_collection(self):
         """The feed page ends up holding hundreds of rendered cards and their
@@ -502,13 +513,24 @@ class TestMemoryIsBoundedNotJustLimited:
         assert "job_log.record" in src
 
     def test_a_failed_close_does_not_abort_the_run(self):
-        """Each of page/context/browser is closed individually now, and a
-        browser that is already gone must not kill a run that is otherwise
-        fine."""
+        """One close now, not three: a persistent context owns its browser and
+        `context.browser` is None, so closing page/context/browser in turn
+        would have ended on a call to None. A context that is already gone
+        must still not kill a run that is otherwise fine."""
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper._recycle_browser)
-        i = src.index("await closer.close()")
+        i = src.index("await close_context(ctx)")
         assert "except Exception" in src[i:i + 300]
+
+    def test_the_live_jar_is_saved_before_the_browser_is_torn_down(self):
+        """The restore after a recycle replayed whatever the database last
+        held — older than what the browser was carrying, because Divar hands
+        back a fresh sAccessToken on every navigation."""
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._recycle_browser)
+        persist = src.index("await self._persist_active_session()")
+        close = src.index("await close_context(ctx)")
+        assert persist < close, "the jar is saved after the browser is already gone"
 
     def test_the_recycle_does_not_stop_the_playwright_driver(self):
         """It did, and it cost a whole run.

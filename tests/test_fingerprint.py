@@ -161,3 +161,100 @@ class TestWhatDivarSees:
     def test_viewport_is_the_devices(self, seen):
         js, device = seen
         assert js["vp"] == f"{device.width}x{device.height}"
+
+
+class TestTheProfilePersists:
+    """Divar's «this device already verified» lives in the profile —
+    localStorage, IndexedDB, a device id — not in the cookie jar.
+
+    Measured on the live pod, job 106:
+
+        15:34:04  [memory] recycling the browser: listing collection finished
+        15:34:08  Session restored successfully for 0905*****52
+        15:34:37  SMS-OTP required
+
+    Cookies restored correctly; Divar asked anyway, 29 seconds later. And
+    because initialize() opened a browser per run, one account was three
+    different machines in one afternoon."""
+
+    def test_each_account_gets_its_own_directory(self):
+        from app.scraper.stealth import profile_dir
+        a, b = profile_dir("09058432452"), profile_dir("09146382408")
+        assert a != b
+        assert a == profile_dir("09058432452"), "not stable across calls"
+
+    def test_it_lives_on_the_persistent_volume(self):
+        """/app/data is the PVC. A profile under /tmp would be a fresh device
+        after every pod restart, which is the bug wearing a different hat."""
+        from app.scraper.stealth import profile_dir
+        assert str(profile_dir("0912")).startswith("/app/data/profiles")
+
+    def test_no_account_still_gets_a_stable_directory(self):
+        from app.scraper.stealth import profile_dir
+        assert profile_dir(None).name == "_anonymous"
+        assert profile_dir(None) == profile_dir("")
+
+    def test_a_phone_number_cannot_escape_the_profiles_directory(self):
+        from app.scraper.stealth import profile_dir
+        for nasty in ("../../etc", "a/b", "..", "0912; rm -rf /"):
+            p = profile_dir(nasty)
+            assert p.parent.name == "profiles", f"{nasty!r} escaped to {p}"
+
+    def test_the_launch_is_persistent(self):
+        import inspect
+        from app.scraper import stealth
+        src = inspect.getsource(stealth.open_browser)
+        assert "launch_persistent_context" in src
+        assert "chromium.launch(" not in src, "a non-persistent launch is back"
+
+    def test_one_job_per_profile(self):
+        """A user_data_dir opens in one Chromium at a time; two jobs on one
+        account must fail with a sentence, not a Chromium stack trace."""
+        import inspect
+        from app.scraper import stealth
+        src = inspect.getsource(stealth.open_browser)
+        assert "_PROFILES_IN_USE" in src and "already open" in src
+
+    def test_liveness_is_judged_on_the_context_not_the_browser(self):
+        """context.browser is None for a persistent context, so the old
+        `browser is not None and not is_connected()` passed for a context that
+        had been closed."""
+        import inspect
+        from app.scraper.auth import DivarAuth
+        assert "context_alive(self.context)" in inspect.getsource(DivarAuth.browser_alive)
+
+    def test_context_alive_handles_a_closed_context(self):
+        from app.scraper.stealth import context_alive
+
+        class _Boom:
+            @property
+            def pages(self): raise RuntimeError("closed")
+
+        class _Closed:
+            pages = []
+
+        class _Open:
+            class _P:
+                def is_closed(self): return False
+            pages = [_P()]
+
+        assert context_alive(None) is False
+        assert context_alive(_Boom()) is False
+        assert context_alive(_Closed()) is False
+        assert context_alive(_Open()) is True
+
+    def test_rotation_opens_the_candidates_own_profile(self):
+        """Swapping only the UA would put account B's cookies into account A's
+        localStorage and device id — one machine claiming to be two people."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.maybe_rotate_account)
+        blk = src[src.index("for offset in range"):]
+        assert "_open_browser_for(candidate" in blk
+
+    def test_opening_a_profile_releases_the_previous_one(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._open_browser_for)
+        assert "close_context(_old)" in src
+        assert src.index("close_context(_old)") < src.index("await open_browser(")

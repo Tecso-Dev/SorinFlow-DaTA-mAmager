@@ -22,7 +22,8 @@ from app.config import get_settings, CITIES, CATEGORIES
 from app.models.property import Property, City, Category, allocate_serial_no
 from app.models.scraping_job import ScrapingJob
 from app.models.proxy import Proxy
-from app.scraper.stealth import StealthConfig, open_browser, apply_device, Device
+from app.scraper.stealth import (StealthConfig, open_browser, apply_device, Device,
+                                 close_context, context_alive)
 from app.scraper.auth import DivarAuth
 from app.scraper.contact_extractor import ContactExtractor
 from app.services import skipped_listings
@@ -193,6 +194,17 @@ class DivarScraper:
         is the same device as the one before it — and auth always holds the
         browser that actually exists.
         """
+        # Release whatever profile is open first: one Chromium per
+        # user_data_dir, and rotation calls this with a different account
+        # while the previous one is still held.
+        _old = getattr(self, "context", None)
+        if _old is not None:
+            try:
+                await close_context(_old)
+            except Exception as e:
+                logger.warning(f"[browser] closing the previous context failed: {e}")
+            self.browser = self.context = self.page = None
+
         self.browser, self.context, self.page, self.device = await open_browser(
             self.playwright, headless=self.headless, proxy=proxy,
             account=account, stealth_config=self.stealth_config)
@@ -302,7 +314,11 @@ class DivarScraper:
                 else:
                     logger.warning("No Divar session configured — phone numbers will not be extracted.")
 
-            if self.browser is None:
+            if self.context is None:
+                # The CONTEXT, not the browser: a persistent context leaves
+                # context.browser as None even on success, so testing the
+                # browser here would re-open a second Chromium on the same
+                # profile every run and fail on the profile guard.
                 # restore_session=False: no account, so the default device.
                 await self._open_browser_for(None, proxy)
 
@@ -323,12 +339,11 @@ class DivarScraper:
         try:
             if self._http is not None and not self._http.is_closed:
                 await self._http.aclose()
-            if self.page:
-                await self.page.close()
+            # The context owns the browser in a persistent profile, and
+            # context.browser is None — closing it releases both, and the
+            # profile guard with them.
             if self.context:
-                await self.context.close()
-            if self.browser:
-                await self.browser.close()
+                await close_context(self.context)
             if self.playwright:
                 await self.playwright.stop()
             logger.info("Scraper closed successfully")
@@ -470,6 +485,17 @@ class DivarScraper:
         logger.warning(f"[memory] recycling the browser: {why}")
         phone = self.active_phone
 
+        # Save the jar the live browser is holding BEFORE tearing it down.
+        # Without this the restore below replays whatever was last written to
+        # the database — older than what the browser had, because Divar hands
+        # back a fresh sAccessToken on every navigation. Never allowed to
+        # block the recycle: a failed save is worth less than a recycled
+        # browser.
+        try:
+            await self._persist_active_session()
+        except Exception as e:
+            logger.warning(f"[memory] could not persist before the recycle: {e}")
+
         # Replace the BROWSER, not the Playwright driver.
         #
         # The first version called self.close(), which also does
@@ -482,15 +508,12 @@ class DivarScraper:
         #
         # Chromium is the memory, not the driver, so closing the browser is the
         # whole point and stopping the driver bought nothing.
-        for closer, what in ((getattr(self, "page", None), "page"),
-                             (getattr(self, "context", None), "context"),
-                             (getattr(self, "browser", None), "browser")):
-            if closer is None:
-                continue
+        ctx = getattr(self, "context", None)
+        if ctx is not None:
             try:
-                await closer.close()
+                await close_context(ctx)
             except Exception as e:
-                logger.warning(f"[memory] closing the {what} failed: {e}")
+                logger.warning(f"[memory] closing the context failed: {e}")
         self.page = self.context = self.browser = None
 
         await asyncio.sleep(1)
@@ -2728,14 +2751,32 @@ class DivarScraper:
             if candidate == self.active_phone:
                 continue
             try:
-                # Switch device first: the cookies of account B arriving from
-                # account A's laptop is the pattern this whole file exists to
-                # avoid. Same browser, different person. getattr for the same
-                # reason as everything else in this function — the rotation
-                # tests build the object with __new__.
-                _pg = getattr(self, "page", None)
-                if _pg is not None and not _pg.is_closed():
-                    await apply_device(_pg, Device.for_account(candidate))
+                # Switch the WHOLE identity, not just the user agent.
+                #
+                # Each account owns a browser profile now, and that profile is
+                # where Divar's «this device already verified» lives. Swapping
+                # only the UA would carry account B's cookies into account A's
+                # localStorage, IndexedDB and device id — one machine claiming
+                # to be two people, which is worse than not rotating at all.
+                #
+                # So: hand the outgoing account's jar back, close its profile,
+                # open the candidate's. _open_browser_for does the device, the
+                # proxy and the auth hand-off in one place.
+                #
+                # getattr throughout: the rotation tests build this object with
+                # __new__, so nothing set in __init__ can be assumed.
+                if getattr(self, "playwright", None) is not None:
+                    try:
+                        _px = (await self._get_working_proxy(candidate)
+                               if getattr(self, "proxy_enabled", False) else None)
+                        await self._open_browser_for(candidate, _px)
+                    except Exception as e:
+                        logger.warning(f"[rotate] could not open {candidate}'s profile: {e}")
+                        continue
+                else:
+                    _pg = getattr(self, "page", None)
+                    if _pg is not None and not _pg.is_closed():
+                        await apply_device(_pg, Device.for_account(candidate))
                 restored = await self.auth.restore_session(candidate)
             except Exception as e:
                 logger.warning(f"[rotate] restore failed for {candidate}: {e}")

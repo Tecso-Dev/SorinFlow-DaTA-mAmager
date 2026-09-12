@@ -16,7 +16,8 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.models.cookie import Cookie
-from app.scraper.stealth import StealthConfig, open_browser, apply_device, Device
+from app.scraper.stealth import (StealthConfig, open_browser, apply_device, Device,
+                                 close_context, context_alive)
 
 settings = get_settings()
 
@@ -53,6 +54,12 @@ class DivarAuth:
         already closed.
         """
         try:
+            # The CONTEXT, not the browser. A persistent context has no Browser
+            # object at all — context.browser is None — so `browser is not None
+            # and not is_connected()` silently passed for a context that had
+            # been closed, and every check below it ran against a dead page.
+            if self.context is not None and not context_alive(self.context):
+                return False
             if self.browser is not None and not self.browser.is_connected():
                 return False
             if self.page is None or self.page.is_closed():
@@ -67,8 +74,11 @@ class DivarAuth:
             await self.page.close()
         if self.context:
             await self.context.close()
-        if self.browser:
-            await self.browser.close()
+        # Closing the context closes the browser: a persistent context owns
+        # it, and context.browser is None, so closing "the browser" would be
+        # a call on None.
+        if self.context:
+            await close_context(self.context)
     
     def get_cookie_file_path(self, phone_number: str) -> Path:
         """Get path for cookie file"""
