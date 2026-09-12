@@ -812,7 +812,12 @@ async def otp_inbound(request: Request):
     elif kind == "contact":
         hit = otp_store.find_pending_for_account(body.account)
         if not hit:
-            reason = "no_pending_for_account"
+            # Not a miss — an arrival ahead of the request. Park it; the
+            # scraper claims it the moment it opens one for this account.
+            if otp_store.park_early_code(body.account, code, body.sentStamp):
+                reason = "parked_early"
+            else:
+                reason = "no_pending_for_account"
         else:
             key, entry = hit
             # A late FIRST code must not overwrite a fresh resend: the
@@ -831,8 +836,10 @@ async def otp_inbound(request: Request):
     await sms_log.record(
         sms_log.INBOUND,
         (f"کد {kind or '?'} از {otp_store._digits(body.account) or '؟'} — "
-         + ("به اسکرپر داده شد" if matched else f"استفاده نشد ({reason})")),
-        level="info" if matched or kind in ("login", "test") else "warning",
+         + ("به اسکرپر داده شد" if matched
+            else "زودتر از درخواست رسید — نگه داشته شد" if reason == "parked_early"
+            else f"استفاده نشد ({reason})")),
+        level="info" if matched or reason == "parked_early" or kind in ("login", "test") else "warning",
         route="forwarder", actor=f"forwarder@{ip}",
         account=otp_store._digits(body.account) or None, kind=kind,
         code=_mask_code(code), sent_stamp=body.sentStamp, received_stamp=body.receivedStamp,

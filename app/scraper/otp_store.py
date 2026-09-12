@@ -59,10 +59,60 @@ def job_of(key) -> str:
     return str(key or "").split(":", 1)[0]
 
 
+# A code that arrived before anything was waiting for it.
+#
+# Divar sends the SMS the moment the contact button is clicked. The scraper
+# only registers its request after solving a captcha and finding the modal —
+# measured live: SMS forwarded and delivered to the server at 20:06:32, the
+# request registered at 20:06:38. Six seconds late, and the code was thrown
+# away with «no_pending_for_account» while the run sat waiting for a human.
+#
+# With a forwarder this is the NORMAL order, not a rare race: the phone beats
+# the browser almost every time. So an unmatched contact code is parked by
+# account, and request() claims it the instant it opens.
+_early: Dict[str, Tuple[str, float, Optional[int]]] = {}
+
+# Divar accepts a contact code for about two minutes. Past that, typing it
+# only earns a rejection and burns the attempt.
+EARLY_TTL = 120
+
+
+def park_early_code(account: Optional[str], code: str,
+                    sent_stamp_ms: Optional[int] = None) -> bool:
+    """Hold a code nothing is waiting for yet. True if it was parked."""
+    acct = _digits(account)
+    if not acct or not code:
+        return False
+    _early[acct] = (code, time.time(), sent_stamp_ms)
+    return True
+
+
+def _claim_early(phone_hint: Optional[str]):
+    """Take a parked code for this account if one is still fresh."""
+    acct = _digits(phone_hint)
+    hit = _early.get(acct)
+    if not hit:
+        return None
+    code, at, sent = hit
+    _early.pop(acct, None)
+    if time.time() - at > EARLY_TTL:
+        return None
+    return code, sent
+
+
 def request(key: str, phone_hint: str = "") -> asyncio.Event:
     evt = asyncio.Event()
     _store[key] = {"event": evt, "code": None, "phone_hint": phone_hint,
                    "ts": time.time(), "resend": False, "resends": 0}
+    # Did the phone already forward this one? Then the wait is over before it
+    # begins: the extractor's loop sees a set event on its first pass.
+    early = _claim_early(phone_hint)
+    if early:
+        code, sent = early
+        _store[key].update(code=code, source="forwarder-early")
+        if sent:
+            _sent[key] = float(sent) / 1000.0
+        evt.set()
     return evt
 
 

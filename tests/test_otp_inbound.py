@@ -52,7 +52,12 @@ def _signed(body: dict, secret=SECRET):
 @pytest.fixture(autouse=True)
 def _quiet(monkeypatch):
     """No redis, no database, a known secret."""
-    otp_store._store.clear(); otp_store._sent.clear(); otp_store._login_codes.clear()
+    # _early too: a code parked by one test is claimed by the next test's
+    # request(), which pre-sets its event — so submit() returns False and the
+    # match looks like a regression in the endpoint. Module-level state needs
+    # clearing in full or not at all.
+    otp_store._store.clear(); otp_store._sent.clear()
+    otp_store._login_codes.clear(); otp_store._early.clear()
     monkeypatch.setattr(R.settings, "otp_inbound_secret", SECRET, raising=False)
     async def _no_rl(request, limit=20): return None
     monkeypatch.setattr(R, "_forwarder_rate_limit", _no_rl)
@@ -191,13 +196,23 @@ class TestInboundReleasesTheWaitingBrowser:
         assert not evt.is_set()
 
     @pytest.mark.asyncio
-    async def test_no_pending_for_that_account_is_logged_not_guessed(self, _quiet):
+    async def test_a_code_is_never_handed_to_another_account(self, _quiet):
+        """The point of matching by account. A code for 0912…001 must not wake
+        0912…002's prompt — it is the wrong SIM's code and Divar will reject
+        it, burning the attempt and the prompt.
+
+        It is parked rather than discarded now (the phone usually beats the
+        browser), so the assertion is on WHOSE it becomes, not on the reason
+        string: the waiting account stays untouched, and the parked code is
+        claimable only by the account it was sent to."""
         otp_store.request("job:ad1", "09120000002")             # a DIFFERENT account waits
         body = {"kind": "contact", "account": "09120000001", "code": "523969",
                 "sentStamp": int(time.time() * 1000)}
         out = await R.otp_inbound(_signed(body))
-        assert out["matched"] is False and out["reason"] == "no_pending_for_account"
+        assert out["matched"] is False
         assert not otp_store._store["job:ad1"]["event"].is_set(), "handed to the wrong account"
+        assert not otp_store.request("job:ad2", "09120000002").is_set(), "claimed by the wrong account"
+        assert otp_store.request("job:ad3", "09120000001").is_set(), "lost for the right account"
 
     @pytest.mark.asyncio
     async def test_kind_is_inferred_from_text_when_missing(self):
@@ -359,3 +374,69 @@ class TestAPlaceholderIsNotACode:
         body = {"kind": "contact", "account": "09120000001", "code": "%Regex%", "text": ""}
         out = await R.otp_inbound(_signed(body))
         assert out["matched"] is False and out["reason"] == "no_code_in_text"
+
+
+class TestTheCodeArrivesBeforeTheRequest:
+    """Measured live, job 107:
+
+        20:06:32  phone forwarded the code   -> no_pending_for_account
+        20:06:35  scraper detected the OTP input
+        20:06:38  SMS-OTP required — PAUSING
+
+    Divar sends the SMS the moment the contact button is clicked; the scraper
+    only registers its request after solving a captcha and finding the modal.
+    With a forwarder the phone beats the browser almost every time, so this is
+    the NORMAL order — and the code was being thrown away while the run sat
+    waiting for a human."""
+
+    def setup_method(self):
+        otp_store._store.clear(); otp_store._sent.clear(); otp_store._early.clear()
+
+    def test_a_parked_code_is_claimed_the_instant_the_request_opens(self):
+        otp_store.park_early_code("09058432452", "523969", sent_stamp_ms=1789243589000)
+        evt = otp_store.request("job:ad1", "09058432452")
+        assert evt.is_set(), "the extractor would still be waiting for a code it already has"
+        assert otp_store.pop_code("job:ad1") == "523969"
+        assert otp_store.pop_sent_stamp("job:ad1") is not None, "latency is still measurable"
+
+    def test_it_is_claimed_once_only(self):
+        otp_store.park_early_code("09058432452", "523969")
+        otp_store.request("job:ad1", "09058432452")
+        assert not otp_store.request("job:ad2", "09058432452").is_set()
+
+    def test_a_stale_park_is_not_used(self):
+        """Divar accepts a contact code for ~2 minutes; typing an expired one
+        earns a rejection and burns the attempt."""
+        otp_store.park_early_code("09058432452", "523969")
+        otp_store._early["9058432452"] = ("523969", time.time() - otp_store.EARLY_TTL - 1, None)
+        assert not otp_store.request("job:ad1", "09058432452").is_set()
+
+    def test_another_account_cannot_claim_it(self):
+        otp_store.park_early_code("09058432452", "523969")
+        assert not otp_store.request("job:ad1", "09120000009").is_set()
+        assert otp_store.request("job:ad2", "+989058432452").is_set(), "prefix forms are the same phone"
+
+    @pytest.mark.asyncio
+    async def test_the_endpoint_parks_instead_of_discarding(self, _quiet):
+        body = {"kind": "contact", "account": "09058432452", "code": "523969",
+                "sentStamp": int(time.time() * 1000)}
+        out = await R.otp_inbound(_signed(body))
+        assert out["reason"] == "parked_early", out
+        # and the run that opens next gets it for free
+        assert otp_store.request("job:ad1", "09058432452").is_set()
+
+    @pytest.mark.asyncio
+    async def test_an_early_park_is_not_logged_as_a_failure(self, _quiet):
+        await R.otp_inbound(_signed({"kind": "contact", "account": "09058432452",
+                                     "code": "523969", "sentStamp": int(time.time() * 1000)}))
+        assert _quiet[-1][1].get("level") == "info", "a parked code is not a warning"
+
+    @pytest.mark.asyncio
+    async def test_a_live_request_still_wins_over_parking(self, _quiet):
+        """Parking is the fallback, not the default: an open request must be
+        answered directly so the browser wakes immediately."""
+        evt = otp_store.request("job:ad1", "09058432452")
+        out = await R.otp_inbound(_signed({"kind": "contact", "account": "09058432452",
+                                           "code": "523969", "sentStamp": int(time.time() * 1000)}))
+        assert out["matched"] is True and evt.is_set()
+        assert not otp_store._early, "it was parked as well as delivered"
