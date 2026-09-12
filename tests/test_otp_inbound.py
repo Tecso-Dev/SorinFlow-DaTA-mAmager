@@ -336,3 +336,26 @@ class TestThePhoneIsNotAUser:
         # The call, not the comment above it that also names the router.
         line = [l for l in src.splitlines() if "include_router(scraper.machine_router" in l][0]
         assert 'prefix="/scraper"' in line and "dependencies=" not in line
+
+
+class TestAPlaceholderIsNotACode:
+    """A stock forwarder that does not expand %Regex=…% sends the placeholder
+    itself in `code`. It must be ignored in favour of the text."""
+
+    @pytest.mark.asyncio
+    async def test_placeholder_in_code_falls_back_to_text(self):
+        otp_store.request("job:ad1", "09120000001")
+        body = {"kind": "contact", "account": "09120000001",
+                "code": "%Regex=Code:\\s*(\\d{6})%",
+                "text": "کد امنیتی دریافت اطلاعات تماس دیوار:\nCode: 445566",
+                "sentStamp": int(time.time() * 1000)}
+        out = await R.otp_inbound(_signed(body))
+        assert out["matched"] is True
+        assert otp_store.pop_code("job:ad1") == "445566"
+
+    @pytest.mark.asyncio
+    async def test_garbage_code_and_no_text_is_no_code(self):
+        otp_store.request("job:ad1", "09120000001")
+        body = {"kind": "contact", "account": "09120000001", "code": "%Regex%", "text": ""}
+        out = await R.otp_inbound(_signed(body))
+        assert out["matched"] is False and out["reason"] == "no_code_in_text"

@@ -789,7 +789,11 @@ async def otp_inbound(request: Request):
         raise HTTPException(status_code=422, detail=f"bad body: {type(e).__name__}")
 
     now_ms = int(time.time() * 1000)
-    code = (body.code or "").translate(_PERSIAN_DIGITS).strip() or extract_otp_code(body.text)
+    # `code` is trusted only if it IS a code. A stock forwarder that does not
+    # expand %Regex=…% sends the placeholder text itself, and handing that to
+    # the browser would type «%Regex=Code:\s*(\d{6})%» into Divar's modal.
+    _given = (body.code or "").translate(_PERSIAN_DIGITS).strip()
+    code = _given if (_given.isdigit() and 4 <= len(_given) <= 8) else extract_otp_code(body.text)
     kind = body.kind if body.kind in ("contact", "login", "test") else detect_otp_kind(body.text)
     ip = request.client.host if request.client else "?"
     latency_ms = (now_ms - int(body.sentStamp)) if body.sentStamp else None
