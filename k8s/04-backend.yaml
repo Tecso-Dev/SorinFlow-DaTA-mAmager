@@ -100,6 +100,20 @@ spec:
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: TELEGRAM_CHAT_ID, optional: true } }
             - name: ROOT_PASSWORD
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: ROOT_PASSWORD, optional: true } }
+            # ── LLM (optional) ──
+            # Any OpenAI-compatible endpoint. Liara's AI gateway is one:
+            #   LLM_BASE_URL = https://ai.liara.ir/api/v1/<project-id>
+            #   LLM_MODEL    = provider/model, e.g. openai/gpt-4.1-mini
+            # Read by app/config.py and used by match_service._llm_rerank.
+            # These three were missing here, so the key could be set in the
+            # Secret and never reach the process — the silent no-op the note
+            # above describes.
+            - name: LLM_API_KEY
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: LLM_API_KEY, optional: true } }
+            - name: LLM_BASE_URL
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: LLM_BASE_URL, optional: true } }
+            - name: LLM_MODEL
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: LLM_MODEL, optional: true } }
             # ── the visitor portal ──
             #
             # Ships OFF. With it false, /portal redirects to the dashboard and

@@ -144,3 +144,16 @@ class TestTheReadmeDoesNotLie:
     def test_there_is_exactly_one_tests_heading(self):
         """There were two, and they disagreed with each other."""
         assert _read().count("\n### Tests\n") <= 1
+
+
+class TestOptionalSecretsReachTheContainer:
+    """A secretKeyRef that is not in the manifest is a value that sits in the
+    Secret and never reaches the process — `kubectl patch secret` for it is a
+    silent no-op. The manifest's own comment says so, and LLM_* was missing
+    anyway. Every optional key config.py reads must be listed."""
+
+    def test_every_llm_setting_is_in_the_backend_manifest(self):
+        text = Path("k8s/04-backend.yaml").read_text(encoding="utf-8")
+        for key in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
+            assert f"key: {key}, optional: true" in text, \
+                f"{key} is read by app/config.py but never reaches the pod"
