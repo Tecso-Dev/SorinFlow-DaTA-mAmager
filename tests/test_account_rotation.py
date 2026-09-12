@@ -134,10 +134,17 @@ def test_a_divar_challenge_rotates_immediately():
     assert s._reveals_since_rotation == 0
 
 
-def test_a_challenge_rotates_even_when_the_threshold_is_disabled():
-    """every <= 0 means 'do not rotate on a schedule'. It cannot mean 'ignore
-    Divar telling us the account is finished'."""
-    s = make_scraper(["0911", "0922"], every=0)
+def test_a_challenge_rotates_even_when_the_server_threshold_is_disabled(monkeypatch):
+    """A SERVER-WIDE every <= 0 means 'do not rotate on a schedule'. It cannot
+    mean 'ignore Divar telling us the account is finished'.
+
+    A PER-JOB 0 is different — see TestAnExplicitZeroPinsTheAccount. The
+    operator who sets it has a reason (today's: one phone in hand), and a
+    challenge then pauses on the same account rather than hopping to one that
+    cannot be unlocked."""
+    from app.scraper import divar_scraper as _ds
+    s = make_scraper(["0911", "0922"], every=None)
+    monkeypatch.setattr(_ds.settings, "cookie_rotate_every", 0)
     assert reveals(s, 50) == 0                      # no scheduled rotation
     s._note_account_challenged()
     assert asyncio.run(s.maybe_rotate_account()) is True
@@ -239,3 +246,29 @@ class TestAHeavyChallengedAccountRests:
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper._mark_account_spent)
         assert "row.challenged_at = " in src
+
+
+class TestAnExplicitZeroPinsTheAccount:
+    """One phone in hand means one account. With rotate_every=0 a challenge
+    used to answer the code on the account that can be answered and then hop
+    to one that cannot, parking the run for six hours."""
+
+    @pytest.mark.asyncio
+    async def test_a_challenge_does_not_move_a_pinned_account(self):
+        from app.scraper.divar_scraper import DivarScraper
+        s = DivarScraper.__new__(DivarScraper)
+        s._rotate_every_override = 0
+        s._force_rotate = True
+        s.active_phone = "0905"
+        s._reveals_since_rotation = 0
+        moved = await s.maybe_rotate_account()
+        assert moved is False
+        assert s._force_rotate is False, "the flag must clear or the next reveal re-tries the move"
+
+    def test_the_server_default_still_moves_on_a_challenge(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.maybe_rotate_account)
+        assert "if override == 0:" in src
+        # and the forced path below it is intact
+        assert "if not forced:" in src

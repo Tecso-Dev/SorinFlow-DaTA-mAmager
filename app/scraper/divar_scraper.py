@@ -2653,8 +2653,26 @@ class DivarScraper:
             except Exception as e:
                 logger.warning(f"[rotate] could not record the challenge budget: {e}")
 
-        # every <= 0 disables the threshold, but never the challenge response:
-        # being asked for a code is Divar telling us to move.
+        # An EXPLICIT rotate_every of 0 means «this account, full stop» —
+        # not even a challenge moves it.
+        #
+        # The operator who sets it has a reason: today's was one phone in
+        # hand. Rotating away after a challenge would answer the code on the
+        # account that can be answered and then hop to one that cannot, where
+        # the run parks for six hours. With rotation off, a challenge pauses
+        # on the same account, the code goes in, and the run continues here.
+        # The server default (override None) keeps the old behaviour: a
+        # challenge still forces a move.
+        if override == 0:
+            if forced:
+                logger.info(f"[rotate] pinned to {self.active_phone} (rotate_every=0) — "
+                            f"staying despite the challenge")
+                self._force_rotate = False
+            return False
+
+        # every <= 0 from the SERVER setting disables the threshold, but never
+        # the challenge response: being asked for a code is Divar telling us
+        # to move.
         if not forced:
             if every <= 0:
                 return False
