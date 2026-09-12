@@ -22,7 +22,7 @@ from app.config import get_settings, CITIES, CATEGORIES
 from app.models.property import Property, City, Category, allocate_serial_no
 from app.models.scraping_job import ScrapingJob
 from app.models.proxy import Proxy
-from app.scraper.stealth import StealthConfig, STEALTH_JS, get_browser_args, get_context_options
+from app.scraper.stealth import StealthConfig, open_browser, apply_device, Device
 from app.scraper.auth import DivarAuth
 from app.scraper.contact_extractor import ContactExtractor
 from app.services import skipped_listings
@@ -181,6 +181,21 @@ class DivarScraper:
         # handshake to a host we talk to thousands of times per job.
         self._http: Optional[httpx.AsyncClient] = None
     
+    async def _open_browser_for(self, account: Optional[str], proxy=None) -> None:
+        """Open Chromium presenting as `account`'s device, and point auth at it.
+
+        The one place a browser is opened in the scraper. initialize() and
+        _recycle_browser() both call it, so the fresh browser after a recycle
+        is the same device as the one before it — and auth always holds the
+        browser that actually exists.
+        """
+        self.browser, self.context, self.page, self.device = await open_browser(
+            self.playwright, headless=self.headless, proxy=proxy,
+            account=account, stealth_config=self.stealth_config)
+        self.auth.browser = self.browser
+        self.auth.context = self.context
+        self.auth.page = self.page
+
     async def initialize(self, restore_session: bool = True, phone_number: str = None) -> bool:
         """Initialize scraper with browser and optional session restoration"""
         try:
@@ -191,18 +206,11 @@ class DivarScraper:
             if self.proxy_enabled:
                 proxy = await self._get_working_proxy()
 
-            self.browser = await self.playwright.chromium.launch(
-                headless=self.headless,
-                args=get_browser_args()
-            )
-
-            context_options = get_context_options(self.stealth_config, proxy)
-            self.context = await self.browser.new_context(**context_options)
-
-            # Add stealth script
-            await self.context.add_init_script(STEALTH_JS)
-
-            self.page = await self.context.new_page()
+            # The browser is opened AFTER the account is chosen (below), because
+            # the device it presents as is derived from the account. Opening it
+            # here with no account and re-presenting later would show Divar one
+            # laptop on the first request and another on the second.
+            self.browser = self.context = self.page = None
 
             # Restore authentication session
             if restore_session:
@@ -236,11 +244,10 @@ class DivarScraper:
                     except Exception as _e:
                         logger.warning(f"Could not auto-select session: {_e}")
 
-                if phone_number:
-                    self.auth.context = self.context
-                    self.auth.page = self.page
-                    self.auth.browser = self.browser
+                # Now the account is known, so the device is — open the browser.
+                await self._open_browser_for(phone_number, proxy)
 
+                if phone_number:
                     restored = await self.auth.restore_session(phone_number)
                     if not restored:
                         logger.warning(f"Session not restored for {phone_number}. Trying other saved sessions...")
@@ -260,6 +267,8 @@ class DivarScraper:
                                 if _rec:
                                     phone_number = _rec.phone_number
                                     logger.info(f"Falling back to session for {phone_number}")
+                                    # A different person, so a different laptop.
+                                    await apply_device(self.page, Device.for_account(phone_number))
                                     from app.services import job_log
                                     await job_log.record(
                                         self.current_job.job_id if self.current_job else None,
@@ -290,6 +299,10 @@ class DivarScraper:
                         logger.info("Session restored successfully")
                 else:
                     logger.warning("No Divar session configured — phone numbers will not be extracted.")
+
+            if self.browser is None:
+                # restore_session=False: no account, so the default device.
+                await self._open_browser_for(None, proxy)
 
             return True
             
@@ -387,18 +400,6 @@ class DivarScraper:
                 await asyncio.sleep(self.stealth_config.scroll_delay)
         except Exception as e:
             logger.warning(f"Scroll simulation failed: {e}")
-    
-    async def _mouse_movement(self):
-        """Simulate random mouse movements"""
-        try:
-            viewport = self.stealth_config.get_viewport()
-            for _ in range(random.randint(2, 5)):
-                x = random.randint(100, viewport["width"] - 100)
-                y = random.randint(100, viewport["height"] - 100)
-                await self.page.mouse.move(x, y)
-                await asyncio.sleep(random.uniform(0.1, 0.3))
-        except Exception as e:
-            logger.warning(f"Mouse movement simulation failed: {e}")
     
     def _generate_tag_number(self) -> str:
         """Generate unique tag number for property"""
@@ -501,25 +502,57 @@ class DivarScraper:
             if self.playwright is None:
                 self.playwright = await async_playwright().start()
             proxy = await self._get_working_proxy() if self.proxy_enabled else None
-            self.browser = await self.playwright.chromium.launch(
-                headless=self.headless, args=get_browser_args())
-            self.context = await self.browser.new_context(
-                **get_context_options(self.stealth_config, proxy))
-            await self.context.add_init_script(STEALTH_JS)
-            self.page = await self.context.new_page()
+            # Same account, same device: the recycle must be invisible to
+            # Divar, and it is only invisible if the fresh browser presents
+            # exactly as the old one did.
+            await self._open_browser_for(phone, proxy)
         except Exception as e:
             logger.error(f"[memory] could not start a fresh browser: {e}")
             raise
 
         self.request_count = 0
         self.session_start = datetime.now()
+
+        # Hand the NEW browser to auth before asking it to do anything.
+        #
+        # initialize() points self.auth at the scraper's page/context/browser
+        # once, at start. This method replaced all three and left auth holding
+        # the closed ones — so restore_session() below saw a dead browser,
+        # refused ("the browser is gone"), and the fresh Chromium went to Divar
+        # with no cookies at all. Divar did what it should to an anonymous
+        # visitor asking for a phone number: demanded a code. Six minutes into
+        # every run, right after this recycle, on every account. That was read
+        # as detection for a week. It was a logout.
+        #
+        # The same stale pointer made maybe_rotate_account refuse every
+        # rotation for the rest of the run ("no account can be restored onto
+        # it"), which is why one account carried 223 reveals while three sat
+        # at zero.
+        # (_open_browser_for has already pointed auth at the new browser.)
+
         if phone:
             try:
-                await self.auth.restore_session(phone)
-                self.active_phone = phone
-                logger.info(f"[memory] session for {phone} restored after recycle")
+                restored = await self.auth.restore_session(phone)
             except Exception as e:
                 logger.error(f"[memory] could not restore {phone} after recycle: {e}")
+                restored = False
+            if restored:
+                self.active_phone = phone
+                logger.info(f"[memory] session for {phone} restored after recycle")
+            else:
+                # restore_session returns False rather than raising, and this
+                # used to log «restored» on that False. A browser with no
+                # session must not be reported as one that has it.
+                logger.error(
+                    f"[memory] session for {phone} was NOT restored after the "
+                    f"recycle — the next contact click will be anonymous and "
+                    f"Divar will ask for a code")
+                if self._job_id_str:
+                    from app.services import job_log as _jl
+                    await _jl.record(
+                        self._job_id_str, _jl.SESSION,
+                        f"نشست {phone} بعد از بازراه‌اندازی مرورگر بازیابی نشد",
+                        level="error", phone=phone)
 
         # job_id captured as a plain value, not read off the ORM object: the
         # row may be expired after a commit, and refreshing it here would be one
@@ -534,6 +567,17 @@ class DivarScraper:
     async def _check_rate_limit(self):
         """Check and enforce rate limiting"""
         self.request_count += 1
+
+        # A refusal's cooldown applies to the NEXT request, whatever makes it.
+        # _note_refusal set the deadline and only the per-listing delay ever
+        # read it, so a 429 during collection was followed by the very next
+        # navigation without pause — the one moment Divar had just asked for
+        # one. Every page load passes through here; this is where it belongs.
+        now = time.monotonic()
+        if now < self._cooldown_until:
+            owed = self._cooldown_until - now
+            logger.info(f"[backoff] honouring a refusal cooldown: {owed:.0f}s before the next request")
+            await asyncio.sleep(owed)
 
         # Recycle before the OOM killer does it for us.
         #
@@ -564,82 +608,79 @@ class DivarScraper:
         self, city: str, category: str, page_num: int,
         last_post_date: Optional[int] = None,
     ) -> tuple:
-        """Fetch listings by calling Divar's internal JSON API directly via httpx.
+        """Fetch the next page of listings by replaying Divar's own search POST
+        — from inside the page, with the page's own fetch().
 
         Returns (listings, last_post_date).
+
+        This used to go out through httpx with a hand-built Cookie header and a
+        random User-Agent. That request carried the browser's session cookies
+        but nothing else of the browser: a Python TLS fingerprint, HTTP/1.1
+        where Chrome speaks h2, no Sec-CH-UA, no Sec-Fetch-*, headers in
+        httpx's order — and a different UA on every call. One session, two
+        clients. Every other page of a run was the odd one out.
+
+        page.evaluate(fetch) is literally what Divar's frontend does. Same TLS,
+        same h2, same header order, same cookies (credentials: include), same
+        device — because it IS the same browser, on the same origin.
         """
         listings: List[Dict[str, Any]] = []
         next_last_post_date: Optional[int] = None
 
-        # Pass the browser's session cookies so the API returns real listings
-        cookie_header = ""
-        try:
-            if self.context:
-                browser_cookies = await self.context.cookies()
-                cookie_header = "; ".join(
-                    f"{c['name']}={c['value']}" for c in browser_cookies
-                    if 'divar.ir' in c.get('domain', '')
-                )
-        except Exception:
-            pass
-
-        headers = {
-            "User-Agent": self.stealth_config.get_random_user_agent(),
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Referer": f"https://divar.ir/s/{city}/{category}",
-            "Origin": "https://divar.ir",
-            "x-render-type": "CSR",
-            "x-standard-divar-error": "true",
-        }
-        if cookie_header:
-            headers["Cookie"] = cookie_header
-
-        # ── Preferred: replay the real /postlist/w/search POST the browser made.
-        #    Reuses Divar's own request body (correct city_id + category enum),
-        #    only advancing the pagination cursor. Far more reliable than guessing
-        #    the legacy GET endpoint, which now returns 0 results.
         template = self._search_req_template
-        # The cursor is no longer part of the gate.
-        #
-        # It used to be: `and last_post_date`. But last_post_date starts as None
-        # and was only ever set from a SUCCESSFUL call to this function, so page
-        # one could never take this branch, always fell through to the legacy
-        # GET below — which returns a BLOCKING_VIEW «نیاز به بروزرسانی» and zero
-        # listings — and therefore never produced the cursor that would have let
-        # the branch run. The API phase has contributed nothing to any run since
-        # it was written, which is why depth was capped at whatever the DOM
-        # scroll managed.
-        if template and template.get('post_data'):
-            try:
-                import json as _json
-                body = _json.loads(template['post_data'])
-                pd = body.get('pagination_data')
-                if not isinstance(pd, dict):
-                    pd = {"@type": "type.googleapis.com/post_list.PaginationData"}
-                # Only send a cursor we actually have. Writing None here would
-                # post `"last_post_date": null`; the dead endpoint's -1 is
-                # filtered at the source.
-                if isinstance(last_post_date, int) and last_post_date > 0:
-                    pd['last_post_date'] = last_post_date
-                pd['page'] = page_num
-                if 'layer_page' in pd:
-                    pd['layer_page'] = page_num
-                body['pagination_data'] = pd
-                async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-                    resp = await client.post(
-                        template['url'],
-                        headers={**headers, "Content-Type": "application/json"},
-                        json=body,
-                    )
-                    logger.info(f"Direct API replay POST {template['url']} → {resp.status_code}")
-                    if resp.status_code == 200:
-                        parsed, lpd = self._parse_api_response(resp.json())
-                        if parsed:
-                            logger.info(f"Got {len(parsed)} listings via replayed postlist/w/search")
-                            return parsed, lpd
-            except Exception as e:
-                logger.debug(f"Direct API replay failed: {e}")
+        if not (template and template.get('post_data') and self.page and not self.page.is_closed()):
+            if not template:
+                logger.info("[api] no captured search request to replay — "
+                            "listing collection is DOM-only for this run")
+            return listings, next_last_post_date
+
+        try:
+            import json as _json
+            body = _json.loads(template['post_data'])
+            pd = body.get('pagination_data')
+            if not isinstance(pd, dict):
+                pd = {"@type": "type.googleapis.com/post_list.PaginationData"}
+            # Only send a cursor we actually have. Writing None here would
+            # post `"last_post_date": null`.
+            if isinstance(last_post_date, int) and last_post_date > 0:
+                pd['last_post_date'] = last_post_date
+            pd['page'] = page_num
+            if 'layer_page' in pd:
+                pd['layer_page'] = page_num
+            body['pagination_data'] = pd
+
+            result = await self.page.evaluate(
+                """async ({url, body}) => {
+                    const r = await fetch(url, {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json, text/plain, */*',
+                            'x-render-type': 'CSR',
+                            'x-standard-divar-error': 'true',
+                        },
+                        body: JSON.stringify(body),
+                    });
+                    let data = null;
+                    try { data = await r.json(); } catch (e) {}
+                    return {status: r.status, data};
+                }""",
+                {"url": template['url'], "body": body},
+            )
+            status = int(result.get("status") or 0)
+            logger.info(f"[api] in-page replay POST {template['url']} → {status}")
+            if status == 200 and result.get("data") is not None:
+                parsed, lpd = self._parse_api_response(result["data"])
+                if parsed:
+                    logger.info(f"Got {len(parsed)} listings via replayed postlist/w/search")
+                    return parsed, lpd
+            elif status in (401, 403, 429) or status >= 500:
+                # Was invisible before: the API phase never reported refusals,
+                # so a run refused here read as «the feed ran out».
+                self._note_refusal(status)
+        except Exception as e:
+            logger.debug(f"[api] in-page replay failed: {e}")
 
         # The legacy /v8/web-search endpoint is gone, and deleting it is the
         # fix rather than tidying.
@@ -660,14 +701,8 @@ class DivarScraper:
         # Python, so any code that trusted the returned cursor would poison the
         # next request with it.
         #
-        # Everything real now comes from replaying the browser's own
-        # /postlist/w/search POST above. Without a captured template there is
-        # nothing useful to try, and saying so beats three requests that cannot
-        # work.
-        if not template:
-            logger.info("[api] no captured search request to replay — "
-                        "listing collection is DOM-only for this run")
-
+        # Everything real comes from replaying the browser's own
+        # /postlist/w/search POST above, from inside the page.
         return listings, next_last_post_date
 
     async def _switch_to_list_view(self) -> bool:
@@ -2268,28 +2303,43 @@ class DivarScraper:
                 images = images[:max_count]
 
             try:
-                client = self._client()
+                # Through the browser's own network stack, not httpx.
+                #
+                # The httpx client sent every image request as
+                # `python-httpx/0.26.0`, with no cookies, no Referer and no
+                # pause — up to a thousand CDN hits per run announcing a
+                # Python script, from the same IP that had just browsed the
+                # listing as Chrome. context.request uses Chromium's TLS, its
+                # cookies and the device's UA; the Referer is the page the
+                # image sits on, which is what a browser sends.
+                req = self.context.request if self.context else None
                 for i, url in enumerate(images):
                     try:
-                        # Streamed with a running byte cap. client.get() reads
-                        # the whole body first, so a single oversized file was
-                        # already in memory by the time anyone could object.
                         raw = bytearray()
                         too_big = False
-                        async with client.stream("GET", url, timeout=30) as response:
-                            if response.status_code != 200:
-                                continue
-                            declared = response.headers.get("content-length")
-                            if declared and declared.isdigit() and int(declared) > max_bytes:
-                                logger.warning(
-                                    f"{divar_id}: image {i+1} declares "
-                                    f"{int(declared)}B > {max_bytes}B cap — skipped")
-                                continue
-                            async for chunk in response.aiter_bytes():
-                                raw.extend(chunk)
-                                if len(raw) > max_bytes:
-                                    too_big = True
-                                    break
+                        if req is None:
+                            continue
+                        response = await req.get(
+                            url, timeout=30_000,
+                            headers={"Referer": f"https://divar.ir/v/{divar_id}",
+                                     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"})
+                        if response.status != 200:
+                            continue
+                        declared = (response.headers or {}).get("content-length")
+                        if declared and declared.isdigit() and int(declared) > max_bytes:
+                            logger.warning(
+                                f"{divar_id}: image {i+1} declares "
+                                f"{int(declared)}B > {max_bytes}B cap — skipped")
+                            continue
+                        body = await response.body()
+                        if len(body) > max_bytes:
+                            too_big = True
+                        else:
+                            raw.extend(body)
+                        # A person's browser does not fetch five images in the
+                        # same millisecond; the page loads them as it renders.
+                        if i + 1 < len(images):
+                            await asyncio.sleep(random.uniform(0.15, 0.6))
                         if too_big:
                             logger.warning(
                                 f"{divar_id}: image {i+1} exceeded the "
@@ -2643,6 +2693,14 @@ class DivarScraper:
             if candidate == self.active_phone:
                 continue
             try:
+                # Switch device first: the cookies of account B arriving from
+                # account A's laptop is the pattern this whole file exists to
+                # avoid. Same browser, different person. getattr for the same
+                # reason as everything else in this function — the rotation
+                # tests build the object with __new__.
+                _pg = getattr(self, "page", None)
+                if _pg is not None and not _pg.is_closed():
+                    await apply_device(_pg, Device.for_account(candidate))
                 restored = await self.auth.restore_session(candidate)
             except Exception as e:
                 logger.warning(f"[rotate] restore failed for {candidate}: {e}")

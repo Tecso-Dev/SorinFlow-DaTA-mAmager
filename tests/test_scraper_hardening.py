@@ -89,41 +89,42 @@ def _png(w, h):
 
 
 class FakeResponse:
+    """The shape of a Playwright APIResponse: .status, .headers, await .body().
+
+    Images are fetched through the browser context now, not httpx — the
+    httpx client announced every image request as `python-httpx/0.26.0` with
+    no cookies and no Referer, up to a thousand times a run.
+    """
     def __init__(self, body, status=200):
         self._body = body
-        self.status_code = status
+        self.status = status
         self.headers = {"content-length": str(len(body))}
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *a):
-        return False
-
-    async def aiter_bytes(self):
-        # delivered in chunks, so the running cap is what stops an oversized
-        # body rather than a header we are trusting
-        for i in range(0, len(self._body), 4096):
-            yield self._body[i:i + 4096]
+    async def body(self):
+        return self._body
 
 
-class FakeClient:
+class FakeRequest:
     def __init__(self, body):
         self.body = body
         self.requested = []
 
-    def stream(self, method, url, **kw):
+    async def get(self, url, **kw):
         self.requested.append(url)
         return FakeResponse(self.body)
+
+
+class FakeContext:
+    def __init__(self, body):
+        self.request = FakeRequest(body)
 
 
 def make_scraper(tmp_path, body):
     from app.scraper.divar_scraper import DivarScraper
     s = DivarScraper.__new__(DivarScraper)
     s.images_dir = tmp_path
-    client = FakeClient(body)
-    s._client = lambda: client
-    return s, client
+    s.context = FakeContext(body)
+    return s, s.context.request
 
 
 def test_image_count_is_capped(tmp_path):
@@ -142,7 +143,9 @@ def test_image_count_is_capped(tmp_path):
 
 
 def test_oversized_image_is_refused(tmp_path):
-    """A body over the cap must be dropped mid-download, not buffered whole."""
+    """A body over the cap must be refused. (It is read by the browser
+    context and measured before decoding; the pixel cap below is what stops a
+    small file that decodes large.)"""
     from app.config import get_settings
     cfg = get_settings()
     saved = cfg.max_image_bytes

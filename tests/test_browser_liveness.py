@@ -187,3 +187,56 @@ class TestRotationWithTheRealCollaborators:
         s._force_rotate = True
         await s.maybe_rotate_account()
         assert s._force_rotate is False
+
+
+class TestARecycleHandsAuthTheNewBrowser:
+    """The one that made every other liveness fix look broken.
+
+    From a real week of runs:
+
+        09:03:30  Session restored successfully for 0914*****08
+        09:09:12  0914*****08: the browser is gone — cannot restore a session
+        09:10:39  دیوار کد تأیید خواست
+        09:13:20  [rotate] the browser is gone — no account can be restored
+
+    initialize() points auth at the scraper's page/context/browser once.
+    _recycle_browser replaced all three and left auth holding the closed ones.
+    So after the post-collection recycle — every run — restore_session refused,
+    the fresh Chromium went to Divar with no cookies, and Divar asked the
+    anonymous visitor for a code six minutes into every run. Then every
+    rotation for the rest of the run was refused for the same reason: one
+    account carried 223 reveals while three sat at zero.
+
+    A week of «Divar is detecting us». It was a logout.
+    """
+
+    @pytest.fixture
+    def src(self):
+        from app.scraper.divar_scraper import DivarScraper
+        return inspect.getsource(DivarScraper._recycle_browser)
+
+    def test_it_repoints_all_three_before_restoring(self, src):
+        """The recycle opens its browser through _open_browser_for, which is
+        the one place that points auth at whatever browser now exists. The
+        open must come before the restore."""
+        from app.scraper.divar_scraper import DivarScraper
+        helper = inspect.getsource(DivarScraper._open_browser_for)
+        for attr in ("self.auth.browser = self.browser",
+                     "self.auth.context = self.context",
+                     "self.auth.page = self.page"):
+            assert attr in helper, f"{attr} is not set by _open_browser_for"
+        # The awaited call, not the word: comments mention restore_session too.
+        open_at = src.find("await self._open_browser_for(")
+        restore_at = src.find("await self.auth.restore_session(")
+        assert 0 < open_at < restore_at, "the recycle restores before it has re-pointed auth"
+
+    def test_a_false_from_restore_is_not_logged_as_restored(self, src):
+        """restore_session returns False rather than raising. The old code
+        caught exceptions only, so a refused restore logged «restored»."""
+        assert "restored = await self.auth.restore_session" in src
+        assert "if restored:" in src
+        assert "was NOT restored" in src
+
+    def test_a_failed_restore_reaches_the_run_log(self, src):
+        """The pod log said it every run. The panel never did."""
+        assert "بازیابی نشد" in src

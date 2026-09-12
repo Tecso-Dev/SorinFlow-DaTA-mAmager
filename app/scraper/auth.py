@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.models.cookie import Cookie
-from app.scraper.stealth import StealthConfig, STEALTH_JS, get_browser_args, get_context_options
+from app.scraper.stealth import StealthConfig, open_browser, apply_device, Device
 
 settings = get_settings()
 
@@ -33,22 +33,13 @@ class DivarAuth:
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
     
-    async def initialize_browser(self, proxy: Optional[str] = None, headless: bool = True):
-        """Initialize browser with stealth settings"""
+    async def initialize_browser(self, proxy: Optional[str] = None, headless: bool = True,
+                                 account: Optional[str] = None):
+        """Open a browser presenting as `account`'s device."""
         playwright = await async_playwright().start()
-        
-        self.browser = await playwright.chromium.launch(
-            headless=headless,
-            args=get_browser_args()
-        )
-        
-        context_options = get_context_options(self.stealth_config, proxy)
-        self.context = await self.browser.new_context(**context_options)
-        
-        # Add stealth script
-        await self.context.add_init_script(STEALTH_JS)
-        
-        self.page = await self.context.new_page()
+        self.browser, self.context, self.page, self.device = await open_browser(
+            playwright, headless=headless, proxy=proxy, account=account,
+            stealth_config=self.stealth_config)
         return self.page
     
     def browser_alive(self) -> bool:

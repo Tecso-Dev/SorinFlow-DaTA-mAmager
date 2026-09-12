@@ -1,46 +1,131 @@
 """
-SorinFlow Divar Scraper - Stealth Configuration
-Anti-detection measures for web scraping
+SorinFlow Divar Scraper - how the browser presents itself.
+
+Measured on the live pod (2026-09-12), what Divar actually received from the
+previous version of this file:
+
+    user-agent:          Chrome/130 on Windows         (the engine is 121)
+    sec-ch-ua:           <absent>                      Playwright's UA override
+                                                       strips Client Hints; real
+                                                       Chrome always sends them
+    navigator.webdriver: undefined, own descriptor     real Chrome: false, inherited
+    navigator.plugins:   [1,2,3,4,5], plugins[0].name undefined
+    window.chrome:       {runtime:{}}                  real: loadTimes, csi, app
+    navigator.platform:  Win32 under a Macintosh UA    3 of the 8 UAs
+
+Each line is a one-comparison tell; together they are the signature of a
+copied "stealth" snippet, and modern detection greps for exactly these.
+
+What replaced it, measured the same way (see tests/test_fingerprint.py):
+
+    --headless=new      real Chrome, not old headless: PDF Viewer plugins,
+                        window.chrome with loadTimes/csi/app, webdriver=false
+                        with no override trace. No injected JavaScript at all.
+    CDP UA override     Emulation.setUserAgentOverride WITH userAgentMetadata,
+                        so the header, Sec-CH-UA, Sec-CH-UA-Platform,
+                        navigator.platform and navigator.userAgentData all
+                        say the same thing: Chrome 121 — the real engine — on
+                        Windows.
+    one device per      viewport, Windows version and Accept-Language are
+    account             chosen by hashing the account's phone number, so
+                        account A is always the same laptop and account B is a
+                        different one. Before, every account shared one
+                        fingerprint and a browser recycle changed it under the
+                        same account — the inverse of what people look like.
+
+Delay and request-limit settings are unchanged; other code reads them.
 """
+import hashlib
 import random
-from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
+
+# The engine that is actually running. The UA must claim this version and no
+# other: Client Hints and feature detection both reveal the truth, and a UA
+# that disagrees with them is the cheapest bot check there is. Bump it when
+# the Playwright pin in requirements.txt changes.
+CHROMIUM_MAJOR = "121"
+CHROMIUM_FULL = "121.0.6167.57"
+
+# Real, common Windows desktop sizes. Not randomised ±50: a viewport of
+# 1926×1099 belongs to nobody.
+_VIEWPORTS: Tuple[Tuple[int, int], ...] = (
+    (1920, 1080), (1366, 768), (1536, 864), (1440, 900), (1600, 900), (1280, 720),
+)
+# platformVersion "10.0.0" is Windows 10; "15.0.0" is how Chrome reports 11.
+_WINDOWS: Tuple[Tuple[str, str], ...] = (("10.0.0", "10"), ("15.0.0", "11"))
+_ACCEPT_LANGUAGES: Tuple[str, ...] = (
+    "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7",
+    "fa-IR,fa;q=0.9,en;q=0.8",
+    "fa,en-US;q=0.9,en;q=0.8",
+)
+
+
+@dataclass(frozen=True)
+class Device:
+    """One person's browser, derived from one account. Stable across runs and
+    across browser recycles, distinct between accounts."""
+    width: int
+    height: int
+    platform_version: str
+    accept_language: str
+
+    @property
+    def user_agent(self) -> str:
+        return (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                f"(KHTML, like Gecko) Chrome/{CHROMIUM_MAJOR}.0.0.0 Safari/537.36")
+
+    def cdp_override(self) -> Dict[str, Any]:
+        """The Emulation.setUserAgentOverride payload. The metadata is what
+        makes Sec-CH-UA and navigator.userAgentData agree with the header."""
+        brands = [{"brand": "Not A(Brand", "version": "99"},
+                  {"brand": "Google Chrome", "version": CHROMIUM_MAJOR},
+                  {"brand": "Chromium", "version": CHROMIUM_MAJOR}]
+        full = [{"brand": "Not A(Brand", "version": "99.0.0.0"},
+                {"brand": "Google Chrome", "version": CHROMIUM_FULL},
+                {"brand": "Chromium", "version": CHROMIUM_FULL}]
+        return {
+            "userAgent": self.user_agent,
+            "platform": "Win32",
+            "acceptLanguage": self.accept_language,
+            "userAgentMetadata": {
+                "brands": brands, "fullVersionList": full,
+                "platform": "Windows", "platformVersion": self.platform_version,
+                "architecture": "x86", "model": "", "mobile": False,
+                "bitness": "64", "wow64": False,
+            },
+        }
+
+    @classmethod
+    def for_account(cls, account: Optional[str]) -> "Device":
+        """Deterministic: the same phone number always yields the same device.
+
+        No account (the anonymous probe, single-URL scrapes) gets a fixed
+        default rather than a random one, for the same reason — a device that
+        changes every visit is itself a signal.
+        """
+        seed = int(hashlib.sha256((account or "").encode("utf-8")).hexdigest()[:8], 16)
+        w, h = _VIEWPORTS[seed % len(_VIEWPORTS)]
+        pv, _ = _WINDOWS[(seed >> 8) % len(_WINDOWS)]
+        al = _ACCEPT_LANGUAGES[(seed >> 16) % len(_ACCEPT_LANGUAGES)]
+        return cls(width=w, height=h, platform_version=pv, accept_language=al)
 
 
 @dataclass
 class StealthConfig:
-    """Configuration for stealth/anti-detection measures"""
-    
-    # Browser fingerprint settings
-    viewport_width: int = 1920
-    viewport_height: int = 1080
-    device_scale_factor: float = 1.0
-    is_mobile: bool = False
-    has_touch: bool = False
-    
+    """Pace and limits. The fingerprint no longer lives here — see Device."""
+
     # Locale and timezone (Iran)
     locale: str = "fa-IR"
     timezone_id: str = "Asia/Tehran"
-    
+
     # Geolocation (Tehran default)
     geolocation: Dict[str, float] = field(default_factory=lambda: {
-        "latitude": 35.6892,
-        "longitude": 51.3890,
-        "accuracy": 100
+        "latitude": 35.6892, "longitude": 51.3890, "accuracy": 100,
     })
-    
-    # User agents pool (Updated for 2026)
-    user_agents: List[str] = field(default_factory=lambda: [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    ])
-    
+    device_scale_factor: float = 1.0
+
     # Delay settings (seconds)
     # کمی کاهش داده شده برای سرعت بیشتر ولی همچنان شبیه کاربر واقعی
     # Between actions against Divar.
@@ -70,10 +155,6 @@ class StealthConfig:
     # hosts where that file cannot be read.
     max_requests_per_session: int = 150
     
-    def get_random_user_agent(self) -> str:
-        """Get a random user agent from the pool"""
-        return random.choice(self.user_agents)
-    
     def get_random_delay(self) -> float:
         """Get a random delay between min and max"""
         return random.uniform(self.min_delay, self.max_delay)
@@ -100,169 +181,120 @@ class StealthConfig:
     def get_random_scroll_distance(self) -> int:
         """Get a random scroll distance"""
         return random.randint(self.scroll_distance_min, self.scroll_distance_max)
-    
-    def get_viewport(self) -> Dict[str, int]:
-        """Get viewport settings with slight randomization"""
-        return {
-            "width": self.viewport_width + random.randint(-50, 50),
-            "height": self.viewport_height + random.randint(-50, 50)
-        }
 
 
-# Stealth JavaScript to inject
-STEALTH_JS = """
-// Overwrite the webdriver property
-Object.defineProperty(navigator, 'webdriver', {
-    get: () => undefined
-});
+def get_browser_args(headless: bool = True) -> List[str]:
+    """Chromium launch flags: what a container needs, plus the one that matters.
 
-// Overwrite the plugins property
-Object.defineProperty(navigator, 'plugins', {
-    get: () => [1, 2, 3, 4, 5]
-});
+    The previous list carried --disable-web-security (turns off CORS — a
+    security hole and a behavioural tell), --ignore-certificate-errors, and a
+    dozen site-isolation and feature flags from an old gist. None made the
+    browser look more real; several made it look less.
 
-// Overwrite the languages property
-Object.defineProperty(navigator, 'languages', {
-    get: () => ['fa-IR', 'fa', 'en-US', 'en']
-});
-
-// Overwrite the platform property
-Object.defineProperty(navigator, 'platform', {
-    get: () => 'Win32'
-});
-
-// Overwrite the hardwareConcurrency property
-Object.defineProperty(navigator, 'hardwareConcurrency', {
-    get: () => 8
-});
-
-// Overwrite the deviceMemory property
-Object.defineProperty(navigator, 'deviceMemory', {
-    get: () => 8
-});
-
-// Overwrite chrome runtime
-window.chrome = {
-    runtime: {}
-};
-
-// Overwrite permissions
-const originalQuery = window.navigator.permissions.query;
-window.navigator.permissions.query = (parameters) => (
-    parameters.name === 'notifications' ?
-        Promise.resolve({ state: Notification.permission }) :
-        originalQuery(parameters)
-);
-
-// Add touch support detection bypass
-Object.defineProperty(navigator, 'maxTouchPoints', {
-    get: () => 0
-});
-
-// Console log warning bypass
-const originalConsoleLog = console.log;
-console.log = function(...args) {
-    if (args[0] && typeof args[0] === 'string' && args[0].includes('devtools')) {
-        return;
-    }
-    originalConsoleLog.apply(console, args);
-};
-
-// Disable automation detection
-delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
-"""
-
-
-def get_browser_args() -> List[str]:
-    """Get Chrome browser arguments for stealth mode"""
-    return [
+    --headless=new is the real Chrome code path. It must be paired with
+    headless=False at launch: Playwright 1.41 maps headless=True to the OLD
+    mode, which says HeadlessChrome in the UA and the Client Hints and has no
+    plugins and no window.chrome.
+    """
+    args = [
         "--disable-blink-features=AutomationControlled",
-        "--disable-infobars",
-        "--disable-dev-shm-usage",
-        "--disable-browser-side-navigation",
-        "--disable-gpu",
         "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-web-security",
-        "--disable-features=IsolateOrigins,site-per-process",
-        "--disable-site-isolation-trials",
-        "--disable-extensions",
-        "--disable-plugins-discovery",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
-        "--disable-breakpad",
-        "--disable-component-extensions-with-background-pages",
-        "--disable-component-update",
-        "--disable-default-apps",
-        "--disable-domain-reliability",
-        "--disable-hang-monitor",
-        "--disable-ipc-flooding-protection",
-        "--disable-popup-blocking",
-        "--disable-prompt-on-repost",
         "--disable-renderer-backgrounding",
-        "--disable-sync",
-        "--enable-features=NetworkService,NetworkServiceInProcess",
-        "--force-color-profile=srgb",
-        "--metrics-recording-only",
-        "--no-first-run",
         "--password-store=basic",
         "--use-mock-keychain",
-        "--ignore-certificate-errors",
-        "--ignore-ssl-errors",
         "--lang=fa-IR",
     ]
+    if headless:
+        args.insert(0, "--headless=new")
+    return args
 
 
-def get_context_options(stealth_config: StealthConfig, proxy: Optional[str] = None) -> Dict[str, Any]:
-    """Get browser context options for stealth mode"""
+def get_context_options(stealth_config: StealthConfig, proxy=None,
+                        device: Optional[Device] = None) -> Dict[str, Any]:
+    """Browser context options.
+
+    No `user_agent` here, deliberately. Playwright implements that option as a
+    UA override with no userAgentMetadata, so Chromium stops sending Sec-CH-UA
+    and navigator.userAgentData.brands comes back empty — a Chrome UA with no
+    Client Hints, which real Chrome never produces. The UA is set once the page
+    exists, over CDP, with metadata (apply_device).
+
+    No bypass_csp and no ignore_https_errors: a real browser does neither.
+
+    Only headers that are genuinely identical on every request go in
+    extra_http_headers — Playwright applies them to EVERY request the context
+    makes, so per-request headers (Sec-Fetch-*, Cache-Control) must be left to
+    Chromium, which computes them correctly.
+    """
+    d = device or Device.for_account(None)
     options = {
-        "viewport": stealth_config.get_viewport(),
-        "user_agent": stealth_config.get_random_user_agent(),
+        "viewport": {"width": d.width, "height": d.height},
         "locale": stealth_config.locale,
         "timezone_id": stealth_config.timezone_id,
         "geolocation": stealth_config.geolocation,
         "permissions": ["geolocation"],
         "device_scale_factor": stealth_config.device_scale_factor,
-        "is_mobile": stealth_config.is_mobile,
-        "has_touch": stealth_config.has_touch,
+        "is_mobile": False,
+        "has_touch": False,
         "java_script_enabled": True,
-        "bypass_csp": True,
-        "ignore_https_errors": True,
-        # Only headers that are genuinely the same on every request.
-        #
-        # Playwright applies extra_http_headers to EVERY request the context
-        # makes, not just navigations, and this block was a copy of a Chrome
-        # *document* request. So each font, image, script and XHR announced
-        # itself as a fresh top-level navigation the user had just typed into
-        # the address bar:
-        #
-        #     Sec-Fetch-Dest: document   on a .webp
-        #     Sec-Fetch-Mode: navigate   on an XHR
-        #     Sec-Fetch-User: ?1         on a request nobody clicked
-        #
-        # That combination is not unusual, it is impossible — no browser emits
-        # it — and Chromium computes all of it correctly per request if simply
-        # left alone. Deleting these is removing a forgery, not adding a
-        # disguise.
-        #
-        # Cache-Control: max-age=0 went the same way. Measured on a local
-        # server across 8 navigations: it added 1.75 conditional requests per
-        # page, all of them If-None-Match round trips on fonts and images that
-        # the CDN had marked immutable. Over a 205-page run that is several
-        # hundred pointless round trips at Divar's expense, for nothing we
-        # keep. (JS and CSS were served from Blink's memory cache either way,
-        # so the original claim that the whole bundle was re-fetched was
-        # overstated — this is a politeness fix, and it will not change how
-        # often Divar asks for a code.)
-        "extra_http_headers": {
-            "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept-Encoding": "gzip, deflate, br",
-        }
+        "extra_http_headers": {"Accept-Language": d.accept_language},
     }
-    
     if proxy:
-        options["proxy"] = {"server": proxy}
-    
+        options["proxy"] = proxy if isinstance(proxy, dict) else {"server": proxy}
     return options
+
+
+async def apply_device(page, device: Device) -> None:
+    """Make this page present as `device`, consistently across header, Client
+    Hints and JavaScript. Must run on every new page, including after a
+    browser recycle — a recycled browser that forgot its device is a person
+    whose laptop changed between two clicks.
+
+    The CDP session is kept for the life of the page, on purpose. An
+    emulation override belongs to the session that set it, and Chromium
+    reverts it the moment that session detaches — measured: with a detach
+    here, Divar received HeadlessChrome/121 on Linux, exactly as if nothing
+    had been sent. The session is parked on the page object so it is released
+    with the page and not before.
+    """
+    prev = getattr(page, "_sorinflow_cdp", None)
+    if prev is not None:
+        # Re-presenting the same page (a rotation): reuse the session rather
+        # than stacking a second one.
+        cdp = prev
+    else:
+        cdp = await page.context.new_cdp_session(page)
+        page._sorinflow_cdp = cdp
+    await cdp.send("Emulation.setUserAgentOverride", device.cdp_override())
+    page._sorinflow_device = device
+
+
+async def open_browser(playwright, *, headless: bool, proxy=None,
+                       account: Optional[str] = None,
+                       stealth_config: Optional[StealthConfig] = None):
+    """Launch Chromium, open one context and one page, and present as the
+    account's device. Every launch site goes through here so the three of
+    them cannot drift apart again — they had.
+
+    Returns (browser, context, page, device).
+    """
+    sc = stealth_config or StealthConfig()
+    device = Device.for_account(account)
+    # Always headless=False at the Playwright layer. When `headless` is wanted
+    # the --headless=new flag provides it (real Chrome); when it is not, the
+    # window is simply shown. Playwright's own headless=True is the old mode
+    # and must never be used — see get_browser_args.
+    browser = await playwright.chromium.launch(
+        headless=False,
+        args=get_browser_args(headless=headless),
+    )
+    context = await browser.new_context(**get_context_options(sc, proxy, device))
+    page = await context.new_page()
+    await apply_device(page, device)
+    return browser, context, page, device

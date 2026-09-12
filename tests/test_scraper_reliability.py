@@ -382,7 +382,11 @@ class TestThePaginationDeadlock:
         src = inspect.getsource(DivarScraper._fetch_listings_direct_api)
         assert "template.get('post_data') and last_post_date" not in src, \
             "the deadlock is back: the replay still needs the cursor it produces"
-        assert "if template and template.get('post_data'):" in src
+        # The replay must be reachable with NO cursor: the gate names the
+        # template only. (The replay now runs from inside the page, so the
+        # condition also checks the page is open — that is not a cursor gate.)
+        assert "template.get('post_data')" in src
+        assert "last_post_date > 0" in src, "the cursor is only SENT when held, never required"
 
     def test_the_dom_phase_keeps_the_cursor(self):
         src = _collector_src()
@@ -1125,9 +1129,11 @@ class TestWeDoNotForgeHeadersChromiumComputesCorrectly:
         assert "Cache-Control" not in self._headers()
 
     def test_what_remains_is_genuinely_constant(self):
-        """Accept-Language and Accept-Encoding really are the same on every
-        request, so setting them context-wide is correct."""
-        assert set(self._headers()) == {"Accept-Language", "Accept-Encoding"}
+        """Accept-Language really is the same on every request, so setting it
+        context-wide is correct. Accept-Encoding is no longer forced either:
+        Chromium sends `gzip, deflate, br` on its own, and a forced value is
+        one more header whose order and casing differ from the browser's."""
+        assert set(self._headers()) == {"Accept-Language"}
 
 
 class TestTheCodeAlertReachesSomebody:
