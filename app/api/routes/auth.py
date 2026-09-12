@@ -3,7 +3,7 @@ SorinFlow Divar Scraper - Authentication API Routes
 """
 import logging
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Request, APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -406,7 +406,9 @@ async def import_cookies(
 @router.delete("/cookies/{cookie_id}")
 async def delete_cookie(
     cookie_id: int,
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Delete a stored cookie session, in the database and on disk.
 
@@ -425,6 +427,14 @@ async def delete_cookie(
         raise HTTPException(status_code=404, detail="Cookie not found")
 
     phone = cookie.phone_number
+    # Who, from where, deleted which session — at WARNING, so it survives a
+    # quiet log level. Nine sessions vanished on 2026-09-12 at 15:22 and this
+    # route had recorded nothing: five accounts could have pressed it and the
+    # only pod that saw the request had been replaced. A Divar session costs
+    # an SMS to recreate; its deletion is worth one line.
+    _ip = request.client.host if request.client else "?"
+    logger.warning(f"[audit] {user.username} ({user.role}) from {_ip} deleted "
+                   f"Divar session {phone} (cookie row {cookie_id})")
     file_removed = False
     file_error = None
     try:
