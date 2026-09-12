@@ -109,3 +109,32 @@ class TestTheArithmetic:
     def test_what_the_panel_could_previously_explain(self):
         """82 handled, 5 named — 32 short of 119, which is what was asked."""
         assert 119 - (71 + 11 + 5) == 32
+
+
+class TestAListingWithoutAPhoneIsNotASuccess:
+    """The phone number is the product. A run that reported 50 «تازه» could
+    have held 40 rows nobody can call, and the counter said nothing.
+
+    The row is still saved — the data has value and property_exists treats a
+    phone-less row as a gap, so the next run retries it for free. What it may
+    not do is count as new."""
+
+    def test_a_saved_row_with_no_phone_counts_as_failed(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.start_scraping_job)
+        blk = src[src.index("saved = await self.save_property(property_data)"):][:1600]
+        assert 'not property_data.get("phone_number")' in blk
+        assert "job.failed_items += 1" in blk.split("elif saved:")[0]
+        assert 'reason="no_phone"' in blk
+
+    def test_it_is_named_in_the_tally(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.start_scraping_job)
+        assert 'fail_tally["بدون شماره"]' in src
+
+    def test_the_panel_has_a_label_for_it(self):
+        from app.scraper.divar_scraper import DivarScraper
+        assert DivarScraper._FILTER_LABELS_FA["no_phone"] == "بدون شماره"
+        assert DivarScraper._FILTER_LABELS_FA["failed"] == "ناموفق"

@@ -167,6 +167,10 @@ class DivarScraper:
         # servers.
         self._refusals = 0
         self._cooldown_until = 0.0
+        # A listing without a phone number is not a result. Set per run from
+        # the job's own setting; defaults on because the number is the reason
+        # the run exists.
+        self._phone_required = True
         # The running job's UUID as a string. _recycle_browser needs it to write
         # an event, and reading it off self.current_job means an ORM attribute
         # access — which, on a row expired by an earlier commit, is a lazy
@@ -2780,6 +2784,10 @@ class DivarScraper:
     # useless in a message whose whole job is to say «this is the filter that
     # cost you the listings».
     _FILTER_LABELS_FA = {
+        # Not filters, but they share the panel's label lookup. «failed» had
+        # no label at all, so /jobs/{id}/skipped showed the English word.
+        "failed": "ناموفق",
+        "no_phone": "بدون شماره",
         "deposit": "ودیعه",
         "rent": "اجارهٔ ماهانه",
         "price": "قیمت",
@@ -3587,7 +3595,23 @@ class DivarScraper:
 
                         # Save to database
                         saved = await self.save_property(property_data)
-                        if saved:
+                        if saved and self._phone_required and not property_data.get("phone_number"):
+                            # Stored, but not a success. The row is kept
+                            # because the data has value and property_exists
+                            # treats a phone-less row as a gap, so the next
+                            # run retries it for free. What it must not do is
+                            # count as «تازه»: the phone number is the product,
+                            # and a listing without one reported as a win is
+                            # how a run of 50 «new» could hold 40 unusable.
+                            job.failed_items += 1
+                            fail_tally["بدون شماره"] = fail_tally.get("بدون شماره", 0) + 1
+                            await skipped_listings.record(
+                                self._job_id_str, divar_id=did,
+                                url=listing.get("url"), title=property_data.get("title"),
+                                reason="no_phone",
+                                detail="ذخیره شد ولی شمارهٔ تماس گرفته نشد — در اجرای بعدی دوباره تلاش می‌شود")
+                            logger.warning(f"{did}: saved without a phone number — counted as failed, not new")
+                        elif saved:
                             job.new_items += 1
                         else:
                             # save_property rolled back the shared session, which

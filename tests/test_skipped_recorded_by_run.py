@@ -61,7 +61,11 @@ class TestAllThreeRoutesAreCovered:
             between("Failed to process listing", "# Complete job")
 
     def test_there_is_one_record_call_per_unsaved_route(self):
-        assert SCRAPER.count("skipped_listings.record(") == 5
+        # Six since 2026-09-12: the sixth is «saved but no phone number»,
+        # which is stored (the data has value and the next run retries the
+        # phone for free) but recorded here so the panel can show it and the
+        # counters do not call it a success.
+        assert SCRAPER.count("skipped_listings.record(") == 6
 
     def test_a_duplicate_is_not_recorded_as_unsaved(self):
         """It was saved — on an earlier run."""

@@ -446,6 +446,42 @@ async def check_and_record(db, row, *, confirm: bool = False) -> dict:
     return res
 
 
+async def sweep(reason: str = "") -> dict:
+    """Probe every stored session now, on its own DB session. Never raises.
+
+    Called at the start of a run so rotation begins from a pool Divar has
+    just been asked about, not from is_valid flags that may be an hour old.
+    Returns counts; the per-row verdicts are written to the rows.
+    """
+    from app.models.cookie import Cookie
+
+    alive = dead = unknown = 0
+    try:
+        async with async_session_maker() as db:
+            rows = (await db.execute(
+                select(Cookie).order_by(Cookie.updated_at.desc().nullslast())
+            )).scalars().all()
+            seen = set()
+            for row in rows:
+                if not row.phone_number or row.phone_number in seen:
+                    continue
+                seen.add(row.phone_number)
+                try:
+                    res = await check_and_record(db, row, confirm=False)
+                    a = res.get("alive") if isinstance(res, dict) else None
+                    alive += 1 if a is True else 0
+                    dead += 1 if a is False else 0
+                    unknown += 1 if a is None else 0
+                except Exception as e:
+                    unknown += 1
+                    logger.warning(f"[session] sweep: {row.phone_number}: {type(e).__name__}: {e}")
+    except Exception as e:
+        logger.warning(f"[session] sweep failed: {type(e).__name__}: {e}")
+    logger.info(f"[session] sweep{(' (' + reason + ')') if reason else ''}: "
+                f"{alive} alive · {dead} dead · {unknown} unknown")
+    return {"alive": alive, "dead": dead, "unknown": unknown}
+
+
 async def verifier_loop():
     """Re-test every stored session on a schedule, so the panel is live.
 

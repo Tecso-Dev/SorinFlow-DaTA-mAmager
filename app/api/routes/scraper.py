@@ -102,6 +102,20 @@ async def run_scraping_job(
             )
             
             logger.info(f"[{job_id}] Initializing Playwright browser (divar_phone={divar_phone or 'auto'})")
+            # Ask Divar about every stored session before choosing one. The
+            # pool draws from is_valid flags that may be an hour old; a minute
+            # here means the first account picked — and every rotation after
+            # it — is one Divar accepted moments ago.
+            try:
+                from app.services import divar_session as _ds
+                _sw = await _ds.sweep(reason="pre-run")
+                from app.services import job_log as _jl
+                await _jl.record(job_id, _jl.SESSION,
+                                 f"بررسی نشست‌ها پیش از شروع: {_sw['alive']} فعال، "
+                                 f"{_sw['dead']} باطل، {_sw['unknown']} نامشخص",
+                                 **_sw)
+            except Exception as _e:
+                logger.warning(f"[session] pre-run sweep skipped: {_e}")
             initialized = await scraper.initialize(phone_number=divar_phone)
             
             if not initialized:
