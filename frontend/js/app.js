@@ -2495,6 +2495,82 @@ const _SCRAPER_TEXT_FIELDS = [
 const _SCRAPER_CHECKS = ['scraper-has-images', 'scraper-has-elevator', 'scraper-has-parking',
     'scraper-has-storage', 'scraper-has-balcony', 'scraper-images'];
 
+/* ── «از روی لینک دیوار» ──────────────────────────────────────────────────
+ *
+ * Filters set on Divar itself and pasted here, rather than retyped. The
+ * answer FILLS THE FORM instead of starting a run: a link that quietly
+ * became a scrape would hide whichever half of it did not carry over — a
+ * polygon drawn on the map cannot be expressed as a scrape filter, and
+ * finding that out from the results is finding out too late.               */
+const _LINK_FIELD_IDS = {
+    min_price: 'scraper-min-price',   max_price: 'scraper-max-price',
+    min_deposit: 'scraper-min-deposit', max_deposit: 'scraper-max-deposit',
+    min_rent: 'scraper-min-rent',     max_rent: 'scraper-max-rent',
+    min_area: 'scraper-min-area',     max_area: 'scraper-max-area',
+    min_rooms: 'scraper-min-rooms',   max_rooms: 'scraper-max-rooms',
+};
+
+async function applyDivarLink() {
+    const input = document.getElementById('scraper-link');
+    const note = document.getElementById('scraper-link-note');
+    const btn = document.getElementById('scraper-link-btn');
+    const url = (input?.value || '').trim();
+    if (!url) { showToast('خطا', 'اول لینک را بچسبانید', 'warning'); return; }
+
+    if (btn) { btn.disabled = true; }
+    if (note) { note.className = 'small mt-1 text-muted'; note.textContent = 'در حال خواندن…'; }
+    try {
+        const d = await apiCall('/scraper/parse-link', {
+            method: 'POST', body: JSON.stringify({ url }),
+        });
+
+        const picker = document.getElementById('scraper-city-picker');
+        if (d.city && picker?._setCityValue) picker._setCityValue(d.city);
+        const cat = document.getElementById('scraper-category');
+        if (d.category && cat) {
+            cat.value = d.category;
+            try { onScraperCategoryChange(); } catch (_) {}
+        }
+
+        // Clear every band this form can hold before writing the new ones, or
+        // a leftover from the previous link silently narrows the next scrape.
+        for (const id of Object.values(_LINK_FIELD_IDS)) {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        }
+        for (const [key, id] of Object.entries(_LINK_FIELD_IDS)) {
+            const el = document.getElementById(id);
+            if (el && d.filters?.[key] != null) {
+                el.value = d.filters[key];
+                if (el.classList.contains('money-input')) _formatMoneyInput(el);
+            }
+        }
+        const adv = document.getElementById('scraper-advertiser-type');
+        if (adv) adv.value = d.filters?.advertiser_type || '';
+        const img = document.getElementById('scraper-has-images');
+        if (img) img.checked = !!d.filters?.has_images;
+
+        saveScraperForm();
+
+        const where = [d.city_name, d.category_name].filter(Boolean).join(' — ');
+        if (note) {
+            const lost = (d.ignored || []).length
+                ? `<div class="text-warning">این‌ها منتقل نشدند: ${esc(d.ignored.join('، '))}</div>`
+                : '';
+            note.className = 'small mt-1';
+            note.innerHTML = `<span class="text-success">فرم پر شد — ${esc(where)}</span>${lost}`;
+        }
+        showToast('انجام شد', `فرم از روی لینک پر شد — ${where}`, 'success');
+    } catch (e) {
+        if (note) {
+            note.className = 'small mt-1 text-danger';
+            note.textContent = e.message || 'این لینک خوانده نشد';
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 function saveScraperForm() {
     try {
         const data = { city: document.getElementById('scraper-city')?.value || '' };

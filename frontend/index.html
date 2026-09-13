@@ -654,6 +654,21 @@
                                 <i class="bi bi-plus-circle"></i> اسکرپینگ جدید
                             </div>
                             <div class="card-body">
+                                <!-- فیلترها را در خود دیوار بزنید و آدرس همان
+                                     صفحه را اینجا بچسبانید؛ فرم زیر پر می‌شود. -->
+                                <div class="mb-3 p-2 rounded" style="background:var(--bs-tertiary-bg,rgba(128,128,128,.08))">
+                                    <label class="form-label small mb-1">
+                                        <i class="bi bi-link-45deg"></i> از روی لینک دیوار
+                                    </label>
+                                    <div class="d-flex gap-2">
+                                        <input type="url" id="scraper-link" class="form-control form-control-sm"
+                                               placeholder="divar.ir/s/urmia/rent-apartment?..."
+                                               onkeydown="if(event.key==='Enter'){event.preventDefault();applyDivarLink();}">
+                                        <button type="button" class="btn btn-sm btn-outline-primary text-nowrap"
+                                                id="scraper-link-btn" onclick="applyDivarLink()">پر کن</button>
+                                    </div>
+                                    <div id="scraper-link-note" class="small mt-1"></div>
+                                </div>
                                 <form id="scraper-form">
                                     <div class="mb-3">
                                         <label class="form-label">شهر</label>
@@ -4068,7 +4083,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260912d"></script>
+<script src="js/app.js?v=20260913a"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

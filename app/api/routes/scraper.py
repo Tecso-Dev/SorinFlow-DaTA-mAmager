@@ -666,6 +666,26 @@ async def get_otp_pending():
     return {"forwarders": await list_forwarders(), "pending": otp_store.get_pending(), "timeout": otp_store.wait_window()}
 
 
+class DivarLinkRequest(BaseModel):
+    url: str
+
+
+@router.post("/parse-link")
+async def parse_divar_link(body: DivarLinkRequest):
+    """Read a Divar search link back into the scrape form's own fields.
+
+    Deliberately a read, not a start: the answer fills the form so the filters
+    can be seen and corrected before anything runs. A link that quietly became
+    a running scrape would hide whichever half of it did not carry over.
+    """
+    from app.services.divar_link import parse_search_url
+
+    got = parse_search_url(body.url)
+    if got.get("error"):
+        raise HTTPException(status_code=422, detail=got["error"])
+    return got
+
+
 class OtpSubmitRequest(BaseModel):
     code: str
 
