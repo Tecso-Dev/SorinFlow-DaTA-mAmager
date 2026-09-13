@@ -1,7 +1,7 @@
 """
 SorinFlow Divar Scraper - Cookie Model
 """
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, JSON
+from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, JSON, ForeignKey
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -12,6 +12,14 @@ class Cookie(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     phone_number = Column(String(20), nullable=False, index=True)
+    # Whose Divar number this is.
+    #
+    # «i am sobhan and my number is 09058432452 so i should use that number …
+    # and i can acces only to my account numbers and not other account».
+    # Nullable only so the column can be added to a live table; the backfill
+    # beside the migration gives every existing row an owner, and nothing
+    # creates one without.
+    owner_user_id = Column(Integer, ForeignKey("users.id"), index=True)
     cookies = Column(JSON, nullable=False)  # Store all cookies as JSON
     token = Column(Text)  # JWT token if extracted
     is_valid = Column(Boolean, default=True)
@@ -53,4 +61,5 @@ class Cookie(Base):
             "reveals": self.reveals or 0,
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
+            "owner_user_id": self.owner_user_id,
         }

@@ -116,6 +116,8 @@ async def init_db():
                  _migrate_filing,
                  _migrate_advertiser_type,
                  _migrate_advertiser_signals,
+                 _migrate_cookie_owner,
+                 _backfill_cookie_owner,
                  _backfill_advertiser_signals,
                  _migrate_cookie_usage,
                  _migrate_property_quality,
@@ -241,6 +243,73 @@ async def _migrate_sms_panel(conn):
             "ON crm_sms_logs (campaign, sent_at DESC)"))
     except Exception as e:
         print(f"SMS panel migration skipped: {e}")
+
+
+async def _migrate_cookie_owner(conn):
+    """Whose Divar number each stored session is.
+
+    Nullable in the schema only because a column cannot be added NOT NULL to a
+    table that already has rows. _backfill_cookie_owner below gives every
+    existing row an owner, and the endpoints refuse to create one without.
+    """
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE cookies ADD COLUMN IF NOT EXISTS owner_user_id INTEGER"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_cookies_owner_user_id "
+            "ON cookies (owner_user_id)"))
+        await conn.execute(text("""
+            DO $$ BEGIN
+                ALTER TABLE cookies ADD CONSTRAINT fk_cookies_owner
+                    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL;
+            EXCEPTION WHEN duplicate_object OR undefined_table THEN NULL;
+            END $$;
+        """))
+    except Exception as e:
+        print(f"cookie owner migration skipped: {e}")
+
+
+async def _backfill_cookie_owner(conn):
+    """Give the sessions that predate ownership an owner.
+
+    Two passes, in this order and for this reason:
+
+      1. users.divar_phone already records «this number is mine», which is the
+         very statement the column is for. Matching on it attributes each
+         session to the person who said so.
+      2. whatever is left was set up before anybody said, and on this install
+         that was the super admin. Leaving it NULL instead would make those
+         sessions invisible to every list — a scraper pool that silently
+         empties is worse than an attribution somebody can correct.
+
+    Both are guarded by `owner_user_id IS NULL`, so a row assigned once is
+    never reassigned by a later boot.
+    """
+    try:
+        from sqlalchemy import text
+        by_phone = await conn.execute(text("""
+            UPDATE cookies c SET owner_user_id = u.id
+            FROM users u
+            WHERE c.owner_user_id IS NULL
+              AND u.divar_phone IS NOT NULL
+              AND regexp_replace(u.divar_phone, '\\D', '', 'g')
+                = regexp_replace(c.phone_number, '\\D', '', 'g')
+        """))
+        rest = await conn.execute(text("""
+            UPDATE cookies SET owner_user_id = (
+                SELECT id FROM users
+                 WHERE role IN ('root', 'super_admin')
+                 ORDER BY id ASC LIMIT 1
+            )
+            WHERE owner_user_id IS NULL
+              AND EXISTS (SELECT 1 FROM users WHERE role IN ('root', 'super_admin'))
+        """))
+        if by_phone.rowcount or rest.rowcount:
+            print(f"cookie owner backfill: {by_phone.rowcount or 0} by divar_phone, "
+                  f"{rest.rowcount or 0} to the super admin")
+    except Exception as e:
+        print(f"cookie owner backfill skipped: {e}")
 
 
 async def _migrate_advertiser_signals(conn):
