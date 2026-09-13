@@ -156,13 +156,18 @@ async def verify_otp(
                     existing_cookie.is_valid = True
                     existing_cookie.expires_at = expires_at
                     existing_cookie.updated_at = datetime.now()
+                    if not existing_cookie.owner_user_id and current_user:
+                        existing_cookie.owner_user_id = current_user.id
                 else:
                     new_cookie = Cookie(
                         phone_number=phone_number,
                         cookies=cookies,
                         token=token_value,
                         is_valid=True,
-                        expires_at=expires_at
+                        expires_at=expires_at,
+                        # Whoever answered Divar's code owns the session it
+                        # bought — the same rule the import path follows.
+                        owner_user_id=current_user.id if current_user else None,
                     )
                     db.add(new_cookie)
                 
@@ -275,16 +280,44 @@ async def logout(
         return {"success": False, "message": "Failed to logout"}
 
 
+def _sees_every_session(user) -> bool:
+    """root and super_admin see the whole pool; everyone else sees their own.
+
+    Not a convenience: somebody has to be able to reassign a session when a
+    person leaves, and to notice a number nobody has claimed.
+    """
+    return bool(user) and (user.role or "") in ("root", "super_admin")
+
+
+def _own_sessions_only(query, user):
+    """Narrow a cookies query to what `user` may see."""
+    if _sees_every_session(user):
+        return query
+    if not user:
+        # No identity, no sessions. Safer than «all» for a query whose rows
+        # are live Divar credentials.
+        return query.where(Cookie.id == -1)
+    return query.where(Cookie.owner_user_id == user.id)
+
+
 @router.get("/cookies")
 async def list_cookies(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """List all stored cookie sessions"""
-    
-    result = await db.execute(select(Cookie))
+    """The Divar sessions this user may use — theirs, or all of them for an
+    admin who has to be able to reassign one."""
+    result = await db.execute(_own_sessions_only(select(Cookie), current_user))
     cookies = result.scalars().all()
-    
+    owners = {}
+    if _sees_every_session(current_user):
+        ids = {c.owner_user_id for c in cookies if c.owner_user_id}
+        if ids:
+            owners = {u.id: (u.full_name or u.username) for u in (await db.execute(
+                select(User).where(User.id.in_(ids)))).scalars().all()}
+
     return {
+        "can_reassign": _sees_every_session(current_user),
         "cookies": [
             {
                 "id": c.id,
@@ -295,7 +328,11 @@ async def list_cookies(
                 # header pill reads it so it can stop presenting an untested
                 # belief as a confirmed fact.
                 "last_checked_at": c.last_checked_at.isoformat() if c.last_checked_at else None,
-                "created_at": c.created_at.isoformat() if c.created_at else None
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "owner_user_id": c.owner_user_id,
+                # Only filled for an admin — nobody else is shown a list that
+                # could include somebody else's row in the first place.
+                "owner_name": owners.get(c.owner_user_id),
             }
             for c in cookies
         ]
@@ -352,10 +389,18 @@ async def import_cookies(
 
     if existing:
         existing.cookies = request.cookies
+        if (existing.owner_user_id and current_user
+                and existing.owner_user_id != current_user.id
+                and not _sees_every_session(current_user)):
+            raise HTTPException(
+                status_code=403,
+                detail="این شماره به حساب کاربری دیگری تعلق دارد")
         existing.token = token_value
         existing.is_valid = True
         existing.expires_at = expires_at
         existing.updated_at = datetime.now()
+        if not existing.owner_user_id and current_user:
+            existing.owner_user_id = current_user.id
     else:
         db.add(Cookie(
             phone_number=request.phone_number,
@@ -363,6 +408,9 @@ async def import_cookies(
             token=token_value,
             is_valid=True,
             expires_at=expires_at,
+            # Whoever pasted it owns it. A session with no owner is one nobody
+            # can be asked about.
+            owner_user_id=current_user.id if current_user else None,
         ))
 
     # Auto-link this Divar phone to the current dashboard user
@@ -423,6 +471,11 @@ async def delete_cookie(
         select(Cookie).where(Cookie.id == cookie_id)
     )
     cookie = result.scalar_one_or_none()
+    # A session is a live Divar credential. Deleting somebody else's is not a
+    # listing mistake to be tolerated — it logs them out.
+    if cookie and not _sees_every_session(user) and cookie.owner_user_id != user.id:
+        raise HTTPException(
+            status_code=403, detail="این شماره به حساب کاربری دیگری تعلق دارد")
 
     if not cookie:
         raise HTTPException(status_code=404, detail="Cookie not found")

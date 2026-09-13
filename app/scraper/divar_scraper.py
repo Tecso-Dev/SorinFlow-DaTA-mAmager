@@ -2427,11 +2427,19 @@ class DivarScraper:
             return []
         try:
             from app.models.cookie import Cookie as CookieModel
+            query = (select(CookieModel)
+                     .where(CookieModel.is_valid == True))
+            # Rotation must stay inside the pool the run's owner owns.
+            # Without this it would log somebody else's number in and spend
+            # their reveals — and a reveal is charged to the account, not to
+            # us. A run with no known owner keeps the old behaviour so an
+            # internally-started scrape does not lose its pool.
+            owner = getattr(self, "owner_user_id", None)
+            if owner:
+                query = query.where(CookieModel.owner_user_id == owner)
             rows = (await self.db_session.execute(
-                select(CookieModel)
-                .where(CookieModel.is_valid == True)
-                .order_by(CookieModel.reveals.asc(),
-                          CookieModel.last_used_at.asc().nullsfirst())
+                query.order_by(CookieModel.reveals.asc(),
+                               CookieModel.last_used_at.asc().nullsfirst())
             )).scalars().all()
             # A heavy account Divar recently challenged is resting. Handing it
             # back every cycle was how one account with 225 reveals kept
@@ -2470,10 +2478,14 @@ class DivarScraper:
         try:
             from app.models.cookie import Cookie
             from sqlalchemy import func, select as _select
-            n = (await self.db_session.execute(
-                _select(func.count()).select_from(Cookie)
-                .where(Cookie.is_valid == True)  # noqa: E712
-            )).scalar() or 0
+            q = (_select(func.count()).select_from(Cookie)
+                 .where(Cookie.is_valid == True))  # noqa: E712
+            # Same pool rotation actually draws from, or the run absorbs
+            # prompts for accounts it will never be allowed to reach.
+            owner = getattr(self, "owner_user_id", None)
+            if owner:
+                q = q.where(Cookie.owner_user_id == owner)
+            n = (await self.db_session.execute(q)).scalar() or 0
             return max(1, int(n))
         except Exception as e:
             logger.warning(f"[rotate] could not count usable accounts: {e}")

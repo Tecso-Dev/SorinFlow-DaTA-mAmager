@@ -20,7 +20,7 @@ from app.models.scraping_job import ScrapingJob
 from app.scraper.divar_scraper import DivarScraper
 from app.config import get_settings, CITIES, CATEGORIES
 from app.schemas import ScrapingJobCreate, ScrapingJobResponse, ScrapingJobList
-from app.auth.dependencies import get_current_user_optional
+from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.models.user import User
 
 router = APIRouter()
@@ -67,8 +67,14 @@ async def run_scraping_job(
     max_age_hours: int = None,
     posted_date: str = None,
     rotate_every: Optional[int] = None,
+    owner_user_id: Optional[int] = None,
 ):
-    """Background task to run scraping job"""
+    """Background task to run scraping job.
+
+    owner_user_id scopes the Divar account pool: a run started by one user
+    rotates only through that user's own sessions. Without it, «rotation»
+    meant logging somebody else's number in and spending their reveals.
+    """
     # Import here to avoid circular imports and ensure fresh event loop
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
     from sqlalchemy.pool import NullPool
@@ -111,6 +117,7 @@ async def run_scraping_job(
                 proxy_enabled=settings.proxy_enabled,
                 headless=settings.scraper_headless
             )
+            scraper.owner_user_id = owner_user_id
             
             logger.info(f"[{job_id}] Initializing Playwright browser (divar_phone={divar_phone or 'auto'})")
             # Ask Divar about every stored session before choosing one. The
@@ -224,7 +231,8 @@ async def run_scraping_job(
 async def start_scraping_job(
     job_config: ScrapingJobCreate,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Start a new scraping job"""
     
@@ -307,6 +315,7 @@ async def start_scraping_job(
         job_config.max_age_hours,
         job_config.posted_date,
         job_config.rotate_every,
+        current_user.id if current_user else None,
     )
     
     logger.info(f"Started background task for job {job_id}")
