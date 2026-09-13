@@ -679,6 +679,17 @@
                                         <label class="form-label">دسته‌بندی</label>
                                         <select id="scraper-category" class="form-select" required onchange="onScraperCategoryChange()"></select>
                                     </div>
+                                    <!-- «خودکار» = کم‌مصرف‌ترین شمارهٔ خودتان.
+                                         انتخاب دستی وقتی لازم است که بخواهید
+                                         یک شمارهٔ مشخص را نگه دارید. -->
+                                    <div class="mb-3">
+                                        <label class="form-label">شمارهٔ دیوار</label>
+                                        <select id="scraper-account" class="form-select form-select-sm"
+                                                onchange="onScraperAccountChange()">
+                                            <option value="">خودکار — کم‌مصرف‌ترین</option>
+                                        </select>
+                                        <div id="scraper-account-note" class="form-text small"></div>
+                                    </div>
 
                                     <!-- فیلتر قیمت خرید -->
                                     <div id="scraper-buy-filters" class="d-none">
@@ -4083,7 +4094,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260913a"></script>
+<script src="js/app.js?v=20260913b"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

@@ -329,6 +329,11 @@ async def list_cookies(
                 # belief as a confirmed fact.
                 "last_checked_at": c.last_checked_at.isoformat() if c.last_checked_at else None,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
+                # What the choice should be made on: a number Divar has been
+                # asked 200 times is not interchangeable with a fresh one.
+                "reveals": c.reveals or 0,
+                "challenged_at": c.challenged_at.isoformat() if c.challenged_at else None,
+                "last_used_at": c.last_used_at.isoformat() if c.last_used_at else None,
                 "owner_user_id": c.owner_user_id,
                 # Only filled for an admin — nobody else is shown a list that
                 # could include somebody else's row in the first place.

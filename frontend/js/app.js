@@ -1039,7 +1039,7 @@ function showSection(sectionName) {
     switch (sectionName) {
         case 'dashboard':  loadDashboard(); break;
         case 'properties': loadProperties(); break;
-        case 'scraper':    loadJobs(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling();
+        case 'scraper':    loadJobs(); loadScraperAccounts(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling();
                            _initScraperDatePicker(); refreshDivarSessionCount();
                            setTimeout(restoreScraperForm, 200); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
@@ -2510,6 +2510,55 @@ const _LINK_FIELD_IDS = {
     min_rooms: 'scraper-min-rooms',   max_rooms: 'scraper-max-rooms',
 };
 
+/* ── choosing which Divar number a run uses ───────────────────────────────
+ *
+ * «user can choose for each cookie i want use and i can change manauaili in
+ * session». The default stays automatic — least-spent first — because that
+ * is the right answer most days. The picker is for the days it is not: a
+ * number you want rested, or one you want to prove works.
+ *
+ * The list comes from /auth/cookies, which now returns only the caller's own
+ * sessions, so this cannot offer somebody else's number.                   */
+async function loadScraperAccounts() {
+    const sel = document.getElementById('scraper-account');
+    if (!sel) return;
+    const chosen = sel.value;
+    try {
+        const d = await apiCall('/auth/cookies');
+        const rows = (d.cookies || []).slice().sort(
+            (a, b) => (a.reveals || 0) - (b.reveals || 0));
+        sel.innerHTML = '<option value="">خودکار — کم‌مصرف‌ترین</option>'
+            + rows.map(c => {
+                const bits = [`${c.reveals || 0} افشا`];
+                if (!c.is_valid) bits.push('نامعتبر');
+                if (c.challenged_at) bits.push('اخیراً کد خواسته');
+                return `<option value="${esc(c.phone_number)}"${c.is_valid ? '' : ' disabled'}>`
+                     + `${esc(c.phone_number)} — ${esc(bits.join('، '))}</option>`;
+            }).join('');
+        if (chosen) sel.value = chosen;
+        onScraperAccountChange();
+    } catch (_) {
+        // The form still works on «خودکار»; a picker that failed to load is
+        // not a reason to block a scrape.
+    }
+}
+
+function onScraperAccountChange() {
+    const sel = document.getElementById('scraper-account');
+    const note = document.getElementById('scraper-account-note');
+    if (!note) return;
+    if (!sel?.value) {
+        note.className = 'form-text small';
+        note.textContent = 'کم‌مصرف‌ترین شمارهٔ شما انتخاب می‌شود.';
+        return;
+    }
+    const rotate = _intOrNull('scraper-rotate-every');
+    note.className = 'form-text small' + (rotate === 0 ? '' : ' text-warning');
+    note.textContent = rotate === 0
+        ? 'فقط از همین شماره استفاده می‌شود.'
+        : 'با این حال چرخش شماره ممکن است وسط کار عوضش کند — برای ثابت ماندن، «چرخش شماره» را ۰ بگذارید.';
+}
+
 async function applyDivarLink() {
     const input = document.getElementById('scraper-link');
     const note = document.getElementById('scraper-link-note');
@@ -2730,8 +2779,10 @@ async function startScraping(e) {
 
 async function executeBulkScraping(city, category, maxItems, downloadImages, filters = {}) {
     try {
-        // Auto-use the active Divar session — no manual phone selection needed
-        const session = await _getActiveSession();
+        // A number picked by hand wins; «خودکار» falls back to the active
+        // session, which is what this did before the picker existed.
+        const picked = document.getElementById('scraper-account')?.value || '';
+        const session = picked ? { phone_number: picked } : await _getActiveSession();
         // Strip null/undefined values so the API doesn't receive empty fields
         const cleanFilters = Object.fromEntries(
             Object.entries(filters).filter(([, v]) => v !== null && v !== undefined)
@@ -3684,6 +3735,7 @@ async function verifyCode() {
             document.getElementById('auth-login-form').style.display = 'block';
             document.getElementById('auth-verify-form').style.display = 'none';
             loadCookies();
+            loadScraperAccounts();
             checkAuthStatus();
             checkCookieStatus();
         } else {
