@@ -87,6 +87,22 @@ class Settings(BaseSettings):
     # after which it is trusted on its device. A heavy one being challenged is
     # Divar saying «not this one, not today».
     rest_after_reveals: int = Field(default=50, env="SCRAPER_REST_AFTER_REVEALS")
+
+    # Least time between two contact reveals, in seconds.
+    #
+    # The pacing in _human_like_delay spaces out LISTINGS, and a filtered run
+    # opens far more listings than it reveals — so the thing Divar actually
+    # counts was the one thing nothing paced. Twelve seconds caps a run at
+    # about five reveals a minute; raising it trades speed for fewer code
+    # challenges, and 0 restores the old behaviour of revealing as fast as the
+    # listings arrive.
+    reveal_min_gap_seconds: float = Field(default=12.0, env="SCRAPER_REVEAL_MIN_GAP_SECONDS")
+
+    # How long to wait after Divar challenges an account before revealing
+    # again. A challenge is Divar saying «slow down» in the only words it has;
+    # carrying on at the same pace on the next account is how one challenge
+    # becomes five.
+    challenge_cooldown_seconds: float = Field(default=45.0, env="SCRAPER_CHALLENGE_COOLDOWN_SECONDS")
     rest_hours: float = Field(default=24.0, env="SCRAPER_REST_HOURS")
     # How often to ask Divar whether each stored session still works. Costs one
     # outbound request per account per interval. 0 disables it, leaving the

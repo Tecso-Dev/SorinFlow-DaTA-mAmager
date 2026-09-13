@@ -1794,8 +1794,11 @@ class DivarScraper:
                         f"Not requesting contact info for {property_data.get('divar_id')}: {reason}")
                     return property_data
 
-            # This is the moment Divar counts, so it is the moment we count —
-            # against the account, which is what Divar is counting against.
+            # This is the moment Divar counts, so it is the moment we pace.
+            await self._space_out_reveal()
+
+            # …and the moment we count, against the account, which is what
+            # Divar is counting against.
             self._reveals_since_rotation += 1
             await self._charge_reveal()
             from app import metrics as _mx
@@ -2491,6 +2494,45 @@ class DivarScraper:
             logger.warning(f"[rotate] could not count usable accounts: {e}")
             return 1
 
+    async def _space_out_reveal(self) -> None:
+        """Hold off until enough time has passed since the last reveal.
+
+        _human_like_delay paces LISTINGS, and a filtered run opens far more
+        listings than it reveals — pre_contact_skip drops most of them before
+        the contact button is ever clicked. So the one action Divar counts was
+        the one action nothing paced, and a tightly filtered run could fire
+        reveals back to back while looking slow from the outside.
+
+        Waits out a challenge cooldown first: a challenge is Divar saying
+        «slow down» in the only words it has, and carrying on at the same pace
+        on the next account is how one challenge becomes five.
+
+        Jittered on purpose. A reveal exactly every twelve seconds is a
+        signature; the floor is a floor, not a metronome.
+        """
+        now = time.monotonic()
+
+        until = getattr(self, "_reveal_hold_until", 0.0)
+        if now < until:
+            owed = until - now
+            logger.info(f"[pace] resting {owed:.0f}s after Divar's challenge "
+                        f"before the next reveal")
+            await asyncio.sleep(owed)
+            now = time.monotonic()
+
+        gap = float(getattr(settings, "reveal_min_gap_seconds", 0) or 0)
+        if gap <= 0:
+            self._last_reveal_at = now
+            return
+        last = getattr(self, "_last_reveal_at", None)
+        if last is not None:
+            owed = (last + gap) - now
+            if owed > 0:
+                owed += random.uniform(0, gap * 0.5)
+                logger.info(f"[pace] {owed:.1f}s before the next contact reveal")
+                await asyncio.sleep(owed)
+        self._last_reveal_at = time.monotonic()
+
     async def _charge_reveal(self) -> int:
         """Bill one contact reveal to the active account; return its new total.
 
@@ -2649,6 +2691,13 @@ class DivarScraper:
         itself happens between listings, where it is safe to navigate.
         """
         self._force_rotate = True
+        # Divar just said «slow down». _space_out_reveal waits this out before
+        # the next reveal, on whichever account rotation picks — the pace is
+        # ours, not the account's, and moving to a fresh number at the same
+        # speed only spends the fresh number.
+        cooldown = float(getattr(settings, "challenge_cooldown_seconds", 0) or 0)
+        if cooldown > 0:
+            self._reveal_hold_until = time.monotonic() + cooldown
         from app import metrics as _mx
         _mx.scrape_challenges.inc()
 
