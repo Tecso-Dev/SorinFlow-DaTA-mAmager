@@ -826,6 +826,13 @@ async def otp_inbound(request: Request):
     kind = body.kind if body.kind in ("contact", "login", "test") else detect_otp_kind(body.text)
     ip = request.client.host if request.client else "?"
     latency_ms = (now_ms - int(body.sentStamp)) if body.sentStamp else None
+    # How far the phone's clock sits from ours, measured from this same
+    # message. Recorded because it is the thing that silently breaks the
+    # staleness test below, and a number nobody can see is a fault nobody can
+    # find. Hours of it is a misconfigured clock, not drift.
+    clock_skew_ms = (now_ms - int(body.receivedStamp)) if body.receivedStamp else None
+    if clock_skew_ms is not None and abs(clock_skew_ms) > 6 * 3600 * 1000:
+        clock_skew_ms = None
 
     matched = False
     matched_key = "no_pending"
@@ -851,9 +858,30 @@ async def otp_inbound(request: Request):
             key, entry = hit
             # A late FIRST code must not overwrite a fresh resend: the
             # request's clock restarts on every resend, so a stamp older than
-            # it belongs to an SMS the extractor already gave up on. 10s of
-            # slack for the phone's clock.
-            if body.sentStamp and (int(body.sentStamp) / 1000.0) < (entry["ts"] - 10):
+            # it belongs to an SMS the extractor already gave up on.
+            #
+            # But sentStamp comes off the PHONE's clock and the server's is a
+            # different clock. A handset without time sync drifts, the drift
+            # only grows, and once it passes the slack EVERY code reads as
+            # stale — the forwarder keeps working perfectly and nothing it
+            # sends is ever used again. Reported as «after 5-6 times it stops».
+            #
+            # So measure the difference instead of trusting either clock:
+            # receivedStamp is when the phone saw the SMS and now_ms is when we
+            # saw the POST, and the gap between them is transit plus offset.
+            # Correcting by it keeps the test meaningful however far the phone
+            # has drifted. Transit inflates the correction slightly, which errs
+            # towards accepting a code — the right direction to err.
+            sent_ms = None
+            if body.sentStamp:
+                sent_ms = int(body.sentStamp) + (clock_skew_ms or 0)
+                # A clock hours out is not drift, it is set to the wrong year
+                # or a timezone bug. clock_skew_ms is already None for that,
+                # and with no correction available the stamp is not worth
+                # judging on — a live request and a six-digit code are.
+                if body.receivedStamp and clock_skew_ms is None:
+                    sent_ms = None
+            if sent_ms is not None and (sent_ms / 1000.0) < (entry["ts"] - 10):
                 reason = "stale_code"
             elif otp_store.submit(key, code, sent_stamp_ms=body.sentStamp, source="forwarder"):
                 matched, matched_key, reason = True, key, "matched"
@@ -873,10 +901,11 @@ async def otp_inbound(request: Request):
         account=otp_store._digits(body.account) or None, kind=kind,
         code=_mask_code(code), sent_stamp=body.sentStamp, received_stamp=body.receivedStamp,
         server_ms=now_ms, matched_key=matched_key, reason=reason, latency_ms=latency_ms,
+        clock_skew_ms=clock_skew_ms,
         sim=body.sim, battery=body.battery, network=body.network,
     )
     logger.info(f"[otp-inbound] kind={kind} account={otp_store._digits(body.account)} "
-                f"{reason} latency_ms={latency_ms}")
+                f"{reason} latency_ms={latency_ms} clock_skew_ms={clock_skew_ms}")
     return {"matched": matched, "kind": kind, "reason": reason, "latency_ms": latency_ms}
 
 
