@@ -4122,6 +4122,8 @@ async function loadForwarders() {
                 <td class="text-nowrap">
                   <button class="btn btn-sm btn-outline-primary" onclick="fwGuide(${dv.id})"
                           title="راهنمای نصب و تنظیمات"><i class="bi bi-book"></i></button>
+                  <button class="btn btn-sm btn-outline-secondary" onclick="fwEditPhone(${dv.id})"
+                          title="تغییر شماره"><i class="bi bi-pencil"></i></button>
                   <button class="btn btn-sm btn-outline-secondary" onclick="fwTest(${dv.id})"
                           title="بررسی اتصال"><i class="bi bi-activity"></i></button>
                   <button class="btn btn-sm btn-outline-warning" onclick="fwRotate(${dv.id})"
@@ -4240,11 +4242,36 @@ async function fwRotate(id) {
     if (!await askConfirm({ icon: 'bi-key', title: 'کلید تازه', tone: 'warning', okLabel: 'کلید تازه بساز', body: 'کلید تازه ساخته می‌شود و گوشی تا وارد کردن کلید جدید کار نمی‌کند. ادامه؟' })) return;
     try {
         await apiCall(`/forwarder/devices/${id}/rotate`, { method: 'POST' });
-        showToast('کلید عوض شد', 'کد QR تازه را با گوشی اسکن کنید', 'warning');
         await loadForwarders();
-        // Re-render the guide so the QR on screen is the one the server will
-        // now accept. The old code is dead the moment the rotate returns.
-        fwGuide(id);
+        // The guide is rebuilt from the server, not the page: the QR, the
+        // headers and the template all carry the key, and the old one is dead
+        // the moment the rotate returns.
+        await fwGuide(id);
+        showToast('کلید عوض شد', 'کد QR تازه را با گوشی اسکن کنید', 'warning');
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function fwEditPhone(id) {
+    const sim = await askText({
+        icon: 'bi-sim', title: 'تغییر شماره',
+        body: 'شمارهٔ سیم‌کارتی که داخل این گوشی است — <b>همان شماره‌ای که کد دیوار روی آن می‌آید</b>.',
+        note: 'کد راه‌اندازی با شمارهٔ تازه ساخته می‌شود؛ گوشی را دوباره اسکن کنید.',
+        field: { label: 'شمارهٔ موبایل', placeholder: '09123456789',
+                 dir: 'ltr', inputmode: 'numeric',
+                 validate: v => /^0?9\d{9}$/.test(v.replace(/\D/g, '')) ? '' : 'شمارهٔ موبایل معتبر نیست' },
+    });
+    if (sim === null) return;
+    try {
+        await apiCall(`/forwarder/devices/${id}`, {
+            method: 'PATCH', body: JSON.stringify({ sim_phone: sim.trim() }),
+        });
+        await loadForwarders();
+        // The number is inside the QR and the template; a guide open on this
+        // device would be showing the old one.
+        if (_fwQrDeviceId === id) {
+            await fwGuide(id);
+            showToast('شماره عوض شد', 'کد راه‌اندازی تازه شد — دوباره اسکن کنید', 'warning');
+        } else showToast('شماره عوض شد', '', 'success');
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
@@ -4253,7 +4280,17 @@ async function fwDelete(id) {
     try {
         await apiCall(`/forwarder/devices/${id}`, { method: 'DELETE' });
         showToast('حذف شد', '', 'success');
-        document.getElementById('fw-guide-body').dataset.filled = '';
+        // A guide open on the deleted device is cleared, not left showing a
+        // code for a phone that no longer exists; the list then opens the
+        // guide on whichever device remains.
+        if (_fwQrDeviceId === id) {
+            fwHideQr();
+            _fwQrDeviceId = null; _fwSetupPayload = '';
+            const box = document.getElementById('fw-guide-body');
+            box.dataset.filled = '';
+            box.innerHTML = '<p class="text-muted small">گوشی حذف شد. با «افزودن گوشی» راهنما دوباره پر می‌شود.</p>';
+            document.getElementById('fw-guide-for').textContent = '—';
+        }
         loadForwarders();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
@@ -4291,13 +4328,13 @@ function _fwCopy(id, btn) {
         .catch(() => { el.select(); document.execCommand('copy'); done(); });
 }
 
-async function fwGuide(id) {
+async function fwGuide(id, cfg) {
     const box = document.getElementById('fw-guide-body');
     if (!box) return;
     box.innerHTML = '<p class="text-muted small">در حال آماده‌سازی…</p>';
     document.getElementById('fw-guide').classList.remove('d-none');
     try {
-        const c = await apiCall(`/forwarder/devices/${id}/config`);
+        const c = cfg || await apiCall(`/forwarder/devices/${id}/config`);
         box.dataset.filled = '1';
         document.getElementById('fw-guide-for').textContent = c.device.label || c.device.device_id;
         const r1 = c.rules[0], r2 = c.rules[1];
@@ -4322,23 +4359,42 @@ async function fwGuide(id) {
           </li>
 
           <li><b>به برنامه اجازهٔ خواندن پیامک بدهید.</b>
-            <div class="fw-note">
-              اولین بار که باز می‌کنید می‌پرسد. اگر اشتباهی «نه» زدید:
-              تنظیمات گوشی ← برنامه‌ها ← SMS Forwarder ← مجوزها ← پیامک ← اجازه.
+            <div class="fw-note">اولین بار که باز می‌کنید می‌پرسد. اگر اشتباهی «نه» زدید:</div>
+            <div class="fw-path">
+              <b>تنظیمات گوشی</b><span class="sep">←</span><b>برنامه‌ها</b><span class="sep">←</span>
+              <b>SMS Forwarder</b><span class="sep">←</span><b>مجوزها</b><span class="sep">←</span>
+              <b>پیامک</b><span class="sep">←</span><span class="goal">اجازه</span>
             </div>
           </li>
 
           <li><b>نگذارید گوشی برنامه را ببندد.</b> <span class="fw-warn">(مهم‌ترین قدم)</span>
+            <div class="fw-path">
+              <b>تنظیمات گوشی</b><span class="sep">←</span><b>باتری</b><span class="sep">←</span>
+              <b>SMS Forwarder</b><span class="sep">←</span><span class="goal">بدون محدودیت</span>
+            </div>
+            <div class="fw-path">
+              <b>تنظیمات گوشی</b><span class="sep">←</span><b>برنامه‌ها</b><span class="sep">←</span>
+              <b>SMS Forwarder</b><span class="sep">←</span><span class="goal">Autostart</span>
+              <span class="sep">(شیائومی)</span>
+            </div>
             <div class="fw-note">
-              تنظیمات گوشی ← باتری ← SMS Forwarder ← «بدون محدودیت».
-              روی شیائومی «Autostart» را هم روشن کنید و برنامه را در لیست برنامه‌های باز قفل کنید.
-              اگر این کار را نکنید، گوشی بعد از چند ساعت برنامه را می‌بندد و کدها نمی‌رسند.
+              و برنامه را در لیست برنامه‌های باز <b>قفل کنید</b>.
+              اگر این کارها را نکنید، گوشی بعد از چند ساعت برنامه را می‌بندد و کدها نمی‌رسند.
             </div>
           </li>
 
           <li><b>تنظیمات را وارد کنید.</b>
             <div class="fw-qr">
-              <div id="fw-setup-qrcode" style="display:inline-block;background:#fff;padding:10px;border-radius:10px"></div>
+              <div class="fw-qr-wrap" id="fw-qr-wrap">
+                <div id="fw-setup-qrcode" style="display:inline-block;background:#fff;padding:10px;border-radius:10px"></div>
+                <div class="fw-qr-shield" id="fw-qr-shield" role="button" tabindex="0"
+                     onclick="fwRevealQr()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();fwRevealQr()}">
+                  <i class="bi bi-eye"></i>
+                  <span>برای دیدن کد ضربه بزنید</span>
+                  <span style="opacity:.7">۳۰ ثانیه نمایش داده می‌شود</span>
+                </div>
+              </div>
+              <div class="fw-qr-timer" id="fw-qr-timer"></div>
               <div class="fw-note">
                 در برنامهٔ <b>SorinFlow Forwarder</b>: راه‌اندازی ← «اسکن QR» ← این کد را
                 اسکن کنید ← ذخیره. همین لینک را اگر روی خود گوشی باز کنید (دوربین یا یک پیام)
@@ -4386,27 +4442,95 @@ async function fwGuide(id) {
           وارد کردن دستی کد آخرین گزینه است — و اگر گوشی مشکل داشته باشد،
           برایتان ایمیل می‌فرستیم و می‌گوییم چه چیزی را درست کنید.
         </div>`;
-        // After innerHTML, so the container exists.
-        const qr = document.getElementById('fw-setup-qrcode');
-        if (qr) {
-            qr.innerHTML = '';
-            if (typeof QRCode !== 'undefined' && _fwSetupPayload) {
-                new QRCode(qr, {
-                    text: _fwSetupPayload, width: 220, height: 220,
-                    correctLevel: QRCode.CorrectLevel.M,
-                });
-            } else {
-                // The library is the only way to draw it; without it, show the
-                // link itself so the phone can still be set up.
-                qr.innerHTML = `<code style="font-size:.7rem;word-break:break-all;color:#111">${esc(_fwSetupPayload)}</code>`;
-            }
-        }
+        // After innerHTML, so the container exists. Covered until asked for.
+        _fwQrDeviceId = id;
+        fwHideQr();
+        _fwDrawQr();
     } catch (e) {
         box.innerHTML = `<p class="text-danger small">${esc(e.message || 'خطا')}</p>`;
     }
 }
 
 let _fwSetupPayload = '';
+let _fwQrTimer = null;
+let _fwQrDeviceId = null;
+
+// How long the code stays uncovered. Long enough to line a camera up, short
+// enough that walking away does not leave a live credential on the screen.
+const FW_QR_REVEAL_SECONDS = 30;
+
+function fwHideQr() {
+    if (_fwQrTimer) { clearInterval(_fwQrTimer); _fwQrTimer = null; }
+    document.getElementById('fw-qr-wrap')?.classList.remove('revealed');
+    const t = document.getElementById('fw-qr-timer');
+    if (t) { t.textContent = ''; t.classList.remove('live'); }
+}
+
+async function fwRevealQr() {
+    _fwUncover();
+    // Meanwhile, check it is still the server's code. Rotated from another
+    // tab, number changed from the phone — the camera must see the live one,
+    // so if a newer one exists the guide is rebuilt and shown uncovered.
+    if (await fwRefreshQr()) _fwUncover();
+}
+
+function _fwUncover() {
+    const wrap = document.getElementById('fw-qr-wrap');
+    const t = document.getElementById('fw-qr-timer');
+    if (!wrap) return;
+    wrap.classList.add('revealed');
+    let left = FW_QR_REVEAL_SECONDS;
+    const tick = () => {
+        if (t) {
+            t.classList.add('live');
+            t.innerHTML = `${formatNumber(left)} ثانیه تا پنهان شدن دوباره
+                — <a href="#" onclick="fwHideQr();return false">همین حالا پنهان کن</a>`;
+        }
+        if (left-- <= 0) fwHideQr();
+    };
+    if (_fwQrTimer) clearInterval(_fwQrTimer);
+    tick();
+    _fwQrTimer = setInterval(tick, 1000);
+}
+
+/** Is the guide on screen still what the server would hand out?
+ *
+ *  Re-fetches this device's config and, only if the setup link moved,
+ *  rebuilds the guide from it — the QR, the headers and the template all
+ *  carry the key and the number, so none of them may be left behind. No page
+ *  reload; an unchanged payload changes nothing on screen. Returns whether
+ *  the guide was rebuilt.
+ */
+async function fwRefreshQr(id) {
+    const target = id || _fwQrDeviceId;
+    if (!target) return false;
+    try {
+        const c = await apiCall(`/forwarder/devices/${target}/config`);
+        if (c.setup_payload === _fwSetupPayload) return false;   // nothing moved
+        await fwGuide(target, c);
+        showToast('کد راه‌اندازی تازه شد', 'کد تازه را اسکن کنید', 'warning');
+        return true;
+    } catch (e) {
+        showToast('خطا', e.message || 'کد تازه گرفته نشد', 'danger');
+        return false;
+    }
+}
+
+function _fwDrawQr() {
+    const qr = document.getElementById('fw-setup-qrcode');
+    if (!qr) return;
+    qr.innerHTML = '';
+    if (typeof QRCode !== 'undefined' && _fwSetupPayload) {
+        new QRCode(qr, {
+            text: _fwSetupPayload, width: 220, height: 220,
+            correctLevel: QRCode.CorrectLevel.M,
+        });
+    } else {
+        // The library is the only way to draw it; without it, show the link
+        // itself so the phone can still be set up.
+        qr.innerHTML = `<code style="font-size:.7rem;word-break:break-all;color:#111">${esc(_fwSetupPayload)}</code>`;
+    }
+}
 
 function fwCopyPayload() {
     if (!_fwSetupPayload) return;

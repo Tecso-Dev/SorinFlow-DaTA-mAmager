@@ -539,3 +539,157 @@ class TestPersianIsNotRenderedInMonospace:
         fn = js[js.index("function _fwCopyRow"):]
         fn = fn[:fn.index("\nfunction ")]
         assert "persian ? 'rtl' : 'ltr'" in fn
+
+
+class TestTheQrIsCoveredUntilAskedFor:
+    """It encodes a live 64-character secret. Uncovered, it is in every
+    screenshot, shoulder and screen-share the panel is ever open in — and a
+    QR is readable from further away than text is."""
+
+    def _js(self):
+        return Path("frontend/js/app.js").read_text(encoding="utf-8")
+
+    def test_it_starts_covered(self):
+        js = self._js()
+        fn = js[js.index("async function fwGuide"):]
+        assert "fwHideQr();" in fn[:fn.index("} catch")], "drawn uncovered"
+
+    def test_revealing_is_deliberate(self):
+        js = self._js()
+        assert 'onclick="fwRevealQr()"' in js
+
+    def test_it_can_be_revealed_from_the_keyboard(self):
+        """A div with onclick is invisible to anyone not using a mouse."""
+        js = self._js()
+        assert 'role="button"' in js and 'tabindex="0"' in js
+        assert "event.key==='Enter'" in js
+
+    def test_it_re_covers_itself(self):
+        js = self._js()
+        fn = js[js.index("function fwRevealQr"):js.index("async function fwRefreshQr")]
+        assert "fwHideQr()" in fn, "revealed forever once tapped"
+        assert "setInterval" in fn
+
+    def test_the_window_is_thirty_seconds(self):
+        js = self._js()
+        assert "FW_QR_REVEAL_SECONDS = 30" in js
+
+    def test_the_countdown_is_visible(self):
+        """Otherwise it vanishes mid-scan with no warning."""
+        js = self._js()
+        fn = js[js.index("function fwRevealQr"):js.index("async function fwRefreshQr")]
+        assert "ثانیه تا پنهان" in fn
+
+    def test_the_code_itself_is_blurred_not_only_the_glass(self):
+        """A screenshot through a browser without backdrop-filter must still
+        hold nothing scannable."""
+        css = Path("frontend/css/style.css").read_text(encoding="utf-8")
+        assert ".fw-qr-wrap:not(.revealed) #fw-setup-qrcode { filter: blur(" in css
+
+    def test_it_can_be_hidden_early(self):
+        """Scanned in five seconds, nobody wants it up for twenty-five more."""
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("function _fwUncover"):js.index("async function fwRefreshQr")]
+        assert 'onclick="fwHideQr();return false"' in fn
+
+    def test_hiding_clears_the_timer(self):
+        """A stale interval would re-hide a code revealed later."""
+        js = self._js()
+        fn = js[js.index("function fwHideQr"):js.index("function fwRevealQr")]
+        assert "clearInterval" in fn and "_fwQrTimer = null" in fn
+
+
+class TestTheQrUpdatesWithoutAReload:
+    """Rotate the key, change the number, delete the phone: what is on screen
+    follows the server, and nobody presses F5 to make it."""
+
+    def _js(self):
+        return Path("frontend/js/app.js").read_text(encoding="utf-8")
+
+    def _fn(self, name):
+        js = self._js()
+        fn = js[js.index(f"function {name}"):]
+        return fn[:fn.index("\nasync function") if "\nasync function" in fn else fn.index("\nfunction ")]
+
+    def test_nothing_reloads_the_page(self):
+        js = self._js()
+        blk = js[js.index("async function fwRotate"):js.index("function fwCopyPayload")]
+        assert "location.reload" not in blk
+
+    def test_a_rotate_rebuilds_the_guide_from_the_server(self):
+        """Not only the QR: the headers and the template carry the key too, and
+        a redraw of the code alone would leave them showing a dead one."""
+        assert "await fwGuide(id)" in self._fn("fwRotate")
+
+    def test_the_number_can_be_changed(self):
+        js = self._js()
+        assert 'onclick="fwEditPhone(${dv.id})"' in js
+        fn = self._fn("fwEditPhone")
+        assert "method: 'PATCH'" in fn and "sim_phone" in fn
+
+    def test_a_changed_number_refreshes_an_open_guide(self):
+        """The number is inside the QR and the template."""
+        fn = self._fn("fwEditPhone")
+        assert "_fwQrDeviceId === id" in fn and "await fwGuide(id)" in fn
+
+    def test_the_new_number_is_validated_like_a_new_one(self):
+        fn = self._fn("fwEditPhone")
+        assert "/^0?9\\d{9}$/" in fn
+
+    def test_deleting_the_shown_phone_clears_its_guide(self):
+        """Otherwise a code for a phone that no longer exists stays on
+        screen, and the next person scans it."""
+        fn = self._fn("fwDelete")
+        assert "_fwQrDeviceId === id" in fn
+        assert "fwHideQr()" in fn and "_fwSetupPayload = ''" in fn
+        assert "dataset.filled = ''" in fn
+
+    def test_revealing_checks_the_server_first(self):
+        """Rotated from another tab, the QR on this one is dead; the camera
+        must see the live one."""
+        fn = self._fn("fwRevealQr")
+        assert "await fwRefreshQr()" in fn
+        assert fn.index("_fwUncover()") < fn.index("await fwRefreshQr()"), \
+            "a click must uncover at once, not after a round trip"
+
+    def test_a_refresh_rebuilds_from_one_request(self):
+        fn = self._fn("fwRefreshQr")
+        assert "await fwGuide(target, c)" in fn
+        js = self._js()
+        assert "async function fwGuide(id, cfg)" in js
+        assert "cfg || await apiCall" in js
+
+    def test_an_unchanged_payload_does_not_flash_the_ui(self):
+        fn = self._fn("fwRefreshQr")
+        assert "=== _fwSetupPayload) return false" in fn
+
+    def test_the_user_is_told_it_changed(self):
+        assert "showToast(" in self._fn("fwRefreshQr")
+
+    def test_drawing_is_one_function_not_two_copies(self):
+        """The guide and the refresh must not drift apart."""
+        assert self._js().count("new QRCode(") == 2, "one for TOTP, one for the forwarder"
+
+
+class TestThePhoneSettingsReadAsInstructions:
+    """«تنظیمات گوشی ← باتری ← SMS Forwarder ← بدون محدودیت» buried in a
+    paragraph is the step people skip — and it is the one that decides whether
+    the app is alive in four hours."""
+
+    def test_the_paths_are_their_own_element(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert 'class="fw-path"' in js
+
+    def test_the_destination_is_marked_apart_from_the_route(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert 'class="goal"' in js
+        assert "بدون محدودیت" in js and "Autostart" in js
+
+    def test_the_battery_step_is_still_flagged_as_the_critical_one(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert "fw-warn" in js and "مهم‌ترین قدم" in js
+
+    def test_the_path_styling_uses_panel_tokens(self):
+        css = Path("frontend/css/style.css").read_text(encoding="utf-8")
+        blk = css[css.index(".fw-path {"):css.index(".fw-path b")]
+        assert "var(--input-bg)" in blk and "var(--border)" in blk

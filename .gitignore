@@ -101,3 +101,5 @@ debug_*.png
 graphify-out/
 docker-compose.override.yml
 .claude/settings.json
+.claude/launch.json
+.playwright-mcp/

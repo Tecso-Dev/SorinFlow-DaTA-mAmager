@@ -3059,3 +3059,46 @@ html[data-theme="light"] .table thead th {
 .fw-qr-or::before, .fw-qr-or::after {
   content: ''; flex: 1; height: 1px; background: var(--border);
 }
+
+/* the QR holds a live credential, so it is covered until asked for.
+   A secret sitting uncovered on a screen is a secret in every screenshot,
+   shoulder and screen-share the panel is ever open in. */
+.fw-qr-wrap { position: relative; display: inline-block; border-radius: 10px; overflow: hidden }
+.fw-qr-shield {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: .4rem; cursor: pointer; border-radius: 10px;
+  background: rgba(10,10,14,.55);
+  backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+  border: 1px solid var(--border);
+  color: var(--text-dim); font-size: .78rem; text-align: center; padding: .6rem;
+}
+.fw-qr-shield i { font-size: 1.5rem; color: #c7d2fe }
+.fw-qr-shield:hover { background: rgba(10,10,14,.45) }
+.fw-qr-shield:focus-visible { outline: 2px solid rgba(129,140,248,.9); outline-offset: 2px }
+.fw-qr-wrap.revealed .fw-qr-shield { display: none }
+/* the code itself is blurred as well, so a screenshot taken through a
+   browser without backdrop-filter still holds nothing scannable */
+.fw-qr-wrap:not(.revealed) #fw-setup-qrcode { filter: blur(7px) }
+.fw-qr-timer a { color: var(--text-muted); text-decoration: underline dotted }
+
+.fw-qr-timer {
+  font-size: .74rem; color: var(--text-muted);
+  font-variant-numeric: tabular-nums; min-height: 1.2em;
+}
+.fw-qr-timer.live { color: #fbbf24 }
+
+/* a settings path on the phone — read as one instruction, not prose */
+.fw-path {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem;
+  margin: .35rem 0; padding: .4rem .6rem;
+  background: var(--input-bg); border: 1px solid var(--border);
+  border-radius: 10px; font-size: .8rem;
+}
+.fw-path b { color: var(--text); font-weight: 700 }
+.fw-path .sep { color: var(--text-muted); opacity: .7 }
+.fw-path .goal {
+  background: rgba(34,197,94,.14); color: #86efac;
+  border: 1px solid rgba(34,197,94,.28);
+  border-radius: 7px; padding: .05rem .4rem; font-weight: 700;
+}
