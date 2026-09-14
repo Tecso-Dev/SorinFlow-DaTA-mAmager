@@ -20,6 +20,12 @@ import os
 import sys
 
 
+def _SRC() -> str:
+    import inspect
+    from app.scraper.divar_scraper import DivarScraper
+    return inspect.getsource(DivarScraper.start_scraping_job)
+
+
 def _caller_block(src: str) -> str:
     """The save-and-count block with comment lines removed.
 
@@ -203,3 +209,48 @@ class TestNewMeansCreatedAndUpdatedMeansAlreadyHeld:
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper.start_scraping_job)
         assert 'getattr(self, "_last_save_created", True)' in src
+
+
+class TestChatOnlyIsNotAFailure:
+    """Run 110 got a phone number from every listing that had one — 14 of 14 —
+    and reported nineteen failures.
+
+    The other nineteen were «chat_only»: the poster takes contact through
+    Divar's chat and there is no number to get. property_exists already
+    declines to re-scrape those, so calling them «ناموفق» was wrong twice —
+    it inflated the failure count on a flawless run, and the skipped row
+    promised «در اجرای بعدی دوباره تلاش می‌شود» for a retry that will never
+    happen."""
+
+    def test_chat_only_does_not_count_as_a_failure(self):
+        blk = _caller_block(_SRC())
+        branch = blk[blk.index('contact_channel") == "chat_only"'):]
+        branch = branch[:branch.index("else:")]
+        assert "job.failed_items += 1" not in branch, "a poster's choice is counted as our failure"
+        assert 'skip_tally["chat_only"]' in branch, "it is not reported anywhere"
+
+    def test_a_genuine_reveal_failure_still_counts(self):
+        blk = _caller_block(_SRC())
+        after = blk[blk.index('contact_channel") == "chat_only"'):]
+        tail = after[after.index("else:"):]
+        assert "job.failed_items += 1" in tail
+        assert 'reason="no_phone"' in tail
+
+    def test_only_the_retried_one_promises_a_retry(self):
+        blk = _caller_block(_SRC())
+        head = blk[blk.index('contact_channel") == "chat_only"'):]
+        chat = head[:head.index("else:")]
+        assert "دوباره تلاش" not in chat, "promises a retry that property_exists will refuse"
+        assert "چت دیوار" in chat, "does not say why there is no number"
+
+    def test_the_panel_has_a_label_for_it(self):
+        from app.scraper.divar_scraper import DivarScraper
+        assert DivarScraper._FILTER_LABELS_FA["chat_only"] == "فقط چت دیوار"
+
+    def test_property_exists_still_declines_to_rescrape_them(self):
+        """The half that was already right — asserted so it stays that way."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.property_exists)
+        code = "\n".join(l for l in src.splitlines() if not l.strip().startswith("#"))
+        assert 'contact_channel", None) == "chat_only"' in code

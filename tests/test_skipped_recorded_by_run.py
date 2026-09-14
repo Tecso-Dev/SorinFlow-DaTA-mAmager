@@ -61,11 +61,13 @@ class TestAllThreeRoutesAreCovered:
             between("Failed to process listing", "# Complete job")
 
     def test_there_is_one_record_call_per_unsaved_route(self):
-        # Six since 2026-09-12: the sixth is «saved but no phone number»,
-        # which is stored (the data has value and the next run retries the
-        # phone for free) but recorded here so the panel can show it and the
-        # counters do not call it a success.
-        assert SCRAPER.count("skipped_listings.record(") == 6
+        # Seven since 2026-09-14. The sixth and seventh are the two halves of
+        # «saved but no phone number», split because they are not the same
+        # thing: a reveal that failed (retried next run) and a poster who
+        # takes contact only through Divar chat (never retried, and not a
+        # failure — run 110 reported nineteen of those as failures on a run
+        # that got a number from every listing that had one).
+        assert SCRAPER.count("skipped_listings.record(") == 7
 
     def test_a_duplicate_is_not_recorded_as_unsaved(self):
         """It was saved — on an earlier run."""

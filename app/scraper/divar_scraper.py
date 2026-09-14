@@ -3025,6 +3025,7 @@ class DivarScraper:
         # no label at all, so /jobs/{id}/skipped showed the English word.
         "failed": "ناموفق",
         "no_phone": "بدون شماره",
+        "chat_only": "فقط چت دیوار",
         "deposit": "ودیعه",
         "rent": "اجارهٔ ماهانه",
         "price": "قیمت",
@@ -3917,21 +3918,37 @@ class DivarScraper:
                                         "stopping rather than writing nonsense counters")
                                     raise
                         if saved and self._phone_required and not property_data.get("phone_number"):
-                            # Stored, but not a success. The row is kept
-                            # because the data has value and property_exists
-                            # treats a phone-less row as a gap, so the next
-                            # run retries it for free. What it must not do is
-                            # count as «تازه»: the phone number is the product,
-                            # and a listing without one reported as a win is
-                            # how a run of 50 «new» could hold 40 unusable.
-                            job.failed_items += 1
-                            fail_tally["بدون شماره"] = fail_tally.get("بدون شماره", 0) + 1
-                            await skipped_listings.record(
-                                self._job_id_str, divar_id=did,
-                                url=listing.get("url"), title=property_data.get("title"),
-                                reason="no_phone",
-                                detail="ذخیره شد ولی شمارهٔ تماس گرفته نشد — در اجرای بعدی دوباره تلاش می‌شود")
-                            logger.warning(f"{did}: saved without a phone number — counted as failed, not new")
+                            # Stored, but not a «تازه»: the phone number is the
+                            # product, and a listing without one reported as a
+                            # win is how a run of 50 new could hold 40 nobody
+                            # can call.
+                            #
+                            # Two very different reasons hide behind that blank,
+                            # and calling both «ناموفق» made run 110 — which
+                            # got a number from every listing that had one —
+                            # report nineteen failures.
+                            if property_data.get("contact_channel") == "chat_only":
+                                # The poster chose Divar chat. There is no
+                                # number to get, no run will ever find one, and
+                                # property_exists already declines to re-scrape
+                                # it. Not a failure, and not retried — so the
+                                # detail must not promise a retry.
+                                skip_tally["chat_only"] = skip_tally.get("chat_only", 0) + 1
+                                await skipped_listings.record(
+                                    self._job_id_str, divar_id=did,
+                                    url=listing.get("url"), title=property_data.get("title"),
+                                    reason="chat_only",
+                                    detail="آگهی‌دهنده فقط از راه چت دیوار تماس می‌گیرد — شماره‌ای برای گرفتن نیست")
+                                logger.info(f"{did}: contact is chat-only — stored, not a failure")
+                            else:
+                                job.failed_items += 1
+                                fail_tally["بدون شماره"] = fail_tally.get("بدون شماره", 0) + 1
+                                await skipped_listings.record(
+                                    self._job_id_str, divar_id=did,
+                                    url=listing.get("url"), title=property_data.get("title"),
+                                    reason="no_phone",
+                                    detail="ذخیره شد ولی شمارهٔ تماس گرفته نشد — در اجرای بعدی دوباره تلاش می‌شود")
+                                logger.warning(f"{did}: saved without a phone number — counted as failed, not new")
                         elif saved and getattr(self, "_last_save_created", True):
                             job.new_items += 1
                         elif saved:
