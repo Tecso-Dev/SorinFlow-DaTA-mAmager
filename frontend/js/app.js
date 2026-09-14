@@ -1535,7 +1535,7 @@ async function loadProperties() {
                 <td>
                     ${property.phone_number 
                         ? `<a href="tel:${safeTel(property.phone_number)}" class="text-success">${property.phone_number}</a>`
-                        : '<span class="text-muted">---</span>'
+                        : noPhoneCell(property)
                     }
                 </td>
                 <td>
@@ -1848,7 +1848,7 @@ async function viewProperty(id) {
                                 <div class="h5 mb-0">
                                     ${property.phone_number 
                                         ? `<a href="tel:${safeTel(property.phone_number)}" class="text-success">${property.phone_number}</a>` 
-                                        : '<span class="text-muted">---</span>'}
+                                        : noPhoneCell(property)}
                                 </div>
                             </div>
                             <div class="col-md-6">
@@ -4765,7 +4765,7 @@ async function loadLeads() {
                 <td>
                     ${lead.phone_number
                         ? `<a href="tel:${safeTel(lead.phone_number)}" class="text-success fw-bold">${lead.phone_number}</a>`
-                        : '<span class="text-muted">---</span>'}
+                        : noPhoneCell(lead)}
                 </td>
                 <td>
                     <select class="form-select form-select-sm status-quick ${st.cls}" style="min-width:130px"
@@ -4853,7 +4853,25 @@ async function savePropertyField(propId, field, value, el) {
  * through a «شخصی» filter and should not have; grey is an agency that said
  * so itself. The phrase that gave it away is in the tooltip, because a label
  * nobody can check is a label nobody will trust. */
+/* «---» in the phone column said nothing. Three different facts hide behind
+ * a blank: the poster took contact through chat only (their choice — no run
+ * will ever fill it), the reveal failed (ours — worth a retry), or the row
+ * predates the distinction. Say which. */
+function noPhoneCell(p) {
+    const ch = p && p.contact_channel;
+    if (ch === 'chat_only') {
+        return '<span class="badge bg-secondary" title="آگهی‌دهنده شماره را مخفی کرده و فقط از طریق چت دیوار پاسخ می‌دهد">'
+             + '<i class="bi bi-chat-dots"></i> فقط چت</span>';
+    }
+    if (ch === 'unavailable') {
+        return '<span class="text-warning small" title="شماره در این اسکرپ گرفته نشد — در اجرای بعدی دوباره تلاش می‌شود">'
+             + 'گرفته نشد</span>';
+    }
+    return '<span class="text-muted">---</span>';
+}
+
 function agencyBadge(p) {
+
     if (!p || !p.agency_suspected) return '';
     // On a lead row Divar's declaration arrives under its own name: `Lead`
     // has no advertiser_type of its own, and reusing the property's name for

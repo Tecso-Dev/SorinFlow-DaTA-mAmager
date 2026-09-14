@@ -116,6 +116,7 @@ async def init_db():
                  _migrate_filing,
                  _migrate_advertiser_type,
                  _migrate_advertiser_signals,
+                 _migrate_contact_channel,
                  _migrate_cookie_owner,
                  _backfill_cookie_owner,
                  _backfill_advertiser_signals,
@@ -243,6 +244,24 @@ async def _migrate_sms_panel(conn):
             "ON crm_sms_logs (campaign, sent_at DESC)"))
     except Exception as e:
         print(f"SMS panel migration skipped: {e}")
+
+
+async def _migrate_contact_channel(conn):
+    """How each listing's contact reveal ended.
+
+    NULL on existing rows and left that way: a row with no phone from before
+    this existed could be either kind, and guessing «chat_only» would stop
+    the retry that might fill it. The next visit records the truth.
+    """
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE properties ADD COLUMN IF NOT EXISTS contact_channel VARCHAR(16)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_properties_contact_channel "
+            "ON properties (contact_channel)"))
+    except Exception as e:
+        print(f"contact channel migration skipped: {e}")
 
 
 async def _migrate_cookie_owner(conn):

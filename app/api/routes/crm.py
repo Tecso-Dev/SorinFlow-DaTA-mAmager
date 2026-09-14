@@ -316,7 +316,7 @@ async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse
             Property.document_type, Property.has_parking, Property.has_elevator,
             Property.building_direction, Property.corner_type,
             Property.agency_suspected, Property.agency_evidence,
-            Property.advertiser_type,
+            Property.advertiser_type, Property.contact_channel,
         ).where(Property.id.in_(prop_ids))
     )).all()
     by_id = {r.id: r for r in rows}
@@ -344,6 +344,7 @@ async def _attach_property_columns(db: AsyncSession, leads) -> List[LeadResponse
         # listing that slipped through a «شخصی» filter from one an agency
         # posted openly — which is the whole distinction the badge draws.
         item.lead_advertiser_type = p.advertiser_type
+        item.contact_channel = p.contact_channel
     return items
 
 

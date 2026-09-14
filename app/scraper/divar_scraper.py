@@ -1824,6 +1824,13 @@ class DivarScraper:
             # behaviour, and with five it is four more chances.
             contact_extractor.account_count = await self._usable_account_count()
             phone_number = await contact_extractor.get_phone_number()
+            # How the reveal ended, on the row itself. «chat_only» is the one
+            # that changes behaviour: property_exists stops re-opening those
+            # to fill a gap that is not a gap, and the panel can say «فقط چت»
+            # instead of showing a blank that reads as a scrape that failed.
+            property_data["contact_channel"] = (
+                "phone" if phone_number
+                else (contact_extractor.contact_channel or "unavailable"))
             if phone_number:
                 property_data["phone_number"] = phone_number
                 # A reveal worked, so the pool is not exhausted after all.
@@ -3061,6 +3068,10 @@ class DivarScraper:
             if row is None:
                 return False
             if not (row.phone_number or "").strip():
+                if getattr(row, "contact_channel", None) == "chat_only":
+                    # Not a gap. The poster hid the number; a second visit
+                    # spends a reveal and produces the same nothing.
+                    return True
                 logger.info(
                     f"{divar_id} is already stored but has no phone number — "
                     "re-scraping to fill it in")

@@ -107,6 +107,10 @@ class Property(Base):
     
     # Contact
     phone_number = Column(String(20), index=True)
+    # How the contact reveal ended: "phone", "chat_only", "unavailable", or
+    # NULL for rows from before this existed. «chat_only» is the poster's
+    # choice and never changes; «unavailable» is ours and is worth a retry.
+    contact_channel = Column(String(16), index=True)
     seller_name = Column(String(200))
     advertiser_type = Column(String(20))  # personal, agency — as Divar declared it
     # …and as the ad's own words suggest. Kept separate on purpose: Divar
@@ -217,6 +221,7 @@ class Property(Base):
             "quality_score": self.quality_score,
             "quality_issues": self.quality_issues,
             "phone_number": self.phone_number,
+            "contact_channel": self.contact_channel,
             "agency_suspected": bool(self.agency_suspected),
             "agency_evidence": self.agency_evidence,
             "seller_name": self.seller_name,

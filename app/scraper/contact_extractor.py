@@ -46,6 +46,9 @@ class ContactExtractor:
         # a human. The scraper uses it to rotate to a fresh account instead —
         # the challenge is this number telling us it is spent.
         self.on_challenge = on_challenge
+        # "phone" | "chat_only" | "unavailable" | None — how the last reveal
+        # ended, for the row to record. See _chat_only for why it matters.
+        self.contact_channel = None
         # Fired once a code has been accepted. Divar has just granted this
         # session the trust the code existed to establish, and it lives in the
         # jar the browser now holds. Without this the scraper never saved it,
@@ -99,6 +102,22 @@ class ContactExtractor:
                     continue
 
             if not contact_button:
+                # Two very different reasons for no button, and only one of
+                # them is worth a second visit.
+                #
+                # A poster can hide their number and take contact through
+                # Divar's chat only. That is a decision about the ad, not a
+                # failure of ours: no retry, no rotation, no fresh account will
+                # ever produce a phone. Left indistinguishable from «could not
+                # get it», every such listing was re-opened on every run to
+                # fill a gap that is not a gap — and the panel called it a row
+                # with a missing number instead of a row whose number is not
+                # on offer.
+                if await self._chat_only():
+                    self.contact_channel = "chat_only"
+                    logger.info("Poster takes contact through chat only — no phone to reveal")
+                    return None
+                self.contact_channel = "unavailable"
                 logger.warning("No contact button found on page - phone cannot be extracted")
                 return None
 
@@ -175,7 +194,14 @@ class ContactExtractor:
 
                 phone = await self._scan_for_phone(_is_login_phone)
                 if phone:
+                    self.contact_channel = "phone"
                     return phone
+
+                # The modal opened and says so in words: the poster hid it.
+                if await self._chat_only():
+                    self.contact_channel = "chat_only"
+                    logger.info("Contact modal offers chat only — the poster hid the number")
+                    return None
 
                 # No phone yet. If the captcha challenge is gone, retrying the
                 # puzzle won't help; stop. Otherwise refresh and try again.
@@ -198,6 +224,8 @@ class ContactExtractor:
                     await asyncio.sleep(random.uniform(1.0, 1.8))
 
             logger.warning("No phone element found after clicking contact button")
+            if self.contact_channel is None:
+                self.contact_channel = "unavailable"
             return None
 
         except Exception as e:
@@ -310,6 +338,39 @@ class ContactExtractor:
             except Exception:
                 continue
         logger.info("No captcha refresh button found; relying on auto-refresh")
+
+    # What Divar shows when the poster has hidden their number.
+    _CHAT_SELECTORS = (
+        'button:has-text("چت")',
+        'a:has-text("چت")',
+        '.post-actions__chat',
+        '[class*="chat"] button',
+        'a[href*="/chat/"]',
+    )
+    _HIDDEN_WORDS = ("شماره مخفی", "شماره تماس مخفی", "فقط از طریق چت",
+                     "تنها از طریق چت", "امکان تماس تلفنی وجود ندارد")
+
+    async def _chat_only(self) -> bool:
+        """True when the page offers chat and no phone.
+
+        Judged on the page as a whole, not one control: Divar has said it as a
+        sentence («امکان تماس تلفنی وجود ندارد») and as a lone «چت» button
+        where «اطلاعات تماس» would be, and either is the same fact.
+        """
+        try:
+            text = ((await self.page.inner_text("body")) or "")[:20000]
+            if any(w in text for w in self._HIDDEN_WORDS):
+                return True
+        except Exception:
+            pass
+        for sel in self._CHAT_SELECTORS:
+            try:
+                el = await self.page.query_selector(sel)
+                if el and await el.is_visible():
+                    return True
+            except Exception:
+                continue
+        return False
 
     async def _request_otp_resend(self) -> bool:
         """Click Divar's resend control if it is offering one.
