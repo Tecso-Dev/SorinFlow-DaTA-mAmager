@@ -3190,10 +3190,21 @@ class DivarScraper:
         connection-class errors are retried — a constraint violation would
         fail the same way twice and is not a socket's fault.
         """
+        # Whether this call rolled the RUN's session back.
+        #
+        # The rollback below is what makes the retry work, and it also expires
+        # every ORM object on that session — including `job`. The caller's very
+        # next line is `job.new_items += 1`, and touching an expired attribute
+        # triggers a synchronous lazy reload, which outside a greenlet is
+        # MissingGreenlet. Run 109 died at listing 7 that way: the retry had
+        # already succeeded («Updated property: gajmvaRR») and the counter
+        # after it killed the run.
+        self._last_save_rolled_back = False
         for attempt in (1, 2):
             try:
                 return await self._save_property_attempt(property_data)
             except _DroppedConnection as e:
+                self._last_save_rolled_back = True
                 try:
                     await self.db_session.rollback()
                 except Exception:
@@ -3885,6 +3896,26 @@ class DivarScraper:
 
                         # Save to database
                         saved = await self.save_property(property_data)
+                        if getattr(self, "_last_save_rolled_back", False):
+                            # The save rolled this session back to get a fresh
+                            # connection, so `job` is expired and every counter
+                            # below would lazy-load on attribute access. Re-read
+                            # it once, here, where the failure is contained —
+                            # the same guard the failure branch has always had.
+                            try:
+                                await self.db_session.refresh(job)
+                            except Exception as _re:
+                                logger.warning(
+                                    f"could not re-read the job row after a save "
+                                    f"retry: {_re}")
+                                try:
+                                    await self.db_session.rollback()
+                                    await self.db_session.refresh(job)
+                                except Exception:
+                                    logger.error(
+                                        "job row unreadable after a save retry — "
+                                        "stopping rather than writing nonsense counters")
+                                    raise
                         if saved and self._phone_required and not property_data.get("phone_number"):
                             # Stored, but not a success. The row is kept
                             # because the data has value and property_exists

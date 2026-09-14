@@ -19,6 +19,22 @@ left over is reported as unaccounted rather than passing unremarked.
 import os
 import sys
 
+
+def _caller_block(src: str) -> str:
+    """The save-and-count block with comment lines removed.
+
+    These assertions used to slice a fixed number of characters from the call.
+    That budget is spent by whatever comments the block happens to carry, so
+    adding an explanation to the code broke tests that were asserting nothing
+    about explanations — three times, including the guard that fixed run 109.
+    Comments out, structure in."""
+    blk = src[src.index("saved = await self.save_property(property_data)"):]
+    blk = "\n".join(l for l in blk.splitlines() if not l.strip().startswith("#"))
+    # up to the end of the if/elif chain: the first line back at the `saved =`
+    # indent that is not part of it
+    return blk[:blk.index("await self._human_like_delay(")] if "await self._human_like_delay(" in blk else blk[:4000]
+
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./_acct.db")
@@ -123,7 +139,7 @@ class TestAListingWithoutAPhoneIsNotASuccess:
         import inspect
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper.start_scraping_job)
-        blk = src[src.index("saved = await self.save_property(property_data)"):][:1600]
+        blk = _caller_block(src)
         assert 'not property_data.get("phone_number")' in blk
         assert "job.failed_items += 1" in blk.split("elif saved:")[0]
         assert 'reason="no_phone"' in blk
@@ -164,7 +180,7 @@ class TestNewMeansCreatedAndUpdatedMeansAlreadyHeld:
         import inspect
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper.start_scraping_job)
-        blk = src[src.index("saved = await self.save_property(property_data)"):][:3000]
+        blk = _caller_block(src)
         assert '_last_save_created' in blk.split("job.new_items += 1")[0], \
             "new_items is incremented without checking whether a row was created"
 
@@ -172,7 +188,7 @@ class TestNewMeansCreatedAndUpdatedMeansAlreadyHeld:
         import inspect
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper.start_scraping_job)
-        blk = src[src.index("saved = await self.save_property(property_data)"):][:3000]
+        blk = _caller_block(src)
         after_new = blk.split("job.new_items += 1", 1)[1]
         # The very next branch, before the failure branch: a save that was an
         # update must land somewhere, and that somewhere is updated_items.

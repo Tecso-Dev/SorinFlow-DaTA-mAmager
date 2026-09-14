@@ -33,6 +33,22 @@ from app.scraper import divar_scraper as ds  # noqa: E402
 from app.scraper.divar_scraper import DivarScraper  # noqa: E402
 
 
+def _caller_block(src: str) -> str:
+    """The save-and-count block with comment lines removed.
+
+    These assertions used to slice a fixed number of characters from the call.
+    That budget is spent by whatever comments the block happens to carry, so
+    adding an explanation to the code broke tests that were asserting nothing
+    about explanations — three times, including the guard that fixed run 109.
+    Comments out, structure in."""
+    blk = src[src.index("saved = await self.save_property(property_data)"):]
+    blk = "\n".join(l for l in blk.splitlines() if not l.strip().startswith("#"))
+    # up to the end of the if/elif chain: the first line back at the `saved =`
+    # indent that is not part of it
+    return blk[:blk.index("await self._human_like_delay(")] if "await self._human_like_delay(" in blk else blk[:4000]
+
+
+
 class TestWhatCountsAsDropped:
     """The two errors from run 92, and their relatives — not anything else."""
 
@@ -142,3 +158,51 @@ class TestOnlyDroppedConnectionsAreRetried:
         """The #10 fix must not undo the «say why a save failed» work."""
         src = inspect.getsource(DivarScraper._save_property_attempt)
         assert "self._last_save_error = type(e).__name__" in src
+
+
+class TestTheJobRowSurvivesTheRetry:
+    """Run 109 died at listing 7, and the retry had already worked:
+
+        17:06:21  [save] connection dropped mid-save (InterfaceError) — retrying
+        17:06:21  Updated property: gajmvaRR
+        17:06:21  Failed to process listing: greenlet_spawn has not been called
+
+    A rollback expires every ORM object on that session, `job` included. The
+    caller's next statement is `job.new_items += 1`, and touching an expired
+    attribute triggers a lazy reload — synchronous, outside the greenlet, so
+    MissingGreenlet. The fix for the save broke the line after it."""
+
+    def test_the_wrapper_reports_that_it_rolled_back(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.save_property)
+        assert "self._last_save_rolled_back = False" in src, "the flag is never reset"
+        assert "self._last_save_rolled_back = True" in src, "a rollback is not reported"
+
+    def test_the_caller_re_reads_the_job_before_touching_a_counter(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.start_scraping_job)
+        blk = _caller_block(src)
+        guard = blk.index("_last_save_rolled_back")
+        for counter in ("job.failed_items += 1", "job.new_items += 1", "job.updated_items += 1"):
+            assert guard < blk.index(counter), \
+                f"{counter} is touched before the job row is re-read"
+
+    def test_the_re_read_cannot_itself_kill_the_run_silently(self):
+        """refresh() on a session whose connection just died raises too."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.start_scraping_job)
+        blk = src[src.index("_last_save_rolled_back"):][:1200]
+        assert "except Exception" in blk and "rollback()" in blk
+
+    def test_a_normal_save_does_not_pay_for_a_refresh(self):
+        """The common path is a save that did not roll back; it must not add a
+        query per listing."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper.start_scraping_job)
+        blk = _caller_block(src)
+        assert 'if getattr(self, "_last_save_rolled_back", False):' in blk, \
+            "the refresh is unconditional"
