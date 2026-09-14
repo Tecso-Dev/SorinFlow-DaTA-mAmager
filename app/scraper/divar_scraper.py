@@ -137,6 +137,10 @@ class DivarScraper:
         # listings never do that — so counting listings measured an event Divar
         # does not, and the setting could never hold the codes off.
         self._reveals_since_rotation = 0
+        # For the finish line's «هر N افشا یک چالش» — the number the pacing is
+        # tuned against. Per run, never reset by rotation.
+        self._reveals_this_run = 0
+        self._challenges_this_run = 0
         # Set when Divar demands a code: it is the account itself saying it is
         # spent, which beats any counter, so the next opportunity rotates.
         self._force_rotate = False
@@ -1794,12 +1798,15 @@ class DivarScraper:
                         f"Not requesting contact info for {property_data.get('divar_id')}: {reason}")
                     return property_data
 
-            # This is the moment Divar counts, so it is the moment we pace.
+            # Read the ad the way a person would before asking for the number,
+            # then hold the pace between reveals. Both before Divar counts.
+            await self._dwell_like_a_reader(property_data)
             await self._space_out_reveal()
 
             # …and the moment we count, against the account, which is what
             # Divar is counting against.
             self._reveals_since_rotation += 1
+            self._reveals_this_run = getattr(self, "_reveals_this_run", 0) + 1
             await self._charge_reveal()
             from app import metrics as _mx
             _mx.scrape_reveals.inc()
@@ -2501,6 +2508,46 @@ class DivarScraper:
             logger.warning(f"[rotate] could not count usable accounts: {e}")
             return 1
 
+    async def _dwell_like_a_reader(self, property_data: dict) -> None:
+        """Spend on the ad what a person would before pressing «اطلاعات تماس».
+
+        The scraper used to land, wait three hundred milliseconds, and click.
+        Nobody does that. A reader scrolls down through the description in a
+        few moves, pauses on it for as long as there is to read, sometimes
+        goes back up to the photos, and only then asks for the number.
+
+        The dwell scales with the text: about eighteen characters a second of
+        Persian on a screen, bounded by the two settings, then jittered so
+        two ads of the same length are not read in the same time.
+        """
+        page = getattr(self, "page", None)
+        if page is None:
+            return
+        cfg = settings
+        lo = float(getattr(cfg, "reveal_dwell_min_seconds", 0) or 0)
+        hi = float(getattr(cfg, "reveal_dwell_max_seconds", 0) or 0)
+        if hi <= 0:
+            return
+        text = f"{property_data.get('title') or ''} {property_data.get('description') or ''}"
+        reading = len(text) / 18.0
+        dwell = max(lo, min(hi, reading)) * random.uniform(0.7, 1.4)
+
+        # spread the dwell over a few scrolls, the way reading actually moves
+        steps = random.randint(2, 4)
+        for n in range(steps):
+            try:
+                await page.mouse.wheel(0, random.randint(180, 520))
+            except Exception:
+                pass
+            await asyncio.sleep(dwell / steps * random.uniform(0.6, 1.4))
+        # …and sometimes a look back up at the photos
+        if random.random() < 0.3:
+            try:
+                await page.mouse.wheel(0, -random.randint(300, 900))
+            except Exception:
+                pass
+            await asyncio.sleep(random.uniform(0.8, 2.5))
+
     async def _space_out_reveal(self) -> None:
         """Hold off until enough time has passed since the last reveal.
 
@@ -2526,6 +2573,23 @@ class DivarScraper:
                         f"before the next reveal")
             await asyncio.sleep(owed)
             now = time.monotonic()
+
+        # A person does not reveal forty numbers in a row without looking up.
+        # Roughly every N reveals, a longer break — N and the length both
+        # drawn around their settings so the rhythm has no period to detect.
+        every = int(getattr(settings, "reveal_break_every", 0) or 0)
+        brk = float(getattr(settings, "reveal_break_seconds", 0) or 0)
+        if every > 0 and brk > 0:
+            self._until_break = getattr(self, "_until_break", None)
+            if self._until_break is None:
+                self._until_break = max(3, int(random.gauss(every, every / 3)))
+            self._until_break -= 1
+            if self._until_break <= 0:
+                pause = max(15.0, random.gauss(brk, brk / 3))
+                logger.info(f"[pace] a longer break — {pause:.0f}s — before the next reveal")
+                await asyncio.sleep(pause)
+                self._until_break = max(3, int(random.gauss(every, every / 3)))
+                now = time.monotonic()
 
         gap = float(getattr(settings, "reveal_min_gap_seconds", 0) or 0)
         if gap <= 0:
@@ -2698,6 +2762,7 @@ class DivarScraper:
         itself happens between listings, where it is safe to navigate.
         """
         self._force_rotate = True
+        self._challenges_this_run = getattr(self, "_challenges_this_run", 0) + 1
         # Divar just said «slow down». _space_out_reveal waits this out before
         # the next reveal, on whichever account rotation picks — the pace is
         # ours, not the account's, and moving to a fresh number at the same
@@ -3960,6 +4025,22 @@ class DivarScraper:
             await self.db_session.commit()
 
             from app.services import job_log
+            # The number the pacing is tuned against. «۱۴۰ افشا، ۱ چالش» is
+            # the goal met; «۳۰ افشا، ۴ چالش» is the setting to raise.
+            _rv = getattr(self, "_reveals_this_run", 0)
+            _ch = getattr(self, "_challenges_this_run", 0)
+            _goal = int(getattr(settings, "challenge_goal_reveals", 100) or 100)
+            if _rv:
+                _ratio = (f"هر {_rv // _ch} افشا یک چالش" if _ch
+                          else "بدون چالش")
+                _verdict = ("✓ هدف" if (not _ch or _rv // _ch >= _goal)
+                            else f"✗ هدف هر {_goal}")
+                await job_log.record(
+                    job.job_id, job_log.CHALLENGE,
+                    f"{_rv} افشا، {_ch} چالش کد — {_ratio} ({_verdict})",
+                    level="info" if (not _ch or _rv // _ch >= _goal) else "warning",
+                    reveals=_rv, challenges=_ch,
+                    reveals_per_challenge=(_rv // _ch if _ch else None), goal=_goal)
             _summary = (f"اسکرپ تمام شد — {job.new_items} تازه، "
                         f"{job.updated_items} از قبل ذخیره شده بود، "
                         f"{job.failed_items} ناموفق")

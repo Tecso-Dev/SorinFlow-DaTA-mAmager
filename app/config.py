@@ -6,7 +6,6 @@ from pydantic import Field
 from typing import Optional, List
 from functools import lru_cache
 
-
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
@@ -103,6 +102,28 @@ class Settings(BaseSettings):
     # carrying on at the same pace on the next account is how one challenge
     # becomes five.
     challenge_cooldown_seconds: float = Field(default=45.0, env="SCRAPER_CHALLENGE_COOLDOWN_SECONDS")
+
+    # How long a person spends on an ad before asking for the number.
+    #
+    # Nobody opens a listing and presses «اطلاعات تماس» three hundred
+    # milliseconds later, which is what the scraper did. The dwell scales
+    # with how much there is to read — a two-line ad and a two-paragraph one
+    # are not read in the same time — between these two bounds, in seconds.
+    reveal_dwell_min_seconds: float = Field(default=4.0, env="SCRAPER_REVEAL_DWELL_MIN")
+    reveal_dwell_max_seconds: float = Field(default=22.0, env="SCRAPER_REVEAL_DWELL_MAX")
+
+    # A person does not reveal forty numbers in a row without looking up.
+    # Roughly every this-many reveals the run takes a longer break, of about
+    # this many seconds; both are means, not exact, so the rhythm has no
+    # period to detect. 0 for either turns the breaks off.
+    reveal_break_every: int = Field(default=12, env="SCRAPER_REVEAL_BREAK_EVERY")
+    reveal_break_seconds: float = Field(default=90.0, env="SCRAPER_REVEAL_BREAK_SECONDS")
+
+    # The goal, as a number the finish line can be held against: at most one
+    # code challenge per this many reveals. Nothing enforces it; the run
+    # reports its own ratio so the pacing above can be tuned toward it.
+    challenge_goal_reveals: int = Field(default=100, env="SCRAPER_CHALLENGE_GOAL_REVEALS")
+
     rest_hours: float = Field(default=24.0, env="SCRAPER_REST_HOURS")
     # How often to ask Divar whether each stored session still works. Costs one
     # outbound request per account per interval. 0 disables it, leaving the
@@ -244,12 +265,10 @@ class Settings(BaseSettings):
             return []
         return [p.strip() for p in self.proxy_list.split(",") if p.strip()]
 
-
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance"""
     return Settings()
-
 
 # City slugs mapping — matches Divar.ir URL slugs
 CITIES = {
