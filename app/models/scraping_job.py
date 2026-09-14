@@ -44,6 +44,9 @@ class ScrapingJob(Base):
     # How the run was started, in full, so it can be continued. The START
     # line in the log only says that it began.
     config = Column(JSON)
+    # What Divar said existed for these filters when the run began. The
+    # progress denominator, and the number the panel shows beside the bar.
+    divar_count = Column(Integer)
     # The run this one continues, if any — so the panel can show the chain
     # and a person can see «this is the third attempt at that».
     resumed_from = Column(UUID(as_uuid=True), nullable=True)
@@ -79,16 +82,21 @@ class ScrapingJob(Base):
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "progress": self.progress,
+            "divar_count": self.divar_count,
             "resumed_from": str(self.resumed_from) if self.resumed_from else None,
             "can_resume": bool(self.config) and self.status in ("failed", "cancelled", "completed")
         }
     
     @property
     def progress(self) -> float:
-        """Calculate progress percentage"""
+        """Percent complete, never above 100.
+
+        The denominator is Divar's own count, and the candidate pool can run
+        past it — Divar's result page injects promoted ads its total leaves
+        out — so without the clamp a run read 123% and kept going."""
         if self.total_items == 0:
             return 0.0
-        return round((self.scraped_items / self.total_items) * 100, 2)
+        return min(100.0, round((self.scraped_items / self.total_items) * 100, 2))
 
 
 class ScrapingLog(Base):

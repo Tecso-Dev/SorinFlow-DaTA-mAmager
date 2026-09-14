@@ -3429,6 +3429,7 @@ class DivarScraper:
                 )
                 _divar_total, _count_err = await dc.fetch_post_count(city, _form)
                 if _divar_total is not None:
+                    job.divar_count = int(_divar_total)
                     _gap = len(all_listings) - _divar_total
                     _msg = (f"دیوار می‌گوید {_divar_total} آگهی با این فیلترها دارد؛ "
                             f"{len(all_listings)} نامزد جمع شد")
@@ -3443,20 +3444,25 @@ class DivarScraper:
                 # Advisory. It must never cost a run.
                 logger.warning(f"[count] could not ask Divar for its total: {e}")
 
-            # Progress is position in the candidate pool.
+            # Progress is measured against what Divar says exists.
             #
-            # It used to be measured against max_items, which is a target of
-            # *saved* listings — a different quantity from the candidates being
-            # counted into it. A pool of 119 against a target of 100 therefore
-            # read 100% at candidate 100 and then went on scraping for another
-            # nineteen. The two only ever coincided when every candidate was
-            # saved, which is the case that never happens.
+            # Asked for as «درصد پیشرفت بر اساس تعداد دقیق آگهی‌های دیوار». It
+            # was the candidate pool before that, and the pool is the more
+            # exact denominator — it is what the loop actually walks — but it
+            # is also a number nobody sees until the run is over, and «۶۰ از
+            # ۱۲۰» reads against the figure the panel showed before the button
+            # was pressed. So Divar's count when it answered, the pool when it
+            # did not.
             #
-            # The loop ends when the pool runs out or the target is met,
-            # whichever comes first, so the pool is the honest denominator: the
-            # bar cannot fill early, and the completion below fills it for the
-            # run that stops at its target with candidates to spare.
-            job.total_items = len(all_listings)
+            # Two things stop this from lying. The pool can exceed the count
+            # (Divar injects promoted ads its own total leaves out) and the
+            # property's progress clamps at 100 rather than reading 123%. And
+            # the pool can fall short of it, in which case the completion below
+            # fills the bar, because a finished run is finished whatever Divar
+            # said it held.
+            job.total_items = (job.divar_count
+                               if (getattr(job, "divar_count", None) or 0) > 0
+                               else len(all_listings))
             await self.db_session.commit()
 
             logger.info(

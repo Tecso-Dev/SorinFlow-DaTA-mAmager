@@ -256,7 +256,8 @@ async def _migrate_job_resume(conn):
         await conn.execute(text(
             "ALTER TABLE scraping_jobs "
             "ADD COLUMN IF NOT EXISTS config JSON, "
-            "ADD COLUMN IF NOT EXISTS resumed_from UUID"))
+            "ADD COLUMN IF NOT EXISTS resumed_from UUID, "
+            "ADD COLUMN IF NOT EXISTS divar_count INTEGER"))
     except Exception as e:
         print(f"job resume migration skipped: {e}")
 

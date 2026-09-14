@@ -53,8 +53,11 @@ class TestTheRunThatWasReported:
 
 
 class TestTheDenominatorIsThePool:
-    def test_total_items_is_the_candidate_count(self):
-        assert "job.total_items = len(all_listings)" in SCRAPER
+    def test_the_candidate_count_is_the_fallback_denominator(self):
+        """Divar's own count took over as the denominator when the operator
+        asked for it; the pool remains the denominator when Divar does not
+        answer, which is the case this test originally pinned."""
+        assert "else len(all_listings)" in SCRAPER
 
     def test_the_target_is_no_longer_the_denominator(self):
         assert "job.total_items = len(all_listings) if" not in SCRAPER, \

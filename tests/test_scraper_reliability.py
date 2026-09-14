@@ -923,9 +923,13 @@ class TestProgressReflectsWork:
         assert src.count("job.scraped_items = i + 1") >= 2, \
             "both the skip path and the save path must advance the bar"
 
-    def test_it_is_divided_by_the_pool_it_walks(self):
+    def test_it_is_divided_by_what_divar_said_or_the_pool(self):
+        """Divar's count when it answered, the pool when it did not. What
+        must never come back is the target of SAVED rows as the denominator —
+        that is the mismatch that filled the bar early."""
         src = _code_only(_run_src())
-        assert "job.total_items = len(all_listings)" in src
+        assert "job.total_items = (job.divar_count" in src
+        assert "else len(all_listings)" in src
         assert "min(i + 1, max_items)" not in src, \
             "capping the numerator at the target is what filled the bar early"
 

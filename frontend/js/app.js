@@ -1039,7 +1039,7 @@ function showSection(sectionName) {
     switch (sectionName) {
         case 'dashboard':  loadDashboard(); break;
         case 'properties': loadProperties(); break;
-        case 'scraper':    loadJobs(); loadScraperAccounts(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling();
+        case 'scraper':    loadJobs(); loadScraperAccounts(); _wireEstimateRefresh(); scheduleEstimate(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling();
                            _initScraperDatePicker(); refreshDivarSessionCount();
                            setTimeout(restoreScraperForm, 200); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
@@ -2656,11 +2656,36 @@ function restoreScraperForm() {
 // Divar prints this above its own results («۳۴۳ آگهی در این محدوده») and its
 // search API carries the same number. One request answers what would otherwise
 // take opening every ad in the city.
-async function estimateScrape() {
+/* The count Divar gives for these filters, kept current as the form
+ * changes rather than only on the button. It is the number the progress bar
+ * is now measured against, so it should be on screen before the run starts,
+ * not discovered in the log afterwards. Debounced: every keystroke in a
+ * price box is not a request to Divar. */
+let _estimateTimer = null;
+function scheduleEstimate() {
+    clearTimeout(_estimateTimer);
+    const city = document.getElementById('scraper-city')?.value;
+    const cat = document.getElementById('scraper-category')?.value;
+    if (!city || !cat) return;
+    _estimateTimer = setTimeout(() => estimateScrape(true), 900);
+}
+
+function _wireEstimateRefresh() {
+    const form = document.getElementById('scraper-form');
+    if (!form || form._estimateWired) return;
+    form._estimateWired = true;
+    form.addEventListener('input', e => {
+        if (e.target?.id === 'scraper-max-items' || e.target?.id === 'scraper-rotate-every') return;
+        scheduleEstimate();
+    });
+    form.addEventListener('change', scheduleEstimate);
+}
+
+async function estimateScrape(quiet = false) {
     const box = document.getElementById('scraper-estimate');
     const btn = document.getElementById('scraper-estimate-btn');
     const city = document.getElementById('scraper-city').value;
-    if (!city) { showToast('خطا', 'اول شهر را انتخاب کنید', 'warning'); return; }
+    if (!city) { if (!quiet) showToast('خطا', 'اول شهر را انتخاب کنید', 'warning'); return; }
 
     const p = new URLSearchParams({ city });
     const cat = document.getElementById('scraper-category')?.value;
@@ -3336,7 +3361,11 @@ function _renderJobsTable(items) {
                         <div class="progress-bar" role="progressbar"
                              style="width:${job.progress}%;border-radius:3px;"></div>
                     </div>
-                    <div style="font-size:.72rem;color:var(--text-muted,#aaa);text-align:center;margin-top:2px;">${Math.round(job.progress)}%</div>
+                    <div style="font-size:.72rem;color:var(--text-muted,#aaa);text-align:center;margin-top:2px;"
+                         title="${job.divar_count ? 'بررسی‌شده از تعدادی که دیوار برای این فیلترها اعلام کرد' : 'بررسی‌شده از نامزدهای جمع‌شده'}">
+                        ${Math.round(job.progress)}%
+                        ${job.total_items ? `<bdi class="opacity-75">· ${job.scraped_items} / ${job.total_items}</bdi>` : ''}
+                    </div>
                 </div>
             </td>
             <!-- «جدید / بروز» reads right-to-left, so «جدید» is the RIGHT

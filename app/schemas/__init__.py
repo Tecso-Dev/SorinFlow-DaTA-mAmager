@@ -176,6 +176,7 @@ class ScrapingJobResponse(BaseModel):
     # job that scraped a day smaller than its cap fills this in too.
     finish_reason: Optional[str] = None
     progress: float = 0.0
+    divar_count: Optional[int] = None       # what Divar said existed at the start
     resumed_from: Optional[str] = None      # the run this one continues
     can_resume: bool = False                 # settings stored, and not running
     started_at: Optional[datetime] = None

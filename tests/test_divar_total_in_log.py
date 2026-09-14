@@ -73,16 +73,25 @@ class TestItCannotCostARun:
         assert "Divar's own total unavailable" in BLOCK
 
 
-class TestItIsNotTheDenominator:
-    def test_progress_still_divides_by_the_pool(self):
-        assert "job.total_items = len(all_listings)" in SCRAPER
+class TestTheDenominatorDecisionWasReversedDeliberately:
+    """This file argued that Divar's count must not be the denominator. The
+    operator then asked for exactly that — «درصد پیشرفت بر اساس تعداد دقیق
+    آگهی‌های دیوار» — and the concern was answered differently: not by
+    refusing the number, but by clamping progress at 100 and filling the bar
+    on completion. The pool stays as the fallback when Divar does not answer.
+    Pinned here so the reversal reads as a decision, not a regression."""
 
-    def test_divars_number_is_not_written_to_the_job_counters(self):
-        assert "job.total_items = _divar_total" not in SCRAPER
-        assert "job.scraped_items = _divar_total" not in SCRAPER
+    def test_divars_count_is_the_denominator_when_it_answered(self):
+        i = SCRAPER.index("job.total_items = (job.divar_count")
+        assert "else len(all_listings)" in SCRAPER[i:i + 200]
 
-    def test_the_reason_is_written_down_where_the_next_person_will_look(self):
-        assert "must not become the progress" in SCRAPER
+    def test_the_two_failure_modes_are_both_handled(self):
+        from app.models.scraping_job import ScrapingJob
+        j = ScrapingJob(); j.total_items, j.scraped_items = 113, 119
+        assert j.progress == 100.0, "a pool larger than the count must clamp"
+        i = SCRAPER.index('job.status = "completed"')
+        assert "job.scraped_items = job.total_items" in SCRAPER[i:i + 700], \
+            "a pool smaller than the count must be filled on completion"
 
 
 class TestTheArithmeticOfTheTwoFailureModes:
