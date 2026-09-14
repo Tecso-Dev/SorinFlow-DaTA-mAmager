@@ -224,21 +224,21 @@ class TestChatOnlyIsNotAFailure:
 
     def test_chat_only_does_not_count_as_a_failure(self):
         blk = _caller_block(_SRC())
-        branch = blk[blk.index('contact_channel") == "chat_only"'):]
+        branch = blk[blk.index('_ch == "chat_only"'):]
         branch = branch[:branch.index("else:")]
         assert "job.failed_items += 1" not in branch, "a poster's choice is counted as our failure"
         assert 'skip_tally["chat_only"]' in branch, "it is not reported anywhere"
 
     def test_a_genuine_reveal_failure_still_counts(self):
         blk = _caller_block(_SRC())
-        after = blk[blk.index('contact_channel") == "chat_only"'):]
+        after = blk[blk.index('_ch == "chat_only"'):]
         tail = after[after.index("else:"):]
         assert "job.failed_items += 1" in tail
         assert 'reason="no_phone"' in tail
 
     def test_only_the_retried_one_promises_a_retry(self):
         blk = _caller_block(_SRC())
-        head = blk[blk.index('contact_channel") == "chat_only"'):]
+        head = blk[blk.index('_ch == "chat_only"'):]
         chat = head[:head.index("else:")]
         assert "دوباره تلاش" not in chat, "promises a retry that property_exists will refuse"
         assert "چت دیوار" in chat, "does not say why there is no number"

@@ -67,7 +67,10 @@ class TestAllThreeRoutesAreCovered:
         # takes contact only through Divar chat (never retried, and not a
         # failure — run 110 reported nineteen of those as failures on a run
         # that got a number from every listing that had one).
-        assert SCRAPER.count("skipped_listings.record(") == 7
+        # Eight since 2026-09-14: the eighth is «Divar wants identity
+        # verification», split out of no_phone because it is ours and
+        # temporary — the listing is retried once the account is verified.
+        assert SCRAPER.count("skipped_listings.record(") == 8
 
     def test_a_duplicate_is_not_recorded_as_unsaved(self):
         """It was saved — on an earlier run."""

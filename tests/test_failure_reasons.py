@@ -77,11 +77,12 @@ class TestTheRunTalliesThem:
 
     def test_every_place_that_increments_failed_items_also_tallies(self):
         """A count and a tally that disagree are worse than the count alone."""
-        # Four: save failed, off-category/invalid, an exception, and — added
-        # 2026-09-12 — saved but no phone number. The phone is the product; a
-        # row nobody can call must not count as «تازه».
-        assert SCRAPER.count("job.failed_items += 1") == 4
-        assert SCRAPER.count("fail_tally[") == 4, \
+        # Five since 2026-09-14: save failed, off-category/invalid, an
+        # exception, saved-without-a-number, and Divar demanding identity
+        # verification — which is ours and temporary, unlike a poster who
+        # only takes chat.
+        assert SCRAPER.count("job.failed_items += 1") == 5
+        assert SCRAPER.count("fail_tally[") == 5, \
             "a failure site was added without a reason, or one lost its tally"
 
 

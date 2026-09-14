@@ -64,14 +64,23 @@ class TestDetectingChatOnly:
         assert await extractor(FakePage(body="شماره تماس مخفی است"))._chat_only()
 
     @pytest.mark.asyncio
-    async def test_a_lone_chat_button(self):
-        page = FakePage(elements={'button:has-text("چت")': FakeEl()})
-        assert await extractor(page)._chat_only()
+    async def test_a_chat_button_is_NOT_evidence(self):
+        """This test used to assert the opposite, and the opposite was a bug.
+
+        «چت و تماس» is in Divar's site header on every listing page, so a lone
+        chat control proves nothing about whether a number is on offer. When
+        Divar restricted the account and hid «اطلاعات تماس», the header link
+        was still there and twenty listings were written off as «فقط چت» —
+        permanently, since property_exists refuses to re-scrape those. One was
+        checked by hand: the number was on the page.
+        """
+        page = FakePage(body="چت و تماس", elements={'button:has-text("چت")': FakeEl()})
+        assert not await extractor(page)._chat_only()
 
     @pytest.mark.asyncio
-    async def test_an_invisible_chat_button_is_not_on_offer(self):
-        page = FakePage(elements={'button:has-text("چت")': FakeEl(visible=False)})
-        assert not await extractor(page)._chat_only()
+    async def test_only_what_divar_says_counts(self):
+        page = FakePage(body="چت و تماس\nشماره مخفی است")
+        assert await extractor(page)._chat_only()
 
     @pytest.mark.asyncio
     async def test_an_ordinary_page_is_not_chat_only(self):
@@ -94,10 +103,16 @@ class TestTheExtractorReportsHowItEnded:
         return inspect.getsource(ContactExtractor.get_phone_number)
 
     def test_no_button_is_judged_before_being_called_a_failure(self):
+        """It is now judged twice: an identity demand first — which is ours
+        and temporary — and only then the poster's own choice, which is
+        permanent."""
         src = self._src()
         i = src.index("if not contact_button:")
         j = src.index("phone cannot be extracted", i)
-        assert "_chat_only()" in src[i:j]
+        blk = src[i:j]
+        assert "_chat_only(" in blk
+        assert "_needs_identity(" in blk
+        assert blk.index("_needs_identity(") < blk.index("_chat_only(")
 
     def test_a_revealed_number_is_recorded_as_phone(self):
         assert 'self.contact_channel = "phone"' in self._src()

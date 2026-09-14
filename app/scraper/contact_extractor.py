@@ -49,6 +49,10 @@ class ContactExtractor:
         # "phone" | "chat_only" | "unavailable" | None — how the last reveal
         # ended, for the row to record. See _chat_only for why it matters.
         self.contact_channel = None
+        # Set when Divar demands identity verification. Account-level:
+        # the run stops trying to reveal numbers rather than writing
+        # each listing off in turn.
+        self.needs_identity = False
         # Fired once a code has been accepted. Divar has just granted this
         # session the trust the code existed to establish, and it lives in the
         # jar the browser now holds. Without this the scraper never saved it,
@@ -113,7 +117,18 @@ class ContactExtractor:
                 # fill a gap that is not a gap — and the panel called it a row
                 # with a missing number instead of a row whose number is not
                 # on offer.
-                if await self._chat_only():
+                _t = await self._page_text()
+                if await self._needs_identity(_t):
+                    # Account-level. Writing this listing off would be wrong and
+                    # permanent, and the next listing would fail identically.
+                    self.contact_channel = "needs_identity"
+                    self.needs_identity = True
+                    logger.error(
+                        "Divar is asking this account to verify its identity — "
+                        "no phone number can be revealed until that is done at "
+                        "divar.ir/my-divar/identity-confirmation")
+                    return None
+                if await self._chat_only(_t):
                     self.contact_channel = "chat_only"
                     logger.info("Poster takes contact through chat only — no phone to reveal")
                     return None
@@ -198,7 +213,13 @@ class ContactExtractor:
                     return phone
 
                 # The modal opened and says so in words: the poster hid it.
-                if await self._chat_only():
+                _t2 = await self._page_text()
+                if await self._needs_identity(_t2):
+                    self.contact_channel = "needs_identity"
+                    self.needs_identity = True
+                    logger.error("Divar is asking this account to verify its identity")
+                    return None
+                if await self._chat_only(_t2):
                     self.contact_channel = "chat_only"
                     logger.info("Contact modal offers chat only — the poster hid the number")
                     return None
@@ -340,37 +361,62 @@ class ContactExtractor:
         logger.info("No captcha refresh button found; relying on auto-refresh")
 
     # What Divar shows when the poster has hidden their number.
-    _CHAT_SELECTORS = (
-        'button:has-text("چت")',
-        'a:has-text("چت")',
-        '.post-actions__chat',
-        '[class*="chat"] button',
-        'a[href*="/chat/"]',
-    )
+    # Divar SAYING the number is not on offer. Nothing else counts.
+    #
+    # This used to also accept the presence of a chat control — «چت» buttons,
+    # a[href*="/chat/"], [class*="chat"] button. Every Divar page has one:
+    # «چت و تماس» sits in the site header on every listing. So the moment the
+    # contact button was missing for ANY reason the page still matched, and
+    # the listing was recorded as «the poster only takes chat» — permanently,
+    # because property_exists refuses to re-scrape those.
+    #
+    # It happened for real: Divar restricted the account and demanded identity
+    # verification, «اطلاعات تماس» disappeared, the header chat link did not,
+    # and twenty listings were written off as unreachable while their numbers
+    # were sitting on the page. One was checked by hand — ۰۹۰۳۲۰۲۳۱۰۰.
+    #
+    # A claim this permanent needs the site to state it, not to merely fail to
+    # contradict it.
     _HIDDEN_WORDS = ("شماره مخفی", "شماره تماس مخفی", "فقط از طریق چت",
-                     "تنها از طریق چت", "امکان تماس تلفنی وجود ندارد")
+                     "تنها از طریق چت", "امکان تماس تلفنی وجود ندارد",
+                     "شماره‌ای ثبت نشده", "بدون شماره تماس")
 
-    async def _chat_only(self) -> bool:
-        """True when the page offers chat and no phone.
+    # Divar asking the ACCOUNT to prove who it is. Account-level, not about
+    # this listing: every reveal fails until somebody completes it at
+    # divar.ir/my-divar/identity-confirmation.
+    _IDENTITY_WORDS = ("تایید هویت", "تأیید هویت", "احراز هویت",
+                       "کد ملی", "هویت خود را تایید", "هویت خود را تأیید")
 
-        Judged on the page as a whole, not one control: Divar has said it as a
-        sentence («امکان تماس تلفنی وجود ندارد») and as a lone «چت» button
-        where «اطلاعات تماس» would be, and either is the same fact.
-        """
+    async def _page_text(self) -> str:
         try:
-            text = ((await self.page.inner_text("body")) or "")[:20000]
-            if any(w in text for w in self._HIDDEN_WORDS):
-                return True
+            return ((await self.page.inner_text("body")) or "")[:20000]
         except Exception:
-            pass
-        for sel in self._CHAT_SELECTORS:
-            try:
-                el = await self.page.query_selector(sel)
-                if el and await el.is_visible():
-                    return True
-            except Exception:
-                continue
-        return False
+            return ""
+
+    async def _chat_only(self, text: str = None) -> bool:
+        """True only when Divar SAYS the number is not on offer.
+
+        The absence of a contact button is not evidence: it is also what a
+        restricted account, a slow render and a changed class name look like.
+        This marks a listing unreachable forever, so it takes a sentence.
+        """
+        t = text if text is not None else await self._page_text()
+        return any(w in t for w in self._HIDDEN_WORDS)
+
+    async def _needs_identity(self, text: str = None) -> bool:
+        """True when Divar is asking this ACCOUNT to verify itself.
+
+        Not about the listing: every reveal on every listing fails until
+        somebody completes it, so a run that hits this is not collecting
+        phone numbers at all and should say so rather than writing each
+        listing off in turn.
+        """
+        t = text if text is not None else await self._page_text()
+        if not any(w in t for w in self._IDENTITY_WORDS):
+            return False
+        # «تایید هویت» is also a menu item on every logged-in page. It only
+        # means us when it is being demanded, not merely offered.
+        return any(w in t for w in ("هویت خود را", "احراز هویت", "کد ملی"))
 
     async def _request_otp_resend(self) -> bool:
         """Click Divar's resend control if it is offering one.

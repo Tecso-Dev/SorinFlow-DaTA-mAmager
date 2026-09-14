@@ -1867,6 +1867,15 @@ class DivarScraper:
             property_data["contact_channel"] = (
                 "phone" if phone_number
                 else (contact_extractor.contact_channel or "unavailable"))
+
+            # Divar asked THIS ACCOUNT to prove who it is. That is not about
+            # this listing: every reveal from here fails the same way, so
+            # carrying on would write off the rest of the pool one by one —
+            # which is exactly what happened before this existed, twenty
+            # listings marked «فقط چت» with their numbers on the page.
+            if getattr(contact_extractor, "needs_identity", False):
+                self._needs_identity = True
+                await self._report_identity_block()
             if phone_number:
                 property_data["phone_number"] = phone_number
                 # A reveal worked, so the pool is not exhausted after all.
@@ -2782,6 +2791,74 @@ class DivarScraper:
         except Exception as e:
             logger.warning(f"[rotate] could not save session for {self.active_phone}: {e}")
 
+    async def _report_identity_block(self) -> None:
+        """Say it once, in the run log and to the account's owner.
+
+        Once per run: every listing hits the same wall, and twenty identical
+        emails is the same as none.
+        """
+        if getattr(self, "_identity_reported", False):
+            return
+        self._identity_reported = True
+        acct = self.active_phone or "—"
+        msg = (f"دیوار از حساب {acct} خواسته هویتش را تأیید کند — تا وقتی این "
+               f"کار انجام نشود هیچ شماره‌ای گرفته نمی‌شود")
+        try:
+            if self._job_id_str:
+                from app.services import job_log as _jl
+                await _jl.record(self._job_id_str, _jl.SESSION, msg,
+                                 level="error", account=acct,
+                                 url="https://divar.ir/my-divar/identity-confirmation")
+        except Exception as e:
+            logger.warning(f"[identity] could not record it on the run: {e}")
+
+        # And the person who can actually fix it: the owner of that account.
+        try:
+            from app.database import async_session_maker
+            from app.models.cookie import Cookie
+            from app.models.user import User
+            from app.services import forwarder as _fw, email_service, email_templates
+            from sqlalchemy import select as _sel
+
+            async with async_session_maker() as db:
+                cks = (await db.execute(_sel(Cookie))).scalars().all()
+                ids = {c.owner_user_id for c in cks
+                       if getattr(c, "owner_user_id", None)
+                       and _fw.same_phone(c.phone_number, acct)}
+                tos = []
+                if ids:
+                    tos = [a for a in (await db.execute(_sel(User.email).where(
+                        User.id.in_(ids), User.email.isnot(None),
+                        User.is_active == True))).scalars().all() if a]  # noqa: E712
+                if not tos:
+                    tos = [a for a in (await db.execute(_sel(User.email).where(
+                        User.role.in_(("root", "super_admin")),
+                        User.email.isnot(None),
+                        User.is_active == True))).scalars().all() if a]  # noqa: E712
+                body = (
+                    f"دیوار برای حساب {acct} «تأیید هویت» خواسته است.\n\n"
+                    "تا وقتی این کار انجام نشود، اسکرپر هیچ شمارهٔ تماسی "
+                    "نمی‌تواند بگیرد — دکمهٔ «اطلاعات تماس» برای این حساب "
+                    "نمایش داده نمی‌شود.\n\n"
+                    "برای رفع آن:\n"
+                    "۱) با همین حساب وارد divar.ir شوید\n"
+                    "۲) «دیوار من» ← «تأیید هویت»\n"
+                    "۳) کد ملی را وارد و مراحل را کامل کنید\n\n"
+                    "آدرس مستقیم: https://divar.ir/my-divar/identity-confirmation"
+                )
+                subj, html, text = email_templates.notification(
+                    "دیوار تأیید هویت می‌خواهد — اسکرپر شماره نمی‌گیرد", body,
+                    cta_label="تأیید هویت در دیوار",
+                    cta_url="https://divar.ir/my-divar/identity-confirmation")
+                for to in tos:
+                    try:
+                        await email_service.send(to, subj, html, text, db=db)
+                    except Exception as se:
+                        logger.warning(f"[identity] could not email {to}: {se}")
+                logger.error(f"[identity] {acct} must verify — told {len(tos)} recipient(s)")
+        except Exception as e:
+            logger.warning(f"[identity] could not notify: {e}")
+
     def _note_account_challenged(self) -> None:
         """Divar asked this account for an SMS code — rotate at the next chance.
 
@@ -3026,6 +3103,7 @@ class DivarScraper:
         "failed": "ناموفق",
         "no_phone": "بدون شماره",
         "chat_only": "فقط چت دیوار",
+        "needs_identity": "نیاز به تأیید هویت دیوار",
         "deposit": "ودیعه",
         "rent": "اجارهٔ ماهانه",
         "price": "قیمت",
@@ -3927,7 +4005,19 @@ class DivarScraper:
                             # and calling both «ناموفق» made run 110 — which
                             # got a number from every listing that had one —
                             # report nineteen failures.
-                            if property_data.get("contact_channel") == "chat_only":
+                            _ch = property_data.get("contact_channel")
+                            if _ch == "needs_identity":
+                                # Ours, not the poster's, and temporary: the
+                                # listing is retried once the account is
+                                # verified. Never chat_only, which is forever.
+                                job.failed_items += 1
+                                fail_tally["نیاز به تأیید هویت"] = fail_tally.get("نیاز به تأیید هویت", 0) + 1
+                                await skipped_listings.record(
+                                    self._job_id_str, divar_id=did,
+                                    url=listing.get("url"), title=property_data.get("title"),
+                                    reason="needs_identity",
+                                    detail="دیوار از این حساب تأیید هویت خواسته — بعد از تأیید دوباره تلاش می‌شود")
+                            elif _ch == "chat_only":
                                 # The poster chose Divar chat. There is no
                                 # number to get, no run will ever find one, and
                                 # property_exists already declines to re-scrape
