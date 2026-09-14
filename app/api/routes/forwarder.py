@@ -154,8 +154,12 @@ async def device_config(device_id: int, db: AsyncSession = Depends(get_db),
     row = await _mine(db, user, device_id)
     base = _base_url()
     acct = row.sim_phone or (user.divar_phone or "")
+    # A token, not %s. The template is made OF %placeholders% — %text%, %sim%,
+    # %battery% — so Python's own % formatting reads them as format specifiers
+    # and raises «not enough arguments for format string». The guide then 500s
+    # and a new user's first click is a broken page.
     tpl = (
-        '{"kind":"%s","account":"' + acct + '",'
+        '{"kind":"__KIND__","account":"' + acct + '",'
         '"code":"%Regex=Code:\\\\s*(\\\\d{6})%",'
         '"text":"%text%","sim":"%sim%",'
         '"sentStamp":%sentStamp%,"receivedStamp":%receivedStamp%,'
@@ -178,11 +182,11 @@ async def device_config(device_id: int, db: AsyncSession = Depends(get_db),
         "rules": [
             {"name_fa": "کد اطلاعات تماس", "sender": "*",
              "text_filter": "اطلاعات تماس",
-             "template": tpl % "contact",
+             "template": tpl.replace("__KIND__", "contact"),
              "why_fa": "کدی که برای دیدن شمارهٔ آگهی لازم است"},
             {"name_fa": "کد ورود", "sender": "*",
              "text_filter": "کد تایید",
-             "template": tpl % "login",
+             "template": tpl.replace("__KIND__", "login"),
              "why_fa": "کد ورود به حساب دیوار"},
         ],
         "advanced_fa": {

@@ -380,3 +380,55 @@ class TestTheAlertGoesToWhoeverCanAnswerIt:
         src = self._src()
         blk = src[src.index("owner_to = []"):src.index("# EVERY admin")]
         assert "except Exception" in blk
+
+
+class TestTheSetupGuideIsActuallyUsable:
+    """A new user's first click is this endpoint. It 500'd on the live server
+    because the payload template is made OF %placeholders% — %text%, %sim%,
+    %battery% — and formatting it with % read those as format specifiers."""
+
+    def _config(self):
+        """Build the config the route builds, without the HTTP layer."""
+        import inspect, re
+        from app.api.routes import forwarder as R
+        src = inspect.getsource(R.device_config)
+        tpl_src = src[src.index("tpl = ("):src.index("headers = {")]
+        ns = {"acct": "09058432452"}
+        exec(compile(tpl_src.strip(), "<tpl>", "exec"), ns)
+        return ns["tpl"]
+
+    def test_the_template_builds_without_a_format_error(self):
+        tpl = self._config()
+        assert "__KIND__" in tpl, "the substitution token is gone"
+
+    def test_both_kinds_substitute_cleanly(self):
+        tpl = self._config()
+        for kind in ("contact", "login"):
+            out = tpl.replace("__KIND__", kind)
+            assert f'"kind":"{kind}"' in out
+            assert "__KIND__" not in out
+
+    def test_the_placeholders_the_app_needs_survive(self):
+        """These are the app's, not Python's — they must reach the phone intact."""
+        tpl = self._config().replace("__KIND__", "contact")
+        for ph in ("%text%", "%sim%", "%sentStamp%", "%receivedStamp%",
+                   "%battery%", "%network%", "%Regex="):
+            assert ph in tpl, f"{ph} was eaten"
+
+    def test_percent_formatting_is_never_used_on_it(self):
+        """The bug itself, pinned: `tpl % kind` raises on this string."""
+        import inspect
+        from app.api.routes import forwarder as R
+        src = inspect.getsource(R.device_config)
+        assert "tpl %" not in src
+
+    def test_the_filled_template_is_valid_json_once_the_app_substitutes(self):
+        import json, re
+        out = self._config().replace("__KIND__", "contact")
+        out = re.sub(r"%Regex=[^%]*%", "523969", out)
+        for ph, v in (("%text%", "Code: 523969"), ("%sim%", "1"),
+                      ("%sentStamp%", "1700000000000"), ("%receivedStamp%", "1700000000500"),
+                      ("%battery%", "91"), ("%network%", "LTE")):
+            out = out.replace(ph, v)
+        body = json.loads(out)
+        assert body["kind"] == "contact" and body["code"] == "523969"
