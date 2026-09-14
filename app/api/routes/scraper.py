@@ -835,24 +835,34 @@ def _inbound_secret() -> str:
     return (getattr(settings, "otp_inbound_secret", "") or "").strip()
 
 
-async def _verify_forwarder(request: Request, raw: bytes) -> None:
-    """HMAC-SHA256 of the raw body in X-Signature, or the secret itself in
-    X-OTP-Secret. Constant-time on both. 503 when nothing is configured —
-    that is «feature off», not «bad credentials»."""
-    import hashlib
-    import hmac as _hmac
-    secret = _inbound_secret()
-    if not secret:
-        raise HTTPException(status_code=503, detail="OTP_INBOUND_SECRET is not configured")
-    sig = (request.headers.get("X-Signature") or "").strip().lower()
-    if sig:
-        want = _hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
-        if _hmac.compare_digest(sig, want):
-            return
-    plain = request.headers.get("X-OTP-Secret") or ""
-    if plain and _hmac.compare_digest(plain.encode("utf-8"), secret.encode("utf-8")):
-        return
-    raise HTTPException(status_code=401, detail="bad signature")
+async def _verify_forwarder(request: Request, raw: bytes, db=None,
+                            account: Optional[str] = None):
+    """Which phone is this, is it really that phone, and may it answer for
+    this Divar account.
+
+    X-Forwarder-Id names a device row and the check runs against THAT device's
+    own secret, so a phone can be revoked on its own and one person's handset
+    cannot answer another person's prompt. Without the header it falls back to
+    the single OTP_INBOUND_SECRET, which is what the phone configured before
+    any of this existed still sends.
+
+    Returns the ForwarderDevice, or None on the legacy path.
+    """
+    from app.services import forwarder as _fw
+
+    try:
+        device, _how = await _fw.authenticate(
+            db,
+            device_id=(request.headers.get("X-Forwarder-Id") or "").strip() or None,
+            raw=raw,
+            signature=(request.headers.get("X-Signature") or ""),
+            plain=(request.headers.get("X-OTP-Secret") or ""),
+            account=account,
+            legacy_secret=_inbound_secret(),
+        )
+        return device
+    except _fw.ForwarderAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
 
 
 async def _forwarder_rate_limit(request: Request, limit: int = 20) -> None:
@@ -893,13 +903,17 @@ def _mask_code(code: Optional[str]) -> str:
 
 
 @machine_router.post("/otp-inbound")
-async def otp_inbound(request: Request):
+async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     """A Divar SMS, forwarded from the phone that holds the SIM."""
     from app.scraper import otp_store
     from app.services import sms_log
 
     raw = await request.body()
-    await _verify_forwarder(request, raw)
+    # Rate limit first: it needs no credentials and it is the cheapest check.
+    # Then PARSE, because per-device authentication has to know which Divar
+    # account the code claims to be for — a device may only answer for
+    # accounts its owner owns. Parsing is validation with no side effects, and
+    # nothing acts on the body until the signature below has passed.
     await _forwarder_rate_limit(request)
     try:
         body = OtpInbound.model_validate_json(raw)
@@ -907,6 +921,8 @@ async def otp_inbound(request: Request):
         raise HTTPException(status_code=422, detail=f"bad body: {type(e).__name__}")
 
     now_ms = int(time.time() * 1000)
+    device = await _verify_forwarder(request, raw, db=db, account=body.account)
+
     # `code` is trusted only if it IS a code. A stock forwarder that does not
     # expand %Regex=…% sends the placeholder text itself, and handing that to
     # the browser would type «%Regex=Code:\s*(\d{6})%» into Divar's modal.
@@ -979,6 +995,13 @@ async def otp_inbound(request: Request):
     else:
         reason = "unknown_kind"
 
+    if device is not None:
+        from app.services import forwarder as _fw
+        # A delivery is the only proof the whole path works — a phone can
+        # heartbeat perfectly and never forward a code, which a wrong text
+        # filter does exactly. Recorded separately from «last seen».
+        await _fw.note_seen(db, device, delivered_code=bool(code))
+
     await sms_log.record(
         sms_log.INBOUND,
         (f"کد {kind or '?'} از {otp_store._digits(body.account) or '؟'} — "
@@ -1010,15 +1033,19 @@ _HB_ONLINE = 600       # ...and reads as offline after 10
 
 
 @machine_router.post("/forwarder-heartbeat")
-async def forwarder_heartbeat(request: Request):
+async def forwarder_heartbeat(request: Request, db: AsyncSession = Depends(get_db)):
     from app.scraper import otp_store
     raw = await request.body()
-    await _verify_forwarder(request, raw)
     await _forwarder_rate_limit(request)
     try:
         body = ForwarderHeartbeat.model_validate_json(raw)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"bad body: {type(e).__name__}")
+    device = await _verify_forwarder(request, raw, db=db, account=body.account)
+    if device is not None:
+        from app.services import forwarder as _fw
+        await _fw.note_seen(db, device, battery=body.battery,
+                            network=body.network, version=body.version)
     acct = otp_store._digits(body.account)
     if not acct:
         raise HTTPException(status_code=422, detail="account is required")

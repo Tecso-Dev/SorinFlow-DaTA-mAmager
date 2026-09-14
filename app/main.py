@@ -191,6 +191,11 @@ async def lifespan(app: FastAPI):
     # most of the time.
     from app.services.proxy_pool import refresh_loop as _proxy_refresh_loop
     proxy_task = asyncio.create_task(_proxy_refresh_loop())
+    # A forwarder fails silently by nature: the phone reports success to
+    # itself and the panel shows a prompt nobody answers. This tells the
+    # device's owner, once per outage, before a run needs the code.
+    from app.services.forwarder_watch import watch_loop as _fw_watch
+    forwarder_task = asyncio.create_task(_fw_watch())
 
     # Google Cloud export. Returns immediately when disabled, which is the
     # shipped default — and when enabled on a host that cannot reach Google it
@@ -209,6 +214,7 @@ async def lifespan(app: FastAPI):
     lease_task.cancel()
     session_task.cancel()
     proxy_task.cancel()
+    forwarder_task.cancel()
     gcp_task.cancel()
     from app.services.gcp import gcp_client as _gcp
     await _gcp.close()

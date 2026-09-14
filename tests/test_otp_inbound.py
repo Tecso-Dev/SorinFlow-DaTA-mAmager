@@ -131,11 +131,30 @@ class TestAuth:
 
     def test_the_signature_is_over_the_raw_body(self):
         """Re-serialising JSON changes byte order and whitespace; the check
-        must hash what came over the wire."""
-        import inspect
+        must hash what came over the wire.
+
+        Asserted on the argument rather than the whole call: verification now
+        also takes the session and the account, because a device may only
+        answer for an account its owner owns — but it is still `raw` that is
+        hashed, which is the thing this test is about."""
+        import inspect, re
         src = inspect.getsource(R.otp_inbound)
         assert "raw = await request.body()" in src
-        assert "_verify_forwarder(request, raw)" in src
+        m = re.search(r"_verify_forwarder\(\s*request,\s*raw\b", src)
+        assert m, "verification is not being handed the raw body"
+        # and the body is parsed from those same bytes, never re-serialised
+        assert "model_validate_json(raw)" in src
+
+    def test_authentication_happens_before_anything_acts_on_the_body(self):
+        """Parsing has to come first now — the account decides which device may
+        answer — so the guard is that nothing with an effect runs before the
+        signature check."""
+        import inspect
+        src = inspect.getsource(R.otp_inbound)
+        verify_at = src.index("_verify_forwarder(")
+        for effect in ("otp_store.submit(", "park_early_code(", "sms_log.record("):
+            assert src.index(effect) > verify_at, \
+                f"{effect} runs before the signature is checked"
 
 
 class TestMatchingByAccount:

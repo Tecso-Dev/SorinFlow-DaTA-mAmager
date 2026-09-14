@@ -770,7 +770,7 @@ function copyTotpSecret() {
 }
 
 // ═══ Hash router: #/login, #/dashboard, #/properties, ... ═══════
-const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'auth', 'proxies', 'users'];
+const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'auth', 'forwarder', 'proxies', 'users'];
 let _currentSection = null;
 let _intendedRoute = null;   // deep link requested before login
 let _suppressHashNav = false;
@@ -1043,6 +1043,7 @@ function showSection(sectionName) {
                            _initScraperDatePicker(); refreshDivarSessionCount();
                            setTimeout(restoreScraperForm, 200); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
+        case 'forwarder':  loadForwarders(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
         case 'insights':   insTab(_insTab); break;
@@ -3966,6 +3967,225 @@ function _proxyExitCell(p) {
     const note = ir ? '' : ' — برای دیوار مناسب نیست';
     return `<span class="badge ${cls}" title="${esc(p.exit_ip || '')}">${esc(p.exit_country)} · ${kind}</span>` +
            `<span class="small text-muted">${note}</span>`;
+}
+
+// ═══ SMS forwarder — my phones ══════════════════════════════════════════
+//
+// The whole point of this section is that somebody who has never heard of a
+// webhook can get their phone forwarding Divar's codes. So the guide is
+// filled in with THEIR values — their URL, their secret, their SIM — and
+// every field is one copy button away. Nothing here asks them to understand
+// what a payload template is.
+
+const FW_STATE = {
+    ok:           { cls: 'bg-success',                fa: 'سالم' },
+    offline:      { cls: 'bg-danger',                 fa: 'آفلاین' },
+    never_seen:   { cls: 'bg-secondary',              fa: 'هنوز وصل نشده' },
+    no_codes_yet: { cls: 'bg-warning text-dark',      fa: 'وصل، بدون کد' },
+    disabled:     { cls: 'bg-secondary',              fa: 'غیرفعال' },
+};
+
+function _fwAgo(sec) {
+    if (sec == null) return '—';
+    if (sec < 90) return 'همین الان';
+    if (sec < 3600) return `${formatNumber(Math.round(sec / 60))} دقیقه پیش`;
+    if (sec < 86400) return `${formatNumber(Math.round(sec / 3600))} ساعت پیش`;
+    return `${formatNumber(Math.round(sec / 86400))} روز پیش`;
+}
+
+async function loadForwarders() {
+    const tb = document.getElementById('forwarder-table');
+    if (!tb) return;
+    try {
+        const d = await apiCall('/forwarder/devices');
+        const rows = d.devices || [];
+        if (!rows.length) {
+            tb.innerHTML = `<tr><td colspan="6" class="text-muted small p-3">
+                هنوز گوشی‌ای اضافه نکرده‌اید. با «افزودن گوشی» شروع کنید —
+                بعد از آن راهنمای نصب با تنظیمات خودتان پر می‌شود.</td></tr>`;
+            document.getElementById('fw-guide-for').textContent = '—';
+            return;
+        }
+        tb.innerHTML = rows.map(dv => {
+            const h = dv.health || {};
+            const st = FW_STATE[h.state] || FW_STATE.never_seen;
+            return `<tr>
+                <td>${esc(dv.label || '—')}<div class="small text-muted" dir="ltr">${esc(dv.device_id)}</div></td>
+                <td dir="ltr">${esc(dv.sim_phone || '—')}</td>
+                <td><span class="badge ${st.cls}">${st.fa}</span>
+                    <div class="small text-muted">${esc(h.message_fa || '')}</div></td>
+                <td class="small">${_fwAgo(h.seconds_since_code)}</td>
+                <td class="small">${formatNumber(dv.codes_forwarded || 0)}</td>
+                <td class="text-nowrap">
+                  <button class="btn btn-sm btn-outline-primary" onclick="fwGuide(${dv.id})"
+                          title="راهنمای نصب و تنظیمات"><i class="bi bi-book"></i></button>
+                  <button class="btn btn-sm btn-outline-secondary" onclick="fwTest(${dv.id})"
+                          title="بررسی اتصال"><i class="bi bi-activity"></i></button>
+                  <button class="btn btn-sm btn-outline-warning" onclick="fwRotate(${dv.id})"
+                          title="کلید تازه (اگر گوشی گم شد)"><i class="bi bi-key"></i></button>
+                  <button class="btn btn-sm btn-outline-danger" onclick="fwDelete(${dv.id})"
+                          title="حذف"><i class="bi bi-trash"></i></button>
+                </td></tr>`;
+        }).join('');
+        // open the guide on the first device so a new user lands on it
+        if (rows.length && !document.getElementById('fw-guide-body').dataset.filled) {
+            fwGuide(rows[0].id);
+        }
+    } catch (e) {
+        tb.innerHTML = `<tr><td colspan="6" class="text-danger small p-3">${esc(e.message || 'خطا')}</td></tr>`;
+    }
+}
+
+async function addForwarderDevice() {
+    const label = prompt('اسم این گوشی چه باشد؟ (مثلاً: گوشی سبحان)');
+    if (label === null) return;
+    const sim = prompt('شمارهٔ سیم‌کارت داخل این گوشی — همان شماره‌ای که کد دیوار روی آن می‌آید:');
+    if (sim === null) return;
+    try {
+        const d = await apiCall('/forwarder/devices', {
+            method: 'POST',
+            body: JSON.stringify({ label: label.trim(), sim_phone: sim.trim() }),
+        });
+        showToast('اضافه شد', 'حالا راهنما را دنبال کنید', 'success');
+        await loadForwarders();
+        fwGuide(d.id);
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function fwTest(id) {
+    try {
+        const r = await apiCall(`/forwarder/devices/${id}/test`, { method: 'POST' });
+        showToast(r.ok ? 'سالم' : 'هنوز کامل نیست', r.hint_fa || '', r.ok ? 'success' : 'warning');
+        loadForwarders();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function fwRotate(id) {
+    if (!confirm('کلید تازه ساخته می‌شود و گوشی تا وارد کردن کلید جدید کار نمی‌کند. ادامه؟')) return;
+    try {
+        await apiCall(`/forwarder/devices/${id}/rotate`, { method: 'POST' });
+        showToast('کلید عوض شد', 'کلید تازه را در برنامهٔ گوشی بگذارید', 'warning');
+        await loadForwarders();
+        fwGuide(id);
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function fwDelete(id) {
+    if (!confirm('این گوشی حذف شود؟ کلیدش بلافاصله از کار می‌افتد.')) return;
+    try {
+        await apiCall(`/forwarder/devices/${id}`, { method: 'DELETE' });
+        showToast('حذف شد', '', 'success');
+        document.getElementById('fw-guide-body').dataset.filled = '';
+        loadForwarders();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+function _fwCopyRow(labelFa, value, hintFa) {
+    const id = 'fwv' + Math.random().toString(36).slice(2, 9);
+    return `<div class="mb-2">
+        <label class="form-label small mb-1">${esc(labelFa)}</label>
+        <div class="input-group input-group-sm">
+          <input class="form-control" id="${id}" dir="ltr" readonly value="${esc(value)}">
+          <button class="btn btn-outline-secondary" onclick="_fwCopy('${id}')">
+            <i class="bi bi-clipboard"></i> کپی
+          </button>
+        </div>
+        ${hintFa ? `<div class="form-text small">${esc(hintFa)}</div>` : ''}
+    </div>`;
+}
+
+function _fwCopy(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    navigator.clipboard.writeText(el.value)
+        .then(() => showToast('کپی شد', '', 'success'))
+        .catch(() => { el.select(); document.execCommand('copy'); });
+}
+
+async function fwGuide(id) {
+    const box = document.getElementById('fw-guide-body');
+    if (!box) return;
+    box.innerHTML = '<p class="text-muted small">در حال آماده‌سازی…</p>';
+    document.getElementById('fw-guide').classList.remove('d-none');
+    try {
+        const c = await apiCall(`/forwarder/devices/${id}/config`);
+        box.dataset.filled = '1';
+        document.getElementById('fw-guide-for').textContent = c.device.label || c.device.device_id;
+        const r1 = c.rules[0], r2 = c.rules[1];
+        const hdr = JSON.stringify(c.headers);
+
+        box.innerHTML = `
+        <ol class="fw-steps" style="padding-inline-start:1.2rem;line-height:2">
+          <li><b>برنامه را نصب کنید.</b>
+            <div class="mt-1 mb-2">
+              <a class="btn btn-sm btn-primary" href="${esc(c.android_apk_url)}">
+                <i class="bi bi-android2"></i> دانلود برای اندروید
+              </a>
+              <span class="badge bg-secondary-subtle text-secondary ms-2">
+                <i class="bi bi-apple"></i> ${esc(c.ios.message_fa)}
+              </span>
+            </div>
+            <div class="form-text small">
+              این برنامه در گوگل‌پلی نیست، چون پیامک‌ها را می‌خواند و گوگل برای این کار
+              اجازه نمی‌دهد. فایل را دانلود و نصب کنید؛ اگر گوشی هشدار داد، «نصب به هر حال» را بزنید.
+            </div>
+          </li>
+
+          <li><b>به برنامه اجازهٔ خواندن پیامک بدهید.</b>
+            <div class="form-text small">
+              اولین بار که باز می‌کنید می‌پرسد. اگر اشتباهی «نه» زدید:
+              تنظیمات گوشی ← برنامه‌ها ← SMS Forwarder ← مجوزها ← پیامک ← اجازه.
+            </div>
+          </li>
+
+          <li><b>نگذارید گوشی برنامه را ببندد.</b> <span class="text-danger small">(مهم‌ترین قدم)</span>
+            <div class="form-text small">
+              تنظیمات گوشی ← باتری ← SMS Forwarder ← «بدون محدودیت».
+              روی شیائومی «Autostart» را هم روشن کنید و برنامه را در لیست برنامه‌های باز قفل کنید.
+              اگر این کار را نکنید، گوشی بعد از چند ساعت برنامه را می‌بندد و کدها نمی‌رسند.
+            </div>
+          </li>
+
+          <li><b>در برنامه یک قانون بسازید</b> (دکمهٔ + گوشهٔ صفحه) و این‌ها را وارد کنید:
+            <div class="mt-2 p-2 rounded" style="background:var(--bs-secondary-bg,rgba(128,128,128,.08))">
+              ${_fwCopyRow('فرستنده (Sender)', '*', 'ستاره یعنی همهٔ پیامک‌ها — فیلتر متن کار جداسازی را می‌کند')}
+              ${_fwCopyRow('فیلتر متن (Text filter)', r1.text_filter, r1.why_fa)}
+              ${_fwCopyRow('آدرس (Webhook URL)', c.endpoints.inbound)}
+              ${_fwCopyRow('هدرها (Headers)', hdr, 'این شامل کلید مخصوص گوشی شماست — با کسی به اشتراک نگذارید')}
+              ${_fwCopyRow('قالب پیام (Json Payload Template)', r1.template)}
+              <div class="form-text small mt-2">
+                در «تنظیمات پیشرفته»: تعداد تلاش مجدد ${formatNumber(c.advanced_fa.retries)}،
+                «ذخیرهٔ پیام‌های ناموفق» روشن، «نادیده گرفتن خطای SSL» خاموش.
+                <br>${esc(c.advanced_fa.note)}
+              </div>
+            </div>
+          </li>
+
+          <li><b>دکمهٔ TEST را در برنامه بزنید.</b>
+            <div class="form-text small">
+              اگر جواب سبز گرفتید یعنی گوشی به سرور می‌رسد. بعد اینجا دکمهٔ
+              <i class="bi bi-activity"></i> را بزنید تا از این طرف هم تأیید شود.
+            </div>
+          </li>
+
+          <li><b>یک قانون دوم برای کد ورود بسازید</b> (اختیاری ولی بهتر است).
+            <div class="mt-2 p-2 rounded" style="background:var(--bs-secondary-bg,rgba(128,128,128,.08))">
+              ${_fwCopyRow('فیلتر متن', r2.text_filter, r2.why_fa)}
+              ${_fwCopyRow('قالب پیام', r2.template)}
+              <div class="form-text small">آدرس و هدرها همان قبلی است.</div>
+            </div>
+          </li>
+        </ol>
+
+        <div class="alert alert-secondary small mb-0 mt-2">
+          <b>اگر کدی نرسید چه؟</b> اسکرپر خودش دو بار از دیوار کد تازه می‌خواهد.
+          اگر باز هم نیامد، در پنجرهٔ کد دکمهٔ «ارسال دوباره کد» را بزنید.
+          وارد کردن دستی کد آخرین گزینه است — و اگر گوشی مشکل داشته باشد،
+          برایتان ایمیل می‌فرستیم و می‌گوییم چه چیزی را درست کنید.
+        </div>`;
+    } catch (e) {
+        box.innerHTML = `<p class="text-danger small">${esc(e.message || 'خطا')}</p>`;
+    }
 }
 
 async function loadProxies() {

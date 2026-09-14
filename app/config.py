@@ -166,6 +166,9 @@ class Settings(BaseSettings):
     proxy_enabled: bool = Field(default=False, env="PROXY_ENABLED")
     # Re-test every active proxy this often. 0 disables the loop.
     proxy_refresh_hours: float = Field(default=24.0, env="PROXY_REFRESH_HOURS")
+    # How often to check whether each registered phone is still forwarding.
+    # 0 disables the check and its emails.
+    forwarder_watch_minutes: float = Field(default=5.0, env="FORWARDER_WATCH_MINUTES")
 
     # ── automatic OTP intake from a phone-side SMS forwarder ──
     # Shared secret the forwarder signs each POST with (HMAC-SHA256 of the raw

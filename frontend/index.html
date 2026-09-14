@@ -352,6 +352,10 @@
                 <span class="nav-icon"><i class="bi bi-key"></i></span>
                 احراز هویت دیوار
             </a>
+            <a class="nav-item-link" onclick="showSection('forwarder')" id="nav-link-forwarder">
+                <span class="nav-icon"><i class="bi bi-phone-vibrate"></i></span>
+                فرستندهٔ پیامک
+            </a>
             <a class="nav-item-link" onclick="showSection('proxies')" id="nav-link-proxies">
                 <span class="nav-icon"><i class="bi bi-shield-check"></i></span>
                 پراکسی‌ها
@@ -1000,6 +1004,55 @@
             </div>
 
             <!-- ═══ PROXIES ══════════════════════ -->
+            <div id="section-forwarder" class="section-content" style="display:none;">
+
+              <div class="card mb-3">
+                <div class="card-header d-flex align-items-center gap-2">
+                  <i class="bi bi-phone-vibrate"></i> گوشی‌های من
+                  <button class="btn btn-sm btn-primary ms-auto" onclick="addForwarderDevice()">
+                    <i class="bi bi-plus-lg"></i> افزودن گوشی
+                  </button>
+                  <button class="btn btn-sm btn-outline-secondary" onclick="loadForwarders()">
+                    <i class="bi bi-arrow-clockwise"></i>
+                  </button>
+                </div>
+                <div class="card-body p-0">
+                  <div class="table-responsive">
+                    <table class="table table-sm mb-0 align-middle">
+                      <thead><tr>
+                        <th>نام</th><th>سیم‌کارت</th><th>وضعیت</th>
+                        <th>آخرین کد</th><th>تعداد کد</th><th>عملیات</th>
+                      </tr></thead>
+                      <tbody id="forwarder-table">
+                        <tr><td colspan="6" class="text-muted small p-3">در حال بارگذاری…</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <!-- the guide. Shown expanded for somebody with no device yet:
+                   the first question is always «how do I set this up». -->
+              <div class="card mb-3">
+                <div class="card-header d-flex align-items-center gap-2">
+                  <i class="bi bi-book"></i> راهنمای نصب — قدم به قدم
+                  <span class="badge bg-secondary-subtle text-secondary ms-2" id="fw-guide-for">—</span>
+                  <button class="btn btn-sm btn-outline-secondary ms-auto"
+                          onclick="document.getElementById('fw-guide').classList.toggle('d-none')">
+                    نمایش / پنهان
+                  </button>
+                </div>
+                <div class="card-body" id="fw-guide">
+                  <div id="fw-guide-body">
+                    <p class="text-muted small mb-0">
+                      اول یک گوشی اضافه کنید تا راهنما با تنظیمات خودتان پر شود.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
             <div id="section-proxies" class="section-content" style="display:none;">
                 <div class="row g-3">
                     <div class="col-md-4">

@@ -418,6 +418,33 @@ class ContactExtractor:
             from sqlalchemy import select
 
             async with async_session_maker() as db:
+                # Whose phone SHOULD have answered this, and what is wrong with
+                # it. The alert used to say only «a code is needed», which is
+                # the one thing the reader can already see; what they cannot
+                # see is that their handset went offline forty minutes ago.
+                fw_line = ""
+                try:
+                    from app.services import forwarder as _fw
+                    from app.models.forwarder import ForwarderDevice as _FD
+                    devs = (await db.execute(select(_FD).where(
+                        _FD.is_active == True))).scalars().all()   # noqa: E712
+                    mine = [d for d in devs
+                            if _fw.same_phone(d.sim_phone, self.account_phone)]
+                    if not mine:
+                        fw_line = ("\n\nهیچ گوشی‌ای برای این شماره ثبت نشده — "
+                                   "با ثبت آن در پنل، کدها خودکار وارد می‌شوند.")
+                    else:
+                        d = mine[0]
+                        h = _fw.health(d)
+                        if h["state"] != "ok":
+                            fw_line = (f"\n\nفرستندهٔ پیامک «{d.label or d.device_id}» "
+                                       f"مشکل دارد: {h['message_fa']}")
+                        else:
+                            fw_line = ("\n\nفرستندهٔ پیامک سالم است ولی این کد نرسید — "
+                                       "شاید پیامک دیر رسیده. «ارسال دوباره کد» را بزنید.")
+                except Exception as _fe:
+                    logger.debug(f"[otp] could not describe the forwarder: {_fe}")
+
                 # EVERY admin with an address, not one of them.
                 #
                 # This was .limit(1) with no ORDER BY: one admin, chosen by
@@ -467,7 +494,8 @@ class ContactExtractor:
                     f"اسکرپر برای گرفتن شمارهٔ تماس به کد تأیید دیوار نیاز دارد "
                     f"و {int(waited)} ثانیه است منتظر مانده.\n\n"
                     f"شمارهٔ حساب: {self.account_phone or '—'}\n\n"
-                    "برای ادامه، وارد پنل شوید و در بخش «اسکرپر» کد پیامک‌شده را "
+                    + fw_line +
+                    "\n\nبرای ادامه، وارد پنل شوید و در بخش «اسکرپر» کد پیامک‌شده را "
                     "وارد کنید. تا آن زمان اسکرپ متوقف می‌ماند و آگهی‌ها بدون "
                     "شمارهٔ تماس ذخیره نمی‌شوند."
                 )

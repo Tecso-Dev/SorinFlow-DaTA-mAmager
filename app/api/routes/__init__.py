@@ -4,7 +4,7 @@ SorinFlow Divar Scraper - API Routes
 from fastapi import APIRouter, Depends
 from app.api.routes import (
     properties, scraper, auth, stats, proxies, crm, users, filing,
-    public_auth, portal, gcp, monitoring, sms, email,
+    public_auth, portal, gcp, monitoring, sms, email, forwarder
 )
 from app.auth.dependencies import require_permission, get_staff_user
 
@@ -50,4 +50,8 @@ router.include_router(filing.router, prefix="/filing", tags=["Filing"], dependen
 router.include_router(monitoring.router, prefix="/monitoring", tags=["Monitoring"], dependencies=_perm("monitoring"))
 router.include_router(gcp.router, prefix="/gcp", tags=["Google Cloud"], dependencies=_perm("monitoring"))
 router.include_router(sms.router, prefix="/sms", tags=["SMS"], dependencies=_perm("sms"))
+# Each route is already scoped to the caller's own rows; the permission
+# decides whether the SECTION exists for them at all. divar_auth, because a
+# forwarder exists to serve a Divar session and the two are owned together.
+router.include_router(forwarder.router, prefix="/forwarder", tags=["SMS Forwarder"], dependencies=_perm("divar_auth"))
 router.include_router(email.router, prefix="/email", tags=["Email"], dependencies=_perm("email"))
