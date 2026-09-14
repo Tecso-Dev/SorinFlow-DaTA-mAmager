@@ -1093,7 +1093,9 @@ class TestDivarDoesTheFilteringItCanDo:
     def test_a_query_that_cannot_be_built_does_not_stop_the_run(self):
         src = _run_src()
         i = src.index("build_search_query(")
-        assert "except Exception" in src[i:i + 900]
+        # bounded by the except's own body rather than a character count —
+        # the block grew when the API form was added beside the query string
+        assert "except Exception" in src[i:src.index('self._search_query = ""', i)]
 
 
 class TestARunKilledByADeploySaysSo:

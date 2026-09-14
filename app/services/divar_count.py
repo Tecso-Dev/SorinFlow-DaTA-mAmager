@@ -9,7 +9,7 @@ every ad in the city.
 Everything here except fetch_post_count() is pure and testable: the slug and
 filter mapping is the part that can silently go wrong.
 """
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from loguru import logger
@@ -218,3 +218,117 @@ async def fetch_post_count(city: str, form_data: Dict[str, Any]) -> Tuple[Option
         if count is None:
             return None, "دیوار تعداد را برنگرداند"
         return int(count), None
+
+
+# ── the listings themselves, over the same request ─────────────────────────
+#
+# The same POST that answers «how many» returns the first 24 listings and a
+# cursor for the next 24. Paging it is one request per 24 ads over plain
+# HTTP — no browser, no session, no scrolling — because the search page is
+# public and this is exactly what Divar's own frontend sends.
+#
+# It is the reason the scraper no longer spends minutes scrolling a listing
+# page before it opens its first ad. That phase — a real Chromium walking the
+# feed with a five-second sleep per batch, then six empty cycles to confirm
+# the end — was the whole of «the wait before the first listing»: two and a
+# half minutes on the run that prompted this, ten on another. The same pool
+# is here in about two seconds.
+
+_PAGE_PAUSE = 0.35     # between pages: a person does not page faster than this
+_MAX_PAGES = 80        # 24 a page; more than this is not a run, it is a mirror
+
+
+def _row_from_widget(w: dict) -> Optional[dict]:
+    """One POST_ROW widget → the listing shape the scraper walks."""
+    if not isinstance(w, dict) or w.get("widget_type") != "POST_ROW":
+        return None
+    d = w.get("data") or {}
+    token = d.get("token") or ((d.get("action") or {}).get("payload") or {}).get("token")
+    if not token or not isinstance(token, str):
+        return None
+    # Everything Divar put on the card, kept: the title feeds the category
+    # check, and the description lines carry the deposit/rent at no cost.
+    descs = [d.get(k) for k in ("top_description_text", "middle_description_text",
+                                "bottom_description_text") if d.get(k)]
+    return {
+        "divar_id": token,
+        "url": f"https://divar.ir/v/{token}",
+        "title": (d.get("title") or "")[:200] or None,
+        "descriptions": descs,
+    }
+
+
+def _cursor_day(pagination: dict):
+    """The date of the last post on this page, from the cursor, or None."""
+    from datetime import datetime
+    raw = ((pagination or {}).get("data") or {}).get("last_post_date")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).date()
+    except Exception:
+        return None
+
+
+async def fetch_listings(city: str, form_data: Dict[str, Any], *,
+                         target: int, until_day=None,
+                         on_page=None) -> Tuple[List[dict], Optional[str]]:
+    """(listings, error). Page Divar's search until `target` listings are in
+    hand, or — with `until_day` — until the feed's cursor moves past that day.
+
+    Never raises. An error is returned as a sentence so the caller can fall
+    back to the browser and say why.
+    """
+    import asyncio
+
+    out: List[dict] = []
+    seen = set()
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        city_id = await resolve_city_id(city, client)
+        if not city_id:
+            return out, f"شهر «{city}» در دیوار پیدا نشد"
+        body: Dict[str, Any] = {
+            "city_ids": [str(city_id)],
+            "search_data": {"form_data": {"data": form_data}},
+        }
+        headers = {"User-Agent": _UA, "Content-Type": "application/json",
+                   "Accept": "application/json"}
+        for page in range(1, _MAX_PAGES + 1):
+            try:
+                resp = await client.post(SEARCH_URL, json=body, headers=headers)
+            except Exception as e:
+                return out, f"دیوار پاسخ نداد: {e}"
+            if resp.status_code != 200:
+                return out, f"دیوار خطا داد ({resp.status_code})"
+            try:
+                payload = resp.json()
+            except Exception:
+                return out, "پاسخ دیوار قابل خواندن نبود"
+
+            fresh = 0
+            for w in payload.get("list_widgets") or []:
+                row = _row_from_widget(w)
+                if row and row["divar_id"] not in seen:
+                    seen.add(row["divar_id"])
+                    out.append(row)
+                    fresh += 1
+            if on_page:
+                try:
+                    await on_page(page, fresh, len(out))
+                except Exception:
+                    pass
+
+            pagination = payload.get("pagination") or {}
+            if until_day is not None:
+                day = _cursor_day(pagination)
+                if day is not None and day < until_day:
+                    break                       # the feed has moved past the day
+            elif len(out) >= target:
+                break
+            if not pagination.get("has_next_page") or not pagination.get("data"):
+                break
+            if fresh == 0:
+                break                           # a stuck cursor; do not spin
+            body["pagination_data"] = pagination["data"]
+            await asyncio.sleep(_PAGE_PAUSE)
+    return (out if until_day is not None else out[:target]), None

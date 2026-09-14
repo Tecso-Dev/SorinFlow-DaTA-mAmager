@@ -1219,6 +1219,47 @@ class DivarScraper:
         all_listings: List[Dict[str, Any]] = []
         seen_ids: set = set()
 
+        # Strategy 0: the search API over plain HTTP, no browser.
+        #
+        # «زمان تا اولین آگهی ۲:۳۰ دقیقه طول کشید و خیلی زیاده.» That time was
+        # the browser walking the listing page — a real Chromium scrolling the
+        # feed a batch at a time. The same feed is one POST per 24 listings to
+        # the API the count already uses, public, sessionless, and back in a
+        # couple of seconds for a whole city. So it goes first, and the walk
+        # below is kept only for the day the API's shape changes underneath
+        # us: an empty answer here falls through to it, with the reason logged.
+        form = getattr(self, "_search_form", None)
+        if form is not None:
+            from app.services import divar_count as _dc
+            from app.services import job_log as _jl
+            job_id = getattr(self, "_job_id_str", None)
+
+            async def _progress(page, fresh, total):
+                logger.info(f"[api] page {page}: +{fresh} → {total}")
+
+            listings, err = await _dc.fetch_listings(
+                city, form, target=target_count, until_day=until_day,
+                on_page=_progress)
+            if listings:
+                for lst in listings:
+                    if lst['divar_id'] not in seen_ids:
+                        seen_ids.add(lst['divar_id'])
+                        all_listings.append(lst)
+                self._collect_stop = ("exhausted", None) if (
+                    until_day is not None or len(all_listings) < target_count) else ("target", None)
+                logger.info(f"[robust] API-first: {len(all_listings)} listings, no browser walk")
+                if job_id:
+                    await _jl.record(job_id, _jl.PAGE,
+                                     f"{len(all_listings)} آگهی از API دیوار جمع شد — بدون پیمایش مرورگر",
+                                     collected=len(all_listings), via="api")
+                return all_listings if until_day is not None else all_listings[:target_count]
+            logger.warning(f"[robust] API-first returned nothing ({err or 'empty'}) — "
+                           "falling back to the browser walk")
+            if job_id:
+                await _jl.record(job_id, _jl.PAGE,
+                                 f"API دیوار آگهی نداد ({err or 'خالی'}) — به پیمایش مرورگر برمی‌گردیم",
+                                 level="warning")
+
         # Strategy 1: live DOM extraction (independent of API response format).
         # Bounded on purpose: this phase scrolls a real browser and its cost
         # grows with the target (max_scrolls = target/2), while the API phase
@@ -3577,6 +3618,17 @@ class DivarScraper:
             try:
                 from app.services.divar_count import build_search_query
                 self._search_query = build_search_query(
+                    advertiser_type=advertiser_type, has_images=has_images,
+                    min_price=min_price, max_price=max_price,
+                    min_deposit=min_deposit, max_deposit=max_deposit,
+                    min_rent=min_rent, max_rent=max_rent,
+                    min_area=min_area, max_area=max_area,
+                )
+                # The same filters in the shape the search API takes, for the
+                # collection that no longer needs a browser.
+                from app.services.divar_count import build_form_data as _bfd
+                self._search_form = _bfd(
+                    category,
                     advertiser_type=advertiser_type, has_images=has_images,
                     min_price=min_price, max_price=max_price,
                     min_deposit=min_deposit, max_deposit=max_deposit,
