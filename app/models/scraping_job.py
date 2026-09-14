@@ -41,6 +41,12 @@ class ScrapingJob(Base):
     # fault, so a run that ran out of listings has to say that it did. Not an
     # error — a completed job with nothing wrong still fills this in.
     finish_reason = Column(String(300))
+    # How the run was started, in full, so it can be continued. The START
+    # line in the log only says that it began.
+    config = Column(JSON)
+    # The run this one continues, if any — so the panel can show the chain
+    # and a person can see «this is the third attempt at that».
+    resumed_from = Column(UUID(as_uuid=True), nullable=True)
 
     # Timestamps
     started_at = Column(DateTime(timezone=True))
@@ -72,7 +78,9 @@ class ScrapingJob(Base):
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "progress": self.progress
+            "progress": self.progress,
+            "resumed_from": str(self.resumed_from) if self.resumed_from else None,
+            "can_resume": bool(self.config) and self.status in ("failed", "cancelled", "completed")
         }
     
     @property

@@ -235,6 +235,68 @@ async def start_scraping_job(
     current_user: User = Depends(get_current_user),
 ):
     """Start a new scraping job"""
+    return await _launch_job(job_config, background_tasks, db, current_user)
+
+
+@router.post("/jobs/{job_id}/resume", response_model=ScrapingJobResponse)
+async def resume_scraping_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Continue a run that stopped — a restart, a cancel, a failure.
+
+    A new run with the old run's exact settings, linked back to it. New rather
+    than revived on purpose: the old row's counters and log are the record of
+    what happened, and a run that carries on inside them would blur where the
+    first one ended. Continuing is what property_exists already does — every
+    listing the earlier run saved with a number is skipped, every one it did
+    not is tried again — so the second run starts where the first one left
+    off without either of them having to remember a position.
+    """
+    from app.services import job_log
+
+    job_uuid = await _job_uuid_from(job_id, db)
+    job = (await db.execute(
+        select(ScrapingJob).where(ScrapingJob.job_id == job_uuid))).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status in ("running", "paused", "pending"):
+        raise HTTPException(status_code=409, detail="این اسکرپ هنوز در حال اجراست")
+    if not job.config:
+        raise HTTPException(
+            status_code=409,
+            detail="این اسکرپ پیش از افزوده‌شدن «ادامه» اجرا شده و تنظیماتش ذخیره نشده — "
+                   "با همان فیلترها یک اسکرپ تازه شروع کنید")
+
+    cfg = dict(job.config)
+    owner = cfg.pop("owner_user_id", None)
+    if owner and current_user and current_user.id != owner \
+            and (current_user.role or "") not in ("root", "super_admin"):
+        raise HTTPException(status_code=403, detail="این اسکرپ را کاربر دیگری شروع کرده است")
+
+    config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
+                                  if k in ScrapingJobCreate.model_fields})
+    resp = await _launch_job(config, background_tasks, db, current_user,
+                             resumed_from=job.job_id)
+    await job_log.record(
+        resp.job_id, job_log.START,
+        f"ادامهٔ اسکرپ {str(job.job_id)[:8]} — آگهی‌های ذخیره‌شدهٔ آن رد می‌شوند",
+        resumed_from=str(job.job_id))
+    return resp
+
+
+async def _launch_job(
+    job_config: ScrapingJobCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession,
+    current_user: Optional[User],
+    resumed_from=None,
+) -> ScrapingJobResponse:
+    """Validate, record and start one run. Shared by start and resume so the
+    two cannot drift — a resume that skipped a check the start makes would be
+    the side door."""
     
     active = {k: v for k, v in job_config.model_dump().items() if v is not None and k not in ('city', 'category', 'max_items', 'download_images', 'divar_phone')}
     logger.info(f"Scraping job request — city={job_config.city} category={job_config.category} max_items={job_config.max_items} images={job_config.download_images} filters={active}")
@@ -277,11 +339,16 @@ async def start_scraping_job(
             detail="Too many running jobs. Please wait for existing jobs to complete."
         )
     
-    # Create job record
+    # Create job record. The config goes on the row so the run can be
+    # continued later: «ادامه» has to know what the run was, and the log's
+    # START line only says that it began.
     job = ScrapingJob(
         status="pending",
         divar_phone=job_config.divar_phone or None,
-        created_at=datetime.now()
+        created_at=datetime.now(),
+        config={**job_config.model_dump(),
+                "owner_user_id": current_user.id if current_user else None},
+        resumed_from=resumed_from,
     )
     db.add(job)
     await db.commit()
@@ -402,6 +469,8 @@ async def get_scraping_jobs(
             failed_items=j.failed_items,
             error_message=j.error_message,
             progress=j.progress,
+            resumed_from=str(j.resumed_from) if j.resumed_from else None,
+            can_resume=bool(j.config) and j.status in ("failed", "cancelled", "completed"),
             started_at=j.started_at,
             completed_at=j.completed_at,
             created_at=j.created_at
@@ -554,6 +623,8 @@ async def get_scraping_job(
         failed_items=job.failed_items,
         error_message=job.error_message,
         progress=job.progress,
+        resumed_from=str(job.resumed_from) if job.resumed_from else None,
+        can_resume=bool(job.config) and job.status in ("failed", "cancelled", "completed"),
         started_at=job.started_at,
         completed_at=job.completed_at,
         created_at=job.created_at

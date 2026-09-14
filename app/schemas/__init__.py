@@ -176,6 +176,8 @@ class ScrapingJobResponse(BaseModel):
     # job that scraped a day smaller than its cap fills this in too.
     finish_reason: Optional[str] = None
     progress: float = 0.0
+    resumed_from: Optional[str] = None      # the run this one continues
+    can_resume: bool = False                 # settings stored, and not running
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None

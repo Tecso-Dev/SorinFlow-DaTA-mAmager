@@ -116,6 +116,7 @@ async def init_db():
                  _migrate_filing,
                  _migrate_advertiser_type,
                  _migrate_advertiser_signals,
+                 _migrate_job_resume,
                  _migrate_contact_channel,
                  _migrate_cookie_owner,
                  _backfill_cookie_owner,
@@ -244,6 +245,20 @@ async def _migrate_sms_panel(conn):
             "ON crm_sms_logs (campaign, sent_at DESC)"))
     except Exception as e:
         print(f"SMS panel migration skipped: {e}")
+
+
+async def _migrate_job_resume(conn):
+    """What a run needs in order to be continued: its own settings, and the
+    run it continues. Rows from before land NULL and the resume endpoint says
+    so rather than inventing a config."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE scraping_jobs "
+            "ADD COLUMN IF NOT EXISTS config JSON, "
+            "ADD COLUMN IF NOT EXISTS resumed_from UUID"))
+    except Exception as e:
+        print(f"job resume migration skipped: {e}")
 
 
 async def _migrate_contact_channel(conn):

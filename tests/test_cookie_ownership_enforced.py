@@ -99,7 +99,8 @@ class TestRotationStaysInsideThePool:
         assert "current_user" in params
 
     def test_it_is_passed_to_the_background_task(self):
-        src = inspect.getsource(scraper_routes.start_scraping_job)
+        # the body lives in _launch_job, which start and resume share
+        src = inspect.getsource(scraper_routes._launch_job)
         assert "current_user.id if current_user else None" in src
 
     def test_the_pool_query_filters_on_it(self):
@@ -145,14 +146,14 @@ class TestTheSideDoor:
     def test_a_named_number_must_be_the_callers(self):
         """A run that starts ON a given number never consults the pool for
         its first account, so this is the only place that check can live."""
-        src = inspect.getsource(scraper_routes.start_scraping_job)
+        src = inspect.getsource(scraper_routes._launch_job)
         assert "به حساب کاربری شما تعلق ندارد" in src
         assert "status_code=403" in src
 
     def test_an_admin_may_still_name_any_number(self):
-        src = inspect.getsource(scraper_routes.start_scraping_job)
+        src = inspect.getsource(scraper_routes._launch_job)
         assert '("root", "super_admin")' in src
 
     def test_it_compares_digits_not_strings(self):
-        src = inspect.getsource(scraper_routes.start_scraping_job)
+        src = inspect.getsource(scraper_routes._launch_job)
         assert "ch.isdigit()" in src

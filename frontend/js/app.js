@@ -3014,6 +3014,22 @@ async function loadScraperLog() {
     }
 }
 
+/* «ادامه» — a stopped run, picked up where it left off.
+ *
+ * A new run with the old one's exact settings. Nothing has to remember a
+ * position: every listing the earlier run saved with a number is skipped by
+ * the same rule that skips duplicates, so the second run starts at the first
+ * listing the first one did not finish.                                     */
+async function resumeJob(jobId) {
+    try {
+        const r = await apiCall(`/scraper/jobs/${encodeURIComponent(jobId)}/resume`, { method: 'POST' });
+        showToast('ادامه', `اسکرپ از همان‌جا ادامه یافت: ${r.job_id}`, 'success');
+        loadJobs();
+    } catch (e) {
+        showToast('خطا', e.message, 'danger');
+    }
+}
+
 async function cancelJob(jobId) {
     if (!confirm('آیا از لغو این تسک اطمینان دارید؟')) return;
 
@@ -3307,6 +3323,8 @@ function _renderJobsTable(items) {
             <td>${esc(job.city_name) || '—'}</td>
             <td>
                 <span class="badge ${statusClass}">${statusLabel}</span>
+                ${job.resumed_from ? `<div class="text-muted" style="font-size:.66rem" title="این اجرا ادامهٔ اجرای قبلی است">
+                    <i class="bi bi-arrow-return-left"></i> ادامهٔ ${esc(String(job.resumed_from).slice(0, 8))}</div>` : ''}
                 ${job.finish_reason ? `
                     <div style="font-size:.68rem;color:var(--text-muted,#aaa);margin-top:.3rem;max-width:190px;line-height:1.5;">
                         ${esc(job.finish_reason)}
@@ -3345,6 +3363,12 @@ function _renderJobsTable(items) {
                     <button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.job_id}')"
                             title="لغو تسک">
                         <i class="bi bi-stop-fill"></i>
+                    </button>
+                ` : ''}
+                ${job.can_resume ? `
+                    <button class="btn btn-sm btn-outline-primary" onclick="resumeJob('${job.job_id}')"
+                            title="ادامه از همان‌جا — آگهی‌های ذخیره‌شده رد می‌شوند">
+                        <i class="bi bi-play-fill"></i>
                     </button>
                 ` : ''}
             </td>
