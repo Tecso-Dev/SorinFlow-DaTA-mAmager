@@ -127,7 +127,13 @@ def parse_search_url(url: str) -> Dict[str, Any]:
     ignored: List[str] = list(out["ignored"])
 
     for key, values in query.items():
-        value = (values[-1] or "").strip()
+        # Divar writes list-valued filters comma-separated WITH a trailing
+        # comma: «business-type=personal,». Read literally, «personal,» is
+        # not «personal», and the one filter that most changes the count —
+        # 702 ads for everyone against 185 for personal, on the same search —
+        # silently fell off the link. Split, drop the empties, keep the first.
+        parts = [p.strip() for p in (values[-1] or "").split(",") if p.strip()]
+        value = parts[0] if parts else ""
         if not value or key in _NOISE:
             continue
         if key in _RANGES:

@@ -261,3 +261,34 @@ class TestTheBoxFollowsThePanelTheme:
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         css = open(os.path.join(root, "frontend/css/style.css"), encoding="utf-8").read()
         assert css.count("--surface2:") >= 2
+
+
+class TestDivarsTrailingComma:
+    """Divar writes list-valued filters comma-separated WITH a trailing comma.
+    The real link: «business-type=personal%2C». Read literally, «personal,»
+    matched nothing, the advertiser filter fell off, and the estimate for
+    that search said 701 where Divar's own page said 186 — the same search
+    with and without «شخصی», straight from Divar's API: 702 vs 185."""
+
+    def test_the_real_link_carries_the_advertiser(self):
+        got = parse_search_url(
+            "https://divar.ir/s/urmia/rent-residential"
+            "?bbox=44.6289711%2C37.1391678%2C45.6484299%2C37.7174263"
+            "&business-type=personal%2C&credit=400000000-600000000")
+        assert got["filters"]["advertiser_type"] == "personal"
+
+    def test_the_agency_value_with_a_trailing_comma(self):
+        got = parse_search_url("https://divar.ir/s/urmia/rent-apartment?business-type=real-estate-business%2C")
+        assert got["filters"]["advertiser_type"] == "agency"
+
+    def test_a_range_with_a_trailing_comma_still_parses(self):
+        got = parse_search_url("https://divar.ir/s/urmia/rent-apartment?credit=400000000-600000000%2C")
+        assert got["filters"]["max_deposit"] == 600000000
+
+    def test_the_bbox_was_never_the_reason(self):
+        """It covered the whole city and Divar's API gave the same count with
+        and without it; it is still reported as not carried, which is true."""
+        got = parse_search_url(
+            "https://divar.ir/s/urmia/rent-residential?bbox=44.6%2C37.1%2C45.6%2C37.7&business-type=personal%2C")
+        assert "محدودهٔ نقشه" in got["ignored"]
+        assert got["filters"]["advertiser_type"] == "personal"
