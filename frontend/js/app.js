@@ -5962,10 +5962,24 @@ async function loadUsers() {
                    <span class="badge ${ok ? 'bg-success' : 'bg-warning text-dark'}"
                          title="${ok ? okText : noText}">${ok ? '✓' : '!'}</span>
                  </div>`;
+            // Issue #13. Both recovery paths — password reset and the email
+            // second factor — refuse an account with no address, correctly:
+            // enabling a factor an account cannot receive would lock it out.
+            // But that leaves a super_admin with no address and no way back
+            // except psql, and nothing on this screen said so. A privileged
+            // account you cannot recover is a latent lockout; name it here,
+            // where the person who can fix it is already looking.
+            const privileged = ['root', 'super_admin', 'admin'].includes(u.role);
+            const noRecovery = privileged && !(u.email || '').trim() && u.is_active;
             const contact =
                 (tick(u.phone, u.phone_verified, 'شماره با پیامک تأیید شده', 'شماره تأیید نشده — کدی با پیامک ارسال نشده است') +
                  tick(u.email, u.email_verified, 'ایمیل تأیید شده', 'ایمیل تأیید نشده'))
                 || '<span class="text-muted small">---</span>';
+            const recoveryWarning = noRecovery ? `
+                <div class="badge bg-danger mt-1" style="white-space:normal;text-align:right"
+                     title="بازنشانی رمز و تأیید دومرحله‌ای هر دو به ایمیل نیاز دارند. بدون آن، اگر رمز این حساب گم شود تنها راه برگشت پایگاه داده است.">
+                    <i class="bi bi-exclamation-triangle"></i> بدون ایمیل — قابل بازیابی نیست
+                </div>` : '';
 
             const row = document.createElement('tr');
             row.innerHTML = `
@@ -5980,7 +5994,7 @@ async function loadUsers() {
                         <i class="bi bi-pencil-square"></i>
                     </button>
                 </td>
-                <td>${contact}</td>
+                <td>${contact}${recoveryWarning}</td>
                 <td>
                     <span class="badge ${u.is_active ? 'bg-success' : 'bg-secondary'}">
                         ${u.is_active ? 'فعال' : 'غیرفعال'}
