@@ -27,7 +27,7 @@ SCRAPER = open(os.path.join(ROOT, "app/scraper/divar_scraper.py"),
 
 from app.scraper.divar_scraper import DivarScraper  # noqa: E402
 
-SAVE = inspect.getsource(DivarScraper.save_property)
+SAVE = inspect.getsource(DivarScraper._save_property_attempt)  # the body lives in _save_property_attempt; save_property is the retry wrapper (#10)
 
 
 class TestEveryWayASaveGivesUpIsNamed:

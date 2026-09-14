@@ -236,7 +236,7 @@ class TestTheScraperRecordsBeforeItOverwrites:
     def test_the_capture_precedes_the_overwrite(self):
         import inspect
         from app.scraper.divar_scraper import DivarScraper
-        src = inspect.getsource(DivarScraper.save_property)
+        src = inspect.getsource(DivarScraper._save_property_attempt)  # the body lives in _save_property_attempt; save_property is the retry wrapper (#10)
         assert src.index("_record_price_move") < src.index("setattr(existing, key, value)")
 
     def test_it_only_records_a_real_change(self):

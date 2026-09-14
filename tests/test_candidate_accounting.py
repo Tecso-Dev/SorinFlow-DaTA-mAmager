@@ -156,7 +156,7 @@ class TestNewMeansCreatedAndUpdatedMeansAlreadyHeld:
     def test_save_property_reports_which_it_did(self):
         import inspect
         from app.scraper.divar_scraper import DivarScraper
-        src = inspect.getsource(DivarScraper.save_property)
+        src = inspect.getsource(DivarScraper._save_property_attempt)  # the body lives in _save_property_attempt; save_property is the retry wrapper (#10)
         assert "self._last_save_created = True" in src, "the insert branch does not report"
         assert "self._last_save_created = False" in src, "the update branch does not report"
 

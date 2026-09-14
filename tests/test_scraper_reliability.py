@@ -902,7 +902,7 @@ class TestAStoredListingWithNoPhoneIsAGapNotADuplicate:
         """Re-scraping is pointless if the phone lands in a new row."""
         import inspect
         from app.scraper.divar_scraper import DivarScraper
-        src = inspect.getsource(DivarScraper.save_property)
+        src = inspect.getsource(DivarScraper._save_property_attempt)  # the body lives in _save_property_attempt; save_property is the retry wrapper (#10)
         assert "existing" in src
 
 

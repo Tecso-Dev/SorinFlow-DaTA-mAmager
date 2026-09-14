@@ -48,6 +48,35 @@ from app.scraper.parsers import (
 settings = get_settings()
 
 
+class _DroppedConnection(Exception):
+    """A save that failed because the database connection went away — the
+    one save failure a retry can fix. Carries the original."""
+
+    def __init__(self, cause: BaseException):
+        super().__init__(str(cause))
+        self.cause = cause
+
+
+def _is_dropped_connection(e: BaseException) -> bool:
+    """Is this the socket's fault rather than the statement's?
+
+    InterfaceError is the driver reporting the connection gone underneath a
+    statement. PendingRollbackError is the session still holding the
+    transaction that died — the first error's aftermath, not a new one.
+    OperationalError covers the server closing it (idle_in_transaction
+    timeout, restart). DBAPIError flags the same thing generically.
+    """
+    from sqlalchemy.exc import (DBAPIError, InterfaceError, OperationalError,
+                                PendingRollbackError)
+    if isinstance(e, (InterfaceError, OperationalError, PendingRollbackError)):
+        return True
+    if isinstance(e, DBAPIError) and getattr(e, "connection_invalidated", False):
+        return True
+    name = type(e).__name__
+    return name in ("ConnectionDoesNotExistError", "ConnectionResetError",
+                    "InterfaceError", "ConnectionRefusedError")
+
+
 class DivarScraper:
     """Main scraper class for Divar.ir real estate listings"""
 
@@ -3147,12 +3176,44 @@ class DivarScraper:
             return False
     
     async def save_property(self, property_data: Dict[str, Any]) -> Optional[Property]:
-        """Save property to database.
+        """Save property to database, surviving a dropped connection.
 
-        Sets _last_save_error on every path that gives up, so the run can put
-        the reason on the skipped row. Six listings came back as «ذخیره نشد»
-        with nothing else, and «ذخیره نشد» is the observation, not the cause.
+        Issue #10: run 92 scraped 144 listings and lost five AT THE SAVE —
+        three InterfaceError, two PendingRollbackError. Those are one fault
+        seen twice: the connection going away under an in-flight statement,
+        and then the session still holding the transaction that just died.
+        The listing had been fully scraped; a reveal had been spent on it; and
+        it was counted «failed» over a socket.
+
+        With NullPool the next statement after a rollback opens a fresh
+        connection, so one retry on a clean session is the whole fix. Only
+        connection-class errors are retried — a constraint violation would
+        fail the same way twice and is not a socket's fault.
         """
+        for attempt in (1, 2):
+            try:
+                return await self._save_property_attempt(property_data)
+            except _DroppedConnection as e:
+                try:
+                    await self.db_session.rollback()
+                except Exception:
+                    pass
+                if attempt == 1:
+                    logger.warning(
+                        f"[save] connection dropped mid-save "
+                        f"({type(e.cause).__name__}) — retrying on a fresh one")
+                    await asyncio.sleep(0.5)
+                    continue
+                logger.error(f"[save] dropped twice: {e.cause}")
+                self._last_save_error = f"{type(e.cause).__name__} (×2)"
+                return None
+        return None
+
+    async def _save_property_attempt(self, property_data: Dict[str, Any]) -> Optional[Property]:
+        """One attempt. Sets _last_save_error on every path that gives up, so
+        the run can put the reason on the skipped row — «ذخیره نشد» is the
+        observation, not the cause. Raises _DroppedConnection for the one
+        kind of failure the caller can do something about."""
         self._last_save_error = None
         # Which of the two things this call did. The caller cannot tell from
         # the returned Property — an update and an insert both return a row —
@@ -3234,6 +3295,8 @@ class DivarScraper:
                 return new_property
                 
         except Exception as e:
+            if _is_dropped_connection(e):
+                raise _DroppedConnection(e)
             logger.error(f"Failed to save property: {e}")
             self._last_save_error = type(e).__name__
             await self.db_session.rollback()
