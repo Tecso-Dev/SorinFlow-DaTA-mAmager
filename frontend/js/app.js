@@ -1962,7 +1962,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function deleteProperty(id) {
-    if (!confirm('آیا از حذف این ملک اطمینان دارید؟')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'آیا از حذف این ملک اطمینان دارید؟' })) return;
     
     try {
         await apiCall(`/properties/${id}`, { method: 'DELETE' });
@@ -2967,7 +2967,7 @@ async function setMaintenance(enabled, opts = {}) {
     const email   = document.getElementById('maintenance-email')?.value.trim() || '';
 
     // re-saving settings on an already-closed site should not ask again
-    if (enabled && !opts.silent && !confirm('سایت برای همه بسته می‌شود. مطمئن هستید؟')) return;
+    if (enabled && !opts.silent && !await askConfirm({ icon: 'bi-question-lg', title: 'تأیید', okLabel: 'تأیید', body: 'سایت برای همه بسته می‌شود. مطمئن هستید؟' })) return;
     try {
         const data = await apiCall('/maintenance', {
             method: 'POST',
@@ -3061,7 +3061,7 @@ async function resumeJob(jobId) {
 }
 
 async function cancelJob(jobId) {
-    if (!confirm('آیا از لغو این تسک اطمینان دارید؟')) return;
+    if (!await askConfirm({ icon: 'bi-x-octagon', title: 'لغو', tone: 'warning', okLabel: 'لغو کن', body: 'آیا از لغو این تسک اطمینان دارید؟' })) return;
 
     try {
         const r = await apiCall(`/scraper/jobs/${jobId}/cancel`, { method: 'POST' });
@@ -3828,7 +3828,7 @@ async function refreshSession() {
 }
 
 async function logout() {
-    if (!confirm('آیا از خروج اطمینان دارید؟')) return;
+    if (!await askConfirm({ icon: 'bi-box-arrow-right', title: 'خروج از حساب', tone: 'warning', okLabel: 'خروج', body: 'آیا از خروج اطمینان دارید؟' })) return;
     
     try {
         await apiCall('/auth/logout', { method: 'POST' });
@@ -3913,7 +3913,7 @@ async function loadCookies() {
 }
 
 async function deleteCookie(id) {
-    if (!confirm('آیا از حذف این نشست اطمینان دارید؟')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'آیا از حذف این نشست اطمینان دارید؟' })) return;
     
     try {
         await apiCall(`/auth/cookies/${id}`, { method: 'DELETE' });
@@ -3938,7 +3938,7 @@ let _proxyCount = 0;
  *  direct connection rather than failing. */
 async function deleteAllProxies() {
     if (!_proxyCount) { showToast('توجه', 'پراکسی‌ای برای حذف وجود ندارد', 'warning'); return; }
-    if (!confirm(`همهٔ ${_proxyCount} پراکسی حذف شود؟ این کار قابل بازگشت نیست.`)) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: `همهٔ ${_proxyCount} پراکسی حذف شود؟ این کار قابل بازگشت نیست.` })) return;
 
     const btn = document.getElementById('proxy-wipe');
     if (btn) btn.disabled = true;
@@ -3967,6 +3967,104 @@ function _proxyExitCell(p) {
     const note = ir ? '' : ' — برای دیوار مناسب نیست';
     return `<span class="badge ${cls}" title="${esc(p.exit_ip || '')}">${esc(p.exit_country)} · ${kind}</span>` +
            `<span class="small text-muted">${note}</span>`;
+}
+
+// ═══ ask() — the panel's own dialog ════════════════════════════════════
+//
+// window.prompt/confirm/alert render as browser chrome: «sorinflow.com says»
+// above a bare sentence, no icon, no explanation, and light-on-light against
+// a black panel. A destructive action should look destructive and a question
+// should have room to say why it is being asked.
+//
+// Promise-based so a call site reads the way prompt() did:
+//     if (!await askConfirm({...})) return;
+//     const v = await askText({...});
+
+function _askClose(overlay, resolve, value) {
+    if (!overlay || overlay.dataset.closing) return;
+    overlay.dataset.closing = '1';
+    document.removeEventListener('keydown', overlay._onKey);
+    overlay.remove();
+    resolve(value);
+}
+
+function _askOpen({ icon, title, body, note, tone, okLabel, cancelLabel, field }) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'ask-overlay';
+        const toneCls = tone === 'danger' ? 'is-danger' : tone === 'warning' ? 'is-warning' : '';
+        overlay.innerHTML = `
+          <div class="ask-card ${toneCls}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+            <div class="ask-ring"><i class="bi ${esc(icon || 'bi-question-lg')}"></i></div>
+            <h5>${esc(title)}</h5>
+            ${body ? `<p class="ask-body">${body}</p>` : ''}
+            ${note ? `<div class="ask-note">${note}</div>` : ''}
+            ${field ? `<div class="ask-field">
+                ${field.label ? `<label for="ask-input">${esc(field.label)}</label>` : ''}
+                <input id="ask-input" type="${esc(field.type || 'text')}"
+                       inputmode="${esc(field.inputmode || 'text')}"
+                       dir="${esc(field.dir || 'auto')}"
+                       placeholder="${esc(field.placeholder || '')}"
+                       value="${esc(field.value || '')}">
+                ${field.hint ? `<div class="ask-hint">${esc(field.hint)}</div>` : ''}
+                <div class="ask-error" id="ask-error"></div>
+              </div>` : ''}
+            <div class="ask-actions">
+              <button class="ask-ok" id="ask-ok">${esc(okLabel || 'تأیید')}</button>
+              <button class="ask-cancel" id="ask-cancel">${esc(cancelLabel || 'انصراف')}</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+
+        const input = overlay.querySelector('#ask-input');
+        const err = overlay.querySelector('#ask-error');
+        const cancelValue = field ? null : false;
+
+        const submit = () => {
+            if (!field) return _askClose(overlay, resolve, true);
+            const v = (input.value || '').trim();
+            if (field.validate) {
+                const msg = field.validate(v);
+                if (msg) { err.textContent = msg; input.focus(); return; }
+            }
+            _askClose(overlay, resolve, v);
+        };
+
+        overlay.querySelector('#ask-ok').addEventListener('click', submit);
+        overlay.querySelector('#ask-cancel')
+            .addEventListener('click', () => _askClose(overlay, resolve, cancelValue));
+        overlay.addEventListener('mousedown', e => {
+            if (e.target === overlay) _askClose(overlay, resolve, cancelValue);
+        });
+        overlay._onKey = e => {
+            if (e.key === 'Escape') _askClose(overlay, resolve, cancelValue);
+            if (e.key === 'Enter' && field && document.activeElement === input) submit();
+        };
+        document.addEventListener('keydown', overlay._onKey);
+
+        // Focus what the person will act on: the field if there is one, else
+        // the safe button — so Enter on a delete dialog does not delete.
+        setTimeout(() => {
+            if (input) { input.focus(); input.select(); }
+            else overlay.querySelector(tone === 'danger' ? '#ask-cancel' : '#ask-ok').focus();
+        }, 30);
+    });
+}
+
+/** A yes/no. Resolves true only if they pressed the confirm button. */
+function askConfirm(opts) {
+    return _askOpen({ icon: 'bi-question-lg', okLabel: 'تأیید', ...opts });
+}
+
+/** One value. Resolves the trimmed string, or null if they cancelled. */
+function askText(opts) {
+    return _askOpen({ icon: 'bi-pencil', okLabel: 'ذخیره', ...opts,
+                      field: { ...(opts.field || {}) } });
+}
+
+/** Something they only need to acknowledge. */
+function askInfo(opts) {
+    return _askOpen({ icon: 'bi-info-lg', okLabel: 'باشه', cancelLabel: 'بستن', ...opts });
 }
 
 // ═══ SMS forwarder — my phones ══════════════════════════════════════════
@@ -4046,6 +4144,24 @@ const FW_REASON = {
     test:         { cls: 'text-muted',   fa: 'آزمایشی' },
 };
 
+// Sent→received, and what to do when that number is impossible.
+//
+// It is measured across TWO clocks — the phone's sentStamp against our own —
+// so a handset whose time is wrong produces a nonsense figure: this column
+// showed «۳۱٬۵۳۶٬۰۰۰s» and «-۲۹۹٫۸s» from a phone set to the wrong year.
+// Negative transit cannot happen and minutes-long transit is not transit, so
+// both are reported as what they actually are: a clock that needs fixing.
+function _fwLatency(ms) {
+    if (ms == null) return '<span class="text-muted">—</span>';
+    if (ms < 0 || ms > 300000) {
+        return `<span class="text-warning" title="ساعت گوشی با ساعت سرور هم‌خوان نیست — این عدد قابل اتکا نیست">`
+             + `<i class="bi bi-clock-history"></i> ساعت گوشی</span>`;
+    }
+    const s = Math.round(ms / 100) / 10;
+    const cls = s <= 10 ? 'text-success' : s <= 60 ? 'text-warning' : 'text-danger';
+    return `<span class="${cls}">${formatNumber(s)}s</span>`;
+}
+
 async function loadForwarderLog() {
     const tb = document.getElementById('fw-log-table');
     if (!tb) return;
@@ -4062,16 +4178,17 @@ async function loadForwarderLog() {
             return;
         }
         tb.innerHTML = rows.map(e => {
-            const r = e.details?.reason || '—';
+            const d = e.details || {};
+            const r = d.reason || '—';
             const m = FW_REASON[r] || { cls: 'text-danger', fa: r };
             const when = e.at ? new Date(e.at).toLocaleString('fa-IR',
                 { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-            const ms = e.details?.latency_ms;
             return `<tr>
                 <td class="small text-muted" dir="ltr">${esc(when)}</td>
                 <td class="small ${m.cls}">${esc(m.fa)}</td>
+                <td class="small" dir="ltr" style="font-family:var(--bs-font-monospace)">${esc(d.code || '—')}</td>
                 <td class="small">${esc(e.message)}</td>
-                <td class="small text-muted" dir="ltr">${ms != null ? formatNumber(Math.round(ms / 100) / 10) + 's' : '—'}</td>
+                <td class="small" dir="ltr">${_fwLatency(d.latency_ms)}</td>
             </tr>`;
         }).join('');
     } catch (e) {
@@ -4080,9 +4197,20 @@ async function loadForwarderLog() {
 }
 
 async function addForwarderDevice() {
-    const label = prompt('اسم این گوشی چه باشد؟ (مثلاً: گوشی سبحان)');
+    const label = await askText({
+        icon: 'bi-phone-vibrate', title: 'افزودن گوشی',
+        body: 'یک اسم بگذارید تا بعداً بین چند گوشی پیدایش کنید.',
+        field: { label: 'اسم گوشی', placeholder: 'گوشی سبحان', value: 'گوشی من' },
+    });
     if (label === null) return;
-    const sim = prompt('شمارهٔ سیم‌کارت داخل این گوشی — همان شماره‌ای که کد دیوار روی آن می‌آید:');
+    const sim = await askText({
+        icon: 'bi-sim', title: 'شمارهٔ سیم‌کارت',
+        body: 'شمارهٔ سیم‌کارتی که داخل این گوشی است — <b>همان شماره‌ای که کد دیوار روی آن می‌آید</b>.',
+        note: 'این شماره باید یکی از حساب‌های دیوار خودتان باشد، وگرنه کدهایش پذیرفته نمی‌شود.',
+        field: { label: 'شمارهٔ موبایل', placeholder: '09123456789',
+                 dir: 'ltr', inputmode: 'numeric',
+                 validate: v => /^0?9\d{9}$/.test(v.replace(/\D/g, '')) ? '' : 'شمارهٔ موبایل معتبر نیست' },
+    });
     if (sim === null) return;
     try {
         const d = await apiCall('/forwarder/devices', {
@@ -4104,7 +4232,7 @@ async function fwTest(id) {
 }
 
 async function fwRotate(id) {
-    if (!confirm('کلید تازه ساخته می‌شود و گوشی تا وارد کردن کلید جدید کار نمی‌کند. ادامه؟')) return;
+    if (!await askConfirm({ icon: 'bi-key', title: 'کلید تازه', tone: 'warning', okLabel: 'کلید تازه بساز', body: 'کلید تازه ساخته می‌شود و گوشی تا وارد کردن کلید جدید کار نمی‌کند. ادامه؟' })) return;
     try {
         await apiCall(`/forwarder/devices/${id}/rotate`, { method: 'POST' });
         showToast('کلید عوض شد', 'کلید تازه را در برنامهٔ گوشی بگذارید', 'warning');
@@ -4114,7 +4242,7 @@ async function fwRotate(id) {
 }
 
 async function fwDelete(id) {
-    if (!confirm('این گوشی حذف شود؟ کلیدش بلافاصله از کار می‌افتد.')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'این گوشی حذف شود؟ کلیدش بلافاصله از کار می‌افتد.' })) return;
     try {
         await apiCall(`/forwarder/devices/${id}`, { method: 'DELETE' });
         showToast('حذف شد', '', 'success');
@@ -4125,24 +4253,30 @@ async function fwDelete(id) {
 
 function _fwCopyRow(labelFa, value, hintFa) {
     const id = 'fwv' + Math.random().toString(36).slice(2, 9);
-    return `<div class="mb-2">
-        <label class="form-label small mb-1">${esc(labelFa)}</label>
-        <div class="input-group input-group-sm">
-          <input class="form-control" id="${id}" dir="ltr" readonly value="${esc(value)}">
-          <button class="btn btn-outline-secondary" onclick="_fwCopy('${id}')">
-            <i class="bi bi-clipboard"></i> کپی
-          </button>
+    return `<div class="fw-row">
+        <label for="${id}">${esc(labelFa)}</label>
+        <div class="fw-copy">
+          <input id="${id}" dir="ltr" readonly value="${esc(value)}">
+          <button onclick="_fwCopy('${id}', this)"><i class="bi bi-clipboard"></i> کپی</button>
         </div>
-        ${hintFa ? `<div class="form-text small">${esc(hintFa)}</div>` : ''}
+        ${hintFa ? `<div class="fw-note">${esc(hintFa)}</div>` : ''}
     </div>`;
 }
 
-function _fwCopy(id) {
+function _fwCopy(id, btn) {
     const el = document.getElementById(id);
     if (!el) return;
-    navigator.clipboard.writeText(el.value)
-        .then(() => showToast('کپی شد', '', 'success'))
-        .catch(() => { el.select(); document.execCommand('copy'); });
+    const done = () => {
+        // Feedback on the button itself: a toast saying «copied» in a list of
+        // eight fields tells you something was copied, not which.
+        if (!btn) return;
+        const was = btn.innerHTML;
+        btn.classList.add('copied');
+        btn.innerHTML = '<i class="bi bi-check-lg"></i> کپی شد';
+        setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = was; }, 1400);
+    };
+    navigator.clipboard.writeText(el.value).then(done)
+        .catch(() => { el.select(); document.execCommand('copy'); done(); });
 }
 
 async function fwGuide(id) {
@@ -4158,7 +4292,7 @@ async function fwGuide(id) {
         const hdr = JSON.stringify(c.headers);
 
         box.innerHTML = `
-        <ol class="fw-steps" style="padding-inline-start:1.2rem;line-height:2">
+        <ol class="fw-steps">
           <li><b>برنامه را نصب کنید.</b>
             <div class="mt-1 mb-2">
               <a class="btn btn-sm btn-primary" href="${esc(c.android_apk_url)}">
@@ -4168,21 +4302,21 @@ async function fwGuide(id) {
                 <i class="bi bi-apple"></i> ${esc(c.ios.message_fa)}
               </span>
             </div>
-            <div class="form-text small">
+            <div class="fw-note">
               این برنامه در گوگل‌پلی نیست، چون پیامک‌ها را می‌خواند و گوگل برای این کار
               اجازه نمی‌دهد. فایل را دانلود و نصب کنید؛ اگر گوشی هشدار داد، «نصب به هر حال» را بزنید.
             </div>
           </li>
 
           <li><b>به برنامه اجازهٔ خواندن پیامک بدهید.</b>
-            <div class="form-text small">
+            <div class="fw-note">
               اولین بار که باز می‌کنید می‌پرسد. اگر اشتباهی «نه» زدید:
               تنظیمات گوشی ← برنامه‌ها ← SMS Forwarder ← مجوزها ← پیامک ← اجازه.
             </div>
           </li>
 
-          <li><b>نگذارید گوشی برنامه را ببندد.</b> <span class="text-danger small">(مهم‌ترین قدم)</span>
-            <div class="form-text small">
+          <li><b>نگذارید گوشی برنامه را ببندد.</b> <span class="fw-warn">(مهم‌ترین قدم)</span>
+            <div class="fw-note">
               تنظیمات گوشی ← باتری ← SMS Forwarder ← «بدون محدودیت».
               روی شیائومی «Autostart» را هم روشن کنید و برنامه را در لیست برنامه‌های باز قفل کنید.
               اگر این کار را نکنید، گوشی بعد از چند ساعت برنامه را می‌بندد و کدها نمی‌رسند.
@@ -4190,13 +4324,13 @@ async function fwGuide(id) {
           </li>
 
           <li><b>در برنامه یک قانون بسازید</b> (دکمهٔ + گوشهٔ صفحه) و این‌ها را وارد کنید:
-            <div class="mt-2 p-2 rounded" style="background:var(--bs-secondary-bg,rgba(128,128,128,.08))">
+            <div class="fw-fields">
               ${_fwCopyRow('فرستنده (Sender)', '*', 'ستاره یعنی همهٔ پیامک‌ها — فیلتر متن کار جداسازی را می‌کند')}
               ${_fwCopyRow('فیلتر متن (Text filter)', r1.text_filter, r1.why_fa)}
               ${_fwCopyRow('آدرس (Webhook URL)', c.endpoints.inbound)}
               ${_fwCopyRow('هدرها (Headers)', hdr, 'این شامل کلید مخصوص گوشی شماست — با کسی به اشتراک نگذارید')}
               ${_fwCopyRow('قالب پیام (Json Payload Template)', r1.template)}
-              <div class="form-text small mt-2">
+              <div class="fw-note">
                 در «تنظیمات پیشرفته»: تعداد تلاش مجدد ${formatNumber(c.advanced_fa.retries)}،
                 «ذخیرهٔ پیام‌های ناموفق» روشن، «نادیده گرفتن خطای SSL» خاموش.
                 <br>${esc(c.advanced_fa.note)}
@@ -4205,22 +4339,22 @@ async function fwGuide(id) {
           </li>
 
           <li><b>دکمهٔ TEST را در برنامه بزنید.</b>
-            <div class="form-text small">
+            <div class="fw-note">
               اگر جواب سبز گرفتید یعنی گوشی به سرور می‌رسد. بعد اینجا دکمهٔ
               <i class="bi bi-activity"></i> را بزنید تا از این طرف هم تأیید شود.
             </div>
           </li>
 
           <li><b>یک قانون دوم برای کد ورود بسازید</b> (اختیاری ولی بهتر است).
-            <div class="mt-2 p-2 rounded" style="background:var(--bs-secondary-bg,rgba(128,128,128,.08))">
+            <div class="fw-fields">
               ${_fwCopyRow('فیلتر متن', r2.text_filter, r2.why_fa)}
               ${_fwCopyRow('قالب پیام', r2.template)}
-              <div class="form-text small">آدرس و هدرها همان قبلی است.</div>
+              <div class="fw-note">آدرس و هدرها همان قبلی است.</div>
             </div>
           </li>
         </ol>
 
-        <div class="alert alert-secondary small mb-0 mt-2">
+        <div class="fw-tip">
           <b>اگر کدی نرسید چه؟</b> اسکرپر خودش دو بار از دیوار کد تازه می‌خواهد.
           اگر باز هم نیامد، در پنجرهٔ کد دکمهٔ «ارسال دوباره کد» را بزنید.
           وارد کردن دستی کد آخرین گزینه است — و اگر گوشی مشکل داشته باشد،
@@ -4337,7 +4471,7 @@ async function toggleProxy(id) {
 }
 
 async function deleteProxy(id) {
-    if (!confirm('آیا از حذف این پراکسی اطمینان دارید؟')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'آیا از حذف این پراکسی اطمینان دارید؟' })) return;
     
     try {
         await apiCall(`/proxies/${id}`, { method: 'DELETE' });
@@ -4958,7 +5092,7 @@ async function bulkLeadStatus(status) {
 
 async function bulkDeleteLeads() {
     if (!_selectedLeads.size) return;
-    if (!confirm(`${_selectedLeads.size} لید انتخاب‌شده حذف شوند؟ این عمل قابل بازگشت نیست.`)) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: `${_selectedLeads.size} لید انتخاب‌شده حذف شوند؟ این عمل قابل بازگشت نیست.` })) return;
     try {
         const r = await apiCall('/crm/leads/bulk', {
             method: 'POST',
@@ -5334,7 +5468,7 @@ async function loadActivity(entityType, entityId, containerId) {
 }
 
 async function convertLeadToDeal(leadId) {
-    if (!confirm('از این لید یک معامله ساخته شود؟')) return;
+    if (!await askConfirm({ icon: 'bi-question-lg', title: 'تأیید', okLabel: 'تأیید', body: 'از این لید یک معامله ساخته شود؟' })) return;
     try {
         const r = await apiCall(`/crm/leads/${leadId}/convert-to-deal`, { method: 'POST' });
         showToast('موفق', `معامله #${r.deal.id} ساخته شد`, 'success');
@@ -5585,7 +5719,7 @@ async function notifyLead(id) {
 }
 
 async function deleteLead(id) {
-    if (!confirm('این لید و ملکِ متصل به آن از همه‌جا (لیست املاک، یادداشت‌ها و تصاویر) حذف می‌شوند. ادامه می‌دهید؟ این عمل قابل بازگشت نیست.')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'این لید و ملکِ متصل به آن از همه‌جا (لیست املاک، یادداشت‌ها و تصاویر) حذف می‌شوند. ادامه می‌دهید؟ این عمل قابل بازگشت نیست.' })) return;
     try {
         await apiCall(`/crm/leads/${id}`, { method: 'DELETE' });
         showToast('موفق', 'لید حذف شد', 'success');
@@ -5838,7 +5972,7 @@ async function saveDpa() {
 }
 
 async function deleteDpa(id) {
-    if (!confirm('این فرم ارزیابی حذف شود؟')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'این فرم ارزیابی حذف شود؟' })) return;
     try {
         await apiCall(`/crm/dpa/${id}`, { method: 'DELETE' });
         showToast('موفق', 'فرم حذف شد', 'success');
@@ -6097,7 +6231,7 @@ async function saveCustomer() {
 }
 
 async function deleteCustomer(id) {
-    if (!confirm('این مشتری حذف شود؟ این عمل قابل بازگشت نیست.')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'این مشتری حذف شود؟ این عمل قابل بازگشت نیست.' })) return;
     try {
         await apiCall(`/crm/customers/${id}`, { method: 'DELETE' });
         showToast('موفق', 'مشتری حذف شد', 'success');
@@ -6406,7 +6540,12 @@ async function toggleUserActive(id, currentlyActive) {
 }
 
 async function promptResetPassword(id) {
-    const newPass = prompt('رمز عبور جدید را وارد کنید (حداقل ۶ کاراکتر):');
+    const newPass = await askText({
+        icon: 'bi-key', title: 'رمز عبور تازه', tone: 'warning',
+        body: 'رمز تازه بلافاصله جایگزین می‌شود و کاربر باید با همین وارد شود.',
+        field: { label: 'رمز عبور جدید', type: 'password', dir: 'ltr',
+                 validate: v => v.length >= 6 ? '' : 'حداقل ۶ کاراکتر' },
+    });
     if (!newPass || newPass.length < 6) {
         showToast('خطا', 'رمز عبور باید حداقل ۶ کاراکتر باشد', 'warning');
         return;
@@ -6424,7 +6563,13 @@ async function promptResetPassword(id) {
 
 async function promptSetDivarPhone(id) {
     const currentPhone = (_usersById[id] || {}).divar_phone || '';
-    const newPhone = prompt(`شماره دیوار مرتبط با این کاربر را وارد کنید:\n(برای پاک کردن، خالی بگذارید)`, currentPhone);
+    const newPhone = await askText({
+        icon: 'bi-person-badge', title: 'شمارهٔ دیوار کاربر',
+        body: 'حساب دیواری که به این کاربر تعلق دارد.',
+        note: 'برای پاک کردن، خالی بگذارید و ذخیره کنید.',
+        field: { label: 'شمارهٔ دیوار', value: currentPhone || '',
+                 placeholder: '09123456789', dir: 'ltr', inputmode: 'numeric' },
+    });
     if (newPhone === null) return; // cancelled
     try {
         await apiCall(`/users/${id}`, {
@@ -6439,7 +6584,7 @@ async function promptSetDivarPhone(id) {
 }
 
 async function deleteUser(id) {
-    if (!confirm('آیا از حذف این کاربر اطمینان دارید؟')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'آیا از حذف این کاربر اطمینان دارید؟' })) return;
     try {
         await apiCall(`/users/${id}`, { method: 'DELETE' });
         showToast('موفق', 'کاربر حذف شد', 'success');
@@ -6557,7 +6702,7 @@ async function saveTask() {
 }
 
 async function deleteTask(id) {
-    if (!confirm('حذف شود؟')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'حذف شود؟' })) return;
     try { await apiCall(`/crm/tasks/${id}`, { method: 'DELETE' }); showToast('موفق', 'حذف شد', 'success'); loadTasks(); }
     catch(e) { showToast('خطا', e.message, 'danger'); }
 }
@@ -6688,7 +6833,7 @@ async function saveContact() {
 }
 
 async function deleteContact(id) {
-    if (!confirm('حذف شود؟')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'حذف شود؟' })) return;
     try { await apiCall(`/crm/contacts/${id}`, { method: 'DELETE' }); showToast('موفق', 'حذف شد', 'success'); loadContacts(); }
     catch(e) { showToast('خطا', e.message, 'danger'); }
 }
@@ -6800,7 +6945,7 @@ async function saveDeal() {
 }
 
 async function deleteDeal(id) {
-    if (!confirm('حذف شود؟')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'حذف شود؟' })) return;
     try { await apiCall(`/crm/deals/${id}`, { method: 'DELETE' }); showToast('موفق', 'حذف شد', 'success'); loadDeals(); }
     catch(e) { showToast('خطا', e.message, 'danger'); }
 }
@@ -6854,7 +6999,7 @@ async function saveNote() {
 }
 
 async function deleteNote(id) {
-    if (!confirm('حذف شود؟')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'حذف شود؟' })) return;
     try { await apiCall(`/crm/notes/${id}`, { method: 'DELETE' }); showToast('موفق', 'حذف شد', 'success'); loadNotes(); }
     catch(e) { showToast('خطا', e.message, 'danger'); }
 }
@@ -6928,7 +7073,7 @@ async function saveReminder() {
 }
 
 async function deleteReminder(id) {
-    if (!confirm('حذف شود؟')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'حذف شود؟' })) return;
     try { await apiCall(`/crm/reminders/${id}`, { method: 'DELETE' }); showToast('موفق', 'حذف شد', 'success'); loadReminders(); }
     catch(e) { showToast('خطا', e.message, 'danger'); }
 }
@@ -7604,7 +7749,7 @@ async function sendEventSmsNow() {
     const to = _smsRecipients();
     if (!to.length) { showToast('خطا', 'هیچ شماره‌ای برای این قرار وارد نشده است', 'warning'); return; }
     const who = to.map(r => `${r.role} (${r.phone})`).join('\n');
-    if (!confirm(`پیامک مشخصات این قرار برای ${to.length} نفر ارسال شود؟\n\n${who}`)) return;
+    if (!await askConfirm({ icon: 'bi-question-lg', title: 'تأیید', okLabel: 'تأیید', body: `پیامک مشخصات این قرار برای ${to.length} نفر ارسال شود؟\n\n${who}` })) return;
 
     const btn = document.getElementById('ev-sms-now-btn');
     if (btn) btn.disabled = true;
@@ -7723,7 +7868,7 @@ async function saveEvent() {
 }
 
 async function deleteEventFromModal() {
-    if (!_editingEventId || !confirm('این قرار حذف شود؟')) return;
+    if (!_editingEventId || !await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'این قرار حذف شود؟' })) return;
     try {
         await apiCall(`/crm/calendar/${_editingEventId}`, { method: 'DELETE' });
         showToast('موفق', 'قرار حذف شد', 'success');
@@ -8103,9 +8248,12 @@ async function bulkFileAction(action) {
     if (!action || !_selectedFiles.size) return;
     if (action === 'tag' || action === 'untag') return bulkTagFiles(action);
     const n = formatNumber(_selectedFiles.size);
-    if (action === 'archive' && !confirm(`${n} فایل بایگانی شود؟`)) return;
-    if (action === 'private' && !confirm(
-        `${n} فایل شخصی شود؟ از این پس فقط شما و مدیر ارشد آن را می‌بینید.`)) return;
+    if (action === 'archive' && !await askConfirm({ icon: 'bi-question-lg', title: 'تأیید', okLabel: 'تأیید', body: `${n} فایل بایگانی شود؟` })) return;
+    if (action === 'private' && !await askConfirm({
+        icon: 'bi-eye-slash', title: 'شخصی کردن فایل', okLabel: 'شخصی کن',
+        body: `<b>${n}</b> فایل شخصی شود؟`,
+        note: 'از این پس فقط شما و مدیر ارشد آن را می‌بینید.',
+    })) return;
     await _fileBulk({ ids: [..._selectedFiles], action }, FILE_ACTION_FA[action] || 'انجام شد');
 }
 async function bulkMoveFiles(binderId) {
@@ -8116,9 +8264,14 @@ async function bulkMoveFiles(binderId) {
 }
 async function bulkTagFiles(action = 'tag') {
     if (!_selectedFiles.size) return;
-    const tags = prompt(action === 'tag'
-        ? 'برچسب‌ها را با ویرگول جدا کنید:'
-        : 'کدام برچسب‌ها برداشته شوند؟ (با ویرگول جدا کنید)');
+    const adding = action === 'tag';
+    const tags = await askText({
+        icon: adding ? 'bi-tags' : 'bi-tag',
+        title: adding ? 'افزودن برچسب' : 'برداشتن برچسب',
+        body: `روی <b>${formatNumber(_selectedFiles.size)}</b> فایل انتخاب‌شده اعمال می‌شود.`,
+        field: { label: 'برچسب‌ها', placeholder: 'قرارداد، اسکن، ۱۴۰۵',
+                 hint: 'چند برچسب را با ویرگول جدا کنید' },
+    });
     if (!tags || !tags.trim()) return;
     await _fileBulk({ ids: [..._selectedFiles], action, tags }, FILE_ACTION_FA[action]);
 }
@@ -8156,7 +8309,7 @@ async function saveCabinet() {
 
 async function deleteCabinet() {
     if (!_cabinetEditId) return;
-    if (!confirm('این کمد و زونکن‌هایش حذف شوند؟ فایل‌ها حذف نمی‌شوند، فقط از زونکن خارج می‌شوند.')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'این کمد و زونکن‌هایش حذف شوند؟ فایل‌ها حذف نمی‌شوند، فقط از زونکن خارج می‌شوند.' })) return;
     try {
         const r = await apiCall(`/filing/cabinets/${_cabinetEditId}`, { method: 'DELETE' });
         showToast('موفق', `کمد حذف شد — ${formatNumber(r.unfiled)} فایل بدون زونکن شد`, 'success');
@@ -8203,7 +8356,7 @@ async function saveBinder() {
 
 async function deleteBinder() {
     if (!_binderEditId) return;
-    if (!confirm('این زونکن حذف شود؟ فایل‌ها حذف نمی‌شوند، فقط از زونکن خارج می‌شوند.')) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'این زونکن حذف شود؟ فایل‌ها حذف نمی‌شوند، فقط از زونکن خارج می‌شوند.' })) return;
     try {
         const r = await apiCall(`/filing/binders/${_binderEditId}`, { method: 'DELETE' });
         showToast('موفق', `زونکن حذف شد — ${formatNumber(r.unfiled)} فایل بدون زونکن شد`, 'success');
@@ -8294,7 +8447,13 @@ async function copyShareText() {
 }
 
 async function shareViaSms() {
-    const to = prompt('شمارهٔ مشتری برای ارسال پیامک:');
+    const to = await askText({
+        icon: 'bi-chat-dots', title: 'ارسال پیامک',
+        body: 'پیامک به این شماره فرستاده می‌شود.',
+        field: { label: 'شمارهٔ گیرنده', placeholder: '09123456789',
+                 dir: 'ltr', inputmode: 'numeric',
+                 validate: v => /^0?9\d{9}$/.test(v.replace(/\D/g, '')) ? '' : 'شمارهٔ موبایل معتبر نیست' },
+    });
     if (!to || !to.trim()) return;
     const message = document.getElementById('share-text')?.value || _shareText;
     try {
@@ -8430,7 +8589,14 @@ async function loadTickets() {
 }
 
 async function decideTicket(id, approve) {
-    if (!confirm(approve ? 'این کاربر به مدیر ارتقا یابد؟' : 'این درخواست رد شود؟')) return;
+    if (!await askConfirm(approve ? {
+        icon: 'bi-person-check', title: 'ارتقا به مدیر', okLabel: 'ارتقا بده',
+        body: 'این کاربر به نقش «مدیر» ارتقا می‌یابد.',
+        note: 'دسترسی‌های او را بعداً می‌توانید در همین صفحه محدود کنید.',
+    } : {
+        icon: 'bi-person-x', title: 'رد درخواست', tone: 'warning', okLabel: 'رد کن',
+        body: 'این درخواست رد شود؟',
+    })) return;
     try {
         await apiCall(`/portal/admin/tickets/${id}/decide`, {
             method: 'POST',
@@ -9226,7 +9392,7 @@ async function sendBroadcast() {
     }
     // The last stop before spending money on an irreversible action. The count
     // is repeated here on purpose — it is the number the server will verify.
-    if (!confirm(`ارسال این پیام به ${_smsAudienceCount} گیرنده؟\n\nاین کار برگشت‌پذیر نیست و هزینه دارد.`)) return;
+    if (!await askConfirm({ icon: 'bi-question-lg', title: 'تأیید', okLabel: 'تأیید', body: `ارسال این پیام به ${_smsAudienceCount} گیرنده؟\n\nاین کار برگشت‌پذیر نیست و هزینه دارد.` })) return;
 
     const btn = document.getElementById('sms-bulk-btn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال ارسال…'; }

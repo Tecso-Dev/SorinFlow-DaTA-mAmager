@@ -2864,3 +2864,163 @@ html[data-theme="light"] .table thead th {
   color: var(--text-muted);
   border-bottom-color: rgba(70,64,160,.10);
 }
+
+/* ════════════════════════════════════════════════════
+   ask() — the panel's own dialog
+   ────────────────────────────────────────────────────
+   Replaces window.prompt/confirm/alert, which render as the browser's chrome:
+   no icon, no explanation, no styling, and «sorinflow.com says» above a bare
+   sentence. A destructive action deserves to look destructive, and a question
+   deserves room to say why it is being asked.
+
+   Shares the OTP dialog's vocabulary — the gradient ring, the 26px radius,
+   the glow — because they are the same kind of moment and should not look
+   like two different products.
+   ════════════════════════════════════════════════════ */
+.ask-overlay {
+  position: fixed; inset: 0; z-index: 2200;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.25rem;
+  background: rgba(2,2,6,.72);
+  backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  animation: askFade .16s ease-out;
+}
+@keyframes askFade { from { opacity: 0 } to { opacity: 1 } }
+
+.ask-card {
+  position: relative; overflow: hidden;
+  width: min(30rem, 100%);
+  padding: 2rem 1.7rem 1.4rem;
+  border-radius: 26px;
+  background: linear-gradient(165deg, rgba(255,255,255,.06), rgba(255,255,255,.02) 60%), rgba(13,13,22,.95);
+  border: 1px solid rgba(255,255,255,.1);
+  box-shadow: 0 40px 110px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.14);
+  text-align: center;
+  animation: askRise .2s cubic-bezier(.2,.9,.3,1);
+}
+@keyframes askRise { from { transform: translateY(10px) scale(.985); opacity: 0 } }
+@media (prefers-reduced-motion: reduce) {
+  .ask-overlay, .ask-card { animation: none }
+}
+
+/* the wash behind the icon, tinted by severity */
+.ask-card::before {
+  content: ''; position: absolute; inset: -60% 20% auto 20%; height: 60%;
+  background: radial-gradient(ellipse at center, var(--ask-glow, rgba(99,102,241,.32)), transparent 70%);
+  pointer-events: none;
+}
+
+.ask-ring {
+  position: relative;
+  width: 62px; height: 62px; margin: 0 auto 1rem;
+  border-radius: 20px; display: flex; align-items: center; justify-content: center;
+  font-size: 1.6rem; color: #fff;
+  background: var(--ask-ring, linear-gradient(135deg, #818cf8, #a78bfa 55%, #67e8f9));
+  box-shadow: 0 10px 30px var(--ask-shadow, rgba(129,140,248,.45));
+}
+.ask-card.is-danger  { --ask-glow: rgba(239,68,68,.3);  --ask-ring: linear-gradient(135deg,#f87171,#ef4444 60%,#b91c1c); --ask-shadow: rgba(239,68,68,.45) }
+.ask-card.is-warning { --ask-glow: rgba(245,158,11,.28); --ask-ring: linear-gradient(135deg,#fbbf24,#f59e0b 60%,#d97706); --ask-shadow: rgba(245,158,11,.42) }
+
+.ask-card h5 { position: relative; font-size: 1.06rem; font-weight: 800; margin: 0 0 .45rem }
+.ask-card .ask-body {
+  position: relative; font-size: .85rem; line-height: 1.85;
+  color: var(--text-dim); margin: 0 auto 1.1rem; max-width: 26rem;
+}
+.ask-card .ask-body b { color: var(--text) }
+/* the consequence — said once, plainly, where the eye lands last before OK */
+.ask-note {
+  position: relative; font-size: .76rem; line-height: 1.7;
+  color: var(--text-muted); background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.07); border-radius: 12px;
+  padding: .6rem .8rem; margin: 0 0 1.1rem; text-align: start;
+}
+.ask-card.is-danger .ask-note {
+  color: #fca5a5; background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.2);
+}
+
+.ask-field { position: relative; text-align: start; margin-bottom: 1rem }
+.ask-field label { display: block; font-size: .76rem; color: var(--text-muted); margin-bottom: .35rem }
+.ask-field input {
+  width: 100%; padding: .7rem .9rem; border-radius: 14px;
+  background: var(--input-bg); border: 1px solid rgba(255,255,255,.1);
+  color: var(--text); font-size: .95rem; font-family: inherit;
+}
+.ask-field input:focus {
+  outline: none; border-color: rgba(129,140,248,.6);
+  box-shadow: 0 0 0 3px rgba(99,102,241,.18); background: var(--input-bg-focus);
+}
+.ask-field .ask-hint { font-size: .72rem; color: var(--text-muted); margin-top: .35rem }
+.ask-field .ask-error { font-size: .74rem; color: #fca5a5; margin-top: .35rem; min-height: 1em }
+
+.ask-actions { position: relative; display: flex; flex-direction: column; gap: .5rem }
+.ask-actions button {
+  width: 100%; padding: .68rem 1rem; border-radius: 14px;
+  font-size: .9rem; font-weight: 700; font-family: inherit;
+  border: 1px solid transparent; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+}
+.ask-ok { background: linear-gradient(135deg,#818cf8,#a78bfa); color: #fff }
+.ask-ok:hover { filter: brightness(1.08) }
+.ask-card.is-danger  .ask-ok { background: linear-gradient(135deg,#f87171,#dc2626) }
+.ask-card.is-warning .ask-ok { background: linear-gradient(135deg,#fbbf24,#d97706); color: #1a1205 }
+.ask-cancel {
+  background: rgba(255,255,255,.05); color: var(--text-dim);
+  border-color: rgba(255,255,255,.1) !important;
+}
+.ask-cancel:hover { background: rgba(255,255,255,.1) }
+.ask-actions button:focus-visible {
+  outline: 2px solid rgba(129,140,248,.9); outline-offset: 2px;
+}
+
+/* the setup guide — panel tokens only. It first shipped with Bootstrap's
+   --bs-secondary-bg and .form-text, which resolve LIGHT: white boxes on a
+   black panel. */
+.fw-steps { padding-inline-start: 1.2rem; line-height: 2; color: var(--text-dim) }
+.fw-steps > li { margin-bottom: 1.15rem }
+.fw-steps > li > b { color: var(--text); font-weight: 700 }
+.fw-note { font-size: .78rem; line-height: 1.85; color: var(--text-muted); margin-top: .3rem }
+.fw-note b { color: var(--text-dim) }
+.fw-warn { color: #fca5a5 }
+
+.fw-fields {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: .9rem 1rem .6rem;
+  margin-top: .6rem;
+}
+.fw-row { margin-bottom: .8rem }
+.fw-row:last-child { margin-bottom: .3rem }
+.fw-row > label {
+  display: block; font-size: .72rem; color: var(--text-muted);
+  margin-bottom: .3rem; letter-spacing: .01em;
+}
+.fw-copy { display: flex; gap: .4rem; align-items: stretch }
+.fw-copy input {
+  flex: 1; min-width: 0;
+  background: var(--input-bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 11px;
+  padding: .5rem .7rem; font-size: .8rem; font-family: var(--bs-font-monospace);
+  overflow-x: auto;
+}
+.fw-copy input:focus {
+  outline: none; border-color: rgba(99,102,241,.55);
+  box-shadow: 0 0 0 3px rgba(99,102,241,.15);
+}
+.fw-copy button {
+  flex: 0 0 auto; padding: .45rem .75rem; border-radius: 11px;
+  background: rgba(99,102,241,.14); color: #c7d2fe;
+  border: 1px solid rgba(99,102,241,.28);
+  font-size: .76rem; font-family: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; gap: .3rem;
+}
+.fw-copy button:hover { background: rgba(99,102,241,.24) }
+.fw-copy button.copied { background: rgba(34,197,94,.16); color: #86efac; border-color: rgba(34,197,94,.3) }
+
+.fw-tip {
+  background: rgba(99,102,241,.08);
+  border: 1px solid rgba(99,102,241,.2);
+  border-radius: 14px; padding: .75rem .9rem;
+  font-size: .8rem; line-height: 1.9; color: var(--text-dim); margin-top: .4rem;
+}
+.fw-tip b { color: var(--text) }
