@@ -108,7 +108,8 @@ class TestTheCountIsOnScreenBeforeTheRun:
         """max_items is ours, not a Divar filter — changing it changes
         nothing Divar would count."""
         i = APP_JS.index("function _wireEstimateRefresh()")
-        assert "scraper-max-items" in APP_JS[i:i + 600]
+        # the count box's real id — the earlier name did not exist
+        assert "scraper-pages" in APP_JS[i:i + 600]
 
     def test_an_automatic_refresh_does_not_nag(self):
         i = APP_JS.index("async function estimateScrape(quiet = false)")

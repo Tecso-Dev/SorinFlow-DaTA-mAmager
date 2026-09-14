@@ -2486,8 +2486,12 @@ document.addEventListener('DOMContentLoaded', () => initRangeSliders());
 // ═══ Scraper form memory (last used filters persist across visits) ═══
 // note: scraper-posted-date is intentionally NOT persisted — it's a
 // per-run choice and the picker auto-fills today, which would force date mode
+// «تعداد آگهی» is deliberately NOT here. It is a decision about this run,
+// not a preference to carry between runs: a 50 left over from last time
+// silently capped the next scrape, and the box read as if somebody had
+// typed it. Empty means «all of them», and empty is what it should open as.
 const _SCRAPER_TEXT_FIELDS = [
-    'scraper-category', 'scraper-pages', 'scraper-advertiser-type', 'scraper-rotate-every',
+    'scraper-category', 'scraper-advertiser-type', 'scraper-rotate-every',
     'scraper-min-price', 'scraper-max-price', 'scraper-min-ppm', 'scraper-max-ppm',
     'scraper-min-deposit', 'scraper-max-deposit', 'scraper-min-rent', 'scraper-max-rent',
     'scraper-min-area', 'scraper-max-area', 'scraper-min-rooms', 'scraper-max-rooms',
@@ -2675,7 +2679,7 @@ function _wireEstimateRefresh() {
     if (!form || form._estimateWired) return;
     form._estimateWired = true;
     form.addEventListener('input', e => {
-        if (e.target?.id === 'scraper-max-items' || e.target?.id === 'scraper-rotate-every') return;
+        if (e.target?.id === 'scraper-pages' || e.target?.id === 'scraper-rotate-every') return;
         scheduleEstimate();
     });
     form.addEventListener('change', scheduleEstimate);
