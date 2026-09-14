@@ -82,8 +82,11 @@ class TestItCannotLie:
 
 
 class TestThePanelShowsBothNumbers:
-    def test_the_bar_says_n_of_N(self):
-        assert "${job.scraped_items} / ${job.total_items}" in APP_JS
+    def test_the_counts_are_shown_beside_the_bar(self):
+        """Moved out of the bar's cell into their own column — the pair was
+        unreadable crammed under the percent."""
+        assert '<bdi title="بررسی‌شده">${job.scraped_items}</bdi>' in APP_JS
+        assert '<bdi title="کل">${job.total_items}</bdi>' in APP_JS
 
     def test_the_tooltip_says_which_denominator(self):
         assert "تعدادی که دیوار برای این فیلترها اعلام کرد" in APP_JS

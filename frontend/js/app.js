@@ -3336,7 +3336,7 @@ function _renderJobsTable(items) {
     if (!tbody) return;
     tbody.innerHTML = '';
     if (items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4">هیچ تسکی وجود ندارد</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4">هیچ تسکی وجود ندارد</td></tr>`;
         return;
     }
     const JOB_STATUS_FA = {
@@ -3366,12 +3366,17 @@ function _renderJobsTable(items) {
                         <div class="progress-bar" role="progressbar"
                              style="width:${job.progress}%;border-radius:3px;"></div>
                     </div>
-                    <div style="font-size:.72rem;color:var(--text-muted,#aaa);text-align:center;margin-top:2px;"
-                         title="${job.divar_count ? 'بررسی‌شده از تعدادی که دیوار برای این فیلترها اعلام کرد' : 'بررسی‌شده از نامزدهای جمع‌شده'}">
-                        ${Math.round(job.progress)}%
-                        ${job.total_items ? `<bdi class="opacity-75">· ${job.scraped_items} / ${job.total_items}</bdi>` : ''}
-                    </div>
+                    <div style="font-size:.72rem;color:var(--text-muted,#aaa);text-align:center;margin-top:2px;">${Math.round(job.progress)}%</div>
                 </div>
+            </td>
+            <!-- The two counts under the percent were unreadable crammed into
+                 the bar's cell; they get a column. Same <bdi> reasoning as
+                 «جدید / بروز»: isolated so the pair keeps the header's order. -->
+            <td style="text-align:center;white-space:nowrap"
+                title="${job.divar_count ? 'کل = تعدادی که دیوار برای این فیلترها اعلام کرد' : 'کل = نامزدهای جمع‌شده'}">
+                ${job.total_items
+                    ? `<bdi title="بررسی‌شده">${job.scraped_items}</bdi> <span class="text-muted">/</span> <bdi title="کل">${job.total_items}</bdi>`
+                    : '<span class="text-muted">---</span>'}
             </td>
             <!-- «جدید / بروز» reads right-to-left, so «جدید» is the RIGHT
                  column. dir="ltr" here put the new count on the LEFT, under
