@@ -121,3 +121,38 @@ class TestRotationStaysInsideThePool:
         """An internally started scrape must not lose its pool."""
         src = inspect.getsource(DivarScraper._usable_account_count)
         assert "if owner:" in src
+
+
+class TestTheSideDoor:
+    """Ownership enforced on the list and the pool but not on the status
+    endpoint was ownership with a side door: the header pill and the scrape
+    form's «خودکار» both read it, and it used to fall back to any valid
+    session in the database."""
+
+    def test_the_status_endpoint_knows_who_is_asking(self):
+        params = inspect.signature(auth_routes.get_cookie_status).parameters
+        assert "current_user" in params
+
+    def test_both_fallbacks_are_narrowed_to_the_caller(self):
+        src = inspect.getsource(auth_routes.get_cookie_status)
+        assert src.count("_mine(select(Cookie)") == 2, \
+            "one of the two fallbacks still reaches the whole table"
+
+    def test_the_callers_own_divar_phone_is_the_default(self):
+        src = inspect.getsource(auth_routes.get_cookie_status)
+        assert "current_user.divar_phone if current_user else None" in src
+
+    def test_a_named_number_must_be_the_callers(self):
+        """A run that starts ON a given number never consults the pool for
+        its first account, so this is the only place that check can live."""
+        src = inspect.getsource(scraper_routes.start_scraping_job)
+        assert "به حساب کاربری شما تعلق ندارد" in src
+        assert "status_code=403" in src
+
+    def test_an_admin_may_still_name_any_number(self):
+        src = inspect.getsource(scraper_routes.start_scraping_job)
+        assert '("root", "super_admin")' in src
+
+    def test_it_compares_digits_not_strings(self):
+        src = inspect.getsource(scraper_routes.start_scraping_job)
+        assert "ch.isdigit()" in src

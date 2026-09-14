@@ -189,22 +189,33 @@ async def verify_otp(
 @router.get("/status", response_model=CookieStatusResponse)
 async def get_cookie_status(
     phone_number: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_optional),
 ):
-    """Get current cookie/session status"""
-    
-    phone = phone_number or settings.divar_phone_number
+    """The session the header pill shows and the scraper's «خودکار» uses.
+
+    Scoped to the caller's own numbers, like the list. This used to fall back
+    to «any valid session in the DB», which handed one user another user's
+    number — and because the scrape form takes what this returns, the run
+    then logged that number in and spent its reveals. Ownership enforced on
+    the list and the pool but not here was ownership with a side door.
+    """
+    phone = phone_number or (current_user.divar_phone if current_user else None) \
+        or settings.divar_phone_number
 
     auth = DivarAuth(db)
+
+    def _mine(q):
+        return _own_sessions_only(q, current_user)
 
     # If a specific phone was requested, return its status directly
     if phone:
         status = await auth.get_cookie_status(phone)
-        # If that number has no valid session, fall back to any active session in DB
+        # If that number has no valid session, fall back to another of the
+        # caller's OWN — never to somebody else's.
         if not status.get("is_valid"):
             result = await db.execute(
-                select(Cookie)
-                .where(Cookie.is_valid == True)
+                _mine(select(Cookie).where(Cookie.is_valid == True))
                 .order_by(Cookie.updated_at.desc())
                 .limit(1)
             )
@@ -213,10 +224,9 @@ async def get_cookie_status(
                 status = await auth.get_cookie_status(fallback.phone_number)
         return CookieStatusResponse(**status)
 
-    # No phone configured at all — find any valid session
+    # No phone configured at all — the caller's most recently used session
     result = await db.execute(
-        select(Cookie)
-        .where(Cookie.is_valid == True)
+        _mine(select(Cookie).where(Cookie.is_valid == True))
         .order_by(Cookie.updated_at.desc())
         .limit(1)
     )

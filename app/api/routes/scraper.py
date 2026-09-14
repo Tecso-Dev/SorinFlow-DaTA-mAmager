@@ -248,6 +248,22 @@ async def start_scraping_job(
         logger.error(f"Invalid category: {job_config.category}")
         raise HTTPException(status_code=400, detail=f"Invalid category: {job_config.category}")
     
+    # A number named explicitly has to be the caller's. The pool filter
+    # covers rotation, but a run that starts ON a given number never consults
+    # the pool for its first account — so this is where somebody else's
+    # session would otherwise be handed straight to the browser.
+    if job_config.divar_phone and current_user and (current_user.role or "") not in ("root", "super_admin"):
+        from app.models.cookie import Cookie as _Cookie
+        _digits = "".join(ch for ch in str(job_config.divar_phone) if ch.isdigit())
+        owned = (await db.execute(
+            select(_Cookie).where(_Cookie.owner_user_id == current_user.id)
+        )).scalars().all()
+        if not any("".join(ch for ch in str(c.phone_number) if ch.isdigit()) == _digits
+                   for c in owned):
+            raise HTTPException(
+                status_code=403,
+                detail="این شمارهٔ دیوار به حساب کاربری شما تعلق ندارد")
+
     # Check for existing running jobs
     result = await db.execute(
         select(ScrapingJob).where(ScrapingJob.status == "running")
