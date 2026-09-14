@@ -235,3 +235,29 @@ class TestThePanelSection:
         js = self._js()
         i = js.index("async function applyDivarLink()")
         assert "text-danger" in js[i:i + 3000]
+
+
+class TestTheBoxFollowsThePanelTheme:
+    """Reported: «ui اینجا با دارک تم نمیخونه». The box used a Bootstrap
+    token, and the panel's dark theme is not Bootstrap's — so the token
+    resolved to Bootstrap's light value and painted a white box on a black
+    page. The panel has its own tokens, defined for both themes."""
+
+    def _box(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        html = open(os.path.join(root, "frontend/index.html"), encoding="utf-8").read()
+        i = html.index('id="scraper-link"')
+        return html[html.rindex("<div", 0, i - 200):i]
+
+    def test_it_uses_the_panels_own_surface_token(self):
+        assert "var(--surface2)" in self._box()
+
+    def test_it_does_not_use_a_bootstrap_token(self):
+        assert "--bs-" not in self._box()
+
+    def test_the_token_is_defined_for_both_themes(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        css = open(os.path.join(root, "frontend/css/style.css"), encoding="utf-8").read()
+        assert css.count("--surface2:") >= 2

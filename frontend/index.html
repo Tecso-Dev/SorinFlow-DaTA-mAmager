@@ -656,7 +656,11 @@
                             <div class="card-body">
                                 <!-- فیلترها را در خود دیوار بزنید و آدرس همان
                                      صفحه را اینجا بچسبانید؛ فرم زیر پر می‌شود. -->
-                                <div class="mb-3 p-2 rounded" style="background:var(--bs-tertiary-bg,rgba(128,128,128,.08))">
+                                <!-- --surface2 / --border are the panel's own theme tokens, defined
+                                     for both themes in style.css. A Bootstrap token here resolved to
+                                     Bootstrap's LIGHT value under the panel's dark theme and painted a
+                                     white box on a black page. -->
+                                <div class="mb-3 p-2 rounded" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);">
                                     <label class="form-label small mb-1">
                                         <i class="bi bi-link-45deg"></i> از روی لینک دیوار
                                     </label>
@@ -4094,7 +4098,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260914c"></script>
+<script src="js/app.js?v=20260914d"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">
