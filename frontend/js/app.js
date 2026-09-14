@@ -4240,8 +4240,10 @@ async function fwRotate(id) {
     if (!await askConfirm({ icon: 'bi-key', title: 'کلید تازه', tone: 'warning', okLabel: 'کلید تازه بساز', body: 'کلید تازه ساخته می‌شود و گوشی تا وارد کردن کلید جدید کار نمی‌کند. ادامه؟' })) return;
     try {
         await apiCall(`/forwarder/devices/${id}/rotate`, { method: 'POST' });
-        showToast('کلید عوض شد', 'کلید تازه را در برنامهٔ گوشی بگذارید', 'warning');
+        showToast('کلید عوض شد', 'کد QR تازه را با گوشی اسکن کنید', 'warning');
         await loadForwarders();
+        // Re-render the guide so the QR on screen is the one the server will
+        // now accept. The old code is dead the moment the rotate returns.
         fwGuide(id);
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
@@ -4258,10 +4260,15 @@ async function fwDelete(id) {
 
 function _fwCopyRow(labelFa, value, hintFa) {
     const id = 'fwv' + Math.random().toString(36).slice(2, 9);
+    // Persian values get the panel's face and RTL; only real code gets
+    // monospace, which has no Arabic shaping and renders «اطلاعات تماس» as
+    // disconnected letters.
+    const persian = /[؀-ۿ]/.test(String(value));
     return `<div class="fw-row">
         <label for="${id}">${esc(labelFa)}</label>
         <div class="fw-copy">
-          <input id="${id}" dir="ltr" readonly value="${esc(value)}">
+          <input id="${id}" class="${persian ? '' : 'is-code'}"
+                 dir="${persian ? 'rtl' : 'ltr'}" readonly value="${esc(value)}">
           <button onclick="_fwCopy('${id}', this)"><i class="bi bi-clipboard"></i> کپی</button>
         </div>
         ${hintFa ? `<div class="fw-note">${esc(hintFa)}</div>` : ''}
@@ -4295,6 +4302,7 @@ async function fwGuide(id) {
         document.getElementById('fw-guide-for').textContent = c.device.label || c.device.device_id;
         const r1 = c.rules[0], r2 = c.rules[1];
         const hdr = JSON.stringify(c.headers);
+        _fwSetupPayload = c.setup_payload || '';
 
         box.innerHTML = `
         <ol class="fw-steps">
@@ -4328,7 +4336,20 @@ async function fwGuide(id) {
             </div>
           </li>
 
-          <li><b>در برنامه یک قانون بسازید</b> (دکمهٔ + گوشهٔ صفحه) و این‌ها را وارد کنید:
+          <li><b>تنظیمات را وارد کنید.</b>
+            <div class="fw-qr">
+              <div id="fw-setup-qrcode" style="display:inline-block;background:#fff;padding:10px;border-radius:10px"></div>
+              <div class="fw-note">
+                در برنامهٔ <b>SorinFlow Forwarder</b>: راه‌اندازی ← «اسکن QR» ← این کد را
+                اسکن کنید ← ذخیره. همین لینک را اگر روی خود گوشی باز کنید (دوربین یا یک پیام)
+                صفحهٔ راه‌اندازی از قبل پر می‌شود.
+                <br>این کد شامل <b>کلید مخصوص همین گوشی</b> است؛ آن را برای کسی نفرستید.
+                با هر تغییر در پنل (چرخاندن کلید، تغییر شماره) کد تازه می‌شود — کافی است
+                دوباره اسکن کنید.
+              </div>
+              <button onclick="fwCopyPayload()"><i class="bi bi-link-45deg"></i> کپی لینک راه‌اندازی</button>
+            </div>
+            <div class="fw-qr-or">یا اگر برنامهٔ عمومی SMS Forwarder را دارید، دستی وارد کنید</div>
             <div class="fw-fields">
               ${_fwCopyRow('فرستنده (Sender)', '*', 'ستاره یعنی همهٔ پیامک‌ها — فیلتر متن کار جداسازی را می‌کند')}
               ${_fwCopyRow('فیلتر متن (Text filter)', r1.text_filter, r1.why_fa)}
@@ -4365,9 +4386,33 @@ async function fwGuide(id) {
           وارد کردن دستی کد آخرین گزینه است — و اگر گوشی مشکل داشته باشد،
           برایتان ایمیل می‌فرستیم و می‌گوییم چه چیزی را درست کنید.
         </div>`;
+        // After innerHTML, so the container exists.
+        const qr = document.getElementById('fw-setup-qrcode');
+        if (qr) {
+            qr.innerHTML = '';
+            if (typeof QRCode !== 'undefined' && _fwSetupPayload) {
+                new QRCode(qr, {
+                    text: _fwSetupPayload, width: 220, height: 220,
+                    correctLevel: QRCode.CorrectLevel.M,
+                });
+            } else {
+                // The library is the only way to draw it; without it, show the
+                // link itself so the phone can still be set up.
+                qr.innerHTML = `<code style="font-size:.7rem;word-break:break-all;color:#111">${esc(_fwSetupPayload)}</code>`;
+            }
+        }
     } catch (e) {
         box.innerHTML = `<p class="text-danger small">${esc(e.message || 'خطا')}</p>`;
     }
+}
+
+let _fwSetupPayload = '';
+
+function fwCopyPayload() {
+    if (!_fwSetupPayload) return;
+    navigator.clipboard.writeText(_fwSetupPayload)
+        .then(() => showToast('کپی شد', 'لینک را روی گوشی باز کنید', 'success'))
+        .catch(() => showToast('خطا', 'کپی نشد', 'warning'));
 }
 
 async function loadProxies() {

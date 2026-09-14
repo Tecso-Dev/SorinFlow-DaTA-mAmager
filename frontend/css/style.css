@@ -3000,8 +3000,16 @@ html[data-theme="light"] .table thead th {
   flex: 1; min-width: 0;
   background: var(--input-bg); color: var(--text);
   border: 1px solid var(--border); border-radius: 11px;
-  padding: .5rem .7rem; font-size: .8rem; font-family: var(--bs-font-monospace);
+  padding: .5rem .7rem; font-size: .8rem;
+  /* The panel's own face, NOT monospace. Monospace fonts carry no Arabic
+     shaping, so «اطلاعات تماس» rendered as «ا ط ل ا ع ا ت» — disconnected
+     letters, in the one field the reader has to copy exactly. */
+  font-family: var(--font-fa);
   overflow-x: auto;
+}
+/* Monospace only where the value really is ASCII: a URL, a JSON body, a key. */
+.fw-copy input.is-code {
+  font-family: var(--bs-font-monospace); font-size: .78rem;
 }
 .fw-copy input:focus {
   outline: none; border-color: rgba(99,102,241,.55);
@@ -3024,3 +3032,25 @@ html[data-theme="light"] .table thead th {
   font-size: .8rem; line-height: 1.9; color: var(--text-dim); margin-top: .4rem;
 }
 .fw-tip b { color: var(--text) }
+
+/* the setup QR — scan instead of typing eight fields */
+.fw-qr {
+  display: flex; flex-direction: column; align-items: center; gap: .7rem;
+  padding: 1rem; margin-bottom: 1rem;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+}
+.fw-qr .fw-note { text-align: center; max-width: 30rem }
+.fw-qr button {
+  padding: .45rem .9rem; border-radius: 11px;
+  background: rgba(99,102,241,.14); color: #c7d2fe;
+  border: 1px solid rgba(99,102,241,.28);
+  font-size: .78rem; font-family: inherit; cursor: pointer;
+}
+.fw-qr button:hover { background: rgba(99,102,241,.24) }
+.fw-qr-or {
+  display: flex; align-items: center; gap: .7rem; margin: .2rem 0 .6rem;
+  font-size: .74rem; color: var(--text-muted);
+}
+.fw-qr-or::before, .fw-qr-or::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}

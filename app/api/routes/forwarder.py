@@ -14,6 +14,7 @@ credential.
 """
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
@@ -170,8 +171,26 @@ async def device_config(device_id: int, db: AsyncSession = Depends(get_db),
         "X-Forwarder-Id": row.device_id,
         "X-OTP-Secret": row.secret,
     }
+    # What the SorinFlow Forwarder app scans instead of being typed into.
+    #
+    # Computed from the row on every request and never stored, so it follows
+    # the truth automatically: rotate the secret, edit the SIM, move the
+    # domain, and the next render of the guide carries the new one. A stored
+    # copy would go stale exactly when it matters — after a rotation, which is
+    # what somebody does when a handset is lost.
+    #
+    # It carries THIS device's secret, never the global OTP_INBOUND_SECRET:
+    # one QR configures one phone for one user's accounts.
+    setup_payload = "sorinflow://setup?" + urlencode({
+        "server": base,
+        "account": "".join(ch for ch in acct if ch.isdigit()),
+        "device": row.device_id,
+        "secret": row.secret,
+    })
+
     return {
         "device": row.to_dict(reveal_secret=True),
+        "setup_payload": setup_payload,
         "android_apk_url": ANDROID_APK_URL,
         "ios": {"available": False, "message_fa": "نسخهٔ آیفون به‌زودی"},
         "endpoints": {

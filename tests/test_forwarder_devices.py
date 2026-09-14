@@ -12,6 +12,7 @@ configured before any of this existed keeps working.
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -432,3 +433,109 @@ class TestTheSetupGuideIsActuallyUsable:
             out = out.replace(ph, v)
         body = json.loads(out)
         assert body["kind"] == "contact" and body["code"] == "523969"
+
+
+class TestTheSetupQrCarriesTheRightThing:
+    """Eight fields typed into a phone is where setup goes wrong. The QR is
+    the same configuration in one scan — which makes what it carries, and
+    when it changes, the thing to get right."""
+
+    def _payload_src(self):
+        import inspect
+        from app.api.routes import forwarder as R
+        return inspect.getsource(R.device_config)
+
+    def test_it_is_built_with_urlencode_not_string_concatenation(self):
+        """A secret or a phone number in a URL needs escaping; hand-built
+        query strings are how a `+` or `&` silently corrupts one."""
+        src = self._payload_src()
+        assert "urlencode(" in src
+
+    def test_the_scheme_is_the_apps(self):
+        assert 'sorinflow://setup?' in self._payload_src()
+
+    @pytest.mark.parametrize("key", ["server", "account", "device", "secret"])
+    def test_every_field_the_app_needs_is_present(self, key):
+        assert f'"{key}"' in self._payload_src()
+
+    def test_it_carries_the_devices_own_secret_never_the_global_one(self):
+        """One QR configures one phone for one user's accounts. The global
+        OTP_INBOUND_SECRET would hand over every account at once."""
+        src = self._payload_src()
+        assert "row.secret" in src
+        assert "_inbound_secret" not in src and "otp_inbound_secret" not in src
+
+    def test_the_account_is_digits_only(self):
+        """It reaches us from a SIM, a form and a cookie jar, spelled three
+        ways; the app matches on digits."""
+        assert 'ch.isdigit()' in self._payload_src()
+
+    def test_it_is_computed_per_request_not_stored(self):
+        """A stored copy goes stale exactly when it matters — after a rotate,
+        which is what somebody does when a handset is lost."""
+        from app.models.forwarder import ForwarderDevice
+        cols = {c.name for c in ForwarderDevice.__table__.columns}
+        assert "setup_payload" not in cols
+
+    def test_rotating_the_secret_changes_what_the_qr_would_carry(self):
+        """The property that makes re-scanning work."""
+        from app.models.forwarder import new_secret
+        a, b = new_secret(), new_secret()
+        assert a != b and len(a) == 64
+
+    def test_the_panel_renders_it_client_side(self):
+        """The guide is fetched with a bearer token via apiCall, and an
+        <img src> cannot send one — so there is no server-side image route."""
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert "new QRCode(" in js and "_fwSetupPayload" in js
+        api = Path("app/api/routes/forwarder.py").read_text(encoding="utf-8")
+        assert "qr.png" not in api and "image/png" not in api
+
+    def test_it_degrades_to_the_link_when_the_library_is_missing(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        blk = js[js.index("const qr = document.getElementById('fw-setup-qrcode')"):]
+        assert "typeof QRCode !== 'undefined'" in blk[:600]
+        assert "else {" in blk[:900], "no fallback; the phone could not be set up at all"
+
+    def test_the_manual_fields_survive_as_the_fallback(self):
+        """The generic upstream SMS Forwarder app cannot scan this."""
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert "_fwCopyRow(" in js
+        assert "برنامهٔ عمومی SMS Forwarder" in js
+
+    def test_a_rotate_re_renders_the_guide(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("async function fwRotate"):]
+        fn = fn[:fn.index("\nasync function")]
+        assert "fwGuide(id)" in fn, "the QR on screen would be one the server no longer accepts"
+
+
+class TestPersianIsNotRenderedInMonospace:
+    """«اطلاعات تماس» came out as «ا ط ل ا ع ا ت» — disconnected letters — in
+    the one field the reader has to copy exactly. Monospace faces carry no
+    Arabic shaping."""
+
+    def test_the_field_defaults_to_the_panels_face(self):
+        css = Path("frontend/css/style.css").read_text(encoding="utf-8")
+        blk = css[css.index(".fw-copy input {"):css.index(".fw-copy input.is-code")]
+        assert "var(--font-fa)" in blk
+        assert "--bs-font-monospace" not in blk
+
+    def test_monospace_is_opt_in_for_ascii_values(self):
+        css = Path("frontend/css/style.css").read_text(encoding="utf-8")
+        assert ".fw-copy input.is-code" in css
+        blk = css[css.index(".fw-copy input.is-code"):]
+        assert "--bs-font-monospace" in blk[:200]
+
+    def test_the_class_is_chosen_by_the_value_not_the_label(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("function _fwCopyRow"):]
+        fn = fn[:fn.index("\nfunction ")]
+        assert "test(String(value))" in fn
+        assert "is-code" in fn
+
+    def test_persian_values_read_right_to_left(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("function _fwCopyRow"):]
+        fn = fn[:fn.index("\nfunction ")]
+        assert "persian ? 'rtl' : 'ltr'" in fn
