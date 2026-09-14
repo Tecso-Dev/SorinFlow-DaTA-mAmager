@@ -2919,7 +2919,12 @@ html[data-theme="light"] .table thead th {
   box-shadow: 0 10px 30px var(--ask-shadow, rgba(129,140,248,.45));
 }
 .ask-card.is-danger  { --ask-glow: rgba(239,68,68,.3);  --ask-ring: linear-gradient(135deg,#f87171,#ef4444 60%,#b91c1c); --ask-shadow: rgba(239,68,68,.45) }
-.ask-card.is-warning { --ask-glow: rgba(245,158,11,.28); --ask-ring: linear-gradient(135deg,#fbbf24,#f59e0b 60%,#d97706); --ask-shadow: rgba(245,158,11,.42) }
+/* «warning» in the panel's own palette. It was amber — #fbbf24 → #d97706 —
+   the one colour nowhere else in this UI, so a cancel dialog looked like a
+   different product had opened it. Caution here is the violet→pink the
+   panel already uses for its primary actions: still distinct from the
+   indigo default and the red danger, and unmistakably ours. */
+.ask-card.is-warning { --ask-glow: rgba(240,166,255,.26); --ask-ring: linear-gradient(135deg,#a78bfa,#d8b4fe 55%,#f0a6ff); --ask-shadow: rgba(192,132,252,.42) }
 
 .ask-card h5 { position: relative; font-size: 1.06rem; font-weight: 800; margin: 0 0 .45rem }
 .ask-card .ask-body {
@@ -2962,7 +2967,7 @@ html[data-theme="light"] .table thead th {
 .ask-ok { background: linear-gradient(135deg,#818cf8,#a78bfa); color: #fff }
 .ask-ok:hover { filter: brightness(1.08) }
 .ask-card.is-danger  .ask-ok { background: linear-gradient(135deg,#f87171,#dc2626) }
-.ask-card.is-warning .ask-ok { background: linear-gradient(135deg,#fbbf24,#d97706); color: #1a1205 }
+.ask-card.is-warning .ask-ok { background: linear-gradient(135deg,#a78bfa,#f0a6ff); color: #fff }
 .ask-cancel {
   background: rgba(255,255,255,.05); color: var(--text-dim);
   border-color: rgba(255,255,255,.1) !important;
