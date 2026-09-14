@@ -15,7 +15,7 @@ POST /{id}/password      — reset password (super_admin)
 POST /{id}/totp/disable  — force-disable 2FA (super_admin)
 """
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
@@ -185,6 +185,7 @@ async def login(
 @router.post("/token/verify-email", response_model=TokenResponse)
 async def verify_email_login(
     data: EmailCodeVerifyRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Finish a login that owed an emailed code.
@@ -192,9 +193,20 @@ async def verify_email_login(
     Mirrors verify-totp: the session token proves the password was already
     accepted, and is refused as a full credential by get_current_user because
     its `typ` is not an access token.
+
+    Per-IP budget first, like every other unauthenticated route: the code has
+    a per-identifier attempt cap, but one host could otherwise walk many
+    identifiers at the cap each.
     """
     from app.auth.jwt import decode_token
-    from app.services.verification import verify_code, VerificationError
+    from app.services.verification import (
+        verify_code, VerificationError, check_ip_budget, spend_ip_budget,
+        IP_VERIFY_LIMIT)
+
+    try:
+        await check_ip_budget(request, "verify", IP_VERIFY_LIMIT)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message)
 
     try:
         payload = decode_token(data.email_session)
@@ -211,6 +223,8 @@ async def verify_email_login(
     try:
         await verify_code(PURPOSE_EMAIL_2FA, username, data.code)
     except VerificationError as e:
+        # A wrong guess is the thing the budget exists to count.
+        await spend_ip_budget(request, "verify")
         raise HTTPException(status_code=400, detail=e.message)
 
     user.last_login = datetime.now(timezone.utc)
@@ -227,6 +241,7 @@ async def verify_email_login(
 @router.post("/password-reset/request")
 async def password_reset_request(
     data: PasswordResetRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Send a reset code to the address on file.
@@ -239,7 +254,17 @@ async def password_reset_request(
     super_admin, and when the account locked out IS the super_admin the only
     way back was the database.
     """
-    from app.services.verification import issue_code, VerificationError
+    from app.services.verification import (
+        issue_code, VerificationError, check_ip_budget, spend_ip_budget,
+        IP_CODE_LIMIT)
+
+    # Before the lookup, so the refusal says nothing about any account: a
+    # host that has asked too often is told so whether the name it sent is
+    # real or not. This is the only 429 this endpoint ever returns.
+    try:
+        await check_ip_budget(request, "code", IP_CODE_LIMIT)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message)
 
     ident = (data.identifier or "").strip()
     user = (await db.execute(
@@ -251,6 +276,13 @@ async def password_reset_request(
 
     same_answer = {"sent": True,
                    "message": "اگر این حساب وجود داشته باشد، کد بازنشانی به ایمیلش فرستاده شد"}
+
+    # Counted for every identifier, known or not. The threat this budget
+    # meets is probing — a script walking phone numbers — and probing an
+    # unknown name is still probing. Counting only real hits would let the
+    # walk continue for free between them, and would make the moment the
+    # budget runs out depend on how many real accounts the list held.
+    await spend_ip_budget(request, "code")
 
     if not user or not (user.email or "").strip() or not user.is_active:
         return same_answer
@@ -270,10 +302,18 @@ async def password_reset_request(
 @router.post("/password-reset/confirm")
 async def password_reset_confirm(
     data: PasswordResetConfirm,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Set a new password against a code from the reset email."""
-    from app.services.verification import verify_code, VerificationError
+    from app.services.verification import (
+        verify_code, VerificationError, check_ip_budget, spend_ip_budget,
+        IP_VERIFY_LIMIT)
+
+    try:
+        await check_ip_budget(request, "verify", IP_VERIFY_LIMIT)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message)
 
     ident = (data.identifier or "").strip()
     user = (await db.execute(
@@ -286,11 +326,13 @@ async def password_reset_confirm(
     # The code is keyed on the username, so a wrong identifier cannot verify —
     # but answer identically either way, for the same reason as the request.
     if not user:
+        await spend_ip_budget(request, "verify")
         raise HTTPException(status_code=400, detail="کد نادرست یا منقضی است")
 
     try:
         await verify_code(PURPOSE_PWD_RESET, user.username, data.code)
     except VerificationError as e:
+        await spend_ip_budget(request, "verify")
         raise HTTPException(status_code=400, detail=e.message)
 
     user.hashed_password = get_password_hash(data.new_password)

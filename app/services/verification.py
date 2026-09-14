@@ -297,9 +297,13 @@ async def verify_code(purpose: str, identifier: str, code: str) -> str:
 # billed to the owner. Nothing else stands in the way — the api-key middleware
 # explicitly exempts /api/public/auth/*, and the ingress has no limiter.
 
-# registrations per IP per hour, and codes sent per IP per hour
+# registrations per IP per hour, codes sent per IP per hour, and code
+# guesses per IP per hour. The third is looser: a guess sends nothing and the
+# per-identifier attempt cap inside verify_code is the real lock; this only
+# stops one host from walking many identifiers at the cap each.
 IP_SIGNUP_LIMIT = 5
 IP_CODE_LIMIT = 10
+IP_VERIFY_LIMIT = 30
 IP_WINDOW = 3600
 
 
