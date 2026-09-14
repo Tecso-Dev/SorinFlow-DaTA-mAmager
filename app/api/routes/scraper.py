@@ -471,7 +471,7 @@ async def get_scraping_jobs(
             progress=j.progress,
             divar_count=j.divar_count,
             resumed_from=str(j.resumed_from) if j.resumed_from else None,
-            can_resume=bool(j.config) and j.status in ("failed", "cancelled", "completed"),
+            can_resume=bool(j.config) and j.status in ("failed", "cancelled"),
             started_at=j.started_at,
             completed_at=j.completed_at,
             created_at=j.created_at
@@ -626,7 +626,7 @@ async def get_scraping_job(
         progress=job.progress,
         divar_count=job.divar_count,
         resumed_from=str(job.resumed_from) if job.resumed_from else None,
-        can_resume=bool(job.config) and job.status in ("failed", "cancelled", "completed"),
+        can_resume=bool(job.config) and job.status in ("failed", "cancelled"),
         started_at=job.started_at,
         completed_at=job.completed_at,
         created_at=job.created_at

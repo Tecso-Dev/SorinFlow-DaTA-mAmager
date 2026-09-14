@@ -119,7 +119,7 @@ class TestTheResponseSaysWhetherItCan:
 
     def test_can_resume_needs_a_config_and_a_stopped_status(self):
         src = inspect.getsource(sr)
-        assert 'can_resume=bool(j.config) and j.status in ("failed", "cancelled", "completed")' in src
+        assert 'can_resume=bool(j.config) and j.status in ("failed", "cancelled")' in src
 
     def test_the_model_agrees(self):
         assert '"can_resume": bool(self.config) and self.status in' in \
@@ -148,3 +148,43 @@ class TestTheRestartMessagePointsAtTheButton:
         block = MAIN[i:i + 2000]
         assert "دوباره اجرا کنید" not in block
         assert "«ادامه»" in block
+
+
+class TestACompletedRunIsNotOfferedResume:
+    """«وقتی اسکرپ کامل می‌شه نباید علامت ادامه رو نشون بده.» A completed
+    run walked its whole pool; «continue» would be a rerun wearing the wrong
+    label. Failed and cancelled stopped short, and those are what it is for."""
+
+    def test_completed_is_not_in_the_set(self):
+        src = inspect.getsource(sr)
+        assert '"completed"' not in src[src.index("can_resume=bool(j.config)"):][:120]
+
+    def test_the_model_agrees(self):
+        src = inspect.getsource(ScrapingJob.to_dict)
+        i = src.index('"can_resume"')
+        assert '"completed"' not in src[i:i + 200]
+
+    def test_failed_and_cancelled_still_are(self):
+        src = inspect.getsource(ScrapingJob.to_dict)
+        i = src.index('"can_resume"')
+        assert '"failed", "cancelled"' in src[i:i + 200]
+
+
+class TestTheCountsHaveTheirOwnColumn:
+    def test_a_header_exists(self):
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        html = open(os.path.join(root, "frontend/index.html"), encoding="utf-8").read()
+        assert "<th title=" in html and ">بررسی / کل</th>" in html
+
+    def test_the_counts_left_the_progress_cell(self):
+        i = APP_JS.index('class="progress" style="height:5px')
+        cell = APP_JS[i:APP_JS.index("</td>", i)]
+        assert "job.scraped_items" not in cell
+
+    def test_they_sit_in_their_own_cell_isolated(self):
+        assert '<bdi title="بررسی‌شده">${job.scraped_items}</bdi>' in APP_JS
+        assert '<bdi title="کل">${job.total_items}</bdi>' in APP_JS
+
+    def test_the_empty_row_spans_the_new_column_too(self):
+        assert 'colspan="9" class="text-center text-muted py-4">هیچ تسکی وجود ندارد' in APP_JS

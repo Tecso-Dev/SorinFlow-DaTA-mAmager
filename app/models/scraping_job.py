@@ -84,7 +84,10 @@ class ScrapingJob(Base):
             "progress": self.progress,
             "divar_count": self.divar_count,
             "resumed_from": str(self.resumed_from) if self.resumed_from else None,
-            "can_resume": bool(self.config) and self.status in ("failed", "cancelled", "completed")
+            # A completed run is not offered: it already walked its whole pool,
+            # so «continue» would be a rerun wearing the wrong label. Failed
+            # and cancelled runs stopped short, and those are what it is for.
+            "can_resume": bool(self.config) and self.status in ("failed", "cancelled")
         }
     
     @property
