@@ -291,9 +291,19 @@ async def password_reset_request(
         await issue_code(PURPOSE_PWD_RESET, user.username, "",
                          email=user.email, channel="email", db=db)
     except VerificationError as e:
-        # Throttling is the one thing worth saying out loud: silence would have
-        # somebody pressing the button until they are locked out for an hour.
-        raise HTTPException(status_code=429, detail=e.message)
+        # Swallowed, deliberately. This branch is only reachable for a REAL
+        # account — an unknown name returned same_answer above and never got
+        # here — so a 429 from it was an oracle: six requests for a stranger
+        # answered 200 every time, six for a real user answered 200 ×5 then
+        # 429. Panel usernames are phone numbers, so that enumerated which
+        # numbers have accounts, which is the one thing same_answer exists to
+        # prevent.
+        #
+        # The worry that motivated the 429 — silence leaving somebody pressing
+        # the button until they are locked out — is now met by the per-IP
+        # budget above, which refuses them out loud and says nothing about any
+        # account. The per-identifier throttle keeps doing its job quietly.
+        logger.info(f"[reset] throttled {user.username}: {e.message}")
     except Exception as e:
         logger.warning(f"[reset] could not send to {user.username}: {e}")
     return same_answer
