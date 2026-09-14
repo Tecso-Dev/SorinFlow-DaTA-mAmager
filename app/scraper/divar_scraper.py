@@ -799,6 +799,32 @@ class DivarScraper:
         logger.warning("[view] Could not switch to list view — proceeding in current view")
         return False
 
+    async def _visible_link_count(self) -> int:
+        """How many listing links the page currently shows."""
+        try:
+            return int(await self.page.evaluate(
+                "() => document.querySelectorAll('a[href*=\"/v/\"]').length"))
+        except Exception:
+            return -1
+
+    async def _wait_for_links_beyond(self, before: int, ceiling: float) -> None:
+        """Return as soon as the page shows more listing links than `before`,
+        or after `ceiling` seconds — whichever is first. The ceiling is the
+        old fixed sleep, so a slow Divar is waited for exactly as long as it
+        was; a fast one no longer is."""
+        if before < 0:
+            await asyncio.sleep(ceiling)
+            return
+        waited = 0.0
+        while waited < ceiling:
+            await asyncio.sleep(0.25)
+            waited += 0.25
+            now = await self._visible_link_count()
+            if now > before:
+                # a beat for the rest of the batch to land alongside
+                await asyncio.sleep(0.4)
+                return
+
     async def _click_load_more(self) -> bool:
         """Click the 'آگهی‌های بیشتر' (Load More) button in Divar's list view.
 
@@ -1088,24 +1114,37 @@ class DivarScraper:
                         el = el.parentElement;
                     }
                 }""")
-                await asyncio.sleep(1.2)
+                # Wait for the page to CHANGE, not for a number of seconds.
+                #
+                # These were fixed sleeps — 1.2s, then 3.5s after a load-more
+                # click or 2.5s after wheeling — about five seconds a cycle
+                # regardless of how fast Divar actually rendered the batch,
+                # which is usually well under one. Over the twenty-odd cycles a
+                # city takes, that was most of the minutes between «شروع» and
+                # the first listing opened. Now: poll the link count and move
+                # on the moment it grows, with the old sleep as the ceiling.
+                before = await self._visible_link_count()
+                await self._wait_for_links_beyond(before, 1.2)
 
                 clicked_more = await self._click_load_more()
                 if clicked_more:
                     no_button_streak = 0
-                    await asyncio.sleep(3.5)  # wait for the next batch to render
+                    await self._wait_for_links_beyond(before, 3.5)
                 else:
                     no_button_streak += 1
                     # No button found — fall back to wheel events (infinite-scroll variant)
                     for _ in range(12):
                         await self.page.mouse.wheel(0, 700)
                         await asyncio.sleep(0.1)
-                    await asyncio.sleep(2.5)
+                    await self._wait_for_links_beyond(before, 2.5)
 
                 if gained == 0:
                     no_new_streak += 1
                     # Stop only when no new items AND no load-more button for a while
-                    if no_new_streak >= 6 and no_button_streak >= 3:
+                    # Three empty cycles with no load-more button is the feed
+                    # ending. It was six, which with the waits above cost half
+                    # a minute of confirming what the third cycle already said.
+                    if no_new_streak >= 3 and no_button_streak >= 3:
                         # Two very different situations look identical from here:
                         # the feed genuinely ended, or Divar stopped serving us.
                         # The refusal tally is what tells them apart.
@@ -3525,7 +3564,12 @@ class DivarScraper:
                 # of the target could therefore only satisfy it on a city that
                 # had never been scraped, and this was additionally capped at
                 # 200, so asking for 200 new could never return 200 new.
-                collect_target = min(max(max_items * 5, max_items + 100), 1500)
+                # Twice what the run asked for plus a page, capped. It was
+                # max_items × 5, so a run for 50 first collected 250 — most of
+                # a city — before opening its first listing. Filters drop
+                # candidates, so more than asked is still collected; five times
+                # more was the wait, not the safety.
+                collect_target = min(max(max_items * 2 + 24, 60), 1500)
 
             # Hand Divar the filters it can apply itself, before the feed is
             # loaded. Everything it will not narrow on (rooms, amenities) is
