@@ -445,6 +445,31 @@ class ContactExtractor:
                 except Exception as _fe:
                     logger.debug(f"[otp] could not describe the forwarder: {_fe}")
 
+                # The OWNER of this Divar account first.
+                #
+                # Rotation moves between accounts mid-run, and the code goes to
+                # whichever SIM is now active — so the person who can answer is
+                # that account's owner, not whoever happens to be an admin. With
+                # ten accounts across three people, mailing every admin every
+                # time is how an alert becomes noise nobody opens.
+                owner_to = []
+                try:
+                    from app.models.cookie import Cookie as _Ck
+                    from app.services import forwarder as _fwsvc
+                    cks = (await db.execute(select(_Ck))).scalars().all()
+                    owner_ids = {c.owner_user_id for c in cks
+                                 if getattr(c, "owner_user_id", None)
+                                 and _fwsvc.same_phone(c.phone_number, self.account_phone)}
+                    if owner_ids:
+                        rows = (await db.execute(
+                            select(User.email).where(
+                                User.id.in_(owner_ids),
+                                User.email.isnot(None),
+                                User.is_active == True))).scalars().all()  # noqa: E712
+                        owner_to = [a.strip() for a in rows if (a or "").strip()]
+                except Exception as _oe:
+                    logger.debug(f"[otp] could not resolve the account owner: {_oe}")
+
                 # EVERY admin with an address, not one of them.
                 #
                 # This was .limit(1) with no ORDER BY: one admin, chosen by
@@ -465,6 +490,10 @@ class ContactExtractor:
                     addr = (addr or "").strip()
                     if addr and addr not in recipients:
                         recipients.append(addr)
+                # The owner is the one who can act; admins are the fallback
+                # for an account nobody owns yet.
+                if owner_to:
+                    recipients = owner_to
                 to = recipients[0] if recipients else None
 
                 if not to:

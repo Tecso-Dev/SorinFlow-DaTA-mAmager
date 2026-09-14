@@ -195,6 +195,49 @@ async def device_config(device_id: int, db: AsyncSession = Depends(get_db),
     }
 
 
+@router.get("/devices/{device_id}/events")
+async def device_events(device_id: int, limit: int = 50,
+                        db: AsyncSession = Depends(get_db),
+                        user: User = Depends(get_current_user)):
+    """What this phone has actually sent us.
+
+    Read from sms_events, which already records every inbound POST with its
+    outcome — matched, parked, refused and why. Filtered to this device's SIM
+    so one person's log does not show another's traffic.
+    """
+    from app.models.sms_log import SmsEvent
+
+    row = await _mine(db, user, device_id)
+    rows = (await db.execute(
+        select(SmsEvent)
+        .where(SmsEvent.stage == "inbound")
+        .order_by(SmsEvent.created_at.desc(), SmsEvent.id.desc())
+        .limit(500)
+    )).scalars().all()
+
+    import json as _json
+    out = []
+    for e in rows:
+        try:
+            d = _json.loads(e.details) if e.details else {}
+        except Exception:
+            d = {}
+        if row.sim_phone and not fw.same_phone(d.get("account"), row.sim_phone):
+            continue
+        out.append({
+            "at": e.created_at.isoformat() if e.created_at else None,
+            "level": e.level,
+            "message": e.message,
+            "kind": d.get("kind"),
+            "reason": d.get("reason"),
+            "code": d.get("code"),
+            "latency_ms": d.get("latency_ms"),
+        })
+        if len(out) >= max(1, min(limit, 200)):
+            break
+    return {"events": out, "count": len(out), "device_id": row.device_id}
+
+
 @router.post("/devices/{device_id}/test")
 async def test_device(device_id: int, db: AsyncSession = Depends(get_db),
                       user: User = Depends(get_current_user)):

@@ -347,3 +347,36 @@ class TestTheCodeNeededEmailDiagnosesThePhone:
         src = inspect.getsource(ContactExtractor._notify_code_needed)
         blk = src[src.index("fw_line = \"\""):]
         assert "except Exception" in blk[:blk.index("# EVERY admin")]
+
+
+class TestTheAlertGoesToWhoeverCanAnswerIt:
+    """Rotation moves between accounts mid-run and the code goes to whichever
+    SIM is now active, so the person who can answer is that account's owner —
+    not whoever happens to be an admin. With ten accounts across three people,
+    mailing every admin every time is how an alert becomes noise."""
+
+    def _src(self):
+        import inspect
+        from app.scraper.contact_extractor import ContactExtractor
+        return inspect.getsource(ContactExtractor._notify_code_needed)
+
+    def test_it_resolves_the_owner_of_the_active_account(self):
+        src = self._src()
+        assert "owner_user_id" in src
+        assert "same_phone(c.phone_number, self.account_phone)" in src
+
+    def test_the_owner_wins_over_the_admin_list(self):
+        src = self._src()
+        assert "if owner_to:" in src
+        assert src.index("if owner_to:") < src.index("to = recipients[0]")
+
+    def test_admins_remain_the_fallback_for_an_unowned_account(self):
+        """Every account was unowned before ownership existed; an alert with
+        no recipient is the same as no alert."""
+        src = self._src()
+        assert "recipients[0] if recipients else None" in src
+
+    def test_resolving_the_owner_cannot_break_the_alert(self):
+        src = self._src()
+        blk = src[src.index("owner_to = []"):src.index("# EVERY admin")]
+        assert "except Exception" in blk
