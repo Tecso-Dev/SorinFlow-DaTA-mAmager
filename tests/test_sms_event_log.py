@@ -163,3 +163,38 @@ class TestThe412AdviceFitsThePathThatFailed:
         from app.services.sms_service import STATUS_FA
         msg = STATUS_FA[412]
         assert "در «الگوی کد ورود» بگذارید" not in msg
+
+
+class TestOneServicesTrafficStaysOutOfAnothersLog:
+    """«رویدادهای سرویس پیامک» is about Kavenegar SENDING. Codes arriving from
+    a phone are a different service with its own section — and they drown this
+    one: a handful of sends an hour against a code every listing."""
+
+    def test_the_sms_panel_excludes_inbound_by_default(self):
+        src = Path("app/api/routes/sms.py").read_text(encoding="utf-8")
+        fn = src.split("async def sms_events")[1].split("\n@router")[0]
+        assert 'exclude_stages=None if stage else ("inbound",)' in fn
+
+    def test_it_is_still_reachable_by_asking_for_it(self):
+        """The forwarder section reads the same table with stage=inbound."""
+        src = Path("app/api/routes/sms.py").read_text(encoding="utf-8")
+        fn = src.split("async def sms_events")[1].split("\n@router")[0]
+        assert "None if stage else" in fn, "asking for the stage by name is refused"
+
+    def test_the_query_actually_filters(self):
+        import inspect
+        from app.services import sms_log
+        src = inspect.getsource(sms_log.events)
+        assert "notin_" in src
+
+    def test_an_explicit_stage_is_never_overridden(self):
+        import inspect
+        from app.services import sms_log
+        src = inspect.getsource(sms_log.events)
+        # the exclusion is the `elif`, so a named stage wins
+        assert src.index("if stage:") < src.index("elif exclude_stages:")
+
+    def test_the_forwarder_section_reads_them(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert "function loadForwarderLog" in js
+        assert "stage=inbound" in js

@@ -514,7 +514,12 @@ async def sms_events(limit: int = Query(100, ge=1, le=500),
     Separate from /messages, which lists messages. This lists events: the
     question «چرا پیامک نرفت؟» is answered here, not there.
     """
-    rows = await sms_log.events(db, limit=limit, stage=stage, level=level)
+    # «رویدادهای سرویس پیامک» is about Kavenegar SENDING. Codes arriving from
+    # a phone are a different service with its own section and its own log, and
+    # they drown this one — a handful of sends an hour against a code every
+    # listing. Reachable here only by asking for the stage by name.
+    rows = await sms_log.events(db, limit=limit, stage=stage, level=level,
+                                exclude_stages=None if stage else ("inbound",))
     out = []
     for r in rows:
         try:

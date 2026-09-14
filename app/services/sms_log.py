@@ -93,13 +93,21 @@ def _mask(number: str) -> str:
     return n if len(n) < 8 else f"{n[:4]}***{n[-4:]}"
 
 
-async def events(db, *, limit: int = 200, stage: str = None, level: str = None):
-    """Most recent first — a log is read newest-down, unlike a run timeline."""
+async def events(db, *, limit: int = 200, stage: str = None, level: str = None,
+                 exclude_stages=None):
+    """Most recent first — a log is read newest-down, unlike a run timeline.
+
+    `exclude_stages` keeps one service's traffic out of another's log. The SMS
+    panel is about Kavenegar sending; a forwarder delivering a code every
+    listing would bury a handful of sends an hour.
+    """
     from app.models.sms_log import SmsEvent
 
     q = select(SmsEvent)
     if stage:
         q = q.where(SmsEvent.stage == stage)
+    elif exclude_stages:
+        q = q.where(SmsEvent.stage.notin_(tuple(exclude_stages)))
     if level:
         q = q.where(SmsEvent.level == level)
     q = q.order_by(SmsEvent.created_at.desc(), SmsEvent.id.desc()).limit(limit)

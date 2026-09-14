@@ -1031,6 +1031,33 @@
                 </div>
               </div>
 
+              <div class="card mb-3">
+                <div class="card-header d-flex align-items-center gap-2">
+                  <i class="bi bi-journal-text"></i> کدهای رسیده از گوشی
+                  <select id="fw-log-filter" class="form-select form-select-sm ms-2"
+                          style="width:auto" onchange="loadForwarderLog()">
+                    <option value="">همه</option>
+                    <option value="matched">به اسکرپر داده شد</option>
+                    <option value="parked_early">زودتر رسید — نگه داشته شد</option>
+                    <option value="problem">مشکل‌دار</option>
+                  </select>
+                  <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadForwarderLog()">
+                    <i class="bi bi-arrow-clockwise"></i> تازه‌سازی
+                  </button>
+                </div>
+                <div class="card-body p-0">
+                  <div class="table-responsive" style="max-height:320px;overflow-y:auto">
+                    <table class="table table-sm mb-0 align-middle">
+                      <thead><tr>
+                        <th style="width:10rem">زمان</th><th style="width:7rem">نتیجه</th>
+                        <th>شرح</th><th style="width:6rem">سرعت</th>
+                      </tr></thead>
+                      <tbody id="fw-log-table"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
               <!-- the guide. Shown expanded for somebody with no device yet:
                    the first question is always «how do I set this up». -->
               <div class="card mb-3">
@@ -4151,7 +4178,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260914g"></script>
+<script src="js/app.js?v=20260914h"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

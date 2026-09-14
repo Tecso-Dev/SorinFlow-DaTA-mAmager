@@ -1043,7 +1043,7 @@ function showSection(sectionName) {
                            _initScraperDatePicker(); refreshDivarSessionCount();
                            setTimeout(restoreScraperForm, 200); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
-        case 'forwarder':  loadForwarders(); break;
+        case 'forwarder':  loadForwarders(); loadForwarderLog(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
         case 'insights':   insTab(_insTab); break;
@@ -4033,6 +4033,49 @@ async function loadForwarders() {
         }
     } catch (e) {
         tb.innerHTML = `<tr><td colspan="6" class="text-danger small p-3">${esc(e.message || 'خطا')}</td></tr>`;
+    }
+}
+
+const FW_REASON = {
+    matched:      { cls: 'text-success', fa: 'وارد شد' },
+    parked_early: { cls: 'text-info',    fa: 'زودتر رسید' },
+    stale_code:   { cls: 'text-warning', fa: 'کد قدیمی' },
+    no_code_in_text: { cls: 'text-warning', fa: 'کدی در متن نبود' },
+    no_pending_for_account: { cls: 'text-muted', fa: 'درخواستی نبود' },
+    already_answered: { cls: 'text-muted', fa: 'قبلاً جواب داده' },
+    test:         { cls: 'text-muted',   fa: 'آزمایشی' },
+};
+
+async function loadForwarderLog() {
+    const tb = document.getElementById('fw-log-table');
+    if (!tb) return;
+    const f = document.getElementById('fw-log-filter')?.value || '';
+    tb.innerHTML = '<tr><td colspan="4" class="text-muted small p-3">در حال بارگذاری…</td></tr>';
+    try {
+        const d = await apiCall('/sms/events?limit=100&stage=inbound');
+        let rows = d.events || [];
+        // «مشکل‌دار» is anything that did not end with the code in the browser
+        if (f === 'problem') rows = rows.filter(e => !['matched', 'parked_early', 'test'].includes(e.details?.reason));
+        else if (f) rows = rows.filter(e => e.details?.reason === f);
+        if (!rows.length) {
+            tb.innerHTML = '<tr><td colspan="4" class="text-muted small p-3">چیزی ثبت نشده است</td></tr>';
+            return;
+        }
+        tb.innerHTML = rows.map(e => {
+            const r = e.details?.reason || '—';
+            const m = FW_REASON[r] || { cls: 'text-danger', fa: r };
+            const when = e.at ? new Date(e.at).toLocaleString('fa-IR',
+                { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+            const ms = e.details?.latency_ms;
+            return `<tr>
+                <td class="small text-muted" dir="ltr">${esc(when)}</td>
+                <td class="small ${m.cls}">${esc(m.fa)}</td>
+                <td class="small">${esc(e.message)}</td>
+                <td class="small text-muted" dir="ltr">${ms != null ? formatNumber(Math.round(ms / 100) / 10) + 's' : '—'}</td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        tb.innerHTML = `<tr><td colspan="4" class="text-danger small p-3">${esc(e.message || 'خطا')}</td></tr>`;
     }
 }
 
