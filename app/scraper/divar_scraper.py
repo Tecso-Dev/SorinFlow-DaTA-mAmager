@@ -813,6 +813,13 @@ class DivarScraper:
         logger.warning("[view] Could not switch to list view — proceeding in current view")
         return False
 
+    @staticmethod
+    def _token_from_url(url: str) -> Optional[str]:
+        """The listing token out of any Divar listing URL — /v/<slug>/<token>
+        or bare /v/<token> — or None if this is not one."""
+        m = re.search(r"/v/(?:[^/?#]+/)?([A-Za-z0-9_-]{6,20})(?:[/?#]|$)", str(url or ""))
+        return m.group(1) if m else None
+
     async def _visible_link_count(self) -> int:
         """How many listing links the page currently shows."""
         try:
@@ -3593,8 +3600,17 @@ class DivarScraper:
         max_age_hours: Optional[int] = None,
         posted_date: Optional[str] = None,
         rotate_every: Optional[int] = None,
+        urls: Optional[List[str]] = None,
     ) -> ScrapingJob:
-        """Start a complete scraping job for a city and category"""
+        """Start a complete scraping job for a city and category.
+
+        With `urls`, the pool is those listings and nothing is collected: the
+        same run — the same reveal, OTP prompt, pacing, rotation, log and
+        skipped-list bookkeeping — pointed at an explicit list. This is what
+        «اسکرپ تکی» and «بازاسکرپ همه» are now: a job of one, or of many, so a
+        code prompt does not have to be answered inside an HTTP request and
+        the finish line says what actually happened.
+        """
 
         # Date mode: scrape listings published on this exact day. There,
         # max_items is an optional cap (None = the whole day); in normal
@@ -3740,10 +3756,29 @@ class DivarScraper:
                 logger.warning(f"[collect] could not build the Divar query: {e}")
                 self._search_query = ""
 
-            all_listings = await self._collect_listings_robust(
-                city, category, collect_target,
-                until_day=target_day if date_mode else None,
-            )
+            if urls:
+                # An explicit list: no search, no collection, no count. The
+                # listings are whatever was handed over, in that order.
+                all_listings = []
+                _seen = set()
+                for u in urls:
+                    tok = self._token_from_url(u)
+                    if tok and tok not in _seen:
+                        _seen.add(tok)
+                        all_listings.append({
+                            "divar_id": tok, "url": f"https://divar.ir/v/{tok}",
+                            "title": None, "descriptions": [],
+                        })
+                self._collect_stop = ("explicit", None)
+                await job_log.record(
+                    job.job_id, job_log.PAGE,
+                    f"{len(all_listings)} آگهی از فهرست داده‌شده — بدون جست‌وجو",
+                    collected=len(all_listings), via="urls")
+            else:
+                all_listings = await self._collect_listings_robust(
+                    city, category, collect_target,
+                    until_day=target_day if date_mode else None,
+                )
             seen_ids: set = {lst['divar_id'] for lst in all_listings}
 
             # Collection is the heaviest thing the browser ever does: the feed
@@ -3815,7 +3850,8 @@ class DivarScraper:
                     collected=len(all_listings), target=collect_target)
 
             # What Divar itself says, asked again at run time and written down
-            # beside what the listing page actually gave up.
+            # beside what the listing page actually gave up. Not for an
+            # explicit list — there is no search to count.
             #
             # «۱۱۳ آگهی با این فیلترها در دیوار هست» and «۱۱۹ نامزد جمع شد» are
             # answers to two different questions — an estimate Divar computed
@@ -3825,6 +3861,8 @@ class DivarScraper:
             # bar's denominator, because it can be larger or smaller than the
             # pool the run actually walks, and either way the bar would lie.
             try:
+                if urls:
+                    raise StopAsyncIteration   # caught below: nothing to ask
                 from app.services import divar_count as dc
                 _form = dc.build_form_data(
                     category,
@@ -3847,6 +3885,8 @@ class DivarScraper:
                         divar_count=_divar_total, collected=len(all_listings))
                 elif _count_err:
                     logger.info(f"[count] Divar's own total unavailable: {_count_err}")
+            except StopAsyncIteration:
+                pass
             except Exception as e:
                 # Advisory. It must never cost a run.
                 logger.warning(f"[count] could not ask Divar for its total: {e}")
@@ -3938,8 +3978,10 @@ class DivarScraper:
                     # go?».
                     examined += 1
 
-                    # Check if already scraped
-                    if await self.property_exists(listing['divar_id']):
+                    # Check if already scraped. Not for an explicit list: a
+                    # listing named by hand is one somebody wants opened,
+                    # whatever the table already holds about it.
+                    if not urls and await self.property_exists(listing['divar_id']):
                         # Already stored AND complete: nothing is written here.
                         # «بروز» counts «از قبل موجود بود» — which is what the
                         # column's own tooltip says — not «was refreshed».
@@ -3983,8 +4025,17 @@ class DivarScraper:
                     if detail:
                         # Merge with listing data
                         property_data = {**listing, **detail}
-                        property_data['city_name'] = CITIES.get(city, {}).get('name', city)
-                        property_data['category_name'] = CATEGORIES.get(category, {}).get('name', category)
+                        # The run's city/category name the row — unless the run
+                        # is an explicit list, where they are only labels («—»,
+                        # «بازاسکرپ») and the page's own breadcrumb is the truth.
+                        if CITIES.get(city):
+                            property_data['city_name'] = CITIES[city].get('name', city)
+                        elif not urls:
+                            property_data['city_name'] = city
+                        if CATEGORIES.get(category):
+                            property_data['category_name'] = CATEGORIES[category].get('name', category)
+                        elif not urls:
+                            property_data['category_name'] = category
                         listing_type = CATEGORIES.get(category, {}).get('type', 'unknown')
                         property_data['listing_type'] = listing_type
 

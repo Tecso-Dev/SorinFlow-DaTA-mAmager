@@ -117,6 +117,9 @@ class ScrapingJobCreate(BaseModel):
     """Schema for creating a scraping job"""
     city: str
     category: str
+    # An explicit list of listing URLs. With this set the run opens exactly
+    # these and searches for nothing; city/category are then only labels.
+    urls: Optional[List[str]] = None
     # Optional in date mode (posted_date set): empty = the whole day,
     # a number = cap. In normal mode the backend falls back to 100.
     max_items: Optional[int] = None

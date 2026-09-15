@@ -92,7 +92,7 @@ class TestCandidatesNeverReachedAreNotCandidatesDropped:
     def test_it_counts_before_the_duplicate_check(self):
         """An already-held listing was looked at."""
         i = SCRAPER.index("examined += 1")
-        assert SCRAPER.index("if await self.property_exists(", i) > i
+        assert SCRAPER.index("await self.property_exists(", i) > i
 
     def test_the_leftovers_are_reported_separately(self):
         assert "بررسی‌نشده" in SCRAPER

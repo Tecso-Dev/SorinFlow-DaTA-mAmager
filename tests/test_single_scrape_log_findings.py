@@ -38,22 +38,29 @@ from app.scraper.divar_scraper import DivarScraper  # noqa: E402
 from app.scraper.contact_extractor import ContactExtractor  # noqa: E402
 
 
-class TestASingleScrapeRefusesCleanly:
-    SRC = inspect.getsource(sr.scrape_single_property)
+class TestARunWhoseBrowserDidNotComeUpFailsInWords:
+    """The single scrape is a job of one now, so this lives in the job path —
+    which had the same bug: «Browser initialization incomplete, continuing
+    anyway...» continued with no page."""
+    SRC = inspect.getsource(sr.run_scraping_job)
 
-    def test_initialize_s_answer_is_checked(self):
-        assert "if not await scraper.initialize():" in self.SRC
+    def test_initialize_s_answer_stops_the_run(self):
+        # the old log line, not the comment that quotes it
+        assert 'Browser initialization incomplete, continuing anyway' not in self.SRC
+        i = self.SRC.index("if not initialized:")
+        assert "raise RuntimeError(msg)" in self.SRC[i:i + 1600]
 
-    def test_a_busy_account_is_a_409_in_words(self):
-        assert "status_code=409" in self.SRC
-        assert "در یک اسکرپ در حال اجرا مشغول است" in self.SRC
+    def test_a_busy_account_is_named_as_such(self):
+        assert "دو اسکرپ" in self.SRC and "«ادامه» را بزنید" in self.SRC
 
-    def test_any_other_boot_failure_is_a_503_with_the_reason(self):
-        assert "status_code=503" in self.SRC
+    def test_any_other_boot_failure_carries_the_reason(self):
         assert "مرورگر اسکرپر بالا نیامد" in self.SRC
 
-    def test_the_failure_message_names_which_half_failed(self):
-        assert "_last_detail_error" in self.SRC and "_last_save_error" in self.SRC
+    def test_it_is_written_to_the_run_log_and_the_finish_line(self):
+        i = self.SRC.index("if not initialized:")
+        block = self.SRC[i:i + 1600]
+        assert "_jl.record(job_id, _jl.ERROR, msg" in block
+        assert "_row.finish_reason = msg[:300]" in block
 
     def test_initialize_records_why_it_failed(self):
         src = inspect.getsource(DivarScraper.initialize)

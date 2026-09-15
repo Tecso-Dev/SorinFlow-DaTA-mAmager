@@ -68,6 +68,7 @@ async def run_scraping_job(
     posted_date: str = None,
     rotate_every: Optional[int] = None,
     owner_user_id: Optional[int] = None,
+    urls: Optional[List[str]] = None,
 ):
     """Background task to run scraping job.
 
@@ -137,7 +138,29 @@ async def run_scraping_job(
             initialized = await scraper.initialize(phone_number=divar_phone)
             
             if not initialized:
-                logger.warning(f"[{job_id}] Browser initialization incomplete, continuing anyway...")
+                # «continuing anyway» meant continuing with no page: the run
+                # went on to «'NoneType' object has no attribute 'goto'» on
+                # every listing. The usual cause is not a fault — the account's
+                # browser profile is open in another running job — so the run
+                # is failed with THAT in its finish line, where the panel and
+                # the ▶ button can act on it.
+                why = getattr(scraper, "_init_error", "") or ""
+                if "already open" in why:
+                    msg = ("این شمارهٔ دیوار در یک اسکرپ دیگر در حال اجراست و دو اسکرپ "
+                           "نمی‌توانند یک شماره را همزمان باز کنند — بعد از پایان آن، «ادامه» را بزنید")
+                else:
+                    msg = f"مرورگر اسکرپر بالا نیامد: {why[:200] or 'نامشخص'}"
+                from app.services import job_log as _jl
+                await _jl.record(job_id, _jl.ERROR, msg, level="error")
+                try:
+                    _row = (await session.execute(
+                        select(ScrapingJob).where(ScrapingJob.job_id == job_id))).scalar_one_or_none()
+                    if _row:
+                        _row.finish_reason = msg[:300]
+                        await session.commit()
+                except Exception:
+                    pass
+                raise RuntimeError(msg)
             
             logger.info(f"[{job_id}] Starting main scraping task")
             
@@ -169,6 +192,7 @@ async def run_scraping_job(
                 max_age_hours=max_age_hours,
                 posted_date=posted_date,
                 rotate_every=rotate_every,
+                urls=urls,
             )
             
             logger.info(f"[{job_id}] Job completed: {result.new_items} new, {result.failed_items} failed, Status={result.status}")
@@ -301,12 +325,18 @@ async def _launch_job(
     active = {k: v for k, v in job_config.model_dump().items() if v is not None and k not in ('city', 'category', 'max_items', 'download_images', 'divar_phone')}
     logger.info(f"Scraping job request — city={job_config.city} category={job_config.category} max_items={job_config.max_items} images={job_config.download_images} filters={active}")
     
-    # Validate city and category
-    if job_config.city not in CITIES:
+    # Validate city and category — unless the run is an explicit list of
+    # listings, where they are only labels and the ads say what they are.
+    if job_config.urls:
+        cleaned = [u for u in job_config.urls if isinstance(u, str) and "divar.ir/v/" in u]
+        if not cleaned:
+            raise HTTPException(status_code=400, detail="هیچ لینک آگهی معتبری داده نشد")
+        job_config.urls = cleaned[:500]
+    elif job_config.city not in CITIES:
         logger.error(f"Invalid city: {job_config.city}")
         raise HTTPException(status_code=400, detail=f"Invalid city: {job_config.city}")
     
-    if job_config.category not in CATEGORIES:
+    if not job_config.urls and job_config.category not in CATEGORIES:
         logger.error(f"Invalid category: {job_config.category}")
         raise HTTPException(status_code=400, detail=f"Invalid category: {job_config.category}")
     
@@ -401,6 +431,7 @@ async def _launch_job(
         job_config.posted_date,
         job_config.rotate_every,
         current_user.id if current_user else None,
+        job_config.urls,
     )
     
     logger.info(f"Started background task for job {job_id}")
@@ -460,7 +491,10 @@ async def get_scraping_jobs(
             city_id=j.city_id,
             category_id=j.category_id,
             city_name=city_map.get(j.city_id),
-            category_name=cat_map.get(j.category_id),
+            # An explicit-list run has no category row; its label is the
+            # kind of run it was («اسکرپ تکی», «بازاسکرپ»).
+            category_name=cat_map.get(j.category_id)
+                or ((j.config or {}).get("category") if (j.config or {}).get("urls") else None),
             status=j.status,
             total_pages=j.total_pages,
             scraped_pages=j.scraped_pages,
@@ -1148,54 +1182,55 @@ class SingleScrapeRequest(BaseModel):
 @router.post("/scrape-single")
 async def scrape_single_property(
     request: SingleScrapeRequest,
-    db: AsyncSession = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Scrape a single property by URL"""
+    """Scrape one listing — as a job of one.
+
+    This used to open a browser inside the HTTP request and answer «Failed
+    to scrape property» or «success» — and «success» meant a row was saved,
+    number or not, which is how a listing came back «با موفقیت اسکرپ شد»
+    with its phone column still reading «گرفته نشد». Inside a request there
+    was also nowhere for a code prompt to go: the panel's OTP dialog polls
+    jobs, and the request could not wait on it.
+
+    A job of one has everything a run has: the OTP dialog, the pacing, the
+    rotation, the log, the skipped-list bookkeeping, and a finish line that
+    says what happened. The panel shows it in the table like any other.
+    """
     url = request.url
-    
     if "divar.ir/v/" not in url:
         raise HTTPException(status_code=400, detail="Invalid Divar property URL")
-    
-    scraper = DivarScraper(
-        db_session=db,
-        proxy_enabled=settings.proxy_enabled,
-        headless=settings.scraper_headless
-    )
-    
-    try:
-        # initialize() returns False rather than raising, and this ignored
-        # it: the scrape went on with no page and died on «'NoneType' has no
-        # attribute 'goto'», which the panel showed as a bare «Failed to
-        # scrape property». The usual reason is not a fault at all — the
-        # account's browser profile is open in a running job, and two jobs
-        # cannot share it — so say that, in words a person can act on.
-        if not await scraper.initialize():
-            why = getattr(scraper, "_init_error", "") or ""
-            if "already open" in why:
-                raise HTTPException(
-                    status_code=409,
-                    detail="این شمارهٔ دیوار الان در یک اسکرپ در حال اجرا مشغول است — "
-                           "بعد از پایان آن، یا با شمارهٔ دیگری، دوباره بزنید")
-            raise HTTPException(
-                status_code=503,
-                detail=f"مرورگر اسکرپر بالا نیامد: {why[:160] or 'نامشخص'}")
+    cfg = ScrapingJobCreate(city="—", category="اسکرپ تکی", urls=[url], max_items=1,
+                            download_images=True)
+    return await _launch_job(cfg, background_tasks, db, current_user)
 
-        property_data = await scraper.scrape_property_detail(url)
 
-        if property_data:
-            saved = await scraper.save_property(property_data)
-            if saved:
-                return {"success": True, "property": saved.to_dict()}
+class RescrapeRequest(BaseModel):
+    urls: List[str]
+    label: Optional[str] = None
 
-        # Say which half failed. A page that would not open and a page that
-        # opened but gave no number are different problems.
-        why = getattr(scraper, "_last_detail_error", None) \
-            or getattr(scraper, "_last_save_error", None)
-        return {"success": False,
-                "message": (f"اسکرپ نشد — {why}" if why else "اسکرپ نشد")}
 
-    finally:
-        await scraper.close()
+@router.post("/rescrape")
+async def rescrape_listings(
+    body: RescrapeRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Open a given set of listings again, as one job.
+
+    «یه علامت رفرش کلی دقیقاً همین فیلد بدون شماره بذار وقتی اونو بزنم همه رو
+    اسکرپ کنه.» The skipped list already holds the links; this is that list
+    handed back as a run, so a person presses one button instead of thirty.
+    """
+    urls = [u for u in body.urls if isinstance(u, str) and "divar.ir/v/" in u]
+    if not urls:
+        raise HTTPException(status_code=400, detail="هیچ لینک آگهی معتبری داده نشد")
+    cfg = ScrapingJobCreate(city="—", category=body.label or "بازاسکرپ",
+                            urls=urls, max_items=len(urls), download_images=True)
+    return await _launch_job(cfg, background_tasks, db, current_user)
 
 
 @router.get("/active-tasks")
