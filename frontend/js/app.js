@@ -2536,8 +2536,10 @@ async function loadScraperAccounts() {
             + rows.map(c => {
                 const bits = [`${c.reveals || 0} افشا`];
                 if (!c.is_valid) bits.push('نامعتبر');
-                if (c.challenged_at) bits.push('اخیراً کد خواسته');
-                return `<option value="${esc(c.phone_number)}"${c.is_valid ? '' : ' disabled'}>`
+                if (c.identity_required_at) bits.push('احراز هویت لازم');
+                else if (c.challenged_at) bits.push('اخیراً کد خواسته');
+                const usable = c.is_valid && !c.identity_required_at;
+                return `<option value="${esc(c.phone_number)}"${usable ? '' : ' disabled'}>`
                      + `${esc(c.phone_number)} — ${esc(bits.join('، '))}</option>`;
             }).join('');
         if (chosen) sel.value = chosen;
@@ -3505,11 +3507,66 @@ function initOtp2Boxes() {
     });
 }
 
+/* ── Divar's identity wall ────────────────────────────────────────────────
+ *
+ * «دیوار ازش احراز هویت با کد ملی خواست.» Divar sometimes asks an account
+ * to prove who it is — national ID, birth date — and nothing automated can
+ * answer that. The scraper recognises the page, sets the account aside, and
+ * says so here: the only useful response is a person logging in on Divar
+ * with that number and doing it, then telling the panel it is done.
+ *
+ * Once per account per session unless the person says «بعداً», and never
+ * stacked on top of itself.                                                 */
+const _identityShown = new Set();
+let _identityOpen = false;
+
+async function _showIdentityWall(items) {
+    if (_identityOpen) return;
+    const item = items.find(i => !_identityShown.has(i.phone));
+    if (!item) return;
+    _identityOpen = true;
+    _identityShown.add(item.phone);
+    try {
+        const ok = await _askOpen({
+            icon: 'bi-person-badge',
+            tone: 'danger',
+            title: 'دیوار احراز هویت می‌خواهد',
+            body: `دیوار برای شمارهٔ <b dir="ltr">${esc(item.phone)}</b> احراز هویت با <b>کد ملی</b> خواسته است.
+                   اسکرپر نمی‌تواند این را انجام دهد و این شماره را کنار گذاشته؛ اجرا با شماره‌های دیگر ادامه می‌یابد.`,
+            note: `با همین شماره در <a href="https://divar.ir/my-divar" target="_blank" rel="noopener">divar.ir</a> وارد شوید و احراز هویت را انجام دهید.
+                   بعد اینجا «انجام شد» را بزنید تا شماره دوباره به چرخش برگردد.
+                   ${item.text ? `<div class="mt-2 opacity-75" style="font-size:.7rem">دیوار: «${esc(item.text.slice(0, 160))}»</div>` : ''}`,
+            okLabel: 'انجام شد — احراز هویت کردم',
+            cancelLabel: 'بعداً',
+        });
+        if (ok) await _identityCleared(item.phone);
+    } finally {
+        _identityOpen = false;
+    }
+}
+
+async function _identityCleared(phone) {
+    try {
+        const d = await apiCall('/auth/cookies');
+        const c = (d.cookies || []).find(x => (x.phone_number || '').replace(/\D/g, '') === String(phone).replace(/\D/g, ''));
+        if (!c) { showToast('خطا', 'نشست این شماره پیدا نشد', 'warning'); return; }
+        await apiCall(`/auth/cookies/${c.id}/identity-cleared`, { method: 'POST' });
+        showToast('انجام شد', `${phone} دوباره در چرخش است`, 'success');
+        _identityShown.delete(phone);
+        loadScraperAccounts();
+    } catch (e) {
+        showToast('خطا', e.message, 'danger');
+    }
+}
+
 // keys the user explicitly dismissed this session — don't re-pop them
 async function pollDivarOtp() {
     try {
         const data = await apiCall('/scraper/otp-pending');
         if (data.timeout) _otp2Window = data.timeout;
+        // An account Divar wants identified takes precedence over a code
+        // prompt: no code will get past it, and the person has to know now.
+        await _showIdentityWall(data.identity_required || []);
         const pending = data.pending || [];
         const modal = document.getElementById('divarOtpModal');
         if (!modal) return;
@@ -3905,6 +3962,13 @@ async function loadCookies() {
                     <strong>${cookie.phone_number}</strong>
                     <br>
                     <small class="text-muted">${cookie.is_valid ? 'معتبر' : 'منقضی'}</small>
+                    ${cookie.identity_required_at ? `
+                        <div class="mt-1">
+                            <span class="badge bg-danger" title="دیوار برای این شماره احراز هویت با کد ملی می‌خواهد؛ تا انجام نشود در چرخش نیست">
+                                <i class="bi bi-person-badge"></i> احراز هویت لازم
+                            </span>
+                            <button class="btn btn-sm btn-link p-0 ms-1 small" onclick="_identityCleared('${esc(cookie.phone_number)}')">انجام شد</button>
+                        </div>` : ''}
                 </div>
                 <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${cookie.id})">
                     <i class="bi bi-trash"></i>
