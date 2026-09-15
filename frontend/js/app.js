@@ -10881,13 +10881,13 @@ function visibleSkipped() {
         : _skippedRows;
 }
 
-/* What «بازاسکرپ همه» would open right now: the rows on screen, minus
- * chat-only ones unless that is the bucket chosen — no run will ever fill
- * those and each would spend a reveal. The button's number and the action
- * both read this, so they cannot disagree: «(8)» over a list of four was
- * the two being computed separately. */
+/* What «بازاسکرپ همه» would open right now: exactly the rows on screen.
+ * The button's number and the action both read this, so they cannot
+ * disagree — «(8)» over a list of four was the two being computed
+ * separately. Chat-only rows are included too: that verdict has been
+ * wrong before, and a second look is the only way to find out. */
 function rescrapeCandidates() {
-    return visibleSkipped().filter(r => r.reason !== 'chat_only' || _skippedFilter === 'chat_only');
+    return visibleSkipped();
 }
 
 function renderSkippedRows() {

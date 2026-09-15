@@ -139,10 +139,14 @@ class TestThePanel:
         block = APP_JS[i:i + 1800]
         assert "visibleSkipped()" in block and "'/scraper/rescrape'" in block
 
-    def test_chat_only_is_left_alone_unless_asked_for_by_name(self):
-        """No run will ever fill those; re-opening them spends reveals."""
+    def test_the_button_counts_exactly_what_is_on_screen(self):
+        """«همه» over eight rows says (8): the number is the list, filter or
+        not. Chat-only rows are not quietly dropped — that verdict has been
+        wrong before."""
         i = APP_JS.index("function rescrapeCandidates()")
-        assert "r.reason !== 'chat_only' || _skippedFilter === 'chat_only'" in APP_JS[i:i + 400]
+        body = APP_JS[i:APP_JS.index("}", i)]
+        assert "return visibleSkipped();" in body
+        assert "chat_only" not in body
 
     def test_the_button_s_number_and_the_action_read_the_same_set(self):
         """«(8)» over a list of four was the two being computed separately."""
