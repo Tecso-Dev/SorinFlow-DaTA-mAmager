@@ -1157,16 +1157,37 @@ async def scrape_single_property(
     )
     
     try:
-        await scraper.initialize()
+        # initialize() returns False rather than raising, and this ignored
+        # it: the scrape went on with no page and died on «'NoneType' has no
+        # attribute 'goto'», which the panel showed as a bare «Failed to
+        # scrape property». The usual reason is not a fault at all — the
+        # account's browser profile is open in a running job, and two jobs
+        # cannot share it — so say that, in words a person can act on.
+        if not await scraper.initialize():
+            why = getattr(scraper, "_init_error", "") or ""
+            if "already open" in why:
+                raise HTTPException(
+                    status_code=409,
+                    detail="این شمارهٔ دیوار الان در یک اسکرپ در حال اجرا مشغول است — "
+                           "بعد از پایان آن، یا با شمارهٔ دیگری، دوباره بزنید")
+            raise HTTPException(
+                status_code=503,
+                detail=f"مرورگر اسکرپر بالا نیامد: {why[:160] or 'نامشخص'}")
+
         property_data = await scraper.scrape_property_detail(url)
-        
+
         if property_data:
             saved = await scraper.save_property(property_data)
             if saved:
                 return {"success": True, "property": saved.to_dict()}
-        
-        return {"success": False, "message": "Failed to scrape property"}
-        
+
+        # Say which half failed. A page that would not open and a page that
+        # opened but gave no number are different problems.
+        why = getattr(scraper, "_last_detail_error", None) \
+            or getattr(scraper, "_last_save_error", None)
+        return {"success": False,
+                "message": (f"اسکرپ نشد — {why}" if why else "اسکرپ نشد")}
+
     finally:
         await scraper.close()
 
