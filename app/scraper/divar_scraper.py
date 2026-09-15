@@ -359,6 +359,10 @@ class DivarScraper:
             
         except Exception as e:
             logger.error(f"Failed to initialize scraper: {e}")
+            # Kept for callers that want to say WHY to a person — «profile is
+            # already open in this process» is a busy account, not a fault,
+            # and deserves a different sentence than a crashed browser.
+            self._init_error = str(e)
             return False
     
     def _client(self) -> httpx.AsyncClient:
@@ -643,14 +647,24 @@ class DivarScraper:
             await self._recycle_browser(f"container memory at {frac:.0%}")
             return
         
-        # Check requests per minute
+        # Check requests per minute.
+        #
+        # This was `request_count / elapsed * 60` from the first request on,
+        # and on a fresh instance the first request comes 0.1s after
+        # session_start: 1 / 0.1 × 60 = 600 rpm, «Rate limit reached», a
+        # 59-second sleep. Every «اسکرپ تکی» paid it on its very first page —
+        # a projection from a tenth of a second treated as a minute's rate.
+        # In the first minute the only rate that means anything is the plain
+        # count; the projection is trusted once there is a minute to project
+        # from.
+        limit = self.stealth_config.max_requests_per_minute
         elapsed = (datetime.now() - self.session_start).total_seconds()
-        if elapsed > 0:
-            rpm = (self.request_count / elapsed) * 60
-            if rpm > self.stealth_config.max_requests_per_minute:
-                wait_time = 60 - (elapsed % 60)
-                logger.info(f"Rate limit reached. Waiting {wait_time:.1f} seconds...")
-                await asyncio.sleep(wait_time)
+        over = (self.request_count > limit) if elapsed < 60 \
+            else ((self.request_count / elapsed) * 60 > limit)
+        if over:
+            wait_time = 60 - (elapsed % 60)
+            logger.info(f"Rate limit reached. Waiting {wait_time:.1f} seconds...")
+            await asyncio.sleep(wait_time)
         
         # Check requests per session
         if self.request_count >= self.stealth_config.max_requests_per_session:
