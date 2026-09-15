@@ -178,26 +178,23 @@ class ContactExtractor:
                 # Handle Divar SMS-OTP for contact-info verification
                 await self._handle_sms_otp_if_present()
 
-                # Dismiss PWA info modal if present
-                try:
-                    for btn in await self.page.query_selector_all('.kt-new-modal__footer button.kt-button--primary'):
-                        try:
-                            text = (await btn.inner_text() or '').strip()
-                        except Exception:
-                            continue
-                        if 'متوجه شدم' in text:
-                            logger.info("Dismissing PWA info modal")
-                            try:
-                                await btn.click(force=True, timeout=3000)
-                            except Exception:
-                                try:
-                                    await btn.click()
-                                except Exception:
-                                    pass
-                            await asyncio.sleep(1.0)
-                            break
-                except Exception:
-                    pass
+                # A notice standing between the click and the number.
+                #
+                # From a real run: «Contact button clicked» → «No tel: link
+                # found» → «Modal detected on page» → «No phone element found»,
+                # and the listing was saved without a number that Divar was
+                # showing in the same session by hand. The modal had no input
+                # — so it was not the code prompt — and its button did not say
+                # «متوجه شدم», which was the only wording this dismissed. A
+                # safety notice, a terms nudge, a first-reveal tip: Divar has
+                # several, the wording moves, and every one of them sits
+                # exactly where the number is about to appear.
+                #
+                # Any modal with no input that shows up after «اطلاعات تماس»
+                # is a notice, and acknowledging it is what a person does.
+                # Its words go in the log first, so the next one that does
+                # not match is a line to read rather than a listing lost.
+                await self._acknowledge_notice()
 
                 # Debug screenshot
                 try:
@@ -417,6 +414,63 @@ class ContactExtractor:
         # «تایید هویت» is also a menu item on every logged-in page. It only
         # means us when it is being demanded, not merely offered.
         return any(w in t for w in ("هویت خود را", "احراز هویت", "کد ملی"))
+
+    # Buttons that acknowledge a notice, in the order to prefer them. The
+    # first is the one this used to require; the rest are Divar's other
+    # wordings for the same gesture.
+    _ACK_WORDS = ("متوجه شدم", "فهمیدم", "باشه", "تأیید", "تایید", "ادامه",
+                  "قبول", "بستن", "OK")
+
+    async def _acknowledge_notice(self) -> bool:
+        """Dismiss a no-input modal, logging what it said. True if one was."""
+        try:
+            modal = None
+            for sel in ('.kt-new-modal', '[role="dialog"]', '.kt-modal'):
+                el = await self.page.query_selector(sel)
+                if el and await el.is_visible():
+                    modal = el
+                    break
+            if modal is None:
+                return False
+            # A modal WITH an input is the code prompt (or a phone step), and
+            # belongs to the OTP handler — never click through that.
+            if await modal.query_selector('input'):
+                return False
+            text = ((await modal.inner_text()) or "").strip()
+            buttons = await modal.query_selector_all('button, [role="button"], a.kt-button')
+            labelled = []
+            for b in buttons:
+                try:
+                    if await b.is_visible():
+                        labelled.append((((await b.inner_text()) or "").strip(), b))
+                except Exception:
+                    continue
+            logger.info(f"[notice] modal after contact click — says: {text[:200]!r}; "
+                        f"buttons: {[t for t, _ in labelled][:6]}")
+            target = None
+            for word in self._ACK_WORDS:
+                for t, b in labelled:
+                    if word in t:
+                        target = (t, b)
+                        break
+                if target:
+                    break
+            if target is None and len(labelled) == 1:
+                target = labelled[0]          # one button on a notice: that is the one
+            if target is None:
+                logger.warning("[notice] no button on it matched — leaving it; the number stays hidden")
+                return False
+            t, b = target
+            try:
+                await b.click(force=True, timeout=3000)
+            except Exception:
+                await b.click()
+            logger.info(f"[notice] acknowledged via {t!r}")
+            await asyncio.sleep(1.0)
+            return True
+        except Exception as e:
+            logger.debug(f"[notice] lookup failed: {e}")
+            return False
 
     async def _request_otp_resend(self) -> bool:
         """Click Divar's resend control if it is offering one.
