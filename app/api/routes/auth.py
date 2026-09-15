@@ -345,6 +345,7 @@ async def list_cookies(
                 "challenged_at": c.challenged_at.isoformat() if c.challenged_at else None,
                 "last_used_at": c.last_used_at.isoformat() if c.last_used_at else None,
                 "owner_user_id": c.owner_user_id,
+                "identity_required_at": c.identity_required_at.isoformat() if c.identity_required_at else None,
                 # Only filled for an admin — nobody else is shown a list that
                 # could include somebody else's row in the first place.
                 "owner_name": owners.get(c.owner_user_id),
@@ -465,6 +466,29 @@ async def import_cookies(
 
     return {"success": True, "alive": alive, "message": msg,
             "expires_at": expires_at.isoformat() if expires_at else None}
+
+
+@router.post("/cookies/{cookie_id}/identity-cleared")
+async def identity_cleared(
+    cookie_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """A person has verified this account on Divar; let rotation use it again.
+
+    The flag is not cleared by time and not cleared by a code: only by
+    somebody saying they did it. Own accounts only, or an admin's.
+    """
+    cookie = (await db.execute(select(Cookie).where(Cookie.id == cookie_id))).scalar_one_or_none()
+    if not cookie:
+        raise HTTPException(status_code=404, detail="نشست پیدا نشد")
+    if not _sees_every_session(user) and cookie.owner_user_id != user.id:
+        raise HTTPException(status_code=403, detail="این شماره به حساب کاربری دیگری تعلق دارد")
+    cookie.identity_required_at = None
+    await db.commit()
+    from app.scraper import otp_store
+    otp_store.clear_identity_required(cookie.phone_number)
+    return {"success": True, "phone_number": cookie.phone_number}
 
 
 @router.delete("/cookies/{cookie_id}")

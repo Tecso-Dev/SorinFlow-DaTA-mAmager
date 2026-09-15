@@ -24,8 +24,12 @@ class ContactExtractor:
     def __init__(self, page, images_dir: Path, otp_key: Optional[str] = None,
                  on_pause=None, on_resume=None, should_cancel=None,
                  account_phone: Optional[str] = None, on_challenge=None,
-                 on_verified=None):
+                 on_verified=None, on_identity_required=None):
         self.page = page
+        # Divar asked this account to prove who it is — national ID, birth
+        # date. Nothing here can answer that; the scraper marks the account
+        # and tells the panel. See _identity_wall().
+        self.on_identity_required = on_identity_required
         self.images_dir = images_dir
         self.otp_key = otp_key  # key into otp_store; set by scraper when a job is running
         # How many Divar sessions the scraper can rotate through. Decides how
@@ -177,6 +181,15 @@ class ContactExtractor:
 
                 # Handle Divar SMS-OTP for contact-info verification
                 await self._handle_sms_otp_if_present()
+
+                # Divar's identity wall can be a whole page, not a dialog.
+                try:
+                    _body = ((await self.page.inner_text("body")) or "")[:20000]
+                except Exception:
+                    _body = ""
+                if self._identity_wall(_body):
+                    await self._report_identity_wall(_body)
+                    return None
 
                 # A notice standing between the click and the number.
                 #
@@ -471,6 +484,31 @@ class ContactExtractor:
         except Exception as e:
             logger.debug(f"[notice] lookup failed: {e}")
             return False
+
+    # What Divar's identity verification says about itself. Both halves are
+    # required: «کد ملی» alone appears in a poster's own text now and then
+    # («کد ملی نمی‌دهم»), and «احراز هویت» alone is the panel's own word.
+    _IDENTITY_ID_WORDS = ("کد ملی", "کدملی", "شماره ملی", "شمارهٔ ملی", "شناسه ملی")
+    _IDENTITY_ASK_WORDS = ("احراز هویت", "تاریخ تولد", "تایید هویت", "تأیید هویت",
+                           "هویت خود را", "هویت شما")
+
+    @classmethod
+    def _identity_wall(cls, text: str) -> bool:
+        t = (text or "").replace("‌", " ")
+        return any(w in t for w in cls._IDENTITY_ID_WORDS) and \
+            any(w in t for w in cls._IDENTITY_ASK_WORDS)
+
+    async def _report_identity_wall(self, text: str) -> None:
+        """Record the wall and hand the account back. Never raises."""
+        self.contact_channel = "identity_required"
+        logger.warning(
+            f"[identity] Divar is asking {self.account_phone or '?'} to verify its identity "
+            f"(national ID) — the page says: {(text or '')[:240]!r}")
+        if self.on_identity_required:
+            try:
+                await self.on_identity_required((text or "")[:400])
+            except Exception as e:
+                logger.warning(f"[identity] on_identity_required failed: {e}")
 
     async def _request_otp_resend(self) -> bool:
         """Click Divar's resend control if it is offering one.
@@ -845,6 +883,19 @@ class ContactExtractor:
                 f"[otp] field {await self._input_attrs(otp_input)} | "
                 f"modal says: {modal_text[:300]!r}"
             )
+
+            # Not a code prompt at all: Divar asking who this account IS.
+            #
+            # An operator hit it by hand — «دیوار ازش احراز هویت با کدملی
+            # خواست». It looks like every other challenge from a selector's
+            # point of view (a dialog with an input) and it is nothing like
+            # one: no SMS is coming, no code will satisfy it, and a run that
+            # parks here waits five minutes for nothing while the account
+            # stays unusable. Recognise it by its words, record it, hand the
+            # account back, and put it in front of a person.
+            if self._identity_wall(modal_text):
+                await self._report_identity_wall(modal_text)
+                return
 
             if not self.otp_key:
                 logger.warning("SMS-OTP modal found but otp_key not set — phone extraction skipped")

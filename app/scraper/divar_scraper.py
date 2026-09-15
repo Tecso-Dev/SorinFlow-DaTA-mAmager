@@ -1947,6 +1947,9 @@ class DivarScraper:
                 # A code that has been answered is trust Divar just granted to
                 # this jar. Save it, or the next use starts untrusted again.
                 on_verified=self._persist_active_session,
+                # Divar asking who this account IS. Nothing here can answer;
+                # mark the account, rotate away, and put it in front of a person.
+                on_identity_required=self._note_identity_required,
             )
             # How many sessions rotation can still reach. An unanswered code
             # prompt suppresses phone numbers for the whole job only once every
@@ -2577,7 +2580,11 @@ class DivarScraper:
         try:
             from app.models.cookie import Cookie as CookieModel
             query = (select(CookieModel)
-                     .where(CookieModel.is_valid == True))
+                     .where(CookieModel.is_valid == True)
+                     # An account Divar wants identified is not a candidate.
+                     # Handing it back would spend a reveal to hit the same
+                     # wall and re-alarm the panel.
+                     .where(CookieModel.identity_required_at.is_(None)))
             # Rotation must stay inside the pool the run's owner owns.
             # Without this it would log somebody else's number in and spend
             # their reveals — and a reveal is charged to the account, not to
@@ -2952,6 +2959,48 @@ class DivarScraper:
                 logger.error(f"[identity] {acct} must verify — told {len(tos)} recipient(s)")
         except Exception as e:
             logger.warning(f"[identity] could not notify: {e}")
+
+    async def _note_identity_required(self, page_text: str = "") -> None:
+        """Divar wants this account to prove who it is. Record it everywhere
+        a person might look, and stop offering the account.
+
+        Three places, deliberately: the cookie row so it survives a restart
+        and the pool can skip it; the in-memory registry the panel polls so a
+        dialog opens within seconds; and the run log so the finish line says
+        why this account produced nothing. Never raises.
+        """
+        phone = getattr(self, "active_phone", None)
+        from app.scraper import otp_store as _os
+        from app.services import job_log as _jl
+        job_id = getattr(self, "_job_id_str", None)
+
+        _os.note_identity_required(phone or "", job_id=job_id, text=page_text)
+
+        db = getattr(self, "db_session", None)
+        if phone and db is not None:
+            try:
+                from app.models.cookie import Cookie as CookieModel
+                row = (await db.execute(
+                    select(CookieModel).where(CookieModel.phone_number == phone))).scalars().first()
+                if row:
+                    row.identity_required_at = datetime.now(timezone.utc)
+                    await db.commit()
+            except Exception as e:
+                logger.warning(f"[identity] could not flag {phone}: {e}")
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+
+        if job_id:
+            await _jl.record(
+                job_id, _jl.CHALLENGE,
+                f"دیوار برای شمارهٔ {phone or '؟'} احراز هویت با کد ملی می‌خواهد — "
+                "اسکرپر نمی‌تواند این را انجام دهد؛ این شماره کنار گذاشته شد",
+                level="error", phone=phone, kind="identity")
+
+        # Same exit as a code challenge: this account is done for this run.
+        self._force_rotate = True
 
     def _note_account_challenged(self) -> None:
         """Divar asked this account for an SMS code — rotate at the next chance.

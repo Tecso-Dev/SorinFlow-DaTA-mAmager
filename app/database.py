@@ -119,6 +119,7 @@ async def init_db():
                  _migrate_job_resume,
                  _migrate_contact_channel,
                  _migrate_cookie_owner,
+                 _migrate_identity_required,
                  _backfill_cookie_owner,
                  _backfill_advertiser_signals,
                  _migrate_cookie_usage,
@@ -278,6 +279,16 @@ async def _migrate_contact_channel(conn):
             "ON properties (contact_channel)"))
     except Exception as e:
         print(f"contact channel migration skipped: {e}")
+
+
+async def _migrate_identity_required(conn):
+    """When Divar asked a stored account to verify its identity."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE cookies ADD COLUMN IF NOT EXISTS identity_required_at TIMESTAMPTZ"))
+    except Exception as e:
+        print(f"identity_required migration skipped: {e}")
 
 
 async def _migrate_cookie_owner(conn):

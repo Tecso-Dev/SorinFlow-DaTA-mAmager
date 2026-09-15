@@ -351,3 +351,29 @@ def reset_cancel(job_id: Optional[str] = None) -> None:
         _cancelled_until.clear()
     else:
         _cancelled_until.pop(job_id, None)
+
+
+# ── identity walls ────────────────────────────────────────────────────────
+#
+# Accounts Divar has asked to prove who they are — national ID, birth date.
+# Nothing automated can answer that, so the only useful thing to do with it
+# is to say it loudly, where the person who can log in and do it is looking.
+# In memory for the panel's poll; the durable copy is cookies.identity_required_at.
+
+_identity: Dict[str, dict] = {}
+
+
+def note_identity_required(phone: str, *, job_id=None, text: str = "") -> None:
+    acct = _digits(phone)
+    if not acct:
+        return
+    _identity[acct] = {"phone": phone, "job_id": str(job_id) if job_id else None,
+                       "at": time.time(), "text": (text or "")[:400]}
+
+
+def clear_identity_required(phone: str) -> bool:
+    return _identity.pop(_digits(phone), None) is not None
+
+
+def identity_required() -> list:
+    return [dict(v, age=int(time.time() - v["at"])) for v in _identity.values()]

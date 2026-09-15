@@ -761,7 +761,11 @@ async def get_otp_pending():
     actually wait.
     """
     from app.scraper import otp_store
-    return {"forwarders": await list_forwarders(), "pending": otp_store.get_pending(), "timeout": otp_store.wait_window()}
+    return {"forwarders": await list_forwarders(), "pending": otp_store.get_pending(),
+            "timeout": otp_store.wait_window(),
+            # Accounts Divar wants identified — national ID, birth date. No
+            # code answers it; the panel opens a dialog naming the number.
+            "identity_required": otp_store.identity_required()}
 
 
 class DivarLinkRequest(BaseModel):

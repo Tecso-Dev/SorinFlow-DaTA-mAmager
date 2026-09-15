@@ -45,6 +45,11 @@ class Cookie(Base):
     # that keeps being challenged is Divar saying «not this one, not today»;
     # rotation rests it rather than handing it back every cycle.
     challenged_at = Column(DateTime(timezone=True))
+    # When Divar asked this account to prove who it is — national ID, birth
+    # date. Unlike a code challenge this does not pass with time or with a
+    # human typing six digits: somebody has to log in on Divar and do it.
+    # Rotation skips the account while this is set; the panel clears it.
+    identity_required_at = Column(DateTime(timezone=True))
     
     def __repr__(self):
         return f"<Cookie(id={self.id}, phone={self.phone_number}, valid={self.is_valid})>"
@@ -62,4 +67,5 @@ class Cookie(Base):
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
             "owner_user_id": self.owner_user_id,
+            "identity_required_at": self.identity_required_at.isoformat() if self.identity_required_at else None,
         }
