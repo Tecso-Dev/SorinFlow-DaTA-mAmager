@@ -435,9 +435,50 @@ class UserResponse(BaseModel):
     permissions: List[str] = Field(default_factory=list)
     last_login: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    headline: Optional[str] = None
+    bio: Optional[str] = None
+    links: Optional[dict] = None
+    presence: str = "available"
+    avatar_url: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+PRESENCE_VALUES = ("available", "busy", "away")
+
+
+class ProfileLinks(BaseModel):
+    website: Optional[str] = Field(None, max_length=200)
+    instagram: Optional[str] = Field(None, max_length=200)
+    linkedin: Optional[str] = Field(None, max_length=200)
+
+
+class ProfileUpdate(BaseModel):
+    """What a person may change about themselves. Every field optional: the
+    page saves one card at a time."""
+    full_name: Optional[str] = Field(None, max_length=200)
+    username: Optional[str] = Field(None, min_length=3, max_length=100)
+    headline: Optional[str] = Field(None, max_length=120)
+    bio: Optional[str] = Field(None, max_length=1000)
+    links: Optional[ProfileLinks] = None
+    presence: Optional[str] = None
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class EmailChangeRequest(BaseModel):
+    """Ask for a code. With an address, the code goes to THAT address and the
+    account switches to it only once the code comes back — so a mistyped
+    address never replaces a working one."""
+    email: Optional[str] = Field(None, max_length=200)
+
+
+class EmailVerifyRequest(BaseModel):
+    code: str = Field(..., min_length=4, max_length=8)
 
 
 class UserCreate(BaseModel):

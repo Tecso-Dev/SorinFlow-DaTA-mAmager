@@ -314,7 +314,9 @@ async def _launch_job(
     # covers rotation, but a run that starts ON a given number never consults
     # the pool for its first account — so this is where somebody else's
     # session would otherwise be handed straight to the browser.
-    if job_config.divar_phone and current_user and (current_user.role or "") not in ("root", "super_admin"):
+    # Root included: seeing every session is for reassigning them, not for
+    # scraping on somebody else's number and spending their reveals.
+    if job_config.divar_phone and current_user:
         from app.models.cookie import Cookie as _Cookie
         _digits = "".join(ch for ch in str(job_config.divar_phone) if ch.isdigit())
         owned = (await db.execute(

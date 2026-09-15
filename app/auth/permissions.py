@@ -40,6 +40,10 @@ PERMISSIONS = {
     "crm":        "مدیریت ارتباط با مشتری",
     "filing":     "بایگانی (کمد و زونکن)",
     "divar_auth": "حساب‌های دیوار",
+    # Its own key, not a rider on divar_auth: the phone that forwards codes
+    # and the SMS panel that sends campaigns are two products, and a person
+    # can be trusted with one and not the other.
+    "forwarder":  "فرستندهٔ پیامک",
     "proxies":    "پروکسی‌ها",
     "stats":      "آمار و گزارش",
     "portal":     "درخواست‌های بازدیدکنندگان",

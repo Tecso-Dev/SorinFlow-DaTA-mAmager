@@ -262,3 +262,69 @@ def test_startup_never_waits_forever_for_a_lock():
 
     # and a failed seed must not stop a pod that is otherwise able to serve
     assert "seed.__name__" in init and "skipped" in init
+
+
+# ── the profile columns and the forwarder backfill ────────────────────────────
+
+@pytest.fixture(scope="module")
+def profile_migrated(migrated):
+    """On top of the auth migration: the profile columns, and the one-time
+    forwarder backfill — run twice, with a permission removed in between,
+    because pods restart and a removal must stick."""
+    import json
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from app.database import _migrate_profile, _backfill_forwarder_permission
+
+    async def _go():
+        eng = create_async_engine(PG_URL)
+        async with eng.begin() as c:
+            await c.execute(text(
+                "CREATE TABLE IF NOT EXISTS app_settings (key VARCHAR(100) PRIMARY KEY, "
+                "value TEXT, updated_by VARCHAR(200), updated_at TIMESTAMPTZ DEFAULT now())"))
+            await c.execute(text("DELETE FROM app_settings WHERE key = 'migration:forwarder_permission'"))
+            await c.execute(text("DELETE FROM users WHERE username IN ('mig_fw_yes', 'mig_fw_no')"))
+            await c.execute(text(
+                "INSERT INTO users (username, hashed_password, role, permissions) VALUES "
+                "('mig_fw_yes', 'x', 'admin', :a), ('mig_fw_no', 'x', 'admin', :b)"),
+                {"a": json.dumps(["divar_auth", "crm"]), "b": json.dumps(["crm"])})
+        async with eng.begin() as c:
+            await _migrate_profile(c)
+            await _backfill_forwarder_permission(c)
+        async with eng.begin() as c:
+            first = {r[0]: r[1] for r in (await c.execute(text(
+                "SELECT username, permissions::text FROM users WHERE username LIKE 'mig_fw_%'"))).all()}
+            # a super_admin takes it away again …
+            await c.execute(text(
+                "UPDATE users SET permissions = :p WHERE username = 'mig_fw_yes'"),
+                {"p": json.dumps(["divar_auth", "crm"])})
+        # … and the next boot must not hand it back
+        async with eng.begin() as c:
+            await _migrate_profile(c)
+            await _backfill_forwarder_permission(c)
+        async with eng.begin() as c:
+            second = {r[0]: r[1] for r in (await c.execute(text(
+                "SELECT username, permissions::text FROM users WHERE username LIKE 'mig_fw_%'"))).all()}
+            cols = {r[0] for r in (await c.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='users' AND table_schema=current_schema()"))).all()}
+            nulls = (await c.execute(text(
+                "SELECT count(*) FROM users WHERE presence IS NULL OR token_version IS NULL"))).scalar()
+        await eng.dispose()
+        return first, second, cols, nulls
+
+    return _run(_go())
+
+
+def test_profile_columns_are_added(profile_migrated):
+    _f, _s, cols, nulls = profile_migrated
+    for need in ("headline", "bio", "links", "presence", "avatar_token", "token_version"):
+        assert need in cols, f"{need} was not added"
+    assert nulls == 0
+
+
+def test_forwarder_follows_divar_auth_once(profile_migrated):
+    first, second, _c, _n = profile_migrated
+    assert "forwarder" in first["mig_fw_yes"], "an admin who could open it yesterday lost it"
+    assert "forwarder" not in first["mig_fw_no"], "an admin who never had divar_auth gained it"
+    assert "forwarder" not in second["mig_fw_yes"], "a removed permission came back on the next boot"

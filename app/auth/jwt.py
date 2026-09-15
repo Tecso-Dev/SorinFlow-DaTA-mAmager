@@ -44,6 +44,19 @@ def create_access_token(data: dict, expires_minutes: int = None,
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
+def access_claims(user) -> dict:
+    """The claims every finished access token carries.
+
+    `tv` is the user's token_version. A password change bumps it, and a token
+    carrying the old number is refused from then on — every other device is
+    signed out without a revocation list. Tokens minted before the column
+    existed carry no `tv` and read as 0, which matches an untouched account,
+    so a deploy does not log the office out.
+    """
+    return {"sub": user.username, "role": user.role,
+            "tv": int(getattr(user, "token_version", 0) or 0)}
+
+
 def decode_token(token: str) -> dict:
     """Decode and validate JWT. Raises JWTError on failure."""
     return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])

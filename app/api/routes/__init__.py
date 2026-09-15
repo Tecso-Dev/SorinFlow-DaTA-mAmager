@@ -53,5 +53,5 @@ router.include_router(sms.router, prefix="/sms", tags=["SMS"], dependencies=_per
 # Each route is already scoped to the caller's own rows; the permission
 # decides whether the SECTION exists for them at all. divar_auth, because a
 # forwarder exists to serve a Divar session and the two are owned together.
-router.include_router(forwarder.router, prefix="/forwarder", tags=["SMS Forwarder"], dependencies=_perm("divar_auth"))
+router.include_router(forwarder.router, prefix="/forwarder", tags=["SMS Forwarder"], dependencies=_perm("forwarder"))
 router.include_router(email.router, prefix="/email", tags=["Email"], dependencies=_perm("email"))

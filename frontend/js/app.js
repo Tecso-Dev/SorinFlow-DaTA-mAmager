@@ -524,10 +524,7 @@ async function _finishLogin(data) {
     // the second, so it always matches what the routers will allow.
     try {
         const me = await apiCall('/users/me');
-        if (me) _currentUser = {
-            username: me.username, role: me.role,
-            full_name: me.full_name, permissions: me.permissions || [],
-        };
+        if (me) _currentUser = { ...me, permissions: me.permissions || [] };
     } catch (_) { /* fall back to an empty permission set */ }
     showMainApp();
 }
@@ -576,7 +573,6 @@ async function open2FAModal() {
     document.getElementById('totp-btn-disable').classList.add('d-none');
 
     loadEmail2faState();
-    loadPhoneState();
 
     try {
         const data = await apiCall('/users/me/totp/status');
@@ -662,6 +658,290 @@ async function disableTotp() {
     } catch(e) {
         showToast('خطا', e.message, 'danger');
     }
+}
+
+// ═══ Avatars ═══════════════════════════════════════════════════
+// One helper for every place a person appears, so the picture, the initial
+// fallback and the presence dot look the same in the sidebar, the users list
+// and the profile header.
+const PRESENCE_FA = { available: 'در دسترس', busy: 'مشغول', away: 'دور از میز' };
+
+function avatarHtml(u, size = 34, cls = 'avatar', id = '') {
+    const name = (u && (u.full_name || u.username)) || '';
+    const initial = name.trim().charAt(0) || '?';
+    const presence = (u && u.presence) || 'available';
+    const inner = (u && u.avatar_url)
+        ? `<img src="${esc(u.avatar_url)}" alt="${esc(name)}" loading="lazy">`
+        : `<span class="av-initial">${esc(initial)}</span>`;
+    return `<span class="${cls} av av-${presence}" ${id ? `id="${id}"` : ''}
+                  style="--av:${size}px" title="${esc(name)} — ${PRESENCE_FA[presence] || ''}">${inner}<i class="av-dot"></i></span>`;
+}
+
+// ═══ My profile ════════════════════════════════════════════════
+let _pfMe = null;
+
+async function loadProfile() {
+    try {
+        _pfMe = await apiCall('/users/me');
+    } catch (e) { showToast('خطا', e.message, 'danger'); return; }
+    pfRender(_pfMe);
+    loadPhoneState();
+}
+
+function pfRender(me) {
+    const roleMap = { root: 'Root', super_admin: 'مدیر ارشد', admin: 'مدیر', visitor: 'بازدیدکننده' };
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    const av = document.getElementById('pf-avatar');
+    if (av) av.outerHTML = avatarHtml(me, 96, 'pf-avatar', 'pf-avatar');
+    document.getElementById('pf-avatar-remove')?.classList.toggle('d-none', !me.avatar_url);
+    set('pf-name', me.full_name || me.username);
+    set('pf-headline', me.headline || 'سمت خود را در «مشخصات» بنویسید');
+    const roleEl = document.getElementById('pf-role');
+    if (roleEl) {
+        const rl = (typeof ROLE_LABELS !== 'undefined' && ROLE_LABELS[me.role]) || { label: roleMap[me.role] || me.role, cls: 'bg-dark' };
+        roleEl.textContent = rl.label; roleEl.className = 'badge ' + rl.cls;
+    }
+    set('pf-username', '@' + me.username);
+    const fa = d => new Date(d).toLocaleDateString('fa-IR');
+    set('pf-since', me.created_at ? fa(me.created_at) : '—');
+    set('pf-last', me.last_login ? fa(me.last_login) : '—');
+    const pres = document.getElementById('pf-presence');
+    if (pres) pres.value = me.presence || 'available';
+
+    // the form
+    const f = id => document.getElementById(id);
+    if (f('pf-full-name')) {
+        f('pf-full-name').value = me.full_name || '';
+        f('pf-username-in').value = me.username || '';
+        f('pf-headline-in').value = me.headline || '';
+        f('pf-bio').value = me.bio || '';
+        const l = me.links || {};
+        f('pf-website').value = l.website || '';
+        f('pf-instagram').value = l.instagram || '';
+        f('pf-linkedin').value = l.linkedin || '';
+    }
+
+    // contact
+    set('pf-email', me.email || '—');
+    const eb = document.getElementById('pf-email-badge');
+    if (eb) {
+        const ok = !!me.email_verified;
+        eb.textContent = !me.email ? 'ثبت نشده' : (ok ? 'تأیید شده' : 'تأیید نشده');
+        eb.className = 'badge ms-1 ' + (ok ? 'bg-success' : (me.email ? 'bg-warning text-dark' : 'bg-secondary'));
+        document.getElementById('pf-email-btn').textContent = me.email && !ok ? 'ارسال کد' : 'تغییر ایمیل';
+    }
+    pfLoadDivarAccounts();
+
+    // the sidebar card follows
+    if (_currentUser) { Object.assign(_currentUser, me); applyRoleUI(); }
+}
+
+async function pfSaveProfile(ev) {
+    ev.preventDefault();
+    const v = id => (document.getElementById(id)?.value || '').trim();
+    const body = {
+        full_name: v('pf-full-name'), username: v('pf-username-in'),
+        headline: v('pf-headline-in'), bio: v('pf-bio'),
+        links: { website: v('pf-website'), instagram: v('pf-instagram'), linkedin: v('pf-linkedin') },
+    };
+    if (body.username !== (_pfMe?.username || '')) {
+        const ok = await askConfirm({
+            icon: 'bi-person-badge', title: 'تغییر نام کاربری', tone: 'warning', okLabel: 'تغییر بده',
+            body: `از این پس با <b dir="ltr">${esc(body.username)}</b> وارد می‌شوید. ادامه؟`,
+        });
+        if (!ok) return;
+    }
+    try {
+        const r = await apiCall('/users/me', { method: 'PATCH', body: JSON.stringify(body) });
+        // A rename comes with a fresh token: the old one names a user that no
+        // longer exists and would fail on the very next request.
+        if (r.access_token) setToken(r.access_token);
+        _pfMe = r.user; pfRender(_pfMe);
+        showToast('ذخیره شد', '', 'success');
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+    return false;
+}
+
+async function pfSetPresence(value) {
+    try {
+        const r = await apiCall('/users/me', { method: 'PATCH', body: JSON.stringify({ presence: value }) });
+        _pfMe = r.user; pfRender(_pfMe);
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function pfUploadAvatar(input) {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { showToast('خطا', 'حجم تصویر باید کمتر از ۵ مگابایت باشد', 'warning'); return; }
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+        // Not apiCall: it forces a JSON content-type and multipart needs the
+        // browser to write the boundary itself.
+        const res = await fetch(`${API_BASE}/users/me/avatar`, {
+            method: 'POST', body: fd, headers: { 'Authorization': `Bearer ${getToken()}` },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+        showToast('عکس عوض شد', '', 'success');
+        loadProfile();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function pfRemoveAvatar() {
+    if (!await askConfirm({ icon: 'bi-person-x', title: 'حذف عکس', tone: 'danger', okLabel: 'حذف', body: 'عکس پروفایل حذف شود؟' })) return;
+    try {
+        await apiCall('/users/me/avatar', { method: 'DELETE' });
+        loadProfile();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function pfRequestEmailCode() {
+    const out = document.getElementById('pf-email-result');
+    const fresh = (document.getElementById('pf-email-new')?.value || '').trim();
+    const btn = document.getElementById('pf-email-btn');
+    if (!fresh && !_pfMe?.email) { out.textContent = 'ابتدا ایمیل تازه را بنویسید'; out.className = 'small mt-2 text-warning'; return; }
+    if (!fresh && _pfMe?.email_verified) { document.getElementById('pf-email-new')?.focus(); return; }
+    btn.disabled = true;
+    out.textContent = 'در حال ارسال…'; out.className = 'small mt-2 text-muted';
+    try {
+        const d = await apiCall('/users/me/email/request', {
+            method: 'POST', body: JSON.stringify(fresh ? { email: fresh } : {}),
+        });
+        if (d.verified) { out.textContent = d.message; out.className = 'small mt-2 text-success'; loadProfile(); return; }
+        document.getElementById('pf-email-code-wrap').classList.remove('d-none');
+        document.getElementById('pf-email-code').focus();
+        out.textContent = `${d.message} (${d.email})`; out.className = 'small mt-2 text-success';
+    } catch (e) {
+        out.textContent = e.message || 'خطا'; out.className = 'small mt-2 text-danger';
+    }
+    btn.disabled = false;
+}
+
+async function pfConfirmEmailCode() {
+    const out = document.getElementById('pf-email-result');
+    const code = (document.getElementById('pf-email-code')?.value || '').trim();
+    if (!code) return;
+    out.textContent = 'در حال بررسی…'; out.className = 'small mt-2 text-muted';
+    try {
+        const d = await apiCall('/users/me/email/verify', { method: 'POST', body: JSON.stringify({ code }) });
+        out.textContent = d.message; out.className = 'small mt-2 text-success';
+        document.getElementById('pf-email-code-wrap').classList.add('d-none');
+        document.getElementById('pf-email-code').value = '';
+        document.getElementById('pf-email-new').value = '';
+        loadProfile();
+        if (typeof loadUsers === 'function' && document.getElementById('users-table')) loadUsers();
+    } catch (e) {
+        out.textContent = e.message || 'کد نادرست است'; out.className = 'small mt-2 text-danger';
+    }
+}
+
+async function pfChangePassword(ev) {
+    ev.preventDefault();
+    const v = id => document.getElementById(id).value;
+    const out = document.getElementById('pf-pw-result');
+    if (v('pf-pw-new').length < 8) { out.textContent = 'رمز تازه باید دست‌کم ۸ نویسه باشد'; out.className = 'small mt-2 text-warning'; return false; }
+    if (v('pf-pw-new') !== v('pf-pw-new2')) { out.textContent = 'تکرار رمز یکی نیست'; out.className = 'small mt-2 text-warning'; return false; }
+    out.textContent = 'در حال تغییر…'; out.className = 'small mt-2 text-muted';
+    try {
+        const r = await apiCall('/users/me/password', {
+            method: 'POST',
+            body: JSON.stringify({ current_password: v('pf-pw-current'), new_password: v('pf-pw-new') }),
+        });
+        // Every other device is signed out by the version bump; this one
+        // keeps the fresh token the server minted for it.
+        if (r.access_token) setToken(r.access_token);
+        ['pf-pw-current', 'pf-pw-new', 'pf-pw-new2'].forEach(id => document.getElementById(id).value = '');
+        out.textContent = r.message; out.className = 'small mt-2 text-success';
+        showToast('رمز عوض شد', 'دستگاه‌های دیگر از حساب خارج شدند', 'success');
+    } catch (e) {
+        out.textContent = e.message || 'خطا'; out.className = 'small mt-2 text-danger';
+    }
+    return false;
+}
+
+// ── my Divar accounts: as many numbers as I have logged in ──
+const _digits = v => String(v || '').replace(/\D/g, '');
+
+async function pfLoadDivarAccounts() {
+    const box = document.getElementById('pf-divar-list');
+    const count = document.getElementById('pf-divar-count');
+    if (!box) return;
+    if (!_hasPerm('divar_auth')) {
+        box.innerHTML = '<div class="pf-note">برای افزودن حساب دیوار به دسترسی «حساب‌های دیوار» نیاز دارید — از مدیر بخواهید.</div>';
+        return;
+    }
+    try {
+        const d = await apiCall('/auth/cookies');
+        // an admin is handed everybody's list for reassignment; here only mine
+        const mine = (d.cookies || []).filter(c => c.owner_user_id === _pfMe?.id);
+        if (count) count.textContent = formatNumber(mine.length);
+        if (!mine.length) {
+            box.innerHTML = '<div class="pf-note">هنوز با هیچ شماره‌ای وارد دیوار نشده‌اید. «افزودن شماره» را بزنید.</div>';
+            return;
+        }
+        const primary = _digits(_pfMe?.divar_phone);
+        box.innerHTML = mine.map(c => {
+            const isPrimary = primary && _digits(c.phone_number) === primary;
+            return `<div class="pf-acct ${isPrimary ? 'is-primary' : ''}">
+                <div class="pf-acct-main">
+                  <b dir="ltr">${esc(c.phone_number)}</b>
+                  <span class="badge ${c.is_valid ? 'bg-success' : 'bg-secondary'}">${c.is_valid ? 'معتبر' : 'منقضی'}</span>
+                  ${isPrimary ? '<span class="badge bg-primary">پیش‌فرض</span>' : ''}
+                  <span class="pf-note">${formatNumber(c.reveals || 0)} شماره‌گیری</span>
+                </div>
+                <div class="pf-acct-actions">
+                  ${isPrimary ? '' : `<button class="btn btn-sm btn-outline-primary" onclick="pfSetPrimaryDivar('${esc(c.phone_number)}')" title="پیش‌فرض کن">پیش‌فرض</button>`}
+                  <button class="btn btn-sm btn-outline-danger" onclick="pfDeleteDivar(${esc(c.id)})" title="حذف نشست"><i class="bi bi-trash"></i></button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        box.innerHTML = `<div class="pf-note text-danger">${esc(e.message || 'خطا')}</div>`;
+    }
+}
+
+async function pfSetPrimaryDivar(phone) {
+    try {
+        await apiCall('/users/me/divar-phone', { method: 'PATCH', body: JSON.stringify({ divar_phone: phone }) });
+        showToast('ذخیره شد', `${phone} شمارهٔ پیش‌فرض شما شد`, 'success');
+        loadProfile();
+        if (typeof checkCookieStatus === 'function') checkCookieStatus();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function pfDeleteDivar(id) {
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف نشست', tone: 'danger', okLabel: 'حذف', body: 'این نشست دیوار حذف شود؟ برای استفادهٔ دوباره باید با همین شماره وارد شوید.' })) return;
+    try {
+        await apiCall(`/auth/cookies/${id}`, { method: 'DELETE' });
+        showToast('حذف شد', '', 'success');
+        pfLoadDivarAccounts();
+        if (typeof checkCookieStatus === 'function') checkCookieStatus();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+function pfAddDivarAccount() {
+    // Logging in IS adding: the number that answers Divar's code joins this
+    // person's pool. The login form lives on «احراز هویت دیوار».
+    if (!_hasPerm('divar_auth')) { showToast('دسترسی', 'به دسترسی «حساب‌های دیوار» نیاز دارید', 'warning'); return; }
+    showSection('auth');
+    setTimeout(() => document.getElementById('auth-phone')?.focus(), 300);
+}
+
+// Admin: ask a person to verify what is still unverified on their account.
+async function nudgeVerify(id) {
+    const u = _usersById[id] || {};
+    const what = [u.email && !u.email_verified ? 'ایمیل' : '', u.phone && !u.phone_verified ? 'شمارهٔ موبایل' : ''].filter(Boolean).join(' و ');
+    if (!await askConfirm({
+        icon: 'bi-send-check', title: 'درخواست تأیید', okLabel: 'بفرست',
+        body: `برای <b>${esc(u.full_name || u.username)}</b> پیام فرستاده می‌شود که ${what} خود را در پروفایلش تأیید کند.`,
+        note: 'هر یک ساعت یک بار برای هر کاربر.',
+    })) return;
+    try {
+        const r = await apiCall(`/users/${id}/verification-request`, { method: 'POST' });
+        showToast('فرستاده شد', r.message, 'success');
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
 async function loadPhoneState() {
@@ -770,7 +1050,7 @@ function copyTotpSecret() {
 }
 
 // ═══ Hash router: #/login, #/dashboard, #/properties, ... ═══════
-const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'auth', 'forwarder', 'proxies', 'users'];
+const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'auth', 'forwarder', 'proxies', 'users', 'profile'];
 let _currentSection = null;
 let _intendedRoute = null;   // deep link requested before login
 let _suppressHashNav = false;
@@ -848,6 +1128,7 @@ const NAV_PERMISSION = {
     'nav-link-scraper':    'scraper',
     'nav-link-crm':        'crm',
     'nav-link-auth':       'divar_auth',
+    'nav-link-forwarder':  'forwarder',
     'nav-link-proxies':    'proxies',
     'nav-link-portal':     'portal',
     'nav-link-monitoring': 'monitoring',
@@ -859,7 +1140,7 @@ const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'] };
 
 const SECTION_PERMISSION = {
     dashboard: 'stats', properties: 'properties', scraper: 'scraper',
-    crm: 'crm', insights: 'crm', auth: 'divar_auth', proxies: 'proxies', portal: 'portal',
+    crm: 'crm', insights: 'crm', auth: 'divar_auth', forwarder: 'forwarder', proxies: 'proxies', portal: 'portal',
     monitoring: 'monitoring', sms: 'sms', email: 'email',
 };
 
@@ -874,7 +1155,11 @@ function applyRoleUI() {
     if (elName) elName.textContent = full_name || username;
     const elRole = document.getElementById('sidebar-role');
     const roleMap = { root: 'Root', super_admin: 'مدیر ارشد', admin: 'مدیر', visitor: 'بازدیدکننده' };
-    if (elRole) elRole.textContent = roleMap[role] || role;
+    // the headline is what the person says they do; the role is what the
+    // system says they may do — the card shows the first when there is one
+    if (elRole) elRole.textContent = _currentUser.headline || roleMap[role] || role;
+    const elAv = document.getElementById('sidebar-avatar');
+    if (elAv) elAv.outerHTML = avatarHtml(_currentUser, 34, 'user-avatar', 'sidebar-avatar');
 
     Object.entries(NAV_PERMISSION).forEach(([id, perm]) => {
         const el = document.getElementById(id);
@@ -905,10 +1190,7 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(user => {
             if (user.role === 'visitor') { window.location.href = '/portal'; return; }
-            _currentUser = {
-                username: user.username, role: user.role,
-                full_name: user.full_name, permissions: user.permissions || [],
-            };
+            _currentUser = { ...user, permissions: user.permissions || [] };
             showMainApp();
         })
         .catch(() => {
@@ -957,12 +1239,14 @@ const SECTION_META = {
     crm:        { title: 'CRM — مدیریت لیدها',  subtitle: 'سیستم CRM و اطلاع‌رسانی' },
     insights:   { title: 'هوش تصویری',           subtitle: 'قیف فروش، عملکرد مشاوران و لیدهای معطل‌مانده' },
     auth:       { title: 'احراز هویت دیوار',     subtitle: 'مدیریت نشست و کوکی حساب دیوار' },
+    forwarder:  { title: 'فرستندهٔ پیامک',       subtitle: 'گوشی‌هایی که کدهای دیوار را خودکار به سرور می‌رسانند' },
     proxies:    { title: 'مدیریت پراکسی‌ها',     subtitle: 'افزودن، تست و مدیریت پراکسی‌ها' },
     portal:     { title: 'درخواست‌های مشتریان',  subtitle: 'ملک‌هایی که بازدیدکنندگان سایت دنبالش هستند' },
     monitoring: { title: 'پایش سامانه',          subtitle: 'سلامت سرویس‌ها، منابع و لاگ زندهٔ سامانه' },
     email:      { title: 'ایمیل',                subtitle: 'تنظیمات SMTP، قالب‌های سایت و گزارش ارسال' },
     sms:        { title: 'پیامک',                subtitle: 'تنظیمات کاوه‌نگار، ارسال تکی و گروهی، و گزارش تحویل' },
     users:      { title: 'مدیریت کاربران',       subtitle: 'حساب‌ها، دسترسی‌ها و درخواست‌های ارتقا' },
+    profile:    { title: 'پروفایل من',           subtitle: 'مشخصات، تماس و تأیید، امنیت حساب' },
 };
 
 // Section Navigation
@@ -1044,6 +1328,7 @@ function showSection(sectionName) {
                            setTimeout(restoreScraperForm, 200); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
         case 'forwarder':  loadForwarders(); loadForwarderLog(); break;
+        case 'profile':    loadProfile(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
         case 'insights':   insTab(_insTab); break;
@@ -6601,6 +6886,15 @@ async function loadUsers() {
                    <span class="badge ${ok ? 'bg-success' : 'bg-warning text-dark'}"
                          title="${ok ? okText : noText}">${ok ? '✓' : '!'}</span>
                  </div>`;
+            // Somebody with a stuck «!» can be asked to fix it from here — the
+            // one screen where the person who notices is already looking.
+            const unverified = (u.email && !u.email_verified) || (u.phone && !u.phone_verified);
+            const nudge = unverified && !isSelf ? `
+                <button class="btn btn-sm btn-link p-0 ms-1" onclick="nudgeVerify(${esc(u.id)})"
+                        title="درخواست تأیید ایمیل / شماره از خود کاربر">
+                    <i class="bi bi-send-check"></i>
+                </button>` : '';
+            const headline = u.headline ? `<div class="small text-muted">${esc(u.headline)}</div>` : '';
             // Issue #13. Both recovery paths — password reset and the email
             // second factor — refuse an account with no address, correctly:
             // enabling a factor an account cannot receive would lock it out.
@@ -6624,7 +6918,8 @@ async function loadUsers() {
             row.innerHTML = `
                 <td>${esc(u.id)}</td>
                 <td><strong>${esc(u.username)}</strong> ${isSelf ? '<span class="badge bg-info">شما</span>' : ''}</td>
-                <td>${esc(u.full_name || '---')}</td>
+                <td><div class="d-flex align-items-center gap-2">${avatarHtml(u, 30)}
+                    <div>${esc(u.full_name || '---')}${headline}</div></div></td>
                 <td><span class="badge ${rl.cls}">${esc(rl.label)}</span></td>
                 <td>${perms}</td>
                 <td>
@@ -6633,7 +6928,7 @@ async function loadUsers() {
                         <i class="bi bi-pencil-square"></i>
                     </button>
                 </td>
-                <td>${contact}${recoveryWarning}</td>
+                <td>${contact}${nudge}${recoveryWarning}</td>
                 <td>
                     <span class="badge ${u.is_active ? 'bg-success' : 'bg-secondary'}">
                         ${u.is_active ? 'فعال' : 'غیرفعال'}

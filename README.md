@@ -474,7 +474,7 @@ ever consulted for an `admin`. Permission keys are defined in
 [`app/auth/permissions.py`](app/auth/permissions.py) and gate the routers in
 [`app/api/routes/__init__.py`](app/api/routes/__init__.py): `properties`,
 `scraper`, `crm`, `filing`, `divar_auth`, `proxies`, `stats`, `portal`,
-`sms`, `email`,
+`sms`, `email`, `forwarder`,
 `monitoring`.
 
 Enforcement is server-side at the router, not just hidden in the UI — the panel

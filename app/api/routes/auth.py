@@ -121,8 +121,11 @@ async def verify_otp(
         result = await auth.submit_otp_code(request.code, phone_number)
         
         if result.get("success"):
-            # Auto-link this Divar phone to the current dashboard user
-            if current_user:
+            # The first number somebody logs in becomes their primary — the
+            # one the header pill and «خودکار» start from. A second or third
+            # number joins their pool without replacing it: which one is
+            # primary is chosen on the profile page, not by login order.
+            if current_user and not (current_user.divar_phone or "").strip():
                 current_user.divar_phone = phone_number
                 # flush so the cookie-save below sees the updated user
                 await db.flush()
@@ -156,7 +159,14 @@ async def verify_otp(
                     existing_cookie.is_valid = True
                     existing_cookie.expires_at = expires_at
                     existing_cookie.updated_at = datetime.now()
-                    if not existing_cookie.owner_user_id and current_user:
+                    # Whoever answered Divar's code holds the phone; the
+                    # session it bought is theirs even if a previous owner
+                    # had logged this number in before.
+                    if current_user and existing_cookie.owner_user_id != current_user.id:
+                        if existing_cookie.owner_user_id:
+                            logger.warning(
+                                f"[auth] session {phone_number} changes hands: "
+                                f"user {existing_cookie.owner_user_id} -> {current_user.id}")
                         existing_cookie.owner_user_id = current_user.id
                 else:
                     new_cookie = Cookie(
@@ -206,53 +216,65 @@ async def get_cookie_status(
     auth = DivarAuth(db)
 
     def _mine(q):
-        return _own_sessions_only(q, current_user)
+        return _usable_by(q, current_user)
 
-    # If a specific phone was requested, return its status directly
+    # The named number counts only if the session behind it is the caller's
+    # own. For every role: root can see and reassign everybody's sessions,
+    # but the pill, the scraper and refresh only ever touch what root owns.
+    named = None
     if phone:
-        status = await auth.get_cookie_status(phone)
-        # If that number has no valid session, fall back to another of the
-        # caller's OWN — never to somebody else's.
-        if not status.get("is_valid"):
-            result = await db.execute(
-                _mine(select(Cookie).where(Cookie.is_valid == True))
-                .order_by(Cookie.updated_at.desc())
-                .limit(1)
-            )
-            fallback = result.scalar_one_or_none()
-            if fallback:
-                status = await auth.get_cookie_status(fallback.phone_number)
-        return CookieStatusResponse(**status)
+        named = (await db.execute(
+            _mine(select(Cookie).where(Cookie.phone_number == phone))
+        )).scalar_one_or_none()
+        if named:
+            status = await auth.get_cookie_status(phone)
+            if status.get("is_valid"):
+                return CookieStatusResponse(**status)
 
-    # No phone configured at all — the caller's most recently used session
-    result = await db.execute(
+    # Otherwise the caller's most recently used valid session — never
+    # somebody else's.
+    fallback = (await db.execute(
         _mine(select(Cookie).where(Cookie.is_valid == True))
         .order_by(Cookie.updated_at.desc())
         .limit(1)
+    )).scalar_one_or_none()
+    if fallback:
+        return CookieStatusResponse(**await auth.get_cookie_status(fallback.phone_number))
+    if named:
+        # Their own number, expired: say that, not «nothing configured».
+        return CookieStatusResponse(**await auth.get_cookie_status(phone))
+    return CookieStatusResponse(
+        has_cookies=False,
+        is_valid=False,
+        phone_number="",
+        message="No phone number configured"
     )
-    record = result.scalar_one_or_none()
-    if not record:
-        return CookieStatusResponse(
-            has_cookies=False,
-            is_valid=False,
-            phone_number="",
-            message="No phone number configured"
-        )
-    status = await auth.get_cookie_status(record.phone_number)
-    return CookieStatusResponse(**status)
+
+
+async def _own_session_or_403(db, user, phone: Optional[str]) -> str:
+    """Resolve the number an action is about, and refuse it unless the
+    session behind it belongs to the caller. Refresh and logout used to take
+    any number at all — a valid way for one person to log another out."""
+    phone = phone or (user.divar_phone if user else None) or settings.divar_phone_number
+    if not phone:
+        raise HTTPException(status_code=400, detail="No phone number provided")
+    row = (await db.execute(
+        select(Cookie).where(Cookie.phone_number == phone))).scalar_one_or_none()
+    if row and (not user or row.owner_user_id != user.id):
+        raise HTTPException(
+            status_code=403, detail="این شماره به حساب کاربری دیگری تعلق دارد")
+    return phone
 
 
 @router.post("/refresh")
 async def refresh_session(
     phone_number: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Attempt to refresh/validate session"""
-    
-    phone = phone_number or settings.divar_phone_number
-    
-    if not phone:
-        raise HTTPException(status_code=400, detail="No phone number provided")
+
+    phone = await _own_session_or_403(db, user, phone_number)
     
     auth = DivarAuth(db)
     
@@ -272,14 +294,12 @@ async def refresh_session(
 @router.post("/logout")
 async def logout(
     phone_number: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Invalidate stored cookies and logout"""
-    
-    phone = phone_number or settings.divar_phone_number
-    
-    if not phone:
-        raise HTTPException(status_code=400, detail="No phone number provided")
+
+    phone = await _own_session_or_403(db, user, phone_number)
     
     auth = DivarAuth(db)
     success = await auth.invalidate_cookies(phone)
@@ -297,6 +317,15 @@ def _sees_every_session(user) -> bool:
     person leaves, and to notice a number nobody has claimed.
     """
     return bool(user) and (user.role or "") in ("root", "super_admin")
+
+
+def _usable_by(query, user):
+    """Narrow a cookies query to what `user` may USE — their own, whatever the
+    role. root sees and reassigns everybody's sessions; root does not scrape
+    on somebody else's number."""
+    if not user:
+        return query.where(Cookie.id == -1)
+    return query.where(Cookie.owner_user_id == user.id)
 
 
 def _own_sessions_only(query, user):

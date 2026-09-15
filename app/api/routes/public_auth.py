@@ -34,6 +34,7 @@ from app.database import get_db
 from app.models.user import User
 from app.auth.jwt import (
     verify_password, get_password_hash, create_access_token, TOKEN_ACCESS,
+    access_claims,
 )
 from app.auth.permissions import ROLE_VISITOR, STAFF_ROLES
 from app.services.verification import (
@@ -87,8 +88,7 @@ def _issued_response(issued, message: str | None = None,
 
 def _token_for(user: User) -> TokenResponse:
     return TokenResponse(
-        access_token=create_access_token(
-            {"sub": user.username, "role": user.role}, token_type=TOKEN_ACCESS),
+        access_token=create_access_token(access_claims(user), token_type=TOKEN_ACCESS),
         token_type="bearer",
         role=user.role,
         username=user.username,

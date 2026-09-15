@@ -15,7 +15,7 @@ POST /{id}/password      — reset password (super_admin)
 POST /{id}/totp/disable  — force-disable 2FA (super_admin)
 """
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
@@ -28,6 +28,7 @@ from app.database import get_db
 from app.models.user import User
 from app.auth.jwt import (
     verify_password, get_password_hash, create_access_token, decode_token,
+    access_claims,
     TOKEN_TOTP_PENDING,
     TOKEN_SMS_PENDING,
 )
@@ -41,6 +42,8 @@ from app.schemas import (
     TotpSetupResponse, TotpEnableRequest, TotpDisableRequest, TotpLoginRequest,
     EmailCodeVerifyRequest, PasswordResetRequest, PasswordResetConfirm,
     PhoneVerifyRequest, PhoneChangeRequest,
+    ProfileUpdate, PasswordChangeRequest, EmailChangeRequest, EmailVerifyRequest,
+    PRESENCE_VALUES,
 )
 
 router = APIRouter()
@@ -76,6 +79,7 @@ def _guard_role_assignment(actor: User, role: str | None) -> None:
 PURPOSE_EMAIL_2FA = "email_2fa"
 PURPOSE_PWD_RESET = "pwd_reset"
 PURPOSE_PHONE = "phone_verify"
+PURPOSE_EMAIL = "email_verify"
 
 
 def _mask_email(addr: str) -> str:
@@ -174,7 +178,7 @@ async def login(
     await db.commit()
 
     return TokenResponse(
-        access_token=create_access_token({"sub": user.username, "role": user.role}),
+        access_token=create_access_token(access_claims(user)),
         token_type="bearer",
         role=user.role,
         username=user.username,
@@ -230,7 +234,7 @@ async def verify_email_login(
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     return TokenResponse(
-        access_token=create_access_token({"sub": user.username, "role": user.role}),
+        access_token=create_access_token(access_claims(user)),
         token_type="bearer",
         role=user.role,
         username=user.username,
@@ -378,7 +382,7 @@ async def verify_totp_login(
     await db.commit()
 
     return TokenResponse(
-        access_token=create_access_token({"sub": user.username, "role": user.role}),
+        access_token=create_access_token(access_claims(user)),
         token_type="bearer",
         role=user.role,
         username=user.username,
@@ -518,6 +522,291 @@ async def confirm_phone_code(data: PhoneVerifyRequest,
     await db.commit()
     logger.info(f"[phone] {current_user.username} verified their number")
     return {"verified": True, "message": "شمارهٔ موبایل تأیید شد"}
+
+
+# ── My profile ────────────────────────────────────────────────────────────────
+
+_USERNAME_RE = r"[A-Za-z0-9_.@+\-]{3,100}"
+
+
+def _clean_links(links) -> dict:
+    """Three optional links, each either a real https URL or nothing.
+
+    Instagram may be typed as a handle — «@sorinflow» — and is stored as the
+    URL it means, so the page can render every link the same way.
+    """
+    import re
+    out = {}
+    raw = links.model_dump() if hasattr(links, "model_dump") else dict(links or {})
+    for key in ("website", "instagram", "linkedin"):
+        v = (raw.get(key) or "").strip()
+        if not v:
+            continue
+        if key == "instagram" and not v.lower().startswith(("http://", "https://")):
+            handle = v.lstrip("@")
+            if not re.fullmatch(r"[A-Za-z0-9_.]{1,30}", handle):
+                raise HTTPException(400, "نام کاربری اینستاگرام معتبر نیست")
+            v = f"https://instagram.com/{handle}"
+        if not re.fullmatch(r"https?://\S{3,190}", v):
+            raise HTTPException(400, "آدرس باید با https:// شروع شود و فاصله نداشته باشد")
+        out[key] = v
+    return out
+
+
+def _me_response(user: User) -> UserResponse:
+    data = UserResponse.model_validate(user, from_attributes=True)
+    data.permissions = user_permissions(user)
+    return data
+
+
+@router.patch("/me")
+async def update_me(data: ProfileUpdate,
+                    current_user: User = Depends(get_current_user),
+                    db: AsyncSession = Depends(get_db)):
+    """Edit my own profile. A changed username comes back with a fresh token,
+    because the token names the user by username and the old one would stop
+    resolving on the very next request."""
+    import re
+    renamed = False
+    if data.username is not None:
+        u = data.username.strip()
+        if not re.fullmatch(_USERNAME_RE, u):
+            raise HTTPException(
+                400, "نام کاربری فقط می‌تواند حرف انگلیسی، عدد و . _ @ + - داشته باشد (۳ تا ۱۰۰ نویسه)")
+        if u != current_user.username:
+            clash = (await db.execute(
+                select(User).where(func.lower(User.username) == u.lower(),
+                                   User.id != current_user.id))).scalars().first()
+            if clash:
+                raise HTTPException(409, "این نام کاربری قبلاً گرفته شده است")
+            logger.warning(f"[profile] {current_user.username} renamed to {u}")
+            current_user.username = u
+            renamed = True
+    if data.full_name is not None:
+        current_user.full_name = data.full_name.strip() or None
+    if data.headline is not None:
+        current_user.headline = data.headline.strip() or None
+    if data.bio is not None:
+        current_user.bio = data.bio.strip() or None
+    if data.presence is not None:
+        if data.presence not in PRESENCE_VALUES:
+            raise HTTPException(400, "وضعیت نامعتبر است")
+        current_user.presence = data.presence
+    if data.links is not None:
+        current_user.links = _clean_links(data.links)
+    await db.commit()
+    await db.refresh(current_user)
+    return {"user": _me_response(current_user),
+            "access_token": create_access_token(access_claims(current_user)) if renamed else None}
+
+
+@router.post("/me/password")
+async def change_my_password(data: PasswordChangeRequest,
+                             current_user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    """Change my password. Every other device is signed out: token_version
+    moves, and a token minted before it is refused from then on. This
+    device gets a fresh token in the response so it stays in."""
+    from app.services.verification import (
+        check_login_rate, record_login_failure, clear_login_failures, VerificationError)
+
+    # The same throttle as the login form. Somebody holding a stolen session
+    # must not get unlimited guesses at the one thing that would let them
+    # keep it.
+    try:
+        await check_login_rate(current_user.username)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message)
+    if not verify_password(data.current_password, current_user.hashed_password):
+        await record_login_failure(current_user.username)
+        raise HTTPException(400, "رمز فعلی درست نیست")
+    if data.new_password == data.current_password:
+        raise HTTPException(400, "رمز تازه نباید با رمز فعلی یکی باشد")
+
+    current_user.hashed_password = get_password_hash(data.new_password)
+    current_user.token_version = (current_user.token_version or 0) + 1
+    await db.commit()
+    await db.refresh(current_user)
+    await clear_login_failures(current_user.username)
+    logger.warning(f"[profile] {current_user.username} changed their password; "
+                   f"other sessions signed out")
+    return {"success": True,
+            "message": "رمز عوض شد و دستگاه‌های دیگر از حساب خارج شدند",
+            "access_token": create_access_token(access_claims(current_user))}
+
+
+def _pending_email_key(user: User) -> str:
+    return f"sorinflow:email_change:{user.id}"
+
+
+@router.post("/me/email/request")
+async def request_email_code(data: EmailChangeRequest,
+                             current_user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    """Email a code to prove an address.
+
+    With an address in the body, the code goes to THAT address and the
+    account switches to it only once the code comes back. The current address
+    keeps working meanwhile — it is the second factor and the recovery route,
+    and a typo must not be able to replace it with something nobody reads.
+    """
+    from app.database import get_redis
+    from app.services.email_service import valid_email
+    from app.services.verification import issue_code, VerificationError
+
+    target = (data.email or "").strip().lower()
+    if target:
+        if not valid_email(target):
+            raise HTTPException(400, "ایمیل معتبر نیست")
+        if target == (current_user.email or "").lower() and current_user.email_verified:
+            return {"sent": False, "verified": True, "message": "این ایمیل قبلاً تأیید شده است"}
+        clash = (await db.execute(
+            select(User).where(func.lower(User.email) == target,
+                               User.id != current_user.id))).scalars().first()
+        if clash:
+            raise HTTPException(409, "این ایمیل قبلاً برای حساب دیگری ثبت شده است")
+    else:
+        target = (current_user.email or "").strip().lower()
+        if not target:
+            raise HTTPException(400, "ابتدا یک ایمیل وارد کنید")
+        if current_user.email_verified:
+            return {"sent": False, "verified": True, "message": "این ایمیل قبلاً تأیید شده است"}
+
+    try:
+        issued = await issue_code(PURPOSE_EMAIL, current_user.username, "",
+                                  email=target, channel="email", db=db)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message)
+    if issued.channel != "email":
+        raise HTTPException(status_code=503,
+                            detail="ایمیل ارسال نشد — تنظیمات ایمیل را در پنل بررسی کنید")
+
+    # Remembered only until the code would have expired anyway, plus slack
+    # for a slow inbox. Verifying reads it back; a new request overwrites it.
+    try:
+        r = await get_redis()
+        await r.setex(_pending_email_key(current_user), 900, target)
+    except Exception as e:
+        logger.warning(f"[profile] could not remember pending email: {e}")
+        raise HTTPException(status_code=503, detail="سرویس موقتاً در دسترس نیست")
+    return {"sent": True, "verified": False, "email": _mask_email(target),
+            "message": "کد تأیید به ایمیل فرستاده شد"}
+
+
+@router.post("/me/email/verify")
+async def confirm_email_code(data: EmailVerifyRequest,
+                             current_user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    """Confirm the emailed code: the pending address becomes the address,
+    verified."""
+    from app.database import get_redis
+    from app.services.verification import verify_code, VerificationError
+
+    try:
+        used = await verify_code(PURPOSE_EMAIL, current_user.username, data.code)
+    except VerificationError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+    if used and used != "email":
+        raise HTTPException(400, "این کد از راه ایمیل نرسیده بود، پس تأیید ایمیل نیست")
+
+    pending = None
+    try:
+        r = await get_redis()
+        key = _pending_email_key(current_user)
+        pending = await r.get(key)
+        await r.delete(key)
+    except Exception as e:
+        logger.warning(f"[profile] could not read pending email: {e}")
+    if isinstance(pending, bytes):
+        pending = pending.decode()
+    target = (pending or current_user.email or "").strip().lower()
+    if not target:
+        raise HTTPException(400, "ایمیلی برای تأیید ثبت نشده است")
+    if target != (current_user.email or "").lower():
+        clash = (await db.execute(
+            select(User).where(func.lower(User.email) == target,
+                               User.id != current_user.id))).scalars().first()
+        if clash:
+            raise HTTPException(409, "این ایمیل در این فاصله برای حساب دیگری ثبت شد")
+        current_user.email = target
+    current_user.email_verified = True
+    await db.commit()
+    logger.info(f"[profile] {current_user.username} verified email {_mask_email(target)}")
+    return {"verified": True, "email": target, "message": "ایمیل تأیید شد"}
+
+
+# ── avatar ──
+MAX_AVATAR_BYTES = 5 * 1024 * 1024
+AVATAR_SIZE = 400
+
+
+def _avatar_dir():
+    from pathlib import Path
+    from app.config import get_settings
+    return Path(get_settings().images_path) / "avatars"
+
+
+def _drop_avatar_file(token: str | None) -> None:
+    if not token:
+        return
+    try:
+        (_avatar_dir() / f"{token}.jpg").unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning(f"[profile] could not remove old avatar {token}: {e}")
+
+
+@router.post("/me/avatar")
+async def upload_my_avatar(file: UploadFile = File(...),
+                           current_user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    """Set my picture.
+
+    Whatever arrives is decoded and re-encoded: a 400×400 JPEG, centre-cropped,
+    orientation applied, no metadata carried over. A crafted file that is not
+    an image is refused at decode; one that is gets flattened into pixels and
+    nothing else. Stored under a random token, so the URL is not guessable and
+    changes on every upload — which is also what makes a browser drop the
+    cached old picture.
+    """
+    import io
+    import secrets
+    from PIL import Image, ImageOps
+
+    raw = await file.read(MAX_AVATAR_BYTES + 1)
+    if len(raw) > MAX_AVATAR_BYTES:
+        raise HTTPException(413, "حجم تصویر باید کمتر از ۵ مگابایت باشد")
+    if not raw:
+        raise HTTPException(400, "فایلی دریافت نشد")
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img.load()
+        img = ImageOps.exif_transpose(img)
+        img = ImageOps.fit(img.convert("RGB"), (AVATAR_SIZE, AVATAR_SIZE),
+                           method=Image.LANCZOS, centering=(0.5, 0.5))
+    except Exception:
+        raise HTTPException(400, "فایل تصویر معتبر نیست (JPG یا PNG بفرستید)")
+
+    token = secrets.token_hex(12)
+    folder = _avatar_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    img.save(folder / f"{token}.jpg", "JPEG", quality=85, optimize=True)
+
+    old = current_user.avatar_token
+    current_user.avatar_token = token
+    await db.commit()
+    _drop_avatar_file(old)
+    logger.info(f"[profile] {current_user.username} changed their avatar")
+    return {"avatar_url": current_user.avatar_url}
+
+
+@router.delete("/me/avatar")
+async def delete_my_avatar(current_user: User = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    old = current_user.avatar_token
+    current_user.avatar_token = None
+    await db.commit()
+    _drop_avatar_file(old)
+    return {"avatar_url": None}
 
 
 @router.get("/me", response_model=UserResponse)
@@ -776,3 +1065,78 @@ async def admin_disable_totp(
     user.totp_secret = None
     await db.commit()
     return {"success": True, "message": "احراز هویت دو مرحله‌ای کاربر غیرفعال شد"}
+
+
+@router.post("/{user_id}/verification-request")
+async def request_verification(user_id: int,
+                               actor: User = _super_admin,
+                               db: AsyncSession = Depends(get_db)):
+    """Ask a person to verify what is still unverified on their account.
+
+    Not a code: the code lives three minutes and would be dead before most
+    people open the email. A message saying what to do and a link to the
+    profile page, where «ارسال کد» mints a fresh one when they are actually
+    looking. Once an hour per person, so a stuck badge cannot become spam.
+    """
+    from app.config import get_settings
+    from app.database import get_redis
+    from app.services import email_service, email_templates
+    from app.services.sms_service import send_sms
+
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    _guard_root_target(actor, target)
+
+    need_email = bool((target.email or "").strip()) and not target.email_verified
+    need_phone = bool((target.phone or "").strip()) and not target.phone_verified
+    if not (need_email or need_phone):
+        raise HTTPException(400, "چیزی برای تأیید نمانده است")
+
+    try:
+        r = await get_redis()
+        if not await r.set(f"sorinflow:verify_nudge:{target.id}", "1", ex=3600, nx=True):
+            raise HTTPException(429, "در یک ساعت گذشته برای این کاربر درخواست فرستاده شده است")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"[profile] nudge limiter unavailable, allowing: {e}")
+
+    settings = get_settings()
+    who = actor.full_name or actor.username
+    profile_url = f"https://{(settings.domain or 'sorinflow.com')}/dashboard/#/profile"
+    sent = {"email": False, "sms": False}
+
+    if need_email:
+        try:
+            what = "ایمیل" + (" و شمارهٔ موبایل" if need_phone else "")
+            subj, html, text = email_templates.notification(
+                f"لطفاً {what} خود را تأیید کنید",
+                f"{who} از شما خواسته {what} خود را در سورین‌فلو تأیید کنید. "
+                "وارد پنل شوید، به «پروفایل» بروید و کنار هر مورد «ارسال کد» را بزنید.",
+                cta_label="باز کردن پروفایل", cta_url=profile_url)
+            res = await email_service.send(target.email, subj, html, text, db=db)
+            sent["email"] = bool(res.get("success"))
+        except Exception as e:
+            logger.warning(f"[profile] nudge email to user {target.id} failed: {e}")
+    if need_phone:
+        try:
+            res = await send_sms(
+                target.phone,
+                f"سورین‌فلو: {who} از شما خواسته شمارهٔ موبایل خود را تأیید کنید. "
+                f"پنل ← پروفایل ← «ارسال کد». {profile_url}",
+                provider=settings.auth_sms_provider, db=db)
+            sent["sms"] = bool(res.get("success"))
+        except Exception as e:
+            logger.warning(f"[profile] nudge sms to user {target.id} failed: {e}")
+
+    if not (sent["email"] or sent["sms"]):
+        try:
+            await (await get_redis()).delete(f"sorinflow:verify_nudge:{target.id}")
+        except Exception:
+            pass
+        raise HTTPException(503, "هیچ پیامی ارسال نشد — تنظیمات ایمیل و پیامک را بررسی کنید")
+
+    logger.info(f"[profile] {actor.username} asked user {target.id} to verify: {sent}")
+    channels = [n for n, ok in (("ایمیل", sent["email"]), ("پیامک", sent["sms"])) if ok]
+    return {"sent": sent, "message": "درخواست از راه " + " و ".join(channels) + " فرستاده شد"}

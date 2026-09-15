@@ -35,7 +35,7 @@ class TestTheWarning:
         assert "&& u.is_active" in BLOCK
 
     def test_it_is_shown_in_the_contact_cell(self):
-        assert "${contact}${recoveryWarning}" in APP_JS
+        assert "${contact}${nudge}${recoveryWarning}" in APP_JS
 
     def test_it_says_what_it_means(self):
         assert "قابل بازیابی نیست" in BLOCK

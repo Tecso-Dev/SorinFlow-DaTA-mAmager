@@ -150,9 +150,37 @@ class TestTheSideDoor:
         assert "به حساب کاربری شما تعلق ندارد" in src
         assert "status_code=403" in src
 
-    def test_an_admin_may_still_name_any_number(self):
+    def test_root_may_not_name_somebody_elses_number_either(self):
+        """Seeing every session is for reassigning them. A run on another
+        person's number spends THEIR reveals, whoever starts it."""
         src = inspect.getsource(scraper_routes._launch_job)
-        assert '("root", "super_admin")' in src
+        assert '("root", "super_admin")' not in src
+
+    def test_using_and_seeing_are_different_powers(self):
+        src = inspect.getsource(auth_routes._usable_by)
+        assert "_sees_every_session" not in src
+        assert "owner_user_id == user.id" in src
+        assert "_usable_by(q, current_user)" in inspect.getsource(auth_routes.get_cookie_status)
+
+    def test_a_named_number_owned_by_somebody_else_is_not_reported(self):
+        src = inspect.getsource(auth_routes.get_cookie_status)
+        assert "_mine(select(Cookie).where(Cookie.phone_number == phone))" in src
+
+    def test_refresh_and_logout_know_who_is_asking(self):
+        """They used to take any number at all — a valid way for one person
+        to log another out of Divar."""
+        for fn in (auth_routes.refresh_session, auth_routes.logout):
+            assert "user" in inspect.signature(fn).parameters
+            assert "_own_session_or_403" in inspect.getsource(fn)
+        src = inspect.getsource(auth_routes._own_session_or_403)
+        assert "status_code=403" in src and "row.owner_user_id != user.id" in src
+
+    def test_answering_divars_code_takes_the_session_over(self):
+        """The person who typed the code holds the phone — the session is
+        theirs even if a previous owner logged this number in before."""
+        src = inspect.getsource(auth_routes.verify_otp)
+        assert "existing_cookie.owner_user_id != current_user.id" in src
+        assert "changes hands" in src
 
     def test_it_compares_digits_not_strings(self):
         src = inspect.getsource(scraper_routes._launch_job)

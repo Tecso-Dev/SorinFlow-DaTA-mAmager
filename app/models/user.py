@@ -2,7 +2,7 @@
 SorinFlow — Dashboard User Model
 Roles: root | super_admin | admin | visitor  (see app/auth/permissions.py)
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, Text
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -52,6 +52,25 @@ class User(Base):
     # Which areas an admin may reach. Ignored for every other role: root and
     # super_admin bypass, visitors are refused before it is read.
     permissions = Column(JSON, default=list)
+
+    # ── profile ──
+    headline = Column(String(120))          # «مشاور فروش»، shown under the name
+    bio = Column(Text)
+    links = Column(JSON, default=dict)      # {"website", "instagram", "linkedin"}
+    # A label the person sets, not a measurement: nothing here tracks presence.
+    presence = Column(String(16), default="available", nullable=False)
+    # The avatar file is images/avatars/<token>.jpg. A random token rather than
+    # the user id, so the URL is not guessable and changes on every upload —
+    # which is also what makes a browser drop the cached old picture.
+    avatar_token = Column(String(32))
+    # Bumped when the password changes. A token carrying an older number is
+    # refused, which is how «sign out my other devices» works without a
+    # revocation list.
+    token_version = Column(Integer, default=0, nullable=False)
+
+    @property
+    def avatar_url(self):
+        return f"/images/avatars/{self.avatar_token}.jpg" if self.avatar_token else None
 
     def __repr__(self):
         return f"<User(id={self.id}, username={self.username}, role={self.role})>"

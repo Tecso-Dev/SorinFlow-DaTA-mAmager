@@ -129,7 +129,7 @@ async def issue_code(purpose: str, identifier: str, phone: str,
     pipe.expire(keys["sends"], 3600)
     await pipe.execute()
 
-    used = await _deliver(code, phone=phone, email=email, channel=channel,
+    used = await _deliver(code, purpose=purpose, phone=phone, email=email, channel=channel,
                           message_template=message_template, ttl=ttl, db=db)
     if not used:
         # Burn the code rather than leave one alive that nobody received. This
@@ -152,7 +152,7 @@ async def issue_code(purpose: str, identifier: str, phone: str,
 
 async def _deliver(code: str, *, phone: str, email: str | None,
                    channel: str | None, message_template: str | None,
-                   ttl: int, db=None) -> str | None:
+                   ttl: int, db=None, purpose: str = "") -> str | None:
     """Send the code. Returns the channel that worked, or None.
 
     Order matters when nothing is specified. Email is tried first only when SMS
@@ -213,8 +213,11 @@ async def _deliver(code: str, *, phone: str, email: str | None,
         if not email or not email_service.valid_email(email):
             return False
         try:
-            subject, html, plain = email_templates.login_code(
-                code, minutes=max(1, ttl // 60))
+            # A code that proves an address must not arrive under the
+            # heading «کد ورود» — the person did not try to log in.
+            maker = (email_templates.verify_email_code
+                     if purpose == "email_verify" else email_templates.login_code)
+            subject, html, plain = maker(code, minutes=max(1, ttl // 60))
             res = await email_service.send(email, subject, html, plain, db=db)
         except Exception as e:
             logger.warning(f"[verification] email leg raised: {type(e).__name__}: {e}")

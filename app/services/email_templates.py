@@ -203,6 +203,24 @@ def login_code(code: str, *, minutes: int = 5, name: str = "") -> tuple:
         title="کد ورود", preheader=f"کد ورود شما: {code}", body=body), text)
 
 
+def verify_email_code(code: str, *, minutes: int = 5, name: str = "") -> tuple:
+    """(subject, html, text) for proving an address from the profile page."""
+    hello = f"{name} عزیز،" if name else "سلام،"
+    body = (
+        _h("تأیید ایمیل شما")
+        + _p(hello)
+        + _p("برای تأیید این ایمیل در سورین‌فلو، کد زیر را در صفحهٔ پروفایل وارد کنید:")
+        + _code_block(code)
+        + _muted(f"این کد تا {minutes} دقیقهٔ دیگر معتبر است و تنها یک بار قابل استفاده است. "
+                 "اگر شما این درخواست را نداده‌اید، این پیام را نادیده بگیرید.")
+    )
+    text = (f"{hello}\n\nکد تأیید ایمیل شما در سورین‌فلو: {code}\n"
+            f"این کد تا {minutes} دقیقه معتبر است.\n\n"
+            "اگر این درخواست از طرف شما نبوده، این پیام را نادیده بگیرید.")
+    return ("تأیید ایمیل شما در سورین‌فلو", shell(
+        title="تأیید ایمیل", preheader=f"کد تأیید ایمیل: {code}", body=body), text)
+
+
 def welcome(name: str, *, portal_url: str = f"{SITE_URL}/portal") -> tuple:
     body = (
         _h(f"{name} عزیز، خوش آمدید 👋")

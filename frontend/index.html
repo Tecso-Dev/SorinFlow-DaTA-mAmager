@@ -11,7 +11,7 @@
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260915c">
+    <link rel="stylesheet" href="css/style.css?v=20260915d">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -383,16 +383,18 @@
         </nav>
 
         <div class="sidebar-footer">
-            <div class="user-card">
-                <div class="user-avatar"><i class="bi bi-person-fill"></i></div>
+            <div class="user-card user-card-link" onclick="showSection('profile')" role="button" tabindex="0"
+                 onkeydown="if(event.key==='Enter'){showSection('profile')}" title="پروفایل من">
+                <span class="user-avatar av" id="sidebar-avatar"><span class="av-initial">…</span></span>
                 <div class="user-info">
                     <div class="u-name" id="sidebar-username">در حال بارگیری...</div>
                     <div class="u-role" id="sidebar-role">---</div>
                 </div>
+                <i class="bi bi-chevron-left u-go"></i>
             </div>
             <div class="sidebar-actions">
-                <button class="btn-2fa" onclick="open2FAModal()">
-                    <i class="bi bi-shield-lock"></i> احراز هویت
+                <button class="btn-2fa" onclick="showSection('profile')">
+                    <i class="bi bi-person-circle"></i> پروفایل
                 </button>
                 <button class="btn-logout" onclick="doLogout()">
                     <i class="bi bi-box-arrow-right"></i> خروج
@@ -1005,6 +1007,210 @@
             </div>
 
             <!-- ═══ PROXIES ══════════════════════ -->
+            <!-- ── My profile ─────────────────────────── -->
+            <div id="section-profile" class="section-content" style="display:none;">
+
+              <div class="card mb-3 pf-hero">
+                <div class="card-body">
+                  <div class="pf-hero-row">
+                    <div class="pf-avatar-col">
+                      <span class="pf-avatar av" id="pf-avatar"><span class="av-initial">…</span></span>
+                      <div class="pf-avatar-actions">
+                        <button class="btn btn-sm btn-outline-primary" onclick="document.getElementById('pf-avatar-file').click()">
+                          <i class="bi bi-camera"></i> تغییر عکس
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger d-none" id="pf-avatar-remove" onclick="pfRemoveAvatar()" title="حذف عکس">
+                          <i class="bi bi-x-lg"></i>
+                        </button>
+                        <input type="file" id="pf-avatar-file" accept="image/png,image/jpeg,image/webp" hidden onchange="pfUploadAvatar(this)">
+                      </div>
+                      <div class="pf-note">JPG یا PNG، تا ۵ مگابایت. مربع ۴۰۰×۴۰۰ می‌شود.</div>
+                    </div>
+                    <div class="pf-hero-text">
+                      <div class="pf-name" id="pf-name">—</div>
+                      <div class="pf-headline" id="pf-headline">—</div>
+                      <div class="pf-meta">
+                        <span class="badge bg-primary-subtle text-primary-emphasis" id="pf-role">—</span>
+                        <span dir="ltr" id="pf-username">—</span>
+                        <span class="sep">·</span> عضو از <span id="pf-since">—</span>
+                        <span class="sep">·</span> آخرین ورود <span id="pf-last">—</span>
+                      </div>
+                    </div>
+                    <div class="pf-presence-col">
+                      <label class="form-label small mb-1" for="pf-presence">وضعیت</label>
+                      <select id="pf-presence" class="form-select form-select-sm" onchange="pfSetPresence(this.value)">
+                        <option value="available">🟢 در دسترس</option>
+                        <option value="busy">🔴 مشغول</option>
+                        <option value="away">🟡 دور از میز</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="row g-3">
+                <div class="col-lg-6">
+                  <div class="card mb-3">
+                    <div class="card-header d-flex align-items-center gap-2">
+                      <i class="bi bi-person-lines-fill"></i> مشخصات
+                    </div>
+                    <div class="card-body">
+                      <form id="pf-form" onsubmit="return pfSaveProfile(event)">
+                        <div class="row g-2">
+                          <div class="col-md-6">
+                            <label class="form-label small" for="pf-full-name">نام و نام خانوادگی</label>
+                            <input id="pf-full-name" class="form-control form-control-sm" maxlength="200">
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label small" for="pf-username-in">نام کاربری (برای ورود)</label>
+                            <input id="pf-username-in" class="form-control form-control-sm" dir="ltr" maxlength="100" minlength="3" required>
+                          </div>
+                          <div class="col-12">
+                            <label class="form-label small" for="pf-headline-in">سمت</label>
+                            <input id="pf-headline-in" class="form-control form-control-sm" maxlength="120" placeholder="مثلاً: مشاور فروش، مدیر شعبهٔ سعادت‌آباد">
+                          </div>
+                          <div class="col-12">
+                            <label class="form-label small" for="pf-bio">دربارهٔ من</label>
+                            <textarea id="pf-bio" class="form-control form-control-sm" rows="3" maxlength="1000" placeholder="دو سه جمله دربارهٔ خودتان"></textarea>
+                          </div>
+                          <div class="col-md-4">
+                            <label class="form-label small" for="pf-website"><i class="bi bi-globe2"></i> وب‌سایت</label>
+                            <input id="pf-website" class="form-control form-control-sm" dir="ltr" placeholder="https://" maxlength="200">
+                          </div>
+                          <div class="col-md-4">
+                            <label class="form-label small" for="pf-instagram"><i class="bi bi-instagram"></i> اینستاگرام</label>
+                            <input id="pf-instagram" class="form-control form-control-sm" dir="ltr" placeholder="@username" maxlength="200">
+                          </div>
+                          <div class="col-md-4">
+                            <label class="form-label small" for="pf-linkedin"><i class="bi bi-linkedin"></i> لینکدین</label>
+                            <input id="pf-linkedin" class="form-control form-control-sm" dir="ltr" placeholder="https://linkedin.com/in/…" maxlength="200">
+                          </div>
+                        </div>
+                        <div class="mt-3 d-flex gap-2">
+                          <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg"></i> ذخیرهٔ مشخصات</button>
+                          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="pfRender(_pfMe)">انصراف</button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="col-lg-6">
+                  <div class="card mb-3">
+                    <div class="card-header d-flex align-items-center gap-2">
+                      <i class="bi bi-patch-check"></i> تماس و تأیید
+                    </div>
+                    <div class="card-body">
+
+                      <!-- email: the new address takes over only once its code comes back -->
+                      <div class="pf-contact">
+                        <div class="d-flex align-items-center gap-2">
+                          <i class="bi bi-envelope pf-ic"></i>
+                          <div style="flex:1">
+                            <div class="pf-lbl">ایمیل</div>
+                            <div class="pf-val"><span id="pf-email" dir="ltr">—</span><span id="pf-email-badge" class="badge bg-secondary ms-1">—</span></div>
+                          </div>
+                          <button class="btn btn-outline-primary btn-sm" id="pf-email-btn" onclick="pfRequestEmailCode()">ارسال کد</button>
+                        </div>
+                        <div class="mt-2">
+                          <input type="email" id="pf-email-new" class="form-control form-control-sm" dir="ltr"
+                                 placeholder="برای تغییر ایمیل، ایمیل تازه را بنویسید و «ارسال کد» بزنید">
+                        </div>
+                        <div class="mt-2 d-none" id="pf-email-code-wrap">
+                          <label class="form-label small mb-1" for="pf-email-code">کد ایمیل‌شده</label>
+                          <div class="d-flex gap-2">
+                            <input type="text" id="pf-email-code" class="form-control form-control-sm otp-input"
+                                   dir="ltr" inputmode="numeric" maxlength="8" placeholder="······">
+                            <button class="btn btn-primary btn-sm" onclick="pfConfirmEmailCode()">تأیید</button>
+                          </div>
+                        </div>
+                        <div class="small mt-2" id="pf-email-result"></div>
+                      </div>
+
+                      <!-- phone: proven only by a code that arrived as an SMS -->
+                      <div class="pf-contact">
+                        <div class="d-flex align-items-center gap-2">
+                          <i class="bi bi-phone pf-ic"></i>
+                          <div style="flex:1">
+                            <div class="pf-lbl">شمارهٔ موبایل</div>
+                            <div class="pf-val"><span id="phone-current" dir="ltr">—</span><span id="phone-badge" class="badge bg-secondary ms-1">—</span></div>
+                          </div>
+                          <button class="btn btn-outline-primary btn-sm" id="phone-verify-btn" onclick="requestPhoneCode()">تأیید شماره</button>
+                        </div>
+                        <!-- change the number: an unverified number nobody can replace is a
+                             dead end, because the code would go to whoever owns the mistyped one -->
+                        <div class="mt-2" id="phone-edit-wrap">
+                          <input type="text" id="phone-new" class="form-control form-control-sm" dir="ltr" inputmode="numeric" maxlength="13"
+                                 placeholder="برای تغییر شماره، شمارهٔ تازه را بنویسید و «تأیید شماره» بزنید">
+                        </div>
+                        <div class="mt-2 d-none" id="phone-code-wrap">
+                          <label class="form-label small mb-1" for="phone-code">کد پیامک‌شده</label>
+                          <div class="d-flex gap-2">
+                            <input type="text" id="phone-code" class="form-control form-control-sm otp-input" dir="ltr" inputmode="numeric" maxlength="5" placeholder="·····">
+                            <button class="btn btn-primary btn-sm" onclick="confirmPhoneCode()">تأیید</button>
+                          </div>
+                        </div>
+                        <div class="small mt-2" id="phone-result"></div>
+                      </div>
+
+                      <!-- the Divar accounts this person scrapes with: as many as they log in -->
+                      <div class="pf-contact">
+                        <div class="d-flex align-items-center gap-2">
+                          <i class="bi bi-key pf-ic"></i>
+                          <div style="flex:1">
+                            <div class="pf-lbl">حساب‌های دیوار من <span class="badge bg-secondary" id="pf-divar-count">۰</span></div>
+                            <div class="pf-note">هر شماره‌ای که با آن وارد دیوار شوید به این‌جا می‌آید؛ اسکرپر بین آن‌ها می‌چرخد و شمارهٔ <b>پیش‌فرض</b> اول انتخاب می‌شود. نشست هر شماره فقط برای صاحب آن است.</div>
+                          </div>
+                          <button class="btn btn-outline-primary btn-sm text-nowrap" onclick="pfAddDivarAccount()">
+                            <i class="bi bi-plus-lg"></i> افزودن شماره
+                          </button>
+                        </div>
+                        <div class="mt-2" id="pf-divar-list"><div class="pf-note">در حال بارگذاری…</div></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="card mb-3">
+                    <div class="card-header d-flex align-items-center gap-2">
+                      <i class="bi bi-shield-lock"></i> امنیت
+                    </div>
+                    <div class="card-body">
+                      <form onsubmit="return pfChangePassword(event)" autocomplete="off">
+                        <div class="row g-2">
+                          <div class="col-12">
+                            <label class="form-label small" for="pf-pw-current">رمز فعلی</label>
+                            <input type="password" id="pf-pw-current" class="form-control form-control-sm" dir="ltr" autocomplete="current-password" required>
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label small" for="pf-pw-new">رمز تازه (دست‌کم ۸ نویسه)</label>
+                            <input type="password" id="pf-pw-new" class="form-control form-control-sm" dir="ltr" autocomplete="new-password" minlength="8" required>
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label small" for="pf-pw-new2">تکرار رمز تازه</label>
+                            <input type="password" id="pf-pw-new2" class="form-control form-control-sm" dir="ltr" autocomplete="new-password" minlength="8" required>
+                          </div>
+                        </div>
+                        <div class="pf-note mt-2">با تغییر رمز، همهٔ دستگاه‌های دیگر از حساب خارج می‌شوند؛ این دستگاه وارد می‌ماند.</div>
+                        <div class="mt-2 d-flex gap-2 align-items-center">
+                          <button type="submit" class="btn btn-warning btn-sm"><i class="bi bi-key"></i> تغییر رمز</button>
+                        </div>
+                        <div id="pf-pw-result"></div>
+                      </form>
+                      <hr class="pf-hr">
+                      <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-shield-check pf-ic"></i>
+                        <div style="flex:1">
+                          <div class="pf-lbl">احراز هویت دو مرحله‌ای</div>
+                          <div class="pf-note">با اپلیکیشن (Google Authenticator) یا با کد ایمیل.</div>
+                        </div>
+                        <button class="btn btn-outline-primary btn-sm" onclick="open2FAModal()">تنظیمات</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div id="section-forwarder" class="section-content" style="display:none;">
 
               <div class="card mb-3">
@@ -4041,48 +4247,6 @@
                     <span id="totp-status-badge" class="badge bg-secondary ms-auto">در حال بررسی...</span>
                 </div>
 
-                <!-- Proving the number on file is actually yours. The panel
-                     shows «تأیید نشده» beside it until a texted code comes
-                     back, and until now there was no way to make that badge
-                     go away from inside the panel. -->
-                <div class="p-2 mb-3"
-                     style="background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
-                    <div class="d-flex align-items-center gap-2">
-                        <i class="bi bi-phone" style="color:#818cf8;"></i>
-                        <div style="flex:1">
-                            <div style="font-size:.85rem;color:var(--text);">شمارهٔ موبایل</div>
-                            <div style="font-size:.74rem;color:var(--text-muted);">
-                                <span id="phone-current" dir="ltr">—</span>
-                                <span id="phone-badge" class="badge bg-secondary ms-1">—</span>
-                            </div>
-                        </div>
-                        <button class="btn btn-outline-primary btn-sm" id="phone-verify-btn"
-                                onclick="requestPhoneCode()">تأیید شماره</button>
-                    </div>
-
-                    <!-- change the number: an unverified number nobody can
-                         replace is a dead end, because the code would go to
-                         whoever owns the mistyped number -->
-                    <div class="mt-2" id="phone-edit-wrap">
-                        <div class="input-group input-group-sm">
-                            <input type="text" id="phone-new" class="form-control form-control-sm"
-                                   dir="ltr" inputmode="numeric" maxlength="13"
-                                   placeholder="برای تغییر شماره، شمارهٔ تازه را بنویسید">
-                        </div>
-                    </div>
-
-                    <!-- the code -->
-                    <div class="mt-2 d-none" id="phone-code-wrap">
-                        <label class="form-label small mb-1" for="phone-code">کد پیامک‌شده</label>
-                        <div class="d-flex gap-2">
-                            <input type="text" id="phone-code" class="form-control form-control-sm otp-input"
-                                   dir="ltr" inputmode="numeric" maxlength="5" placeholder="·····">
-                            <button class="btn btn-primary btn-sm" onclick="confirmPhoneCode()">تأیید</button>
-                        </div>
-                    </div>
-                    <div class="small mt-2" id="phone-result"></div>
-                </div>
-
                 <!-- The emailed second factor: no app, no QR, no clock. -->
                 <div class="d-flex align-items-center gap-2 mb-3 p-2"
                      style="background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
@@ -4180,7 +4344,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260915c"></script>
+<script src="js/app.js?v=20260915d"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

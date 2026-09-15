@@ -40,6 +40,10 @@ async def _user_from_token(token: str, db: AsyncSession) -> Optional[User]:
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         return None
+    # A password change bumps token_version; a token minted before it is
+    # somebody's old device, and stays signed out. See access_claims().
+    if int(payload.get("tv", 0) or 0) != int(getattr(user, "token_version", 0) or 0):
+        return None
     return user
 
 

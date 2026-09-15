@@ -124,9 +124,12 @@ class TestThePanelCanActuallyReachIt:
             assert f"function {f}" in js, f"{f} is not defined"
         assert "requestPhoneCode()" in html and "confirmPhoneCode()" in html
 
-    def test_the_state_loads_when_the_modal_opens(self):
+    def test_the_state_loads_when_the_profile_opens(self):
+        """The number lives on the profile page now, next to the email — the
+        2FA modal keeps the second factors only."""
         js = _code_only(APP_JS)
-        assert "loadPhoneState()" in js.split("function open2FAModal")[1][:800]
+        assert "loadPhoneState()" in js.split("async function loadProfile")[1][:600]
+        assert "loadPhoneState()" not in js.split("function open2FAModal")[1][:800]
 
     def test_the_code_field_accepts_persian_digits(self):
         """Every other code field in this panel does; one that does not

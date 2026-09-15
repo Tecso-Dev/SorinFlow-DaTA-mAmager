@@ -121,6 +121,8 @@ async def init_db():
                  _migrate_cookie_owner,
                  _migrate_identity_required,
                  _backfill_cookie_owner,
+                 _backfill_forwarder_permission,
+                 _migrate_profile,
                  _backfill_advertiser_signals,
                  _migrate_cookie_usage,
                  _migrate_property_quality,
@@ -356,6 +358,55 @@ async def _backfill_cookie_owner(conn):
                   f"{rest.rowcount or 0} to the super admin")
     except Exception as e:
         print(f"cookie owner backfill skipped: {e}")
+
+
+async def _migrate_profile(conn):
+    """The profile page: who the person is, and the version number that lets
+    a password change sign their other devices out."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE users "
+            "ADD COLUMN IF NOT EXISTS headline VARCHAR(120), "
+            "ADD COLUMN IF NOT EXISTS bio TEXT, "
+            "ADD COLUMN IF NOT EXISTS links JSON DEFAULT '{}', "
+            "ADD COLUMN IF NOT EXISTS presence VARCHAR(16) NOT NULL DEFAULT 'available', "
+            "ADD COLUMN IF NOT EXISTS avatar_token VARCHAR(32), "
+            "ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0"))
+    except Exception as e:
+        print(f"profile migration skipped: {e}")
+
+
+async def _backfill_forwarder_permission(conn):
+    """«فرستندهٔ پیامک» used to ride on «حساب‌های دیوار». Now that it is its
+    own key, every admin who could open it yesterday gets it today — once.
+
+    Once, and not «whenever missing»: a super_admin who later takes the key
+    away must not find it back after the next restart. The marker row in
+    app_settings is what makes the second boot a no-op.
+    """
+    try:
+        from sqlalchemy import text
+        marker = await conn.execute(text("""
+            INSERT INTO app_settings (key, value, updated_by)
+            VALUES ('migration:forwarder_permission', 'done', 'startup')
+            ON CONFLICT (key) DO NOTHING
+        """))
+        if not marker.rowcount:
+            return
+        res = await conn.execute(text("""
+            UPDATE users
+               SET permissions = (permissions::jsonb || '["forwarder"]'::jsonb)::json
+             WHERE role = 'admin'
+               AND permissions IS NOT NULL
+               AND jsonb_typeof(permissions::jsonb) = 'array'
+               AND permissions::jsonb ? 'divar_auth'
+               AND NOT permissions::jsonb ? 'forwarder'
+        """))
+        if res.rowcount:
+            print(f"forwarder permission backfilled for {res.rowcount} admin(s)")
+    except Exception as e:
+        print(f"forwarder permission backfill skipped: {e}")
 
 
 async def _migrate_advertiser_signals(conn):
