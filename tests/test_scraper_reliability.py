@@ -709,18 +709,18 @@ class TestTheHostSetupIsInTheRepository:
         assert setting.lower() in self._script().lower()
 
     def test_it_checks_the_node_is_the_size_the_manifests_assume(self):
-        """The memory budget in k8s/04-backend.yaml is sized for ~4GB. On a
+        """The memory budget in k8s/04-backend.yaml is sized for ~8GB. On a
         different machine those numbers stop meaning anything, silently."""
         s = self._script()
         assert "MemTotal" in s
-        assert "2560Mi" in s, "the script does not name the limit it is validating"
+        assert "4096Mi" in s, "the script does not name the limit it is validating"
 
     def test_the_backend_limit_matches_what_the_script_expects(self):
         """Two places state the budget; they must not drift apart."""
         from pathlib import Path
         manifest = Path("k8s/04-backend.yaml").read_text(encoding="utf-8")
-        assert 'memory: "2560Mi"' in manifest
-        assert "2560Mi" in self._script()
+        assert 'memory: "4096Mi"' in manifest
+        assert "4096Mi" in self._script()
 
 
 class TestNoTransactionSurvivesTheSlowWork:

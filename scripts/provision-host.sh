@@ -37,16 +37,16 @@ MEM_MB=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)
 CPUS=$(nproc)
 info "RAM ${MEM_MB}MB · ${CPUS} vCPU · $(. /etc/os-release && echo "$PRETTY_NAME")"
 
-# The manifests' memory budget is sized for a ~4GB node. On a smaller one the
+# The manifests' memory budget is sized for a ~8GB node. On a smaller one the
 # backend's limit will not fit beside Postgres, Redis and k3s itself; on a
 # larger one it is leaving capacity unused. Either way, say so rather than
 # letting the numbers silently stop matching the machine.
-if [ "$MEM_MB" -lt 3500 ]; then
-  info "WARNING: k8s/04-backend.yaml assumes ~4GB. Lower the backend limit"
-  info "         (currently 2560Mi) before applying the manifests here."
-elif [ "$MEM_MB" -gt 6000 ]; then
+if [ "$MEM_MB" -lt 7000 ]; then
+  info "WARNING: k8s/04-backend.yaml assumes ~8GB. Lower the backend limit"
+  info "         (currently 4096Mi) before applying the manifests here."
+elif [ "$MEM_MB" -gt 12000 ]; then
   info "NOTE: this node is larger than the manifests assume — the backend"
-  info "      limit (2560Mi) can be raised. Measure first:"
+  info "      limit (4096Mi) can be raised. Measure first:"
   info "      free -m; kubectl top pod -n sorinflow"
 fi
 

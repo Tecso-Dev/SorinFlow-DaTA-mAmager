@@ -51,12 +51,6 @@ done
 grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
 grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
 systemctl restart ssh 2>/dev/null || systemctl restart sshd
-# A little swap: Chromium spikes, and the kernel killing Postgres is worse
-# than a slow minute.
-if ! swapon --show | grep -q swap; then
-  fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
-  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-fi
 
 # ── 2. k3s ───────────────────────────────────────────────────────────────────
 if ! command -v k3s >/dev/null; then
@@ -69,6 +63,11 @@ mkdir -p /root/.kube && cp /etc/rancher/k3s/k3s.yaml /root/.kube/config && chmod
 # ── 3. the manifests ─────────────────────────────────────────────────────────
 say "manifests from main"
 if [ -d "$SRC/.git" ]; then git -C "$SRC" pull -q; else git clone -q "$REPO" "$SRC"; fi
+
+# swap, journald cap, inotify limits, clock — the host-level setup that was
+# once typed by hand and lost with the old server. Idempotent.
+say "host provisioning"
+bash "$SRC/scripts/provision-host.sh" | sed 's/^/   /'
 
 say "traefik + the old certificate"
 kubectl apply -f "$SRC/k8s/06-traefik-acme.yaml" >/dev/null

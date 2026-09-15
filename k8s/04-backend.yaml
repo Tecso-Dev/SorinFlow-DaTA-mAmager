@@ -148,8 +148,13 @@ spec:
               value: "kavenegar"
             - name: ENVIRONMENT
               value: "production"
+            # The node's own address, from Kubernetes. It was a hard-coded
+            # string, and the monitoring page went on reporting the old
+            # server's IP for hours after the move to a new one.
             - name: SERVER_IP
-              value: "5.160.252.187"
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             - name: DOMAIN
               value: "sorinflow.com"
           volumeMounts:
@@ -164,29 +169,24 @@ spec:
               cpu: "200m"
               memory: "512Mi"
             limits:
-              # 2.5Gi, and the reason is measured rather than assumed.
+              # 4Gi, and the reason is measured rather than assumed.
               #
-              # On the live node (2026-09-03):
-              #   MemTotal                3910Mi   "4 GB" is nominal
-              #   k3s-server               659Mi
-              #   containerd + shims       190Mi
+              # On the live node (2026-09-15, the 8 GB box):
+              #   MemTotal                7936Mi
+              #   k3s-server + containerd ~850Mi
               #   Runner.Listener          129Mi   the self-hosted CI runner
-              #   systemd-journal           92Mi -> capped to ~20Mi
-              #   traefik + coredns + metrics-server  108Mi
+              #   traefik + coredns + metrics-server  ~110Mi
+              #   postgres + redis         ~60Mi idle, up to 1.3Gi by their limits
               #   ---------------------------------------------
-              #   genuinely available    ~2400Mi
+              #   genuinely available    ~6200Mi
               #
-              # A 3Gi limit was raised on arithmetic, not measurement, and it
-              # was fiction: the cgroup would not have stopped the pod until
-              # 3072Mi, which this box does not have, so the KERNEL OOM killer
-              # would fire first — and it does not respect Kubernetes QoS, so
-              # it could pick Postgres.
-              #
-              # 2560Mi puts the scraper's 80% recycle at ~2048Mi, comfortably
-              # inside what is actually free. The ceiling is not what makes a
-              # 500-item run work: the recycle is (_check_rate_limit). Raising
-              # this number does not buy capacity the machine does not have.
-              memory: "2560Mi"
+              # The limit must stay below what is actually free: the cgroup
+              # stops the pod at the limit, but if the limit exceeds free
+              # memory the KERNEL OOM killer fires first — and it does not
+              # respect Kubernetes QoS, so it could pick Postgres. 4096Mi puts
+              # the scraper's 80% recycle at ~3277Mi with two gigabytes to
+              # spare. (The previous 4 GB node ran 2560Mi for the same reason.)
+              memory: "4096Mi"
           # Startup is create_all plus a migration chain, and its duration is
           # not knowable in advance. Without a startupProbe the liveness probe
           # kills the container ~150s in and it crashloops forever with no way
