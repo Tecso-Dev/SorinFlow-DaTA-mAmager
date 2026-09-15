@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, env="DEBUG")
     
     # Server
-    server_ip: str = Field(default="171.22.182.91", env="SERVER_IP")
+    # Injected by the manifest from the node itself (status.hostIP). No
+    # default: a stale address shown as fact is worse than a dash.
+    server_ip: str = Field(default="", env="SERVER_IP")
     domain: str = Field(default="scc.sorinflow.com", env="DOMAIN")
     domain_dns_only: str = Field(default="sc.sorinflow.com", env="DOMAIN_DNS_ONLY")
     

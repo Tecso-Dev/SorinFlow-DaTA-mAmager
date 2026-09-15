@@ -54,7 +54,7 @@ services:
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - PROXY_ENABLED=${PROXY_ENABLED:-false}
       - PROXY_LIST=${PROXY_LIST:-}
-      - SERVER_IP=171.22.182.91
+      - SERVER_IP=127.0.0.1
       - DOMAIN=scc.sorinflow.com
     volumes:
       - ./app:/app/app

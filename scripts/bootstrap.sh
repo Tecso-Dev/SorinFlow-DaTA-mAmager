@@ -3,7 +3,7 @@
 # Idempotent — safe to re-run. Runs as root on Ubuntu.
 set -euo pipefail
 
-SERVER_IP="${SERVER_IP:-5.160.252.187}"
+SERVER_IP="${SERVER_IP:-62.60.184.233}"
 DOMAIN="${DOMAIN:-sorinflow.com}"
 
 echo "==== [1/4] Swap (server has little RAM, no swap) ===="

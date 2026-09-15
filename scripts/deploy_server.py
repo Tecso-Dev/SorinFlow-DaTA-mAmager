@@ -9,7 +9,7 @@ Steps:
 The backend Deployment stays ImagePullBackOff until the first CI build pushes
 the image to ghcr.io and (optionally) a ghcr-secret is created. Run with:
 
-    SORIN_HOST=5.160.252.187 SORIN_PW=... python scripts/deploy_server.py
+    SORIN_HOST=62.60.184.233 SORIN_PW=... python scripts/deploy_server.py
 """
 import sys
 from pathlib import Path
