@@ -10836,8 +10836,9 @@ function renderSkippedSummary(byReason) {
             <i class="bi bi-clipboard"></i> کپی همهٔ لینک‌ها
         </button>
         <button class="btn btn-sm btn-primary" onclick="rescrapeAllSkipped()"
-                title="همهٔ آنچه الان نمایش داده می‌شود، در یک تسک دوباره باز می‌شود">
-            <i class="bi bi-arrow-repeat"></i> بازاسکرپ همه (${total})
+                title="همهٔ آنچه الان نمایش داده می‌شود، در یک تسک دوباره باز می‌شود"
+                ${rescrapeCandidates().length ? '' : 'disabled'}>
+            <i class="bi bi-arrow-repeat"></i> بازاسکرپ همه (${rescrapeCandidates().length})
         </button>
     </div>`;
 }
@@ -10858,6 +10859,15 @@ function visibleSkipped() {
     return _skippedFilter
         ? _skippedRows.filter(r => r.reason === _skippedFilter)
         : _skippedRows;
+}
+
+/* What «بازاسکرپ همه» would open right now: the rows on screen, minus
+ * chat-only ones unless that is the bucket chosen — no run will ever fill
+ * those and each would spend a reveal. The button's number and the action
+ * both read this, so they cannot disagree: «(8)» over a list of four was
+ * the two being computed separately. */
+function rescrapeCandidates() {
+    return visibleSkipped().filter(r => r.reason !== 'chat_only' || _skippedFilter === 'chat_only');
 }
 
 function renderSkippedRows() {
@@ -10904,8 +10914,7 @@ function rescrapeSkipped(url) {
  * the phoneless ones and leaves the chat-only ones, which no run will ever
  * fill, alone. */
 async function rescrapeAllSkipped() {
-    const rows = visibleSkipped().filter(r => r.reason !== 'chat_only' || _skippedFilter === 'chat_only');
-    const urls = rows.map(r => r.url).filter(Boolean);
+    const urls = rescrapeCandidates().map(r => r.url).filter(Boolean);
     if (!urls.length) { showToast('خبری نیست', 'چیزی برای بازاسکرپ نمایش داده نمی‌شود', 'warning'); return; }
     const ok = await askConfirm({
         icon: 'bi-arrow-repeat', title: 'بازاسکرپ همه',

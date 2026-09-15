@@ -141,8 +141,19 @@ class TestThePanel:
 
     def test_chat_only_is_left_alone_unless_asked_for_by_name(self):
         """No run will ever fill those; re-opening them spends reveals."""
+        i = APP_JS.index("function rescrapeCandidates()")
+        assert "r.reason !== 'chat_only' || _skippedFilter === 'chat_only'" in APP_JS[i:i + 400]
+
+    def test_the_button_s_number_and_the_action_read_the_same_set(self):
+        """«(8)» over a list of four was the two being computed separately."""
+        assert "بازاسکرپ همه (${rescrapeCandidates().length})" in APP_JS
         i = APP_JS.index("async function rescrapeAllSkipped()")
-        assert "r.reason !== 'chat_only' || _skippedFilter === 'chat_only'" in APP_JS[i:i + 600]
+        assert "rescrapeCandidates().map(r => r.url)" in APP_JS[i:i + 400]
+        assert "_skippedRows.length" not in APP_JS[APP_JS.index("بازاسکرپ همه ("):][:200]
+
+    def test_an_empty_set_disables_the_button(self):
+        i = APP_JS.index("بازاسکرپ همه (")
+        assert "rescrapeCandidates().length ? '' : 'disabled'" in APP_JS[i - 400:i]
 
     def test_it_asks_first_and_says_the_cost(self):
         i = APP_JS.index("async function rescrapeAllSkipped()")

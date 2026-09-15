@@ -450,8 +450,14 @@ class TestThePanelSide:
         assert "--bs-secondary-bg" not in blk and "--bs-body-bg" not in blk
 
     def test_the_cache_busters_moved(self):
+        """At least the version this shipped with — not exactly it, or the
+        next bump by anyone breaks a test about a different change. The
+        date-letter format compares as a string."""
+        import re
         html = self._html()
-        assert "css/style.css?v=20260915d" in html and "js/app.js?v=20260915d" in html
+        css = re.search(r"css/style\.css\?v=([0-9a-z]+)", html).group(1)
+        js = re.search(r"js/app\.js\?v=([0-9a-z]+)", html).group(1)
+        assert css >= "20260915d" and js >= "20260915d"
 
 
 class TestManyDivarNumbersPerPerson:
