@@ -3390,19 +3390,18 @@ async function executeSingleScraping(url) {
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال اسکرپ...';
     }
-    showToast('در حال اسکرپ', 'اسکرپ این ملک شروع شد، چند لحظه صبر کنید...', 'info');
-
     try {
+        // A job of one. It used to run inside this request and answer
+        // «با موفقیت اسکرپ شد» whenever a row was saved — number or not —
+        // and had nowhere to put a code prompt. Now it is a run like any
+        // other: it appears in the table, its log says what happened, and
+        // a code prompt opens the same dialog it would for any run.
         const result = await apiCall('/scraper/scrape-single', {
             method: 'POST',
             body: JSON.stringify({ url })
         });
-
-        if (result.success) {
-            showToast('موفق', 'ملک با موفقیت اسکرپ شد', 'success');
-        } else {
-            showToast('خطا', result.message || 'اسکرپ ناموفق بود', 'danger');
-        }
+        showToast('شروع شد', `اسکرپ تکی به‌عنوان تسک ${String(result.job_id).slice(0, 8)} شروع شد — نتیجه در جدول تسک‌ها`, 'info');
+        loadJobs();
     } catch (error) {
         showToast('خطا', error.message, 'danger');
     } finally {
@@ -10836,6 +10835,10 @@ function renderSkippedSummary(byReason) {
         <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="copySkippedLinks()">
             <i class="bi bi-clipboard"></i> کپی همهٔ لینک‌ها
         </button>
+        <button class="btn btn-sm btn-primary" onclick="rescrapeAllSkipped()"
+                title="همهٔ آنچه الان نمایش داده می‌شود، در یک تسک دوباره باز می‌شود">
+            <i class="bi bi-arrow-repeat"></i> بازاسکرپ همه (${total})
+        </button>
     </div>`;
 }
 
@@ -10893,6 +10896,38 @@ function rescrapeSkipped(url) {
     // The single-scrape box is where this ends up either way; filling it and
     // running it is the same two steps done by hand.
     scrapeSingle();
+}
+
+/* «یه علامت رفرش کلی دقیقاً همین فیلد بذار وقتی اونو بزنم همه رو اسکرپ کنه.»
+ * Whatever the modal is showing — all of it, or one bucket — as one run.
+ * The bucket filter is respected: «بازاسکرپ همه» on «بدون شماره» re-opens
+ * the phoneless ones and leaves the chat-only ones, which no run will ever
+ * fill, alone. */
+async function rescrapeAllSkipped() {
+    const rows = visibleSkipped().filter(r => r.reason !== 'chat_only' || _skippedFilter === 'chat_only');
+    const urls = rows.map(r => r.url).filter(Boolean);
+    if (!urls.length) { showToast('خبری نیست', 'چیزی برای بازاسکرپ نمایش داده نمی‌شود', 'warning'); return; }
+    const ok = await askConfirm({
+        icon: 'bi-arrow-repeat', title: 'بازاسکرپ همه',
+        body: `${urls.length} آگهی در یک تسک دوباره باز می‌شود. برای هر کدام یک افشا خرج می‌شود.`,
+        okLabel: `شروع (${urls.length})`,
+    });
+    if (!ok) return;
+    try {
+        const label = _skippedFilter
+            ? `بازاسکرپ — ${(_skippedRows.find(r => r.reason === _skippedFilter) || {}).reason_label || _skippedFilter}`
+            : 'بازاسکرپ';
+        const r = await apiCall('/scraper/rescrape', {
+            method: 'POST', body: JSON.stringify({ urls, label }),
+        });
+        const el = document.getElementById('skippedModal');
+        const modal = el && bootstrap.Modal.getInstance(el);
+        if (modal) modal.hide();
+        showToast('شروع شد', `بازاسکرپ ${urls.length} آگهی به‌عنوان تسک ${String(r.job_id).slice(0, 8)} شروع شد`, 'success');
+        loadJobs();
+    } catch (e) {
+        showToast('خطا', e.message, 'danger');
+    }
 }
 
 async function copySkippedLinks() {
