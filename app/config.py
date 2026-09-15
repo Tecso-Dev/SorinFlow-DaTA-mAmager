@@ -190,6 +190,9 @@ class Settings(BaseSettings):
     # Paths
     cookies_path: str = "/app/data/cookies"
     images_path: str = "/app/data/images"
+    # The forwarder APK the panel offers, mirrored from GitHub (apk_mirror.py).
+    downloads_path: str = "/app/data/downloads"
+    apk_mirror_hours: float = Field(default=6, env="APK_MIRROR_HOURS")
     logs_path: str = "/app/logs"
     
     # Divar URLs

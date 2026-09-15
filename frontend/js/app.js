@@ -4692,42 +4692,60 @@ async function fwGuide(id, cfg) {
         box.innerHTML = `
         <ol class="fw-steps">
           <li><b>برنامه را نصب کنید.</b>
-            <div class="mt-1 mb-2">
+            <div class="mt-1 mb-2 d-flex align-items-center gap-2 flex-wrap">
               <a class="btn btn-sm btn-primary" href="${esc(c.android_apk_url)}">
-                <i class="bi bi-android2"></i> دانلود برای اندروید
+                <i class="bi bi-android2"></i> دانلود برای اندروید${c.android_apk_version ? ` <span class="badge bg-light text-dark ms-1" dir="ltr">${esc(c.android_apk_version)}</span>` : ''}
               </a>
-              <span class="badge bg-secondary-subtle text-secondary ms-2">
+              <a class="small" href="${esc(c.android_release_url)}" target="_blank" rel="noopener">
+                <i class="bi bi-github"></i> یا از GitHub
+              </a>
+              <span class="badge bg-secondary-subtle text-secondary">
                 <i class="bi bi-apple"></i> ${esc(c.ios.message_fa)}
               </span>
             </div>
             <div class="fw-note">
-              این برنامه در گوگل‌پلی نیست، چون پیامک‌ها را می‌خواند و گوگل برای این کار
-              اجازه نمی‌دهد. فایل را دانلود و نصب کنید؛ اگر گوشی هشدار داد، «نصب به هر حال» را بزنید.
+              برنامهٔ <b>SorinFlow Forwarder</b> در گوگل‌پلی نیست، چون پیامک‌ها را می‌خواند و گوگل
+              برای این کار اجازه نمی‌دهد. فایل را دانلود و نصب کنید. <b>Play Protect هشدار می‌دهد</b> —
+              «جزئیات بیشتر ← به هر حال نصب کن» را بزنید؛ برنامه فقط کد دیوار را به همین سرور می‌فرستد.
+              برنامه خودش نسخه‌های تازه را از GitHub پیشنهاد می‌دهد.
             </div>
           </li>
 
           <li><b>به برنامه اجازهٔ خواندن پیامک بدهید.</b>
-            <div class="fw-note">اولین بار که باز می‌کنید می‌پرسد. اگر اشتباهی «نه» زدید:</div>
+            <div class="fw-note">اولین بار که باز می‌کنید می‌پرسد (پیامک و اعلان). اگر اشتباهی «نه» زدید:</div>
             <div class="fw-path">
               <b>تنظیمات گوشی</b><span class="sep">←</span><b>برنامه‌ها</b><span class="sep">←</span>
-              <b>SMS Forwarder</b><span class="sep">←</span><b>مجوزها</b><span class="sep">←</span>
+              <b>SorinFlow Forwarder</b><span class="sep">←</span><b>مجوزها</b><span class="sep">←</span>
               <b>پیامک</b><span class="sep">←</span><span class="goal">اجازه</span>
+            </div>
+            <div class="fw-note">اندروید ۱۳ به بالا برای برنامه‌های نصب‌شده از فایل، مجوز پیامک را قفل می‌کند. اول این را باز کنید:</div>
+            <div class="fw-path">
+              <b>تنظیمات گوشی</b><span class="sep">←</span><b>برنامه‌ها</b><span class="sep">←</span>
+              <b>SorinFlow Forwarder</b><span class="sep">←</span><b>⋮ (بالا راست)</b><span class="sep">←</span>
+              <span class="goal">Allow restricted settings</span>
             </div>
           </li>
 
           <li><b>نگذارید گوشی برنامه را ببندد.</b> <span class="fw-warn">(مهم‌ترین قدم)</span>
             <div class="fw-path">
               <b>تنظیمات گوشی</b><span class="sep">←</span><b>باتری</b><span class="sep">←</span>
-              <b>SMS Forwarder</b><span class="sep">←</span><span class="goal">بدون محدودیت</span>
+              <b>SorinFlow Forwarder</b><span class="sep">←</span><span class="goal">بدون محدودیت</span>
             </div>
             <div class="fw-path">
               <b>تنظیمات گوشی</b><span class="sep">←</span><b>برنامه‌ها</b><span class="sep">←</span>
-              <b>SMS Forwarder</b><span class="sep">←</span><span class="goal">Autostart</span>
+              <b>SorinFlow Forwarder</b><span class="sep">←</span><span class="goal">Autostart</span>
               <span class="sep">(شیائومی)</span>
             </div>
+            <div class="fw-path">
+              <b>تنظیمات گوشی</b><span class="sep">←</span><b>برنامه‌ها</b><span class="sep">←</span>
+              <b>SorinFlow Forwarder</b><span class="sep">←</span><b>Pause app activity if unused</b><span class="sep">←</span>
+              <span class="goal">خاموش</span>
+            </div>
             <div class="fw-note">
-              و برنامه را در لیست برنامه‌های باز <b>قفل کنید</b>.
+              و برنامه را در لیست برنامه‌های باز <b>قفل کنید</b>. برنامه خودش هم هر ۱۵ دقیقه
+              سرویسش را زنده می‌کند و اجازهٔ «بدون محدودیت» را می‌پرسد — قبولش کنید.
               اگر این کارها را نکنید، گوشی بعد از چند ساعت برنامه را می‌بندد و کدها نمی‌رسند.
+              <br>اگر پیامک دیوار در «پیام‌رسان» گوگل می‌آید، <b>RCS را خاموش کنید</b> — پیام RCS اصلاً پیامک نیست.
             </div>
           </li>
 
@@ -4744,8 +4762,9 @@ async function fwGuide(id, cfg) {
               </div>
               <div class="fw-qr-timer" id="fw-qr-timer"></div>
               <div class="fw-note">
-                در برنامهٔ <b>SorinFlow Forwarder</b>: راه‌اندازی ← «اسکن QR» ← این کد را
-                اسکن کنید ← ذخیره. همین لینک را اگر روی خود گوشی باز کنید (دوربین یا یک پیام)
+                در برنامهٔ <b>SorinFlow Forwarder</b>: روی کارت SorinFlow دکمهٔ <b>Set up</b> ←
+                <b>Scan QR</b> ← این کد را اسکن کنید ← فیلدها پر می‌شود ← <b>Save</b>.
+                همین لینک را اگر روی خود گوشی باز کنید (دوربین یا یک پیام)
                 صفحهٔ راه‌اندازی از قبل پر می‌شود.
                 <br>این کد شامل <b>کلید مخصوص همین گوشی</b> است؛ آن را برای کسی نفرستید.
                 با هر تغییر در پنل (چرخاندن کلید، تغییر شماره) کد تازه می‌شود — کافی است
@@ -4768,9 +4787,10 @@ async function fwGuide(id, cfg) {
             </div>
           </li>
 
-          <li><b>دکمهٔ TEST را در برنامه بزنید.</b>
+          <li><b>دکمهٔ «Send test to server» را در برنامه بزنید.</b>
             <div class="fw-note">
-              اگر جواب سبز گرفتید یعنی گوشی به سرور می‌رسد. بعد اینجا دکمهٔ
+              چند ثانیه بعد وضعیت HTTP، زمان رفت‌وبرگشت و پاسخ سرور را نشان می‌دهد و خط سرور
+              روی کارت سبز می‌شود. بعد اینجا دکمهٔ
               <i class="bi bi-activity"></i> را بزنید تا از این طرف هم تأیید شود.
             </div>
           </li>

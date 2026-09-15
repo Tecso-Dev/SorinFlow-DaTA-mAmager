@@ -197,6 +197,11 @@ async def lifespan(app: FastAPI):
     from app.services.forwarder_watch import watch_loop as _fw_watch
     forwarder_task = asyncio.create_task(_fw_watch())
 
+    # Keeps a copy of the forwarder APK on this site, because the phone that
+    # needs it is the one that cannot reach GitHub's download host from Iran.
+    from app.services.apk_mirror import mirror_loop as _apk_mirror
+    apk_task = asyncio.create_task(_apk_mirror())
+
     # Google Cloud export. Returns immediately when disabled, which is the
     # shipped default — and when enabled on a host that cannot reach Google it
     # backs off rather than retrying every interval.
@@ -209,6 +214,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    apk_task.cancel()
     reminder_task.cancel()
     backup_task.cancel()
     lease_task.cancel()
@@ -453,6 +459,9 @@ async def api_key_middleware(request: Request, call_next):
                     "/api/scraper/otp-inbound", "/api/scraper/forwarder-heartbeat"}
     is_dashboard = (request.url.path.startswith("/dashboard")
                     or request.url.path.startswith("/images")
+                    # the APK is fetched by a phone that has nothing to
+                    # authenticate with yet — installing the app is step one
+                    or request.url.path.startswith("/downloads")
                     or request.url.path == "/portal")
     is_public = request.url.path in public_paths or is_dashboard
 
@@ -973,13 +982,26 @@ async def internal_error_handler(request: Request, exc):
                         content={"detail": "Internal server error", "ref": ref})
 
 
-# Mount static files for frontend
+# Mount static files for frontend. Each mount on its own: one directory
+# missing on a dev box must not silently take the others down with it.
 try:
     app.mount("/dashboard", StaticFiles(directory="frontend", html=True), name="frontend")
-    Path(settings.images_path).mkdir(parents=True, exist_ok=True)
-    app.mount("/images", StaticFiles(directory=settings.images_path), name="images")
 except Exception:
     logger.warning("Frontend directory not found, skipping static file mount")
+try:
+    Path(settings.images_path).mkdir(parents=True, exist_ok=True)
+    app.mount("/images", StaticFiles(directory=settings.images_path), name="images")
+except Exception as e:
+    logger.warning(f"images directory not mountable, skipping: {e}")
+try:
+    # The forwarder APK. Its own mount and its own media type: a browser on the
+    # phone offered application/octet-stream may refuse to install it.
+    import mimetypes
+    mimetypes.add_type("application/vnd.android.package-archive", ".apk")
+    Path(settings.downloads_path).mkdir(parents=True, exist_ok=True)
+    app.mount("/downloads", StaticFiles(directory=settings.downloads_path), name="downloads")
+except Exception as e:
+    logger.warning(f"downloads directory not mountable, skipping: {e}")
 
 
 # The old /api/config returned {"api_key": ...} to anonymous callers, which

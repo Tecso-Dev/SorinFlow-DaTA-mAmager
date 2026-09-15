@@ -34,7 +34,20 @@ settings = get_settings()
 
 # Where the Android build lives. Not on Play: the app reads every SMS, which
 # Play's SMS policy does not allow for a use like this, so it is sideloaded.
+# Served from this site — a copy of the latest GitHub release, kept fresh by
+# app.services.apk_mirror — because GitHub's download host is slow or blocked
+# from Iranian carriers, i.e. from the phone that needs it.
 ANDROID_APK_URL = "https://sorinflow.com/downloads/sorinflow-forwarder.apk"
+ANDROID_SOURCE_URL = "https://github.com/sobhanaz/sorinflow-sms-forwarder"
+
+
+def _apk_version() -> str:
+    """The tag of the APK actually on disk, '' while there is none yet."""
+    try:
+        from app.services.apk_mirror import mirrored_version
+        return mirrored_version()
+    except Exception:
+        return ""
 
 
 def _base_url() -> str:
@@ -192,6 +205,9 @@ async def device_config(device_id: int, db: AsyncSession = Depends(get_db),
         "device": row.to_dict(reveal_secret=True),
         "setup_payload": setup_payload,
         "android_apk_url": ANDROID_APK_URL,
+        "android_apk_version": _apk_version(),
+        "android_source_url": ANDROID_SOURCE_URL,
+        "android_release_url": ANDROID_SOURCE_URL + "/releases/latest",
         "ios": {"available": False, "message_fa": "نسخهٔ آیفون به‌زودی"},
         "endpoints": {
             "inbound": f"{base}/api/scraper/otp-inbound",
