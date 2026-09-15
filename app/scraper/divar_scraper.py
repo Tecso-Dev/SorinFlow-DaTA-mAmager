@@ -3379,6 +3379,29 @@ class DivarScraper:
                 return None
         return None
 
+    async def _number_recovered(self, prop: Property) -> None:
+        """A property has a phone number: make every other record agree.
+
+        «اسکرپ کرد ولی باید همه جاهایی که مربوط می‌شه اضافه بشه و از این بخش
+        هم حذف بشه.» The property row was the only thing a re-scrape used to
+        update. The lead kept its «---», and the skipped list kept offering
+        the listing for a retry it no longer needed, with the count beside
+        «بدون شماره» never going down. Called on every successful save, so a
+        single scrape, a resume and the next full run all heal the same way.
+        Never raises: a listing saved must not be un-saved over bookkeeping.
+        """
+        if not (getattr(prop, "phone_number", None) or "").strip():
+            return
+        try:
+            from app.crm.lead_service import fill_lead_from_property
+            await fill_lead_from_property(self.db_session, prop)
+        except Exception as e:
+            logger.warning(f"[recovered] lead not filled for {prop.divar_id}: {e}")
+        try:
+            await skipped_listings.resolve(prop.divar_id)
+        except Exception as e:
+            logger.warning(f"[recovered] skipped rows not cleared for {prop.divar_id}: {e}")
+
     async def _save_property_attempt(self, property_data: Dict[str, Any]) -> Optional[Property]:
         """One attempt. Sets _last_save_error on every path that gives up, so
         the run can put the reason on the skipped row — «ذخیره نشد» is the
@@ -3433,6 +3456,10 @@ class DivarScraper:
                 if existing.images:
                     existing.has_images = True
                 existing.updated_at = datetime.now()
+                # The row gained a number it did not have. Everything that
+                # was told it had none has to hear: the lead the CRM shows,
+                # and the skipped list that still offers it for a retry.
+                await self._number_recovered(existing)
                 await self.db_session.commit()
                 self._last_save_created = False
                 logger.info(f"Updated property: {divar_id}")
@@ -3454,6 +3481,9 @@ class DivarScraper:
                 await self.db_session.commit()
                 self._last_save_created = True
                 logger.info(f"Saved new property: {divar_id} with tag {property_data['tag_number']}")
+                # A listing recorded as skipped in an earlier run and created
+                # fresh now is not skipped any more either.
+                await self._number_recovered(new_property)
 
                 # Trigger CRM pipeline (lead + notification)
                 try:

@@ -47,3 +47,40 @@ async def create_lead_from_property(db: AsyncSession, prop: Property) -> Lead | 
         logger.error(f"Failed to create CRM lead for property {prop.id}: {e}")
         await db.rollback()
         return None
+
+
+async def fill_lead_from_property(db: AsyncSession, prop: Property) -> bool:
+    """A property that GAINED its number since the lead was made.
+
+    create_lead_from_property runs once, on the insert, and a lead made from
+    a row with no phone stays phoneless forever — the CRM kept showing «---»
+    beside a listing whose number the property list already had. A
+    re-scrape, a resume, the next full run: every path that fills the
+    property goes through save_property, so this is called from there.
+
+    Only fills what is empty. A number somebody corrected by hand in the
+    CRM is not overwritten by a scrape.
+    """
+    try:
+        lead = (await db.execute(
+            select(Lead).where(Lead.property_id == prop.id))).scalar_one_or_none()
+        if not lead:
+            return False
+        changed = False
+        if prop.phone_number and not (lead.phone_number or "").strip():
+            lead.phone_number = prop.phone_number
+            changed = True
+        if prop.seller_name and not (lead.seller_name or "").strip():
+            lead.seller_name = prop.seller_name
+            changed = True
+        if changed:
+            await db.commit()
+            logger.info(f"CRM lead #{lead.id} filled from property {prop.id}: phone={prop.phone_number}")
+        return changed
+    except Exception as e:
+        logger.warning(f"could not fill lead for property {prop.id}: {e}")
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return False

@@ -104,3 +104,32 @@ async def prune(days: int = RETENTION_DAYS) -> int:
     except Exception as e:
         logger.warning(f"[skipped] prune skipped: {type(e).__name__}: {e}")
         return 0
+
+
+async def resolve(divar_id: str) -> int:
+    """Drop every skipped row for this listing — it has been saved with a
+    number, so it is no longer something to retry by hand.
+
+    Without this a listing recovered by «اسکرپ تکی» stayed in the panel's
+    list as though it were still missing, and the count beside «بدون شماره»
+    never went down. The rows are removed rather than flagged: the list is
+    «what still needs a hand», and this does not.
+
+    Own session, never raises — the same rules as record().
+    """
+    if not divar_id:
+        return 0
+    from app.models.scraping_job import SkippedListing
+
+    try:
+        async with async_session_maker() as db:
+            res = await db.execute(
+                delete(SkippedListing).where(SkippedListing.divar_id == str(divar_id)))
+            await db.commit()
+            n = res.rowcount or 0
+            if n:
+                logger.info(f"[skipped] {divar_id} resolved — {n} row(s) cleared")
+            return n
+    except Exception as e:
+        logger.warning(f"[skipped] could not resolve {divar_id}: {type(e).__name__}: {e}")
+        return 0
