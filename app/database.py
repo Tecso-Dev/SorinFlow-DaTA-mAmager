@@ -93,7 +93,7 @@ async def init_db():
     """
     from app.models import (property, cookie, scraping_job, lead, user,
                             crm_models, app_setting, portal, email_log,
-                            sms_log, forwarder)
+                            sms_log, forwarder, scrape_schedule)
 
     async with engine.begin() as conn:
         await _guard(conn)

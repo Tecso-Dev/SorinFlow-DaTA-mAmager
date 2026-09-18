@@ -193,6 +193,8 @@ class Settings(BaseSettings):
     # The forwarder APK the panel offers, mirrored from GitHub (apk_mirror.py).
     downloads_path: str = "/app/data/downloads"
     apk_mirror_hours: float = Field(default=6, env="APK_MIRROR_HOURS")
+    # Saved scrapes fire themselves at their hour (scrape_scheduler.py).
+    scrape_scheduler: bool = Field(default=True, env="SCRAPE_SCHEDULER")
     logs_path: str = "/app/logs"
     
     # Divar URLs

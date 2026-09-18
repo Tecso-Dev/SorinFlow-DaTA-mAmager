@@ -202,6 +202,10 @@ async def lifespan(app: FastAPI):
     from app.services.apk_mirror import mirror_loop as _apk_mirror
     apk_task = asyncio.create_task(_apk_mirror())
 
+    # Saved scrapes fire at their hour, as their owner.
+    from app.services.scrape_scheduler import scheduler_loop as _sched
+    schedule_task = asyncio.create_task(_sched())
+
     # Google Cloud export. Returns immediately when disabled, which is the
     # shipped default — and when enabled on a host that cannot reach Google it
     # backs off rather than retrying every interval.
@@ -214,6 +218,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    schedule_task.cancel()
     apk_task.cancel()
     reminder_task.cancel()
     backup_task.cancel()

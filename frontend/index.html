@@ -11,7 +11,7 @@
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260918a">
+    <link rel="stylesheet" href="css/style.css?v=20260918b">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -857,6 +857,10 @@
                                     <button type="submit" class="btn btn-primary btn-w100">
                                         <i class="bi bi-play-fill"></i> شروع اسکرپینگ
                                     </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-w100 mt-2"
+                                            onclick="saveAsSchedule()" title="همین فیلترها، هر روز در ساعتی که می‌گویید">
+                                        <i class="bi bi-alarm"></i> هر روز خودکار اجرا شود
+                                    </button>
                                 </form>
                             </div>
                         </div>
@@ -877,6 +881,30 @@
                     </div>
 
                     <div class="col-md-8">
+                        <!-- saved scrapes that fire themselves -->
+                        <div class="card mb-3 d-none" id="schedules-card">
+                            <div class="card-header d-flex align-items-center gap-2">
+                                <i class="bi bi-alarm"></i> اسکرپ‌های زمان‌بندی‌شده
+                                <span class="badge bg-secondary" id="schedules-count">۰</span>
+                                <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadSchedules()" title="تازه‌سازی">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0 align-middle">
+                                        <thead><tr>
+                                            <th>نام</th><th>چه چیزی</th><th>ساعت</th><th>آخرین اجرا</th><th>روشن</th><th>عملیات</th>
+                                        </tr></thead>
+                                        <tbody id="schedules-table"></tbody>
+                                    </table>
+                                </div>
+                                <div class="fw-note p-2 px-3">
+                                    هر زمان‌بندی با حساب‌های دیوار <b>صاحبش</b> اجرا می‌شود — همان قانونی که اسکرپ دستی دارد.
+                                    اگر «حداکثر سن آگهی» را خالی گذاشته باشید، فقط آگهی‌های ۲۴ ساعت اخیر گرفته می‌شود.
+                                </div>
+                            </div>
+                        </div>
                         <div class="card">
                             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <span>
@@ -4407,7 +4435,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260918a"></script>
+<script src="js/app.js?v=20260918b"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

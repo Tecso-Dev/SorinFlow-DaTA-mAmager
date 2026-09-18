@@ -1323,7 +1323,7 @@ function showSection(sectionName) {
     switch (sectionName) {
         case 'dashboard':  loadDashboard(); break;
         case 'properties': loadProperties(); break;
-        case 'scraper':    loadJobs(); loadScraperAccounts(); _wireEstimateRefresh(); scheduleEstimate(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling();
+        case 'scraper':    loadJobs(); loadSchedules(); loadScraperAccounts(); _wireEstimateRefresh(); scheduleEstimate(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling();
                            _initScraperDatePicker(); refreshDivarSessionCount();
                            setTimeout(restoreScraperForm, 200); break;
         case 'auth':       checkAuthStatus(); loadCookies(); break;
@@ -3092,6 +3092,138 @@ async function startScraping(e) {
     }
 
     await executeBulkScraping(city, category, maxItems, downloadImages, filters);
+}
+
+/** The scrape form as the API wants it — what «شروع» sends, minus the
+ *  session pick, so a schedule saves exactly what a click would run. */
+function _scrapeFormConfig() {
+    const city     = document.getElementById('scraper-city').value;
+    const category = document.getElementById('scraper-category').value;
+    let maxItems   = parseInt(document.getElementById('scraper-pages').value);
+    const hasPostedDate = !!document.getElementById('scraper-posted-date')?.value.trim();
+    if (isNaN(maxItems) && !hasPostedDate) maxItems = 50;
+    const _chk = id => document.getElementById(id)?.checked ? true : null;
+    const cfg = {
+        city, category,
+        download_images: document.getElementById('scraper-images').checked,
+        min_price: _intOrNull('scraper-min-price'), max_price: _intOrNull('scraper-max-price'),
+        min_price_per_meter: _intOrNull('scraper-min-ppm'), max_price_per_meter: _intOrNull('scraper-max-ppm'),
+        min_deposit: _intOrNull('scraper-min-deposit'), max_deposit: _intOrNull('scraper-max-deposit'),
+        min_rent: _intOrNull('scraper-min-rent'), max_rent: _intOrNull('scraper-max-rent'),
+        min_area: _intOrNull('scraper-min-area'), max_area: _intOrNull('scraper-max-area'),
+        min_rooms: _intOrNull('scraper-min-rooms'), max_rooms: _intOrNull('scraper-max-rooms'),
+        has_images: _chk('scraper-has-images'), has_elevator: _chk('scraper-has-elevator'),
+        has_parking: _chk('scraper-has-parking'), has_storage: _chk('scraper-has-storage'),
+        has_balcony: _chk('scraper-has-balcony'),
+        advertiser_type: document.getElementById('scraper-advertiser-type')?.value || null,
+        rotate_every: _intOrNull('scraper-rotate-every'),
+        max_age_hours: _intOrNull('scraper-max-age'),
+    };
+    if (Number.isFinite(maxItems) && maxItems > 0) cfg.max_items = maxItems;
+    const picked = document.getElementById('scraper-account')?.value || '';
+    if (picked) cfg.divar_phone = picked;
+    return Object.fromEntries(Object.entries(cfg).filter(([, v]) => v !== null && v !== undefined));
+}
+
+// ═══ Scheduled scrapes ═════════════════════════════════════════
+async function saveAsSchedule() {
+    const cfg = _scrapeFormConfig();
+    if (!cfg.city || !cfg.category) { showToast('توجه', 'اول شهر و دسته‌بندی را انتخاب کنید', 'warning'); return; }
+    const when = await askText({
+        icon: 'bi-alarm', title: 'اجرای روزانه',
+        body: `هر روز <b>${esc(cityName(cfg.city))} / ${esc(categoryName(cfg.category))}</b>${cfg.max_items ? ` تا ${formatNumber(cfg.max_items)} آگهی` : ''} با همین فیلترها اجرا می‌شود — با حساب‌های دیوار خودتان.`,
+        note: cfg.max_age_hours ? '' : 'چون «حداکثر سن آگهی» خالی است، فقط آگهی‌های ۲۴ ساعت اخیر گرفته می‌شود.',
+        field: { label: 'ساعت اجرا (به وقت تهران)', value: '08:00', placeholder: '08:00', dir: 'ltr',
+                 validate: v => /^([01]?\d|2[0-3]):[0-5]\d$/.test(v.trim()) ? '' : 'ساعت را مثل 08:00 بنویسید' },
+    });
+    if (when === null) return;
+    const [h, m] = when.trim().split(':').map(Number);
+    const name = await askText({
+        icon: 'bi-tag', title: 'اسم زمان‌بندی', body: 'برای این‌که بعداً بین چند زمان‌بندی پیدایش کنید.',
+        field: { label: 'اسم', value: `${cityName(cfg.city)} — ${categoryName(cfg.category)}` },
+    });
+    if (name === null) return;
+    try {
+        await apiCall('/scraper/schedules', { method: 'POST', body: JSON.stringify({ name: name.trim(), config: cfg, hour: h, minute: m, enabled: true }) });
+        showToast('ذخیره شد', `هر روز ساعت ${when.trim()} اجرا می‌شود`, 'success');
+        loadSchedules();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+function cityName(slug) { const o = document.querySelector(`#scraper-city option[value="${slug}"]`); return o ? o.textContent.trim() : slug; }
+function categoryName(slug) { const o = document.querySelector(`#scraper-category option[value="${slug}"]`); return o ? o.textContent.trim() : slug; }
+
+async function loadSchedules() {
+    const card = document.getElementById('schedules-card');
+    const tb = document.getElementById('schedules-table');
+    if (!card || !tb) return;
+    try {
+        const d = await apiCall('/scraper/schedules');
+        const rows = d.schedules || [];
+        document.getElementById('schedules-count').textContent = formatNumber(rows.length);
+        card.classList.toggle('d-none', rows.length === 0);
+        const fa = iso => iso ? `${new Date(iso).toLocaleDateString('fa-IR')} ${new Date(iso).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}` : '—';
+        tb.innerHTML = rows.map(s => {
+            const c = s.config || {};
+            const what = `${esc(s.city_name || c.city)} / ${esc(s.category_name || c.category)}` +
+                (c.max_items ? ` · ${formatNumber(c.max_items)} آگهی` : '') +
+                (c.max_age_hours ? ` · ${formatNumber(c.max_age_hours)} ساعت اخیر` : '');
+            const lr = s.last_result || {};
+            const cls = { started: 'text-success', failed: 'text-danger', skipped: 'text-warning' }[lr.status] || 'text-muted';
+            const last = s.last_run_at ? `<div class="small ${cls}">${esc(lr.detail || lr.status || '')}</div><div class="small text-muted">${fa(s.last_run_at)}</div>` : '<span class="text-muted small">هنوز اجرا نشده</span>';
+            const hh = String(s.hour).padStart(2, '0'), mm = String(s.minute).padStart(2, '0');
+            return `<tr class="${s.enabled ? '' : 'opacity-50'}">
+                <td>${esc(s.name)}${d.can_see_all && s.owner_name ? `<div class="small text-muted">${esc(s.owner_name)}</div>` : ''}</td>
+                <td class="small">${what}</td>
+                <td dir="ltr">${hh}:${mm}<div class="small text-muted">بعدی: ${fa(s.next_run_at)}</div></td>
+                <td>${last}</td>
+                <td><div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSchedule(${s.id}, this.checked)"></div></td>
+                <td class="text-nowrap">
+                    <button class="btn btn-sm btn-outline-primary" onclick="runScheduleNow(${s.id})" title="همین حالا اجرا کن"><i class="bi bi-play-fill"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="editScheduleTime(${s.id}, '${hh}:${mm}')" title="تغییر ساعت"><i class="bi bi-clock"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteSchedule(${s.id})" title="حذف"><i class="bi bi-trash"></i></button>
+                </td></tr>`;
+        }).join('');
+    } catch (e) { /* the section works without the card */ }
+}
+
+async function toggleSchedule(id, enabled) {
+    try {
+        await apiCall(`/scraper/schedules/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) });
+        showToast(enabled ? 'روشن شد' : 'خاموش شد', '', 'success');
+        loadSchedules();
+    } catch (e) { showToast('خطا', e.message, 'danger'); loadSchedules(); }
+}
+
+async function editScheduleTime(id, current) {
+    const when = await askText({
+        icon: 'bi-clock', title: 'ساعت اجرا', body: 'به وقت تهران.',
+        field: { label: 'ساعت', value: current, dir: 'ltr',
+                 validate: v => /^([01]?\d|2[0-3]):[0-5]\d$/.test(v.trim()) ? '' : 'ساعت را مثل 08:00 بنویسید' },
+    });
+    if (when === null) return;
+    const [h, m] = when.trim().split(':').map(Number);
+    try {
+        await apiCall(`/scraper/schedules/${id}`, { method: 'PATCH', body: JSON.stringify({ hour: h, minute: m }) });
+        loadSchedules();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function runScheduleNow(id) {
+    if (!await askConfirm({ icon: 'bi-play-fill', title: 'اجرای فوری', okLabel: 'اجرا کن', body: 'همین حالا با تنظیمات این زمان‌بندی یک اسکرپ شروع شود؟' })) return;
+    try {
+        const r = await apiCall(`/scraper/schedules/${id}/run`, { method: 'POST' });
+        showToast(r.status === 'started' ? 'شروع شد' : 'اجرا نشد', r.detail || '', r.status === 'started' ? 'success' : 'warning');
+        loadSchedules(); loadJobs();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function deleteSchedule(id) {
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف زمان‌بندی', tone: 'danger', okLabel: 'حذف', body: 'این زمان‌بندی حذف شود؟ اسکرپ‌های قبلی‌اش می‌مانند.' })) return;
+    try {
+        await apiCall(`/scraper/schedules/${id}`, { method: 'DELETE' });
+        loadSchedules();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
 async function executeBulkScraping(city, category, maxItems, downloadImages, filters = {}) {

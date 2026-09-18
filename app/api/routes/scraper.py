@@ -19,6 +19,7 @@ from app.database import get_db, get_redis
 from app.models.scraping_job import ScrapingJob
 from app.scraper.divar_scraper import DivarScraper
 from app.config import get_settings, CITIES, CATEGORIES
+from pydantic import BaseModel, Field
 from app.schemas import ScrapingJobCreate, ScrapingJobResponse, ScrapingJobList
 from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.models.user import User
@@ -313,7 +314,7 @@ async def resume_scraping_job(
 
 async def _launch_job(
     job_config: ScrapingJobCreate,
-    background_tasks: BackgroundTasks,
+    background_tasks: Optional[BackgroundTasks],
     db: AsyncSession,
     current_user: Optional[User],
     resumed_from=None,
@@ -399,8 +400,12 @@ async def _launch_job(
     # Store a placeholder to track active jobs
     active_tasks[job_id] = {"status": "starting", "city": job_config.city, "category": job_config.category}
 
-    # Use background_tasks to run the job
-    background_tasks.add_task(
+    # From a request, the job runs after the response goes out; from the
+    # scheduler there is no request, and the loop is the same one, so a task
+    # on it is the same thing.
+    _spawn = background_tasks.add_task if background_tasks is not None else \
+        (lambda fn, *a: asyncio.create_task(fn(*a)))
+    _spawn(
         run_scraping_job,
         job_id,
         job_config.city,
@@ -443,6 +448,136 @@ async def _launch_job(
         status="pending",
         created_at=job.created_at
     )
+
+
+# ── Schedules: the form, saved with an hour ──────────────────────────────────
+#
+# Scoped like Divar sessions: a person sees and edits their own; root and
+# super_admin see everyone's, because somebody has to be able to switch off a
+# schedule whose owner is on holiday. A run always fires AS the owner.
+
+class ScheduleIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    config: dict
+    hour: int = Field(8, ge=0, le=23)
+    minute: int = Field(0, ge=0, le=59)
+    enabled: bool = True
+
+
+class ScheduleEdit(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=120)
+    hour: Optional[int] = Field(None, ge=0, le=23)
+    minute: Optional[int] = Field(None, ge=0, le=59)
+    enabled: Optional[bool] = None
+
+
+def _sees_every_schedule(user) -> bool:
+    return (getattr(user, "role", "") or "") in ("root", "super_admin")
+
+
+async def _my_schedule(db, user, schedule_id: int):
+    from app.models.scrape_schedule import ScrapeSchedule
+    q = select(ScrapeSchedule).where(ScrapeSchedule.id == schedule_id)
+    if not _sees_every_schedule(user):
+        q = q.where(ScrapeSchedule.owner_user_id == user.id)
+    row = (await db.execute(q)).scalars().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="زمان‌بندی‌ای با این شناسه ندارید")
+    return row
+
+
+def _schedule_view(row, owners: dict) -> dict:
+    d = row.to_dict()
+    d["owner_name"] = owners.get(row.owner_user_id)
+    cfg = d["config"] or {}
+    d["city_name"] = (CITIES.get(cfg.get("city")) or {}).get("name", cfg.get("city"))
+    d["category_name"] = (CATEGORIES.get(cfg.get("category")) or {}).get("name", cfg.get("category"))
+    return d
+
+
+@router.get("/schedules")
+async def list_schedules(db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    from app.models.scrape_schedule import ScrapeSchedule
+    q = select(ScrapeSchedule).order_by(ScrapeSchedule.hour, ScrapeSchedule.minute, ScrapeSchedule.id)
+    if not _sees_every_schedule(current_user):
+        q = q.where(ScrapeSchedule.owner_user_id == current_user.id)
+    rows = (await db.execute(q)).scalars().all()
+    owners = {}
+    ids = {r.owner_user_id for r in rows}
+    if ids:
+        owners = {u.id: (u.full_name or u.username) for u in (await db.execute(
+            select(User).where(User.id.in_(ids)))).scalars().all()}
+    return {"schedules": [_schedule_view(r, owners) for r in rows],
+            "can_see_all": _sees_every_schedule(current_user)}
+
+
+@router.post("/schedules")
+async def create_schedule(data: ScheduleIn, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    """Save the form as a daily run. Validated the way a run is: the config
+    has to be one the scraper would accept today, not at 08:00 tomorrow."""
+    from app.models.scrape_schedule import ScrapeSchedule
+    from app.services.scrape_scheduler import config_for_run, next_occurrence
+    try:
+        cfg = ScrapingJobCreate(**config_for_run(data.config)).model_dump(exclude_none=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"تنظیمات اسکرپ معتبر نیست: {e}")
+    if cfg.get("city") not in CITIES or cfg.get("category") not in CATEGORIES:
+        raise HTTPException(status_code=400, detail="شهر یا دسته‌بندی معتبر نیست")
+    row = ScrapeSchedule(
+        owner_user_id=current_user.id, name=data.name.strip(), config=cfg,
+        hour=data.hour, minute=data.minute, enabled=data.enabled,
+        next_run_at=next_occurrence(data.hour, data.minute),
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    logger.info(f"[schedule] {current_user.username} saved «{row.name}» at {row.hour:02d}:{row.minute:02d}")
+    return _schedule_view(row, {current_user.id: current_user.full_name or current_user.username})
+
+
+@router.patch("/schedules/{schedule_id}")
+async def edit_schedule(schedule_id: int, data: ScheduleEdit,
+                        db: AsyncSession = Depends(get_db),
+                        current_user: User = Depends(get_current_user)):
+    from app.services.scrape_scheduler import next_occurrence
+    row = await _my_schedule(db, current_user, schedule_id)
+    if data.name is not None:
+        row.name = data.name.strip() or row.name
+    if data.hour is not None:
+        row.hour = data.hour
+    if data.minute is not None:
+        row.minute = data.minute
+    if data.enabled is not None:
+        row.enabled = data.enabled
+    # Any change re-arms the clock, so a time edited to «in five minutes»
+    # fires in five minutes and not at yesterday's hour tomorrow.
+    row.next_run_at = next_occurrence(row.hour, row.minute)
+    await db.commit()
+    await db.refresh(row)
+    return _schedule_view(row, {})
+
+
+@router.delete("/schedules/{schedule_id}")
+async def delete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    row = await _my_schedule(db, current_user, schedule_id)
+    await db.delete(row)
+    await db.commit()
+    return {"success": True}
+
+
+@router.post("/schedules/{schedule_id}/run")
+async def run_schedule_now(schedule_id: int, db: AsyncSession = Depends(get_db),
+                           current_user: User = Depends(get_current_user)):
+    """Fire it now, as its owner — the same path the clock takes, so what
+    you see here is what 08:00 will do."""
+    from app.services.scrape_scheduler import fire
+    row = await _my_schedule(db, current_user, schedule_id)
+    res = await fire(row, db)
+    await db.refresh(row)
+    return {**res, "schedule": _schedule_view(row, {})}
 
 
 @router.get("/jobs", response_model=ScrapingJobList)
