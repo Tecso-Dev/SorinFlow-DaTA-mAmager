@@ -14,7 +14,6 @@ back, not once per missed minute.
 """
 import asyncio
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 from loguru import logger
 from sqlalchemy import select
@@ -25,7 +24,11 @@ from app.models.scrape_schedule import ScrapeSchedule
 from app.models.user import User
 
 settings = get_settings()
-TEHRAN = ZoneInfo("Asia/Tehran")
+# A fixed +03:30, not ZoneInfo("Asia/Tehran"): the Playwright image ships no
+# tz database, so ZoneInfo raised at import and the whole app crash-looped —
+# the site was down for fifteen minutes on 2026-09-18. Iran has had no
+# daylight saving since 2022, so the fixed offset is also simply correct.
+TEHRAN = timezone(timedelta(hours=3, minutes=30), "Asia/Tehran")
 TICK_SECONDS = 60
 
 # A daily run of «everything» re-crawls yesterday's listings only to find

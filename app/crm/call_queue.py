@@ -20,9 +20,9 @@ Pure functions here; the route applies what they return. Tehran wall-clock
 for «tomorrow morning».
 """
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
-TEHRAN = ZoneInfo("Asia/Tehran")
+# Fixed +03:30 — see scrape_scheduler.TEHRAN for why not ZoneInfo.
+TEHRAN = timezone(timedelta(hours=3, minutes=30), "Asia/Tehran")
 
 OUTCOMES = {
     "answered":       "پاسخ داد",
