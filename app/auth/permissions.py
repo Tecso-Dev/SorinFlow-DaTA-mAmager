@@ -44,7 +44,7 @@ PERMISSIONS = {
     # and the SMS panel that sends campaigns are two products, and a person
     # can be trusted with one and not the other.
     "forwarder":  "فرستندهٔ پیامک",
-    "proxies":    "پروکسی‌ها",
+    "proxies":    "پراکسی‌ها",
     "stats":      "آمار و گزارش",
     "portal":     "درخواست‌های بازدیدکنندگان",
     "monitoring": "پایش سامانه و Google Cloud",

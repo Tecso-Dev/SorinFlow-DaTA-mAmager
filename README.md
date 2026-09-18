@@ -21,6 +21,9 @@ SorinFlow is a FastAPI application for collecting real-estate listings from Diva
 
 **Navigate:** [Project brain](#project-brain) · [Architecture](#architecture) · [Quick start](#quick-start) · [API](#api-overview) · [Configuration](#configuration) · [Developer map](#developer-change-map) · [Operations](#operations)
 
+
+**راهنمای فارسی برای کاربران پنل:** [`README.fa.md`](README.fa.md) — every section, as it is today.
+
 ## What the project includes
 
 - **Divar collection:** configurable city/category jobs, exact-date and recency modes, price/area/room/amenity filters, advertiser filtering, duplicate updates, single-listing collection, and **saved schedules** that fire daily at a Tehran hour as their owner.
@@ -997,7 +1000,7 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 **9. Bring the remaining documents in line with the code.** The audit found 74 statements across the docs that contradict the source. This file was rewritten on 2026-09-02 and `tests/test_docs.py` now guards the claims that were wrong longest. Still outstanding: `INSTALL.md` describes a Docker-only mid-2026 system and its documented sequence fails, because Compose hard-errors without `POSTGRES_PASSWORD` and `REDIS_PASSWORD`, neither of which it tells you to set. `QUICK_START_GUIDE.md` is a June-era fix note written in the present tense, with two links to a file that never existed and an unwarned `docker compose down -v` — deleting it is a smaller diff than fixing it. *Effort: medium. Owner: Claude.*
 
-**9b. Write a Persian guide.** `README.fa.md` was deleted in `ce2f1e6` instead of being corrected, so the product's Persian-speaking users now have no guide at all. The old one covered 7 of 11 dashboard sections and never mentioned the portal, the SMS panel or the email panel, so it was not worth keeping as it stood — but the audience did not go away with the file. A replacement should be written from the current panel, not translated from this document. *Effort: medium. Owner: Claude, once Sobhan confirms he wants it back.*
+**9b. Write a Persian guide.** ✅ **Closed** 2026-09-19 — [`README.fa.md`](README.fa.md) covers every dashboard section as it is today (17 chapters, a troubleshooting table), and `tests/test_docs.py` checks it names every section and every permission.
 
 **10. Finish the email marketing panel.** `/api/email/audiences`, `/api/email/broadcast` and `/api/email/export` exist, work, and read `marketing_opt_in` — and no UI calls any of them (`app/api/routes/email.py:278, :306, :345`). The SMS twin is fully wired (`frontend/js/app.js:8178, :8218`), so this is an unfinished port, not a design choice. Consent is being collected at every sign-up (`frontend/js/portal.js:124`) with no panel that can act on it. *Effort: medium. Owner: Claude.*
 

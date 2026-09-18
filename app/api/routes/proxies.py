@@ -130,7 +130,7 @@ async def delete_all_proxies(
     if confirm_count != len(rows):
         raise HTTPException(
             status_code=409,
-            detail=f"تعداد پروکسی‌ها تغییر کرده است ({len(rows)} مورد) — صفحه را تازه کنید")
+            detail=f"تعداد پراکسی‌ها تغییر کرده است ({len(rows)} مورد) — صفحه را تازه کنید")
 
     for r in rows:
         await db.delete(r)

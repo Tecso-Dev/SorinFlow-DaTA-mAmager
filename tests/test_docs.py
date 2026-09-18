@@ -157,3 +157,40 @@ class TestOptionalSecretsReachTheContainer:
         for key in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
             assert f"key: {key}, optional: true" in text, \
                 f"{key} is read by app/config.py but never reaches the pod"
+
+
+class TestThePersianGuide:
+    """README.fa.md is for the people who use the panel. It has to name every
+    section they can open and every permission a manager can tick — a guide
+    that skips a section is how «what is this menu item» questions start."""
+
+    def _fa(self):
+        from pathlib import Path
+        return Path("README.fa.md").read_text(encoding="utf-8")
+
+    def test_it_exists_and_is_linked_from_the_english_readme(self):
+        assert "README.fa.md" in _read()
+        assert len(self._fa()) > 8000
+
+    def test_every_dashboard_section_is_described(self):
+        import re
+        from pathlib import Path
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        meta = js[js.index("const SECTION_META = {"):js.index("};", js.index("const SECTION_META = {"))]
+        titles = re.findall(r"(?<![a-z])title: '([^']+)'", meta)   # not subtitle:
+        assert len(titles) >= 12
+        fa = self._fa()
+        # the guide may use the short form of a title (e.g. «اسکرپر» for «اسکرپر دیوار»)
+        missing = [t for t in titles if t not in fa and t.split(" — ")[0].split(" ")[0] not in fa]
+        assert not missing, f"sections the Persian guide never mentions: {missing}"
+
+    def test_every_permission_label_is_named(self):
+        from app.auth.permissions import PERMISSIONS
+        fa = self._fa()
+        missing = [v for v in PERMISSIONS.values() if v.split(" ")[0] not in fa]
+        assert not missing, f"permissions the Persian guide never names: {missing}"
+
+    def test_it_covers_the_three_things_people_ask_about(self):
+        fa = self._fa()
+        for needle in ("تأیید هویت", "فقط چت", "Add to Home Screen", "دوباره زنگ بزن", "@BotFather"):
+            assert needle in fa, needle
