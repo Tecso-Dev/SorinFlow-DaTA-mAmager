@@ -1330,7 +1330,7 @@ function showSection(sectionName) {
         case 'forwarder':  loadForwarders(); loadForwarderLog(); break;
         case 'profile':    loadProfile(); break;
         case 'proxies':    loadProxies(); break;
-        case 'crm':        _applyCrmRoleVisibility(); loadTasks(); break;
+        case 'crm':        _applyCrmRoleVisibility(); loadCalls(); break;
         case 'insights':   insTab(_insTab); break;
         case 'portal':     loadPortalRequests(); break;
         case 'monitoring': loadMonitoring(); break;
@@ -4576,11 +4576,13 @@ function _askOpen({ icon, title, body, note, tone, okLabel, cancelLabel, field }
             ${note ? `<div class="ask-note">${note}</div>` : ''}
             ${field ? `<div class="ask-field">
                 ${field.label ? `<label for="ask-input">${esc(field.label)}</label>` : ''}
-                <input id="ask-input" type="${esc(field.type || 'text')}"
+                ${field.options ? `<select id="ask-input" dir="${esc(field.dir || 'auto')}">
+                    ${field.options.map(([v, l]) => `<option value="${esc(v)}" ${v === field.value ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+                  </select>` : `<input id="ask-input" type="${esc(field.type || 'text')}"
                        inputmode="${esc(field.inputmode || 'text')}"
                        dir="${esc(field.dir || 'auto')}"
                        placeholder="${esc(field.placeholder || '')}"
-                       value="${esc(field.value || '')}">
+                       value="${esc(field.value || '')}">`}
                 ${field.hint ? `<div class="ask-hint">${esc(field.hint)}</div>` : ''}
                 <div class="ask-error" id="ask-error"></div>
               </div>` : ''}
@@ -4620,7 +4622,7 @@ function _askOpen({ icon, title, body, note, tone, okLabel, cancelLabel, field }
         // Focus what the person will act on: the field if there is one, else
         // the safe button — so Enter on a delete dialog does not delete.
         setTimeout(() => {
-            if (input) { input.focus(); input.select(); }
+            if (input) { input.focus(); if (input.select && input.tagName === 'INPUT') input.select(); }
             else overlay.querySelector(tone === 'danger' ? '#ask-cancel' : '#ask-ok').focus();
         }, 30);
     });
@@ -7987,6 +7989,158 @@ function exportJson(type) {
     _downloadExport(`${API_BASE}/crm/${type}/export/json`, `${type}.json`);
 }
 
+// ═══ Call queue — the day's list, one tap per outcome ══════════
+let _cqItems = [];
+
+function _cqWhen(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return `${d.toLocaleDateString('fa-IR')} ${d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+async function loadCalls() {
+    const box = document.getElementById('calls-list');
+    if (!box) return;
+    try {
+        const d = await apiCall('/crm/calls/today?limit=40');
+        _cqItems = d.items || [];
+        document.getElementById('calls-count').textContent = formatNumber(d.total || 0);
+        document.getElementById('calls-stats').textContent =
+            `${formatNumber(d.done_today || 0)} تماس امروز · ${formatNumber(d.due_callbacks || 0)} تماس مجدد سررسیده`;
+        const badge = document.getElementById('calls-due-badge');
+        if (badge) { badge.textContent = formatNumber(d.total || 0); badge.classList.toggle('d-none', !d.total); }
+        if (!_cqItems.length) {
+            box.innerHTML = `<div class="cq-empty"><i class="bi bi-cup-hot"></i> فعلاً کسی منتظر تماس نیست.
+                ${d.total ? '' : 'اسکرپ بعدی که تمام شود، لیدهای تازه اینجا می‌آیند.'}</div>`;
+        } else {
+            box.innerHTML = _cqItems.map(_cqCard).join('');
+        }
+        if (['root', 'super_admin'].includes(_currentUser?.role)) loadCallsSummary();
+    } catch (e) {
+        box.innerHTML = `<div class="text-danger small">${esc(e.message || 'خطا')}</div>`;
+    }
+}
+
+function _cqCard(l) {
+    const price = l.price ? formatNumber(l.price) + ' تومان' : '';
+    const meta = [l.city_name, l.category_name, l.district, l.area ? `${formatNumber(l.area)} متر` : '', price]
+        .filter(Boolean).map(esc).join(' · ');
+    const due = l.next_call_at ? `<span class="badge bg-warning text-dark"><i class="bi bi-arrow-repeat"></i> تماس مجدد ${_cqWhen(l.next_call_at)}</span>` : '';
+    const tries = l.call_attempts ? `<span class="badge bg-secondary">${formatNumber(l.call_attempts)} تماس قبلی</span>` : '<span class="badge bg-success">اولین تماس</span>';
+    const mine = l.assigned_to ? `<span class="badge bg-primary-subtle text-primary-emphasis">${esc(l.assigned_to)}</span>` : '';
+    const chat = l.contact_channel === 'chat_only' ? '<span class="badge bg-info text-dark">فقط چت</span>' : '';
+    const phone = esc(l.phone_number || '');
+    return `<div class="cq-card" id="cq-${l.id}">
+        <div class="cq-head">
+            <a class="cq-phone" href="tel:${safeTel(l.phone_number)}" dir="ltr"><i class="bi bi-telephone-fill"></i> ${phone}</a>
+            <div class="cq-title">
+                <a href="${esc(l.property_url || '#')}" target="_blank" rel="noopener">${esc(l.property_title || 'بدون عنوان')}</a>
+                <div class="cq-meta">${meta}${l.serial_no ? ` · کد ${formatNumber(l.serial_no)}` : ''}</div>
+            </div>
+            <div class="cq-badges">${due}${tries}${mine}${chat}</div>
+        </div>
+        ${l.notes ? `<div class="cq-notes">${esc(l.notes).replace(/\n/g, '<br>')}</div>` : ''}
+        <div class="cq-actions">
+            <button class="btn btn-sm btn-success" onclick="cqOutcome(${l.id}, 'answered')"><i class="bi bi-check-lg"></i> پاسخ داد</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="cqOutcome(${l.id}, 'no_answer')"><i class="bi bi-telephone-x"></i> پاسخ نداد</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="cqOutcome(${l.id}, 'busy')">مشغول</button>
+            <button class="btn btn-sm btn-outline-warning" onclick="cqCallback(${l.id})"><i class="bi bi-alarm"></i> دوباره زنگ بزن</button>
+            <button class="btn btn-sm btn-outline-primary" onclick="cqVisit(${l.id})"><i class="bi bi-calendar-check"></i> بازدید</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="cqOutcome(${l.id}, 'not_interested')">علاقه ندارد</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="cqOutcome(${l.id}, 'wrong_number')">شماره اشتباه</button>
+        </div>
+    </div>`;
+}
+
+async function _cqSend(id, body, doneMsg) {
+    try {
+        const r = await apiCall(`/crm/leads/${id}/call`, { method: 'POST', body: JSON.stringify(body) });
+        const card = document.getElementById(`cq-${id}`);
+        if (card) { card.classList.add('cq-done'); setTimeout(() => card.remove(), 350); }
+        showToast(r.label || 'ثبت شد', doneMsg || (r.next_call_at ? `دوباره: ${_cqWhen(r.next_call_at)}` : ''), 'success');
+        setTimeout(loadCalls, 400);
+        if (typeof loadLeads === 'function' && document.querySelector('#crm-tab-leads.active')) loadLeads();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function cqOutcome(id, outcome) {
+    if (outcome === 'answered') {
+        const note = await askText({
+            icon: 'bi-chat-left-text', title: 'پاسخ داد', okLabel: 'ثبت',
+            body: 'چه گفت؟ یک خط کافی است — روی لید می‌ماند.',
+            field: { label: 'یادداشت (اختیاری)', placeholder: 'مثلاً: قیمت قطعی ۲ میلیارد، هفتهٔ بعد خالی می‌شود' },
+        });
+        if (note === null) return;
+        return _cqSend(id, { outcome, note: note.trim() || null });
+    }
+    if (outcome === 'not_interested' || outcome === 'wrong_number') {
+        if (!await askConfirm({ icon: 'bi-x-circle', title: outcome === 'wrong_number' ? 'شماره اشتباه' : 'علاقه ندارد', tone: 'danger', okLabel: 'ثبت',
+                                body: 'این لید بسته می‌شود و دیگر در لیست تماس نمی‌آید.' })) return;
+    }
+    return _cqSend(id, { outcome });
+}
+
+async function cqCallback(id) {
+    // the three answers people actually give, and a free one
+    const pick = await _askOpen({
+        icon: 'bi-alarm', title: 'دوباره زنگ بزن', okLabel: 'ثبت', cancelLabel: 'انصراف',
+        body: 'کِی؟',
+        field: { label: 'زمان', value: '1h', options: [
+            ['1h', 'یک ساعت دیگر'], ['3h', 'سه ساعت دیگر'], ['tomorrow', 'فردا ۱۰ صبح'], ['custom', 'تاریخ و ساعت دیگر…'],
+        ] },
+    });
+    if (pick === null || pick === false) return;
+    let at = new Date();
+    if (pick === '1h') at.setHours(at.getHours() + 1);
+    else if (pick === '3h') at.setHours(at.getHours() + 3);
+    else if (pick === 'tomorrow') { at.setDate(at.getDate() + 1); at.setHours(10, 0, 0, 0); }
+    else {
+        const raw = await askText({ icon: 'bi-calendar', title: 'زمان تماس مجدد', body: 'به وقت تهران.',
+            field: { label: 'تاریخ و ساعت', placeholder: '1405/06/28 16:30', dir: 'ltr',
+                     validate: v => /^\d{4}\/\d{1,2}\/\d{1,2}\s+([01]?\d|2[0-3]):[0-5]\d$/.test(v.trim()) ? '' : 'مثل 1405/06/28 16:30 بنویسید' } });
+        if (raw === null) return;
+        const [dpart, tpart] = raw.trim().split(/\s+/);
+        const g = jalaliToGregorian(dpart);
+        if (!g) { showToast('خطا', 'تاریخ نامعتبر است', 'warning'); return; }
+        const [hh, mm] = tpart.split(':').map(Number);
+        at = new Date(`${g}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`);
+    }
+    return _cqSend(id, { outcome: 'callback', callback_at: at.toISOString() }, `دوباره: ${_cqWhen(at.toISOString())}`);
+}
+
+async function cqVisit(id) {
+    const raw = await askText({ icon: 'bi-calendar-check', title: 'بازدید گذاشتیم', okLabel: 'ثبت',
+        body: 'زمان بازدید را بنویسید تا در تقویم ثبت شود؛ خالی بگذارید اگر هنوز مشخص نیست.',
+        field: { label: 'تاریخ و ساعت (اختیاری)', placeholder: '1405/06/28 16:30', dir: 'ltr',
+                 validate: v => !v.trim() || /^\d{4}\/\d{1,2}\/\d{1,2}\s+([01]?\d|2[0-3]):[0-5]\d$/.test(v.trim()) ? '' : 'مثل 1405/06/28 16:30 بنویسید' } });
+    if (raw === null) return;
+    const body = { outcome: 'visit' };
+    if (raw.trim()) {
+        const [dpart, tpart] = raw.trim().split(/\s+/);
+        const g = jalaliToGregorian(dpart);
+        if (g) {
+            const [hh, mm] = tpart.split(':').map(Number);
+            body.visit_at = new Date(`${g}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`).toISOString();
+        }
+    }
+    return _cqSend(id, body, body.visit_at ? 'در تقویم ثبت شد' : '');
+}
+
+async function loadCallsSummary() {
+    const box = document.getElementById('calls-summary');
+    if (!box) return;
+    try {
+        const d = await apiCall('/crm/calls/summary?days=1');
+        if (!d.agents.length) { box.innerHTML = ''; return; }
+        box.innerHTML = `<div class="cq-sum-title"><i class="bi bi-people"></i> امروز، به تفکیک مشاور</div>
+            <div class="table-responsive"><table class="table table-sm mb-0 align-middle"><thead><tr>
+            <th>مشاور</th><th>تماس</th><th>پاسخ داد</th><th>پاسخ نداد</th><th>تماس مجدد</th><th>بازدید</th><th>بسته شد</th></tr></thead><tbody>` +
+            d.agents.map(a => `<tr><td>${esc(a.agent)}</td><td>${formatNumber(a.calls)}</td><td>${formatNumber(a.answered)}</td><td>${formatNumber(a.no_answer)}</td><td>${formatNumber(a.callback)}</td><td>${formatNumber(a.visit)}</td><td>${formatNumber(a.rejected)}</td></tr>`).join('') +
+            `</tbody></table></div>`;
+    } catch (_) { box.innerHTML = ''; }
+}
+// ═══ End call queue ═══════════════════════════════════════════
+
 function _applyCrmRoleVisibility() {
     const isSuperAdmin = ['root', 'super_admin'].includes(_currentUser?.role);
     document.querySelectorAll('.crm-superadmin-only').forEach(el => {
@@ -8002,6 +8156,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('#crm-main-tabs .nav-link').forEach(tab => {
         tab.addEventListener('shown.bs.tab', e => {
             const target = e.target.getAttribute('data-bs-target');
+            if (target === '#crm-tab-calls')     loadCalls();
             if (target === '#crm-tab-tasks')     loadTasks();
             if (target === '#crm-tab-calendar')  { loadCalendar(); loadUpcomingEvents(); }
             if (target === '#crm-tab-filing')    loadFiling();

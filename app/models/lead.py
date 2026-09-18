@@ -33,6 +33,14 @@ class Lead(Base):
     notes = Column(Text)
     assigned_to = Column(String(200))
 
+    # The call queue. A lead is «due» when next_call_at is empty (never
+    # called, or answered) or has passed (a callback, an unanswered retry).
+    # call_attempts counts every dial, whatever the outcome.
+    next_call_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    call_attempts = Column(Integer, default=0, nullable=False)
+    last_call_at = Column(DateTime(timezone=True), nullable=True)
+    last_call_outcome = Column(String(20), nullable=True)
+
     # اجاره داده شده — when the lease ends (1 year) the lead returns to "new"
     rented_at = Column(DateTime(timezone=True), nullable=True)
 

@@ -548,6 +548,168 @@ async def update_lead(
     return await _lead_with_property(db, lead)
 
 
+# ── The call queue ────────────────────────────────────────────────────────────
+#
+# A consultant's day: the leads that are due, one tap per outcome. «Due» is
+# never called, answered earlier and still open, or a callback / retry whose
+# time has come. Unassigned leads are everybody's until somebody dials one;
+# that call claims it.
+
+from pydantic import BaseModel as _BaseModel, Field as _Field
+from app.crm import call_queue as _cq
+
+
+class CallOutcomeIn(_BaseModel):
+    outcome: str
+    note: Optional[str] = _Field(None, max_length=1000)
+    callback_at: Optional[datetime] = None
+    visit_at: Optional[datetime] = None
+
+
+def _agent_name(user) -> Optional[str]:
+    return (getattr(user, "full_name", None) or getattr(user, "username", None)) if user else None
+
+
+def _now_utc() -> datetime:
+    from datetime import timezone as _tz
+    return datetime.now(_tz.utc)
+
+
+def _queue_query(agent: Optional[str]):
+    now = _now_utc()
+    q = select(Lead).where(
+        Lead.status.in_(("new", "contacted")),
+        Lead.phone_number.isnot(None),
+        or_(Lead.next_call_at.is_(None), Lead.next_call_at <= now),
+        or_(Lead.assigned_to.is_(None), Lead.assigned_to == "", Lead.assigned_to == agent),
+    )
+    # Callbacks whose time has come first, then never-dialled before retries,
+    # newest listing first — the freshest number is the likeliest to answer.
+    return q.order_by(
+        Lead.next_call_at.is_(None), Lead.next_call_at.asc(),
+        Lead.call_attempts.asc(), Lead.created_at.desc())
+
+
+@router.get("/calls/today")
+async def calls_today(limit: int = Query(30, ge=1, le=100),
+                      db: AsyncSession = Depends(get_db),
+                      current_user: User = Depends(get_current_user)):
+    agent = _agent_name(current_user)
+    q = _queue_query(agent)
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
+    leads = (await db.execute(q.limit(limit))).scalars().all()
+    now = _now_utc()
+    due_callbacks = sum(1 for l in leads if l.next_call_at is not None)
+    day_start = now.astimezone(_cq.TEHRAN).replace(hour=0, minute=0, second=0, microsecond=0)
+    done_today = (await db.execute(
+        select(func.count()).select_from(ActivityLog).where(
+            ActivityLog.action == "call", ActivityLog.actor == agent,
+            ActivityLog.created_at >= day_start))).scalar_one()
+    return {"items": await _attach_property_columns(db, leads), "total": total,
+            "due_callbacks": due_callbacks, "done_today": done_today,
+            "agent": agent, "outcomes": _cq.OUTCOMES}
+
+
+@router.post("/leads/{lead_id}/call")
+async def log_call(lead_id: int, data: CallOutcomeIn,
+                   db: AsyncSession = Depends(get_db),
+                   current_user: User = Depends(get_current_user)):
+    """One dial, one outcome. Claims the lead for the caller, moves the
+    status the way a hand edit would (and scores it the same way), and
+    decides when the lead comes back."""
+    lead = (await db.execute(select(Lead).where(Lead.id == lead_id))).scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    agent = _agent_name(current_user)
+    if lead.assigned_to and lead.assigned_to != agent and \
+            (current_user.role or "") not in ("root", "super_admin"):
+        raise HTTPException(status_code=403, detail=f"این لید با {lead.assigned_to} است")
+    now = _now_utc()
+    try:
+        change = _cq.apply(data.outcome, status=lead.status, attempts=lead.call_attempts or 0,
+                           now=now, callback_at=data.callback_at)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"نتیجهٔ تماس نامعتبر است: {e}")
+
+    status_changed = change["status"] != lead.status
+    lead.status = change["status"]
+    lead.call_attempts = change["call_attempts"]
+    lead.next_call_at = change["next_call_at"]
+    lead.last_call_at = change["last_call_at"]
+    lead.last_call_outcome = data.outcome
+    if not (lead.assigned_to or "").strip():
+        lead.assigned_to = agent
+    if data.note:
+        stamp = now.astimezone(_cq.TEHRAN).strftime("%Y-%m-%d %H:%M")
+        lead.notes = ((lead.notes or "").rstrip() + f"\n[{stamp}] {data.note.strip()}").strip()
+
+    label = _cq.OUTCOMES[data.outcome]
+    extra = ""
+    if data.outcome == "callback" and data.callback_at:
+        extra = " — " + data.callback_at.astimezone(_cq.TEHRAN).strftime("%m/%d %H:%M")
+    _log_activity(db, "lead", lead.id, "call",
+                  f"{label}{extra}" + (f" — {data.note.strip()}" if data.note else ""), agent)
+    if status_changed:
+        await record_lead_status(db, agent, lead.status)
+        _log_activity(db, "lead", lead.id, "status_change",
+                      f"وضعیت به «{lead.status}» تغییر کرد", agent)
+
+    event_id = None
+    if data.outcome == "visit" and data.visit_at:
+        prop = (await db.execute(
+            select(Property).where(Property.id == lead.property_id))).scalar_one_or_none()
+        ev = CalendarEvent(
+            title=f"بازدید: {(lead.property_title or '')[:80]}".strip(": "),
+            event_type="visit", start_at=data.visit_at,
+            lead_id=lead.id, property_id=lead.property_id, created_by=agent,
+            location=(prop.address or " ".join(filter(None, [prop.city_name, prop.district]))) if prop else None,
+        )
+        db.add(ev)
+        await db.flush()
+        event_id = ev.id
+    await db.commit()
+    await db.refresh(lead)
+    return {"lead": await _lead_with_property(db, lead), "outcome": data.outcome,
+            "label": label, "event_id": event_id,
+            "next_call_at": lead.next_call_at.isoformat() if lead.next_call_at else None}
+
+
+@router.get("/calls/summary")
+async def calls_summary(days: int = Query(1, ge=1, le=90),
+                        db: AsyncSession = Depends(get_db),
+                        current_user: User = Depends(get_current_user)):
+    """Calls per person over the window, by outcome. From the activity log,
+    which every dial writes to — so it cannot disagree with the timeline."""
+    since = _now_utc().astimezone(_cq.TEHRAN).replace(hour=0, minute=0, second=0, microsecond=0) \
+        - timedelta(days=days - 1)
+    rows = (await db.execute(
+        select(ActivityLog.actor, ActivityLog.detail).where(
+            ActivityLog.action == "call", ActivityLog.created_at >= since))).all()
+    by_label = {v: k for k, v in _cq.OUTCOMES.items()}
+    per = {}
+    for actor, detail in rows:
+        name = actor or "—"
+        d = per.setdefault(name, {"agent": name, "calls": 0, "answered": 0, "no_answer": 0,
+                                  "visit": 0, "callback": 0, "rejected": 0})
+        d["calls"] += 1
+        head = (detail or "").split(" — ")[0].strip()
+        code = by_label.get(head)
+        if code == "answered":
+            d["answered"] += 1
+        elif code in ("no_answer", "busy"):
+            d["no_answer"] += 1
+        elif code == "visit":
+            d["visit"] += 1
+        elif code == "callback":
+            d["callback"] += 1
+        elif code in ("not_interested", "wrong_number"):
+            d["rejected"] += 1
+    queue_total = (await db.execute(
+        select(func.count()).select_from(_queue_query(None).subquery()))).scalar_one()
+    return {"days": days, "agents": sorted(per.values(), key=lambda x: -x["calls"]),
+            "unassigned_due": queue_total}
+
+
 @router.post("/leads/{lead_id}/notify")
 async def notify_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     lead_result = await db.execute(select(Lead).where(Lead.id == lead_id))

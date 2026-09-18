@@ -123,6 +123,7 @@ async def init_db():
                  _backfill_cookie_owner,
                  _backfill_forwarder_permission,
                  _migrate_profile,
+                 _migrate_call_queue,
                  _backfill_advertiser_signals,
                  _migrate_cookie_usage,
                  _migrate_property_quality,
@@ -358,6 +359,23 @@ async def _backfill_cookie_owner(conn):
                   f"{rest.rowcount or 0} to the super admin")
     except Exception as e:
         print(f"cookie owner backfill skipped: {e}")
+
+
+async def _migrate_call_queue(conn):
+    """The call queue on leads: when to dial next, how many times it has
+    been dialled, what the phone said last."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE leads "
+            "ADD COLUMN IF NOT EXISTS next_call_at TIMESTAMPTZ, "
+            "ADD COLUMN IF NOT EXISTS call_attempts INTEGER NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS last_call_at TIMESTAMPTZ, "
+            "ADD COLUMN IF NOT EXISTS last_call_outcome VARCHAR(20)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_leads_next_call_at ON leads (next_call_at)"))
+    except Exception as e:
+        print(f"call queue migration skipped: {e}")
 
 
 async def _migrate_profile(conn):
