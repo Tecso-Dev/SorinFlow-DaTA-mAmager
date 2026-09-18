@@ -3,16 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+    // Errors in this browser, reported home — see app/services/client_errors.py.
+    // ES5 on purpose and first on purpose: it has to run on the phone whose
+    // browser cannot parse app.js at all, and it has to be installed before
+    // that failure happens. At most five reports per page load.
+    (function () {
+      var sent = 0;
+      function report(kind, msg, src, line, col, stack) {
+        if (sent >= 5) return; sent++;
+        var body = JSON.stringify({ kind: kind, message: String(msg).slice(0, 500),
+          source: String(src || '').slice(0, 200), line: line || 0, col: col || 0,
+          stack: String(stack || '').slice(0, 1500), url: location.href.slice(0, 300),
+          ua: navigator.userAgent.slice(0, 300), screen: screen.width + 'x' + screen.height,
+          at: new Date().toISOString() });
+        try {
+          if (navigator.sendBeacon && navigator.sendBeacon('/api/public/client-error',
+              new Blob([body], { type: 'application/json' }))) return;
+        } catch (e) {}
+        try {
+          var x = new XMLHttpRequest();
+          x.open('POST', '/api/public/client-error', true);
+          x.setRequestHeader('Content-Type', 'application/json');
+          x.send(body);
+        } catch (e) {}
+      }
+      window.onerror = function (msg, src, line, col, err) {
+        report('error', msg, src, line, col, err && err.stack);
+      };
+      if (window.addEventListener) {
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason || {};
+          report('promise', r.message || r, '', 0, 0, r.stack);
+        });
+      }
+    })();
+    </script>
     <!-- Tell browsers we handle theming ourselves — prevents forced/auto dark mode from mangling colors -->
     <meta name="color-scheme" content="dark light">
     <title>SorinFlow — داشبورد مدیریت</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <!-- Apply saved theme before first paint to avoid flash -->
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260918c">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
+    <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/style.css?v=20260918d">
+    <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
 
@@ -911,8 +947,8 @@
                                     <i class="bi bi-list-task"></i> تسک‌های اسکرپینگ
                                     <span id="divar-session-badge" class="badge bg-secondary ms-2" style="cursor:default;font-size:.7rem" title="در حال بررسی...">●</span>
                                 </span>
-                                <div class="d-flex gap-2 align-items-center">
-                                    <select id="jobs-filter-category" class="form-select form-select-sm" style="width:190px;" onchange="loadJobs()">
+                                <div class="d-flex gap-2 align-items-center flex-wrap">
+                                    <select id="jobs-filter-category" class="form-select form-select-sm" style="width:190px;max-width:100%" onchange="loadJobs()">
                                         <option value="">همه دسته‌بندی‌ها</option>
                                     </select>
                                     <button class="btn btn-outline-info btn-sm" onclick="openScraperLog()"
@@ -2604,6 +2640,25 @@
                     </div>
                 </div>
 
+                <!-- errors that happened in users' browsers, with the browser -->
+                <div class="card mb-3" id="mon-client-errors-card">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <i class="bi bi-bug"></i> خطاهای مرورگر کاربران
+                        <span class="badge bg-secondary" id="mon-cerr-count">۰</span>
+                        <span class="small text-muted ms-2">آخرین ۶۰ خطا از گوشی و مرورگر کاربران — «روی بعضی گوشی‌ها خطا می‌دهد» اینجا اسم و نشانی پیدا می‌کند</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadClientErrors()" title="تازه‌سازی"><i class="bi bi-arrow-clockwise"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="clearClientErrors()" title="پاک کردن فهرست"><i class="bi bi-trash"></i></button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0 align-middle">
+                                <thead><tr><th>زمان</th><th>مرورگر</th><th>خطا</th><th>کجا</th></tr></thead>
+                                <tbody id="mon-cerr-table"><tr><td colspan="4" class="text-muted small p-3">در حال بارگذاری…</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Live server status. Rates are derived in the browser from two
                      consecutive counter samples, so there is no server-side history
                      to store, expire or size. -->
@@ -3073,7 +3128,8 @@
                 </div>
 
                 <div class="row g-3 mb-3">
-                    <div class="col-lg-5">
+                    <!-- a free-form send from the agency's account: super_admin only, like the API -->
+                    <div class="col-lg-5 crm-superadmin-only">
                         <div class="card h-100">
                             <div class="card-header d-flex align-items-center gap-2">
                                 <i class="bi bi-pencil-square"></i> ارسال ایمیل
@@ -4453,13 +4509,13 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260918c"></script>
+<script src="vendor/bootstrap.bundle.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="vendor/qrcode.min.js"></script>
+<script src="vendor/jquery-3.7.1.min.js"></script>
+<script src="vendor/persian-date.min.js"></script>
+<script src="vendor/persian-datepicker.min.js"></script>
+<script src="js/app.js?v=20260918d"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

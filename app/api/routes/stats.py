@@ -356,7 +356,7 @@ async def get_recent_logs(
 
 @router.get("/property-trends")
 async def get_property_trends(
-    days: int = 30,
+    days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db)
 ):
     """Get property trends over time"""

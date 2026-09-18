@@ -3199,3 +3199,37 @@ html[data-theme="light"] .table thead th {
 .cq-empty i { display: block; font-size: 1.8rem; margin-bottom: .4rem; color: #818cf8 }
 .cq-sum-title { font-size: .82rem; color: var(--text-dim); margin: .4rem 0 }
 @media (max-width: 640px) { .cq-actions .btn { flex: 1 1 45% } }
+
+/* ── Phones ─────────────────────────────────────────────────────
+   Measured at 375px on 2026-09-18. Three things made the panel hard to use
+   on a phone even though nothing overflowed: inputs under 16px make iOS
+   Safari zoom the whole page on focus, the small buttons were 25px tall
+   (a thumb is ~44px), and thirteen CRM tabs wrapped into a 143px wall. */
+@media (max-width: 768px) {
+  /* iOS zooms into any field smaller than 16px; keep the size, lose the zoom */
+  input.form-control, select.form-select, textarea.form-control,
+  .form-control-sm, .form-select-sm, .ask-field input, .ask-field select {
+    font-size: 16px !important;
+  }
+  /* thumbs, not cursors */
+  .btn-sm, .btn { min-height: 42px; display: inline-flex; align-items: center; justify-content: center }
+  .btn-link.p-0 { min-height: 0 }             /* inline text buttons stay inline */
+  .form-check-input { width: 1.35em; height: 1.35em }
+  /* tabs scroll sideways instead of stacking into a wall */
+  #crm-main-tabs {
+    flex-wrap: nowrap !important; overflow-x: auto; overflow-y: hidden;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none; gap: .15rem;
+  }
+  #crm-main-tabs::-webkit-scrollbar { display: none }
+  #crm-main-tabs .nav-link { white-space: nowrap }
+  /* the call list: full-width dial, two buttons per row */
+  .cq-phone { display: flex; justify-content: center; width: 100%; font-size: 1.35rem; padding: .6rem }
+  .cq-head { flex-direction: column; gap: .5rem }
+  .cq-actions .btn { flex: 1 1 46% }
+  /* dialogs use the whole width, safely */
+  .ask-card { width: min(100vw - 24px, 420px) }
+  /* charts drawn at a fixed width shrink with the card (320px phones) */
+  .card canvas { max-width: 100% !important; height: auto !important }
+  /* tables keep their own scroll; the page never scrolls sideways */
+  body { overflow-x: hidden }
+}

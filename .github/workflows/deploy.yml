@@ -250,7 +250,13 @@ jobs:
           # apply is idempotent: an unchanged manifest is a no-op and restarts
           # nothing. Only a real spec change causes a restart, which is what it
           # should do.
-          for m in k8s/02-postgres.yaml k8s/03-redis.yaml; do
+          # The remaining three as well (roadmap #12): the namespace, the
+          # Postgres init ConfigMap and the Traefik ACME config. All
+          # idempotent; the ACME config only re-renders Traefik when it
+          # actually changed. Nothing in the repo drifts from the cluster
+          # any more.
+          for m in k8s/00-namespace.yaml k8s/02b-postgres-init-configmap.yaml \
+                   k8s/02-postgres.yaml k8s/03-redis.yaml k8s/06-traefik-acme.yaml; do
             kubectl apply --validate=false -f "$m" ||
               { sleep 10; kubectl apply --validate=false -f "$m"; }
           done

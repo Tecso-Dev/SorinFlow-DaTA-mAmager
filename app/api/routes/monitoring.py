@@ -343,6 +343,20 @@ async def connectivity_test(target: str = "divar"):
     return result
 
 
+@router.get("/client-errors")
+async def client_errors_list(limit: int = 30):
+    """What broke in people's browsers, newest first, with the browser."""
+    from app.services import client_errors
+    return {"items": await client_errors.recent(max(1, min(limit, 60)))}
+
+
+@router.delete("/client-errors")
+async def client_errors_clear():
+    from app.services import client_errors
+    await client_errors.clear()
+    return {"success": True}
+
+
 @router.get("/live")
 async def monitoring_live():
     """A cheap snapshot for the live view, polled every few seconds.

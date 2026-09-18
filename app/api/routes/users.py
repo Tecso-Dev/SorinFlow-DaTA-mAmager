@@ -22,6 +22,7 @@ from sqlalchemy import select, or_, func
 from typing import Optional
 
 from loguru import logger
+from pydantic import BaseModel, Field
 import pyotp
 
 from app.database import get_db
@@ -896,18 +897,37 @@ async def set_email_2fa(
     }
 
 
+class DivarPhoneIn(BaseModel):
+    divar_phone: Optional[str] = Field(None, max_length=20)
+
+
 @router.patch("/me/divar-phone", response_model=UserResponse)
 async def update_my_divar_phone(
-    data: dict,
+    data: DivarPhoneIn,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Set or clear the current user's linked Divar phone number."""
-    phone = data.get("divar_phone", "").strip() or None
+    """Set or clear my primary Divar number.
+
+    Validated and normalised (Persian digits, +98, spaces) to the same
+    09xxxxxxxxx the sessions table stores — the pill and the pool compare
+    on it. It used to take any string at all, into the field that scopes
+    what a person's runs use (roadmap #3).
+    """
+    from app.api.routes.sms import normalize_mobile
+    raw = (data.divar_phone or "").strip()
+    phone = None
+    if raw:
+        phone = normalize_mobile(raw)
+        if not phone:
+            raise HTTPException(400, "شمارهٔ دیوار معتبر نیست (مثل 09123456789)")
+    if phone != current_user.divar_phone:
+        logger.info(f"[profile] {current_user.username} primary Divar number: "
+                    f"{current_user.divar_phone or '—'} -> {phone or '—'}")
     current_user.divar_phone = phone
     await db.commit()
     await db.refresh(current_user)
-    return current_user
+    return _me_response(current_user)
 
 
 @router.post("/me/totp/disable")

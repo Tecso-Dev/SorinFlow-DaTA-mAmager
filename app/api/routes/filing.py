@@ -62,7 +62,9 @@ def _actor(user) -> Optional[str]:
 
 
 def _is_super(user) -> bool:
-    return getattr(user, "role", None) == "super_admin"
+    # root outranks super_admin everywhere else; it must not be the one
+    # account that cannot see a private file (roadmap #11)
+    return getattr(user, "role", None) in ("root", "super_admin")
 
 
 def _visible_to(query, user):

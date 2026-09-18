@@ -1151,7 +1151,9 @@ async def export_contacts_json(
     contact_type: Optional[str] = None,
     category: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = require_super_admin,
+    # The same rows leave as .xlsx for any admin with «crm»; gating the JSON
+    # shape alone protected nothing (roadmap #11).
+    current_user: User = Depends(get_current_user),
 ):
     items = (await db.execute(_apply_contact_filters(
         select(Contact).order_by(Contact.name),
@@ -1546,7 +1548,7 @@ def _tasks_visible_to(query, user):
     and hiding them would orphan them — new tasks are stamped with their
     creator on the way in, so the unassigned set only ever shrinks.
     """
-    if getattr(user, "role", None) == "super_admin":
+    if getattr(user, "role", None) in ("root", "super_admin"):
         return query
     actor = _task_actor(user)
     if not actor:
@@ -1801,7 +1803,7 @@ async def export_deals_json(
     status: Optional[str] = None,
     deal_type: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = require_super_admin,
+    current_user: User = Depends(get_current_user),
 ):
     items = (await db.execute(_apply_deal_filters(
         select(Deal).order_by(Deal.created_at.desc()),

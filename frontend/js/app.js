@@ -1050,7 +1050,7 @@ function copyTotpSecret() {
 }
 
 // ═══ Hash router: #/login, #/dashboard, #/properties, ... ═══════
-const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'auth', 'forwarder', 'proxies', 'users', 'profile'];
+const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'insights', 'auth', 'forwarder', 'proxies', 'portal', 'monitoring', 'sms', 'email', 'users', 'profile'];
 let _currentSection = null;
 let _intendedRoute = null;   // deep link requested before login
 let _suppressHashNav = false;
@@ -1333,9 +1333,9 @@ function showSection(sectionName) {
         case 'crm':        _applyCrmRoleVisibility(); loadCalls(); break;
         case 'insights':   insTab(_insTab); break;
         case 'portal':     loadPortalRequests(); break;
-        case 'monitoring': loadMonitoring(); break;
+        case 'monitoring': loadMonitoring(); loadClientErrors(); break;
         case 'sms':        loadSms(); break;
-        case 'email':      loadEmail(); break;
+        case 'email':      _applyCrmRoleVisibility(); loadEmail(); break;
         case 'users':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
                                loadUsers(); loadMaintenance(); loadBackup(); initPermsUI(); loadTickets();
                            } break;
@@ -9635,6 +9635,39 @@ const JOB_STATUS_FA = {
     completed: 'تکمیل‌شده', running: 'در حال اجرا', failed: 'ناموفق',
     pending: 'در صف', paused: 'متوقف', cancelled: 'لغو شده',
 };
+
+async function loadClientErrors() {
+    const tb = document.getElementById('mon-cerr-table');
+    if (!tb) return;
+    try {
+        const d = await apiCall('/monitoring/client-errors?limit=60');
+        const rows = d.items || [];
+        document.getElementById('mon-cerr-count').textContent = formatNumber(rows.length);
+        if (!rows.length) {
+            tb.innerHTML = '<tr><td colspan="4" class="text-muted small p-3">هیچ خطایی از مرورگر کاربران نرسیده — خبر خوبی است.</td></tr>';
+            return;
+        }
+        const fa = iso => iso ? `${new Date(iso).toLocaleDateString('fa-IR')} ${new Date(iso).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}` : '—';
+        tb.innerHTML = rows.map(e => {
+            const where = [e.source ? esc(e.source.replace(/^https?:\/\/[^/]+/, '')) : '', e.line ? `:${e.line}` : ''].join('');
+            const page = (e.url || '').replace(/^https?:\/\/[^/]+/, '');
+            return `<tr>
+                <td class="small text-nowrap">${fa(e.received_at)}</td>
+                <td class="small" dir="ltr">${esc(e.browser || '')}<div class="text-muted">${esc(e.screen || '')}</div></td>
+                <td class="small" dir="ltr" style="max-width:420px;word-break:break-word">${esc(e.message || '')}${e.stack ? `<details><summary class="text-muted">stack</summary><pre class="small mb-0" style="white-space:pre-wrap">${esc(e.stack)}</pre></details>` : ''}</td>
+                <td class="small" dir="ltr"><div>${where || '—'}</div><div class="text-muted">${esc(page)}</div></td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        tb.innerHTML = `<tr><td colspan="4" class="text-danger small p-3">${esc(e.message || 'خطا')}</td></tr>`;
+    }
+}
+
+async function clearClientErrors() {
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'پاک کردن فهرست خطاها', tone: 'danger', okLabel: 'پاک کن', body: 'فهرست خطاهای مرورگر پاک شود؟ خطاهای تازه دوباره ثبت می‌شوند.' })) return;
+    try { await apiCall('/monitoring/client-errors', { method: 'DELETE' }); loadClientErrors(); }
+    catch (e) { showToast('خطا', e.message, 'danger'); }
+}
 
 async function loadMonitoring() {
     loadCookieHealth();

@@ -68,7 +68,11 @@ spec:
               mountPath: /data
           readinessProbe:
             exec:
-              command: ["redis-cli", "-a", "$(REDIS_PASSWORD)", "ping"]
+              # Through a shell, so the password is the real one, and grep,
+              # because redis-cli exits 0 even when the answer is NOAUTH —
+              # the old probe reported ready whether the password worked
+              # or not (roadmap #13).
+              command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
             initialDelaySeconds: 5
             periodSeconds: 5
       volumes:

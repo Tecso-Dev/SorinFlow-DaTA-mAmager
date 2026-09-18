@@ -56,7 +56,7 @@ Read this before changing anything. Where this section and the rest of the READM
 - Query `information_schema` **before** issuing an `ALTER`. `ADD COLUMN IF NOT EXISTS` takes `ACCESS EXCLUSIVE` before checking whether there is work to do; a no-op ALTER queued behind the old pod's lock killed two rollouts (`app/database.py:664-694` names them).
 - Exactly one step may stop the boot: `_verify_auth_v2` (`app/database.py:731-772`) refuses to start on a half-migrated `users` table, because those five columns are read on every User query.
 
-Ordering is the tuple; idempotence is each step's own job. The two `.sql` files in `migrations/` are applied by nothing.
+Ordering is the tuple; idempotence is each step's own job.
 
 **Single replica, ReadWriteOnce, `strategy: Recreate`.** Three PVCs, all RWO, one backend pod (`k8s/04-backend.yaml:19-37`). Two overlapping pods would fight over the data volume and deadlock on migration locks, so deploys use `Recreate` — every deploy is a few seconds of real downtime, accepted deliberately. The consequence to keep in mind: a pod that fails startup is now a full outage, not a failed deploy that leaves the old pod serving. Comments in `app/database.py:740-742` and `SECRETS.md:245-248` still assume the old behaviour; they are wrong.
 
@@ -606,7 +606,7 @@ Application settings live in [`app/config.py`](app/config.py). `.env.example` co
 | Database | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL` |
 | Redis | `REDIS_PASSWORD`, `REDIS_URL` |
 | Bootstrap admin | `SUPER_ADMIN_USERNAME`, `SUPER_ADMIN_PASSWORD` |
-| Scraper | `SCRAPER_HEADLESS`, `SCRAPER_TIMEOUT`, `SCRAPER_DELAY_MIN`, `SCRAPER_DELAY_MAX`, `OTP_WAIT_TIMEOUT`, `DIVAR_PHONE_NUMBER` |
+| Scraper | `SCRAPER_HEADLESS`, `SCRAPER_DELAY_MIN`, `SCRAPER_DELAY_MAX`, `OTP_WAIT_TIMEOUT`, `DIVAR_PHONE_NUMBER` |
 | Proxies | `PROXY_ENABLED`, `PROXY_LIST` |
 | SMS | `KAVENEGAR_API_KEY`, `KAVENEGAR_SENDER`, `MELIPAYAMAK_API_KEY`, `MELIPAYAMAK_FROM` |
 | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
@@ -730,7 +730,6 @@ closed.
 | `scripts/` | Server provisioning, deployment, survey, and backup restoration helpers |
 | `k8s/` | k3s/Kubernetes resources for backend, PostgreSQL, Redis, ingress, and Traefik |
 | `nginx/` | Local reverse proxy and TLS configuration |
-| `migrations/` | Standalone legacy SQL patches |
 | `graphify-out/` | Generated project brain and machine-readable graph |
 
 ### Key entry points

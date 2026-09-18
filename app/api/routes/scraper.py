@@ -604,12 +604,10 @@ async def get_scraping_jobs(
             select(Category.id).where(Category.name == category))).scalars().all()
         query = query.where(ScrapingJob.category_id.in_(cat_ids) if cat_ids else false())
 
-    # Isolate jobs by the user's linked Divar phone (admins see all jobs)
-    # root included — it outranks super_admin everywhere else, so it must not
-    # be the one account that gets its job list filtered down to a phone.
-    is_privileged = current_user and current_user.role in ("root", "super_admin", "admin")
-    if not is_privileged and current_user and current_user.divar_phone:
-        query = query.where(ScrapingJob.divar_phone == current_user.divar_phone)
+    # Every staff role sees every run. The old per-phone narrowing applied
+    # to no role that can reach this router (visitors are refused at the
+    # gate) and fell open on an empty number — roadmap #3 — so it is gone
+    # rather than kept as a filter that filtered nothing.
 
     query = query.limit(limit)
     result = await db.execute(query)

@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     # default: a stale address shown as fact is worse than a dash.
     server_ip: str = Field(default="", env="SERVER_IP")
     domain: str = Field(default="scc.sorinflow.com", env="DOMAIN")
-    domain_dns_only: str = Field(default="sc.sorinflow.com", env="DOMAIN_DNS_ONLY")
     
     # Database
     # No working default on purpose. It used to carry a real password that was
@@ -55,7 +54,6 @@ class Settings(BaseSettings):
     
     # Scraper Settings
     scraper_headless: bool = Field(default=True, env="SCRAPER_HEADLESS")
-    scraper_timeout: int = Field(default=60000, env="SCRAPER_TIMEOUT")
     scraper_delay_min: float = Field(default=2.0, env="SCRAPER_DELAY_MIN")
     scraper_delay_max: float = Field(default=5.0, env="SCRAPER_DELAY_MAX")
     # Max seconds to wait for a Divar SMS-OTP code before giving up on a phone.
@@ -198,11 +196,7 @@ class Settings(BaseSettings):
     logs_path: str = "/app/logs"
     
     # Divar URLs
-    divar_base_url: str = "https://divar.ir"
     divar_login_url: str = "https://divar.ir/my-divar/my-posts"
-
-    # Cities Configuration
-    default_city: str = "urmia"
 
     # Default super admin (created on first startup if no users exist)
     super_admin_username: str = Field(default="admin", env="SUPER_ADMIN_USERNAME")

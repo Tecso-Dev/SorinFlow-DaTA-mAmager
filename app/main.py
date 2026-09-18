@@ -310,44 +310,6 @@ def render_maintenance_page(state=None, message: str = None) -> str:
     return error_pages.render_maintenance(text, blob)
 
 
-async def _maintenance_allows(request: Request) -> bool:
-    """Whether this particular request gets through a closed site.
-
-    Three ways in, and only three: a path that must never close, the bypass
-    cookie, or a bearer token belonging to a super_admin (or root).
-    """
-    from app.services import maintenance as mt
-
-    if mt.is_open_path(request.url.path) or request.method == "OPTIONS":
-        return True
-
-    from app.database import async_session_maker
-    async with async_session_maker() as db:
-        enabled, _message, bypass = await mt.get_state(db)
-        if not enabled:
-            return True
-        if bypass and request.cookies.get(mt.BYPASS_COOKIE) == bypass:
-            return True
-
-        token = request.headers.get("Authorization", "")
-        if token.startswith("Bearer "):
-            try:
-                from app.auth.jwt import decode_token, is_access_token
-                from app.models.user import User
-                from sqlalchemy import select
-                payload = decode_token(token[7:])
-                # A token issued before the TOTP step is not a login yet, so it
-                # must not open a site that has been deliberately closed.
-                username = payload.get("sub") if is_access_token(payload) else None
-                if username:
-                    user = (await db.execute(select(User).where(
-                        User.username == username))).scalar_one_or_none()
-                    if user and user.is_active and user.role in ("root", "super_admin"):
-                        return True
-            except Exception:
-                pass
-    return False
-
 
 async def _maintenance_allows(request: Request) -> bool:
     """Whether this particular request gets through a closed site.
@@ -425,7 +387,8 @@ async def maintenance_middleware(request: Request, call_next):
 # API Key authentication middleware
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    public_paths = {"/health", "/", "/favicon.svg", "/favicon.ico", "/api/public/stats", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info",
+    public_paths = {"/health", "/ready", "/", "/favicon.svg", "/favicon.ico", "/api/public/stats",
+                    "/api/public/client-error", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info",
                     "/api/users/token", "/api/users/token/verify-totp", "/api/users/me",
                     # The rest of the login and recovery flow. Unauthenticated
                     # by nature — there is no token to send yet, which is the
@@ -745,12 +708,52 @@ async def _reactivate_expired_leases():
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    """Basic health check endpoint"""
+    """The process is up. Liveness and startup ask this — and only this: a
+    database outage must not restart the app, which would not bring the
+    database back and would drop every scrape in flight."""
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "version": settings.app_version
     }
+
+
+@app.get("/ready")
+async def readiness_check():
+    """The process can serve. Readiness asks this: 503 while Postgres or
+    Redis is unreachable, so Traefik answers 503 instead of the app answering
+    500 on every request (roadmap #13 — /health used to check nothing)."""
+    from sqlalchemy import text as _text
+    from app.database import async_session_maker as _maker, get_redis as _redis
+    checks = {}
+    try:
+        async with _maker() as s:
+            await s.execute(_text("SELECT 1"))
+        checks["postgres"] = "ok"
+    except Exception as e:
+        checks["postgres"] = f"down: {type(e).__name__}"
+    try:
+        await (await _redis()).ping()
+        checks["redis"] = "ok"
+    except Exception as e:
+        checks["redis"] = f"down: {type(e).__name__}"
+    ok = all(v == "ok" for v in checks.values())
+    return JSONResponse({"ready": ok, **checks}, status_code=200 if ok else 503)
+
+
+# Errors from the user's browser (no auth: the phone that cannot even parse
+# app.js has no token to send). Rate-limited per address inside; always 204.
+@app.post("/api/public/client-error", status_code=204)
+async def client_error(request: Request):
+    from app.services import client_errors
+    from app.services.verification import client_ip
+    try:
+        raw = await request.json()
+    except Exception:
+        return Response(status_code=204)
+    if isinstance(raw, dict):
+        await client_errors.record(raw, client_ip(request))
+    return Response(status_code=204)
 
 
 # Public landing-page stats (no auth; cached 60s in Redis)

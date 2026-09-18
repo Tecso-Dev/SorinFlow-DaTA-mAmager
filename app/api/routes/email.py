@@ -167,7 +167,7 @@ class SendIn(BaseModel):
 
 @router.post("/send")
 async def send_one(payload: SendIn, db: AsyncSession = Depends(get_db),
-                   user: User = Depends(get_current_user)):
+                   user: User = _super_admin):
     """A one-off message, rendered through the site's notification template so
     it looks like everything else the system sends."""
     if not mail.valid_email(payload.to):

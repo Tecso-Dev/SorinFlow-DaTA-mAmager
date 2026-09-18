@@ -100,6 +100,10 @@ spec:
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: TELEGRAM_CHAT_ID, optional: true } }
             - name: ROOT_PASSWORD
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: ROOT_PASSWORD, optional: true } }
+            # Read by the seed on an empty database. Without this entry a
+            # rebuilt server seeded its super_admin with the placeholder.
+            - name: SUPER_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: SUPER_ADMIN_PASSWORD, optional: true } }
             # ── LLM (optional) ──
             # Any OpenAI-compatible endpoint. Liara's AI gateway is one:
             #   LLM_BASE_URL = https://ai.liara.ir/api/v1/<project-id>
@@ -201,7 +205,9 @@ spec:
             timeoutSeconds: 3
           readinessProbe:
             httpGet:
-              path: /health
+              # /ready answers 503 while Postgres or Redis is unreachable;
+              # /health only says the process is up (roadmap #13)
+              path: /ready
               port: 8000
             periodSeconds: 10
             failureThreshold: 6
