@@ -43,11 +43,19 @@
     <meta name="color-scheme" content="dark light">
     <title>SorinFlow — داشبورد مدیریت</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <!-- the panel as an app: manifest, home-screen icon, standalone on iOS -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#0a0a0c">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SorinFlow">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
     <!-- Apply saved theme before first paint to avoid flash -->
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260918d">
+    <link rel="stylesheet" href="css/style.css?v=20260919a">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -427,6 +435,16 @@
                     <div class="u-role" id="sidebar-role">---</div>
                 </div>
                 <i class="bi bi-chevron-left u-go"></i>
+            </div>
+            <!-- shown only on a phone that has not installed the app -->
+            <div class="pwa-hint d-none" id="pwa-hint">
+                <button class="pwa-install" id="pwa-install-btn" onclick="pwaInstall()">
+                    <i class="bi bi-phone"></i> نصب برنامه روی گوشی
+                </button>
+                <div class="pwa-ios d-none" id="pwa-ios">
+                    در Safari: دکمهٔ <i class="bi bi-box-arrow-up"></i> اشتراک‌گذاری ← <b>Add to Home Screen</b>
+                </div>
+                <button class="pwa-dismiss" onclick="pwaDismiss()" title="بعداً">×</button>
             </div>
             <div class="sidebar-actions">
                 <button class="btn-2fa" onclick="showSection('profile')">
@@ -4515,7 +4533,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260918d"></script>
+<script src="js/app.js?v=20260919a"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

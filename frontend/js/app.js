@@ -59,6 +59,67 @@ function clearToken() {
     _authToken = null; _currentUser = null; _totpSession = null;
 }
 
+// ═══ PWA — the panel as an app ══════════════════════════════════
+// The service worker caches the shell (never /api/); the manifest makes the
+// panel installable. On Android/Chrome the browser hands us an install
+// prompt; iOS has none, so the hint says where the button is.
+let _pwaPrompt = null;
+
+function _pwaStandalone() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+}
+
+function _pwaMaybeHint() {
+    const box = document.getElementById('pwa-hint');
+    if (!box || _pwaStandalone()) return;
+    let dismissed = false;
+    try { dismissed = localStorage.getItem('sf_pwa_dismissed') === '1'; } catch (_) {}
+    if (dismissed) return;
+    const ua = navigator.userAgent || '';
+    const ios = /iPhone|iPad|iPod/.test(ua) && !window.MSStream;
+    const phone = ios || /Android/.test(ua);
+    if (!phone) return;
+    box.classList.remove('d-none');
+    if (ios) {
+        document.getElementById('pwa-install-btn').classList.add('d-none');
+        document.getElementById('pwa-ios').classList.remove('d-none');
+    } else if (!_pwaPrompt) {
+        // no prompt yet (or never — some Android browsers): hide the button, keep the card
+        document.getElementById('pwa-install-btn').classList.add('d-none');
+    }
+}
+
+async function pwaInstall() {
+    if (!_pwaPrompt) return;
+    _pwaPrompt.prompt();
+    try {
+        const { outcome } = await _pwaPrompt.userChoice;
+        if (outcome === 'accepted') { showToast('نصب شد', 'برنامه روی صفحهٔ اصلی گوشی است', 'success'); pwaDismiss(); }
+    } catch (_) {}
+    _pwaPrompt = null;
+}
+
+function pwaDismiss() {
+    try { localStorage.setItem('sf_pwa_dismissed', '1'); } catch (_) {}
+    document.getElementById('pwa-hint')?.classList.add('d-none');
+}
+
+window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    _pwaPrompt = e;
+    const btn = document.getElementById('pwa-install-btn');
+    if (btn) btn.classList.remove('d-none');
+    _pwaMaybeHint();
+});
+window.addEventListener('appinstalled', () => pwaDismiss());
+
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        // relative, so the scope is /dashboard/ wherever the panel is mounted
+        navigator.serviceWorker.register('sw.js').catch(() => { /* the panel works without it */ });
+    });
+}
+
 // ═══ Theme (dark / light) ═════════════════════════════════════
 // data-theme is set on <html> before first paint by an inline
 // script in index.html; persisted in localStorage "sf-theme".
@@ -1112,6 +1173,7 @@ function showMainApp() {
     document.getElementById('main-app').style.display = 'flex';
     applyRoleUI();
     initApp();
+    _pwaMaybeHint();
     // Deep link (#/crm etc.) wins over the role's default section
     const target = _intendedRoute || _hashToSection(location.hash) || _defaultSection();
     _intendedRoute = null;

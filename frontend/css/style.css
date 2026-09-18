@@ -3233,3 +3233,21 @@ html[data-theme="light"] .table thead th {
   /* tables keep their own scroll; the page never scrolls sideways */
   body { overflow-x: hidden }
 }
+
+/* ── PWA install hint (sidebar footer, phones only) ─────────── */
+.pwa-hint {
+  position: relative; margin-bottom: .55rem; padding: .55rem .7rem;
+  background: rgba(99,102,241,.1); border: 1px solid rgba(99,102,241,.25); border-radius: var(--r-sm);
+  font-size: .74rem; color: var(--text-dim);
+}
+.pwa-install {
+  width: 100%; background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff; border: 0; border-radius: 8px; padding: .5rem .6rem; font-size: .8rem; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: .4rem; cursor: pointer;
+}
+.pwa-ios { line-height: 1.8 }
+.pwa-ios b { color: var(--text) }
+.pwa-dismiss {
+  position: absolute; top: 2px; left: 6px; background: none; border: 0; color: var(--text-muted);
+  font-size: 1rem; line-height: 1; cursor: pointer; padding: .2rem .4rem;
+}

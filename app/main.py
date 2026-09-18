@@ -999,6 +999,9 @@ try:
     # phone offered application/octet-stream may refuse to install it.
     import mimetypes
     mimetypes.add_type("application/vnd.android.package-archive", ".apk")
+    # the PWA manifest is served from the dashboard mount; without this it
+    # goes out as octet-stream and Chrome ignores it
+    mimetypes.add_type("application/manifest+json", ".webmanifest")
     Path(settings.downloads_path).mkdir(parents=True, exist_ok=True)
     app.mount("/downloads", StaticFiles(directory=settings.downloads_path), name="downloads")
 except Exception as e:
