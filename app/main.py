@@ -748,13 +748,6 @@ async def health_check():
     }
 
 
-# Manual backup trigger (super admin) — nightly run is automatic
-@app.post("/api/backup/run")
-async def run_backup_now(current_user=_require_super_admin):
-    from app.services.backup_service import run_backup
-    return await run_backup()
-
-
 # Public landing-page stats (no auth; cached 60s in Redis)
 @app.get("/api/public/stats")
 async def public_stats():

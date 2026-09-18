@@ -4,7 +4,7 @@ SorinFlow Divar Scraper - API Routes
 from fastapi import APIRouter, Depends
 from app.api.routes import (
     properties, scraper, auth, stats, proxies, crm, users, filing,
-    public_auth, portal, gcp, monitoring, sms, email, forwarder
+    public_auth, portal, gcp, monitoring, sms, email, forwarder, backup
 )
 from app.auth.dependencies import require_permission, get_staff_user
 
@@ -55,3 +55,5 @@ router.include_router(sms.router, prefix="/sms", tags=["SMS"], dependencies=_per
 # forwarder exists to serve a Divar session and the two are owned together.
 router.include_router(forwarder.router, prefix="/forwarder", tags=["SMS Forwarder"], dependencies=_perm("forwarder"))
 router.include_router(email.router, prefix="/email", tags=["Email"], dependencies=_perm("email"))
+# root and super_admin only, checked inside: it is the whole database.
+router.include_router(backup.router, prefix="/backup", tags=["Backup"])

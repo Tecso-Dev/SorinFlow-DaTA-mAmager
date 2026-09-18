@@ -3168,3 +3168,8 @@ html[data-theme="light"] .table thead th {
 .pf-acct.is-primary { border-color: rgba(99,102,241,.45) }
 .pf-acct-main { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; font-size: .82rem }
 .pf-acct-actions { display: flex; gap: .3rem }
+
+/* ── Backup card ────────────────────────────────────────────── */
+.bk-stat { padding: .55rem .7rem; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px }
+.bk-lbl { font-size: .74rem; color: var(--text-muted); margin-bottom: .2rem }
+.bk-val { font-size: .84rem; color: var(--text) }

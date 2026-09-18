@@ -4,6 +4,8 @@ pointed to by DATABASE_URL — e.g. on a brand-new server.
 
 Usage (inside the backend container / with app deps installed):
     python scripts/restore_backup.py data/backups/sorinflow-backup-20260710-0000.json.gz
+    python scripts/restore_backup.py sorinflow-backup-20260918-0000.json.gz.enc   # the Telegram copy
+The .enc copy needs the SECRET_KEY it was sealed with in the environment.
 
 Notes
 - Creates all tables first (same as app startup), then inserts rows in
@@ -23,15 +25,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import DateTime, text  # noqa: E402
 
-# Import every model module so Base.metadata knows all tables
+# Import every model module so Base.metadata knows all tables. The same list
+# init_db uses: a module missing here means its rows are in the backup and
+# silently not restored — which is how a restore once dropped app_settings,
+# both portal tables and the email log.
 from app.database import Base, engine, async_session_maker  # noqa: E402
-import app.models.property  # noqa: F401,E402
-import app.models.scraping_job  # noqa: F401,E402
-import app.models.cookie  # noqa: F401,E402
-import app.models.proxy  # noqa: F401,E402
-import app.models.user  # noqa: F401,E402
-import app.models.lead  # noqa: F401,E402
-import app.models.crm_models  # noqa: F401,E402
+from app.models import (property, cookie, scraping_job, lead, user,  # noqa: F401,E402
+                        crm_models, app_setting, portal, email_log,
+                        sms_log, forwarder, proxy)
 
 
 def _parse_row(table, row: dict) -> dict:
@@ -49,9 +50,19 @@ def _parse_row(table, row: dict) -> dict:
     return out
 
 
-async def restore(path: Path):
+def load_payload(path: Path) -> dict:
+    """A plain snapshot, or the sealed copy Telegram received (.enc) — the
+    latter opens only under the SECRET_KEY it was sealed with."""
+    if path.suffix == ".enc":
+        from app.services.backup_service import unseal
+        raw = gzip.decompress(unseal(path))
+        return json.loads(raw.decode("utf-8"))
     with gzip.open(path, "rt", encoding="utf-8") as f:
-        payload = json.load(f)
+        return json.load(f)
+
+
+async def restore(path: Path):
+    payload = load_payload(path)
 
     tables_data = payload.get("tables", {})
     print(f"backup from {payload.get('created_at')} — {len(tables_data)} tables")

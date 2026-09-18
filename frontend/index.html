@@ -11,7 +11,7 @@
     <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260915e">
+    <link rel="stylesheet" href="css/style.css?v=20260918a">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/css/persian-datepicker.min.css">
 </head>
 <body>
@@ -3204,6 +3204,69 @@
                         <div id="maintenance-bypass" class="d-none mt-3"></div>
                     </div>
                 </div>
+                <!-- بکاپ: the nightly snapshot and its copy off the server -->
+                <div class="card mb-3" id="backup-card">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <i class="bi bi-safe2"></i> بکاپ و نسخهٔ خارج از سرور
+                        <span id="bk-badge" class="badge bg-secondary">در حال بررسی...</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadBackup()" title="تازه‌سازی">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-2">
+                            هر شب ساعت ۰۳:۳۰ از همهٔ جدول‌ها یک نسخه گرفته می‌شود و ۱۴ نسخهٔ آخر روی سرور
+                            می‌ماند. اما سرور <b>همان جایی است که داده‌ها هستند</b> — با یک ربات تلگرام،
+                            هر نسخه به گوشی شما هم می‌رسد و از دست رفتن سرور، داده را از بین نمی‌برد.
+                        </p>
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-6">
+                                <div class="bk-stat">
+                                    <div class="bk-lbl"><i class="bi bi-hdd"></i> آخرین نسخه روی سرور</div>
+                                    <div class="bk-val" id="bk-local">—</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="bk-stat">
+                                    <div class="bk-lbl"><i class="bi bi-send"></i> آخرین ارسال به تلگرام</div>
+                                    <div class="bk-val" id="bk-offsite">—</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-6">
+                                <label class="form-label small">توکن ربات تلگرام</label>
+                                <input type="password" id="bk-token" class="form-control form-control-sm"
+                                       dir="ltr" autocomplete="new-password"
+                                       placeholder="از @BotFather: 123456789:AA…">
+                                <div class="form-text small" id="bk-token-hint"></div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small">شناسهٔ چت (chat id)</label>
+                                <div class="d-flex gap-2">
+                                    <input type="text" id="bk-chat" class="form-control form-control-sm"
+                                           dir="ltr" inputmode="numeric" placeholder="مثلاً 123456789 یا -100…">
+                                    <button class="btn btn-sm btn-outline-primary text-nowrap" onclick="bkProbe()">
+                                        <i class="bi bi-search"></i> پیدا کن
+                                    </button>
+                                </div>
+                                <div class="form-text small">
+                                    در تلگرام ربات را باز کنید، <b>Start</b> را بزنید و یک پیام بفرستید؛ بعد «پیدا کن».
+                                </div>
+                            </div>
+                        </div>
+                        <div id="bk-chats" class="d-none mb-2"></div>
+                        <div class="d-flex gap-2 flex-wrap align-items-center">
+                            <button class="btn btn-sm btn-primary" onclick="bkSave()">
+                                <i class="bi bi-save"></i> ذخیره
+                            </button>
+                            <button class="btn btn-sm btn-outline-success" id="bk-run" onclick="bkRunNow()">
+                                <i class="bi bi-cloud-upload"></i> همین حالا بکاپ بگیر و بفرست
+                            </button>
+                            <span class="small text-muted" id="bk-result"></span>
+                        </div>
+                    </div>
+                </div>
                 <div class="row g-3">
                     <div class="col-md-4">
                         <div class="card">
@@ -4344,7 +4407,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-date@1.1.0/dist/persian-date.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/persian-datepicker@1.2.0/dist/js/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260915f"></script>
+<script src="js/app.js?v=20260918a"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

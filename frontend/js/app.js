@@ -1337,7 +1337,7 @@ function showSection(sectionName) {
         case 'sms':        loadSms(); break;
         case 'email':      loadEmail(); break;
         case 'users':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
-                               loadUsers(); loadMaintenance(); initPermsUI(); loadTickets();
+                               loadUsers(); loadMaintenance(); loadBackup(); initPermsUI(); loadTickets();
                            } break;
     }
 }
@@ -3234,6 +3234,96 @@ function renderMaintenanceState(r) {
             eta.classList.add('d-none');
         }
     }
+}
+
+// ═══ Backup — the nightly snapshot and its copy off the server ═════
+function _bkWhen(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return `${d.toLocaleDateString('fa-IR')} ${d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+async function loadBackup() {
+    const badge = document.getElementById('bk-badge');
+    if (!badge) return;
+    try {
+        const s = await apiCall('/backup/status');
+        const snap = s.snapshots && s.snapshots[0];
+        document.getElementById('bk-local').innerHTML = snap
+            ? `${_bkWhen(snap.at)} <span class="text-muted">· ${formatNumber(snap.size_kb)} KB · ${formatNumber(s.snapshot_count)} نسخه</span>`
+            : '<span class="text-warning">هنوز نسخه‌ای گرفته نشده</span>';
+        const lo = s.last_offsite || {};
+        const off = document.getElementById('bk-offsite');
+        if (!s.configured) {
+            off.innerHTML = '<span class="text-warning">تنظیم نشده — تا تنظیم نشود، نسخه فقط روی همین سرور است</span>';
+        } else if (!lo.at) {
+            off.innerHTML = '<span class="text-muted">تنظیم شده؛ اولین ارسال امشب — یا همین حالا دکمه را بزنید</span>';
+        } else if (lo.ok) {
+            off.innerHTML = `<span class="text-success">✓ ${_bkWhen(lo.at)}</span> <span class="text-muted">· ${esc(lo.file || '')}</span>`;
+        } else {
+            off.innerHTML = `<span class="text-danger">✗ ${_bkWhen(lo.at)} — ${esc(lo.error || 'ارسال نشد')}</span>`;
+        }
+        badge.textContent = !s.configured ? 'بدون نسخهٔ خارج از سرور' : (lo.at && !lo.ok ? 'ارسال ناموفق' : 'فعال');
+        badge.className = 'badge ' + (!s.configured ? 'bg-warning text-dark' : (lo.at && !lo.ok ? 'bg-danger' : 'bg-success'));
+        document.getElementById('bk-token-hint').textContent = s.token_masked
+            ? `ذخیره‌شده: ${s.token_masked}${s.source === 'env' ? ' (از محیط سرور — قابل تغییر از پنل نیست)' : ''}`
+            : '';
+        const chat = document.getElementById('bk-chat');
+        if (s.chat_id && !chat.value) chat.value = s.chat_id;
+        document.getElementById('bk-token').disabled = s.source === 'env';
+        chat.disabled = s.source === 'env';
+    } catch (e) {
+        badge.textContent = 'نامشخص'; badge.className = 'badge bg-secondary';
+    }
+}
+
+async function bkProbe() {
+    const box = document.getElementById('bk-chats');
+    const tok = document.getElementById('bk-token').value.trim();
+    box.classList.remove('d-none');
+    box.innerHTML = '<span class="small text-muted">در حال پرسیدن از تلگرام…</span>';
+    try {
+        const r = await apiCall('/backup/probe', { method: 'POST', body: JSON.stringify({ bot_token: tok || null }) });
+        if (!r.chats.length) {
+            box.innerHTML = `<div class="small text-warning">ربات <b dir="ltr">@${esc(r.bot)}</b> پیدا شد، ولی ${esc(r.hint_fa || 'چتی ندارد')}</div>`;
+            return;
+        }
+        box.innerHTML = `<div class="small text-muted mb-1">ربات <b dir="ltr">@${esc(r.bot)}</b> — یکی را انتخاب کنید:</div>` +
+            r.chats.map(c => `<button class="btn btn-sm btn-outline-secondary me-1 mb-1" onclick="document.getElementById('bk-chat').value='${esc(c.id)}';document.getElementById('bk-chats').classList.add('d-none')">
+                ${esc(c.name || c.id)} <span class="text-muted" dir="ltr">${esc(c.id)}</span></button>`).join('');
+    } catch (e) {
+        box.innerHTML = `<span class="small text-danger">${esc(e.message)}</span>`;
+    }
+}
+
+async function bkSave() {
+    const tok = document.getElementById('bk-token').value.trim();
+    const chat = document.getElementById('bk-chat').value.trim();
+    const body = { chat_id: chat };
+    if (tok) body.bot_token = tok;      // an empty field means «leave the saved one»
+    try {
+        await apiCall('/backup/settings', { method: 'PUT', body: JSON.stringify(body) });
+        document.getElementById('bk-token').value = '';
+        showToast('ذخیره شد', 'حالا «همین حالا بکاپ بگیر و بفرست» را بزنید تا ببینید می‌رسد', 'success');
+        loadBackup();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function bkRunNow() {
+    const btn = document.getElementById('bk-run');
+    const out = document.getElementById('bk-result');
+    btn.disabled = true; out.textContent = 'در حال گرفتن نسخه و ارسال…';
+    try {
+        const r = await apiCall('/backup/run', { method: 'POST' });
+        out.textContent = r.telegram_sent
+            ? `✓ ${r.file} (${formatNumber(r.size_kb)} KB) به تلگرام رسید`
+            : `نسخه گرفته شد (${formatNumber(r.size_kb)} KB) ولی به تلگرام نرسید${r.last_offsite && r.last_offsite.error ? ': ' + r.last_offsite.error : ''}`;
+        out.className = 'small ' + (r.telegram_sent ? 'text-success' : 'text-warning');
+        loadBackup();
+    } catch (e) {
+        out.textContent = e.message; out.className = 'small text-danger';
+    }
+    btn.disabled = false;
 }
 
 async function loadMaintenance() {

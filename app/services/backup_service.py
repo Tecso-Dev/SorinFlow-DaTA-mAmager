@@ -17,10 +17,19 @@ from loguru import logger
 
 from app.config import get_settings
 from app.database import Base, async_session_maker
+from app.services import secret_box
 
 settings = get_settings()
 
 BACKUP_DIR = Path("data/backups")
+
+# The panel's copy of the Telegram credentials. The environment still wins
+# when set, like every other credential the panel accepts (see secret_box).
+KEY_TOKEN = "backup_telegram_token"     # encrypted
+KEY_CHAT = "backup_telegram_chat"
+# What happened the last time a file was shipped: shown on the panel so a
+# broken offsite copy is a red line on a screen, not a warning in a log.
+KEY_LAST = "backup_last_offsite"
 KEEP_LOCAL = 14          # rotate: keep the newest N local backups
 BACKUP_HOUR = 0          # server clock (UTC container → 03:30 Tehran)
 BACKUP_MINUTE = 0
@@ -58,43 +67,155 @@ async def create_backup() -> Path:
     return path
 
 
-async def send_to_telegram(path: Path) -> bool:
+async def resolve_telegram(db=None) -> dict:
+    """Effective Telegram credentials — environment first, then the panel."""
+    cfg = {"token": (settings.telegram_bot_token or "").strip(),
+           "chat_id": (settings.telegram_chat_id or "").strip(),
+           "source": "env" if (settings.telegram_bot_token and settings.telegram_chat_id) else None}
+    if db is None or (cfg["token"] and cfg["chat_id"]):
+        return cfg
+    try:
+        v = await secret_box.get_many(db, (KEY_TOKEN, KEY_CHAT))
+    except Exception as e:
+        logger.warning(f"[backup] saved telegram settings unreadable: {e}")
+        return cfg
+    if not cfg["token"] and v.get(KEY_TOKEN):
+        cfg["token"] = secret_box.decrypt(v[KEY_TOKEN])
+    if not cfg["chat_id"] and v.get(KEY_CHAT):
+        cfg["chat_id"] = (v[KEY_CHAT] or "").strip()
+    if cfg["token"] and cfg["chat_id"] and cfg["source"] is None:
+        cfg["source"] = "panel"
+    return cfg
+
+
+async def _remember_offsite(db, outcome: dict) -> None:
+    """Keep the last outcome where the panel can read it. Never raises."""
+    try:
+        await secret_box.put(db, KEY_LAST, json.dumps(outcome, ensure_ascii=False), "backup")
+    except Exception as e:
+        logger.warning(f"[backup] could not record the offsite outcome: {e}")
+
+
+def seal(path: Path) -> Path:
+    """The copy that leaves the server, encrypted.
+
+    The snapshot is every table: password hashes, TOTP secrets, live Divar
+    session cookies. On this disk that is where they already live; in a
+    Telegram chat it is a copy of the keys to the business held by a third
+    party. So the file is sealed under the same key secret_box uses — derived
+    from SECRET_KEY — before it goes. Restoring needs that key, which is in
+    the Kubernetes Secret and in the server bundle, and nowhere else.
+    """
+    sealed = path.with_suffix(path.suffix + ".enc")
+    sealed.write_bytes(secret_box._fernet().encrypt(path.read_bytes()))
+    return sealed
+
+
+def unseal(path: Path) -> bytes:
+    """The gzip bytes back out of a sealed copy. Raises on the wrong key."""
+    return secret_box._fernet().decrypt(path.read_bytes())
+
+
+async def send_to_telegram(path: Path, db=None) -> bool:
     """Ship the backup file to the configured Telegram chat (offsite copy)."""
-    token, chat_id = settings.telegram_bot_token, settings.telegram_chat_id
+    cfg = await resolve_telegram(db)
+    token, chat_id = cfg["token"], cfg["chat_id"]
     if not token or not chat_id:
         logger.warning("[backup] TELEGRAM_BOT_TOKEN/CHAT_ID not set — offsite copy skipped")
         return False
 
     size_kb = path.stat().st_size // 1024
+    sealed = seal(path)
     caption = (
         f"🗄 بکاپ شبانه سورین‌فلو\n"
         f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-        f"📦 {path.name} ({size_kb} KB)\n"
+        f"📦 {sealed.name} ({size_kb} KB)\n"
+        f"🔐 رمزشده با SECRET_KEY سرور\n"
         f"بازگردانی: python scripts/restore_backup.py <file>"
     )
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     try:
         async with httpx.AsyncClient(timeout=180) as client:
-            with open(path, "rb") as f:
+            with open(sealed, "rb") as f:
                 resp = await client.post(
                     url,
                     data={"chat_id": chat_id, "caption": caption},
-                    files={"document": (path.name, f, "application/gzip")},
+                    files={"document": (sealed.name, f, "application/octet-stream")},
                 )
-        ok = resp.status_code == 200 and resp.json().get("ok") is True
+        body = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        ok = resp.status_code == 200 and body.get("ok") is True
+        error = "" if ok else (body.get("description") or f"HTTP {resp.status_code}")
         if not ok:
             logger.error(f"[backup] telegram upload failed: {resp.status_code} {resp.text[:200]}")
-        return ok
     except Exception as e:
+        ok, error = False, f"{type(e).__name__}: {e}"
         logger.error(f"[backup] telegram upload error: {e}")
-        return False
+    finally:
+        sealed.unlink(missing_ok=True)
+    if db is not None:
+        await _remember_offsite(db, {"at": datetime.now().isoformat(timespec="seconds"),
+                                     "ok": ok, "file": path.name, "size_kb": size_kb,
+                                     "error": error[:200]})
+    return ok
 
 
-async def run_backup() -> dict:
+async def last_offsite(db) -> dict:
+    """The recorded outcome of the last shipment, or {}."""
+    try:
+        raw = (await secret_box.get_many(db, (KEY_LAST,))).get(KEY_LAST)
+        return json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+
+
+def local_snapshots() -> list:
+    """What is on the volume, newest first."""
+    out = []
+    for p in sorted(BACKUP_DIR.glob("sorinflow-backup-*.json.gz"), reverse=True):
+        st = p.stat()
+        out.append({"file": p.name, "size_kb": st.st_size // 1024,
+                    "at": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")})
+    return out
+
+
+async def telegram_probe(token: str) -> dict:
+    """Who the bot is, and which chats have written to it — so the panel can
+    fill in the chat id instead of somebody reading JSON off a curl."""
+    async with httpx.AsyncClient(timeout=20) as client:
+        me = await client.get(f"https://api.telegram.org/bot{token}/getMe")
+        mb = me.json() if me.headers.get("content-type", "").startswith("application/json") else {}
+        if me.status_code != 200 or not mb.get("ok"):
+            raise ValueError(mb.get("description") or "توکن ربات پذیرفته نشد")
+        upd = await client.get(f"https://api.telegram.org/bot{token}/getUpdates",
+                               params={"limit": 100})
+        ub = upd.json() if upd.status_code == 200 else {}
+    chats, seen = [], set()
+    for u in ub.get("result") or []:
+        msg = u.get("message") or u.get("channel_post") or u.get("my_chat_member") or {}
+        chat = msg.get("chat") or {}
+        cid = chat.get("id")
+        if cid is None or cid in seen:
+            continue
+        seen.add(cid)
+        name = chat.get("title") or " ".join(
+            x for x in (chat.get("first_name"), chat.get("last_name")) if x) or chat.get("username") or ""
+        chats.append({"id": str(cid), "name": name, "type": chat.get("type", "")})
+    return {"bot": mb["result"].get("username", ""), "chats": chats}
+
+
+async def run_backup(db=None) -> dict:
     """Create a snapshot, rotate, ship offsite. Returns a summary dict."""
     path = await create_backup()
     size_kb = path.stat().st_size // 1024
-    sent = await send_to_telegram(path)
+    if db is None:
+        async with async_session_maker() as own:
+            sent = await send_to_telegram(path, own)
+    else:
+        sent = await send_to_telegram(path, db)
     logger.info(f"[backup] {path.name} ({size_kb} KB) | telegram={'✓' if sent else '✗'}")
     return {"file": path.name, "size_kb": size_kb, "telegram_sent": sent}
 
