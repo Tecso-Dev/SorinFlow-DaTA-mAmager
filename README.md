@@ -533,6 +533,8 @@ All application routes are mounted below `/api`.
 | `/api/sms` | Kavenegar panel: settings, audiences, broadcast, delivery status, logs |
 | `/api/email` | SMTP panel: settings, templates, previews, audiences, broadcast, export |
 | `/api/backup` | Nightly snapshot status, Telegram offsite settings, chat discovery, run-now (root/super_admin) |
+| `/api/scraper/schedules` | Saved scrapes that fire daily at a Tehran hour, as their owner — list, create, edit, delete, run-now |
+| `/api/crm/calls/*` | The call queue: `calls/today` (leads due now, mine or unassigned), `leads/{id}/call` (one outcome per dial), `calls/summary` |
 | `/api/portal` | Visitor requests and upgrade tickets, plus the staff screens that triage them |
 | `/api/public/auth` | Visitor sign-up, resend, verify, login — unauthenticated, per-IP throttled |
 | `/api/gcp` | Google Cloud export controls |

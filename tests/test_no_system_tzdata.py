@@ -30,3 +30,15 @@ print('ok')
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120,
                        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     assert r.returncode == 0 and "ok" in r.stdout, r.stderr[-2000:]
+
+
+def test_a_rollout_that_never_comes_up_rolls_itself_back():
+    """Recreate strategy: the old pod is gone before the new one is tried, so
+    a new pod that never becomes ready is the site being down. The deploy
+    job must put the previous image back on its own."""
+    wf = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           ".github/workflows/deploy.yml"), encoding="utf-8").read()
+    step = wf[wf.index("Roll out new image"):wf.index("Why the rollout failed")]
+    assert "if ! kubectl rollout status" in step
+    assert "kubectl rollout undo deployment/backend" in step
+    assert "exit 1" in step, "a rolled-back deploy must still be reported as failed"

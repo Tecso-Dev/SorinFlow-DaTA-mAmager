@@ -261,7 +261,19 @@ jobs:
         run: |
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
           kubectl set image deployment/backend backend="$IMAGE" -n sorinflow
-          kubectl rollout status deployment/backend -n sorinflow --timeout=300s
+          if ! kubectl rollout status deployment/backend -n sorinflow --timeout=300s; then
+            # The strategy is Recreate: the old pod is already gone, so a new
+            # pod that never comes up is the site being DOWN, not a failed
+            # canary. On 2026-09-18 an import-time error crash-looped the only
+            # pod for fifteen minutes until somebody rolled back by hand.
+            # Roll back here, first, and only then explain.
+            echo "::error::The new pod did not become ready — rolling back to the previous image."
+            kubectl rollout undo deployment/backend -n sorinflow
+            kubectl rollout status deployment/backend -n sorinflow --timeout=300s \
+              && echo "Rolled back; the site is up on the previous image." \
+              || echo "::error::The rollback did not come up either — look at the pods NOW."
+            exit 1
+          fi
           kubectl get pods -n sorinflow
 
       # `kubectl get pods` above only ever runs when the rollout succeeded,
