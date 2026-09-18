@@ -23,12 +23,13 @@ SorinFlow is a FastAPI application for collecting real-estate listings from Diva
 
 ## What the project includes
 
-- **Divar collection:** configurable city/category jobs, exact-date and recency modes, price/area/room/amenity filters, advertiser filtering, duplicate updates, and single-listing collection.
-- **Authenticated contact extraction:** separate Divar phone/OTP sessions, cookie import and refresh, per-user linked Divar numbers, and scrape-time OTP pause/resume.
+- **Divar collection:** configurable city/category jobs, exact-date and recency modes, price/area/room/amenity filters, advertiser filtering, duplicate updates, single-listing collection, and **saved schedules** that fire daily at a Tehran hour as their owner.
+- **Authenticated contact extraction:** Divar phone/OTP sessions owned per user (usable only by their owner; root and super_admin see the whole list to reassign), several numbers per person with a primary, cookie import and refresh, scrape-time OTP pause/resume, identity-wall detection, and an **Android forwarder app** that delivers Divar's SMS codes to the waiting browser in seconds (its APK is mirrored from GitHub and served from this site).
 - **Property inventory:** Persian-aware parsing, stable Divar IDs, human-facing tags, incremental serial numbers, local JPEG image storage, filtering, pagination, soft deletion, and JSON/CSV export.
-- **CRM:** leads, contacts, structured customer profiles, tasks, deals, notes, reminders, SMS logs, lead notifications, reporting, and daily performance assessment (DPA).
-- **Dashboard security:** username/password JWT login, optional TOTP, four roles (`root`, `super_admin`, `admin`, `visitor` — the first three reach the dashboard, the fourth is portal-only), an 11-key permission catalogue, and super-admin account management.
-- **Operations:** PostgreSQL, Redis, Docker Compose, Nginx, health checks, nightly JSON backups, Kubernetes manifests, and a GitHub Actions deployment workflow.
+- **CRM:** the **call queue** («تماس‌های امروز» — the leads whose turn it is, one tap per outcome, retries that come back on their own, calls per consultant), leads, contacts, structured customer profiles, tasks, deals, notes, reminders, calendar, SMS logs, lead notifications, reporting, and daily performance assessment (DPA).
+- **Dashboard security:** username/password JWT login, optional TOTP or emailed second factor, self-service password reset, a **profile page** (avatar, headline, bio, links, presence; email and phone verification by code; password change that signs other devices out via a token version), four roles (`root`, `super_admin`, `admin`, `visitor` — the first three reach the dashboard, the fourth is portal-only), a 12-key permission catalogue, and super-admin account management including «request verification» nudges.
+- **The panel on a phone:** a PWA (manifest, service worker that caches the shell and never the API, install hint), every asset served from the site rather than a CDN, thumb-sized controls, and browser errors reported home to the monitoring page with the browser's name.
+- **Operations:** PostgreSQL, Redis, Kubernetes (k3s) manifests, a GitHub Actions workflow that deploys through a self-hosted runner and rolls back on its own when the new pod never comes up, `/ready` with real database checks, nightly JSON backups sealed and shipped to Telegram, and a runbook that rebuilds the server from a backup bundle.
 
 ## Project brain
 
@@ -521,15 +522,15 @@ All application routes are mounted below `/api`.
 
 | Prefix | Responsibility |
 |---|---|
-| `/api/users` | Dashboard login, TOTP, profile, and user administration |
-| `/api/auth` | Divar OTP and cookie/session management |
+| `/api/users` | Dashboard login, TOTP / email 2FA, password reset, the profile (`/me`, `/me/password`, `/me/email/*`, `/me/phone/*`, `/me/avatar`, `/me/divar-phone`), user administration, `/{id}/verification-request` |
+| `/api/auth` | Divar OTP login and cookie/session management — sessions are owned; status, refresh and logout act on the caller's own only |
 | `/api/scraper` | Jobs, filters, single-URL collection, scrape-time OTP, and the per-run event log (`/jobs/{id}/events`) |
 | `/api/properties` | Property search, detail, update, soft deletion, and export |
 | `/api/crm` | Leads, contacts, customers, tasks, deals, notes, reminders, SMS, DPA, reports — 65 endpoints, the largest router |
 | `/api/filing` | Cabinets and folders (کمد و زونکن), including private ones |
 | `/api/proxies` | Proxy CRUD, import, activation, connectivity tests, and bulk removal |
 | `/api/stats` | Dashboard totals, health, logs, job summaries, and trends |
-| `/api/monitoring` | Service health, resource use, live logs, Divar connectivity probe, and session verification. Also gates `/api/gcp` |
+| `/api/monitoring` | Service health, resource use, live logs, Divar connectivity probe, session verification, and `client-errors` (what broke in users' browsers). Also gates `/api/gcp` |
 | `/api/sms` | Kavenegar panel: settings, audiences, broadcast, delivery status, logs |
 | `/api/email` | SMTP panel: settings, templates, previews, audiences, broadcast, export |
 | `/api/backup` | Nightly snapshot status, Telegram offsite settings, chat discovery, run-now (root/super_admin) |
@@ -539,8 +540,10 @@ All application routes are mounted below `/api`.
 | `/api/public/auth` | Visitor sign-up, resend, verify, login — unauthenticated, per-IP throttled |
 | `/api/gcp` | Google Cloud export controls |
 | `/api/public/stats` | Public cached landing-page statistics |
+| `/api/public/client-error` | Where the page's ES5 error hook posts browser errors — public, per-IP throttled, always 204 |
+| `/api/forwarder` | The SMS forwarder: a person's phones, per-device secrets, setup config and QR, events, test |
 | `/api/maintenance` | Maintenance-mode status and switch |
-| `/api/backup/run` | Manual super-admin backup |
+| `/health`, `/ready` | Liveness (the process is up) and readiness (Postgres and Redis answer; 503 otherwise) |
 
 ### Obtain a dashboard token
 
@@ -606,10 +609,12 @@ Application settings live in [`app/config.py`](app/config.py). `.env.example` co
 | Database | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL` |
 | Redis | `REDIS_PASSWORD`, `REDIS_URL` |
 | Bootstrap admin | `SUPER_ADMIN_USERNAME`, `SUPER_ADMIN_PASSWORD` |
-| Scraper | `SCRAPER_HEADLESS`, `SCRAPER_DELAY_MIN`, `SCRAPER_DELAY_MAX`, `OTP_WAIT_TIMEOUT`, `DIVAR_PHONE_NUMBER` |
+| Scraper | `SCRAPER_HEADLESS`, `SCRAPER_DELAY_MIN`, `SCRAPER_DELAY_MAX`, `OTP_WAIT_TIMEOUT`, `DIVAR_PHONE_NUMBER`, `SCRAPE_SCHEDULER` (0 disables the saved-schedule loop) |
 | Proxies | `PROXY_ENABLED`, `PROXY_LIST` |
 | SMS | `KAVENEGAR_API_KEY`, `KAVENEGAR_SENDER`, `MELIPAYAMAK_API_KEY`, `MELIPAYAMAK_FROM` |
-| Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — or entered on the admin panel's backup card (token stored encrypted); the environment wins when set |
+| Forwarder | `OTP_INBOUND_SECRET` (legacy single secret; devices registered on the panel carry their own), `FORWARDER_WATCH_MINUTES`, `APK_MIRROR_HOURS` (how often the forwarder APK is refreshed from GitHub; 0 disables), `DOWNLOADS_PATH` |
+| Server | `SERVER_IP` (injected by the manifest from the node — never hard-code it), `DOMAIN` |
 | Email | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `NOTIFICATION_EMAIL` |
 
 ### Docker Compose environment caveat
@@ -719,15 +724,15 @@ closed.
 | Path | Purpose |
 |---|---|
 | `app/main.py` | FastAPI application, middleware, public routes, static mounts, and lifespan jobs |
-| `app/api/routes/` | User, Divar auth, scraper, property, CRM, proxy, and statistics endpoints |
+| `app/api/routes/` | User/profile, Divar auth, scraper (+ schedules), property, CRM (+ call queue), forwarder, backup, monitoring, SMS, email, portal endpoints |
 | `app/auth/` | JWT/password helpers and authenticated-user dependencies |
 | `app/scraper/` | Browser automation, parsing, validation, contact extraction, OTP state, and images |
-| `app/crm/` | Automatic lead creation and notification pipeline |
+| `app/crm/` | Automatic lead creation, the notification pipeline, and `call_queue.py` — what one dial does to a lead |
 | `app/models/` | SQLAlchemy models for core and CRM data |
-| `app/services/` | Backups, SMS providers, and DPA support |
-| `frontend/` | Persian landing page and static single-page dashboard |
+| `app/services/` | Backups (sealed, Telegram), SMS/email providers, verification codes, the forwarder and its watch, the scrape scheduler, the APK mirror, browser-error intake, DPA support |
+| `frontend/` | Persian landing page and the static single-page dashboard; `vendor/` holds every third-party asset (no CDN), `sw.js` + `manifest.webmanifest` + `icons/` make it a PWA |
 | `tests/` | Parser, validator, captcha, settings, and auth unit tests |
-| `scripts/` | Server provisioning, deployment, survey, and backup restoration helpers |
+| `scripts/` | `new_server.sh` (rebuild a server from a backup bundle), `provision-host.sh` (host-level setup), `restore_backup.py`, deployment and survey helpers |
 | `k8s/` | k3s/Kubernetes resources for backend, PostgreSQL, Redis, ingress, and Traefik |
 | `nginx/` | Local reverse proxy and TLS configuration |
 | `graphify-out/` | Generated project brain and machine-readable graph |
@@ -864,9 +869,13 @@ fixable.
 With no code after `OTP_RESEND_AFTER_SECONDS` (90) the browser presses Divar's
 «ارسال مجدد» itself, at most twice per challenge, without extending the wait.
 
+### The SorinFlow Forwarder app
+
+The purpose-built Android app lives at [sobhanaz/sorinflow-sms-forwarder](https://github.com/sobhanaz/sorinflow-sms-forwarder) (a fork of the gateway below). The panel's «فرستندهٔ پیامک» section — its own permission key, `forwarder` — registers each phone with a **per-device secret**, renders a `sorinflow://setup?…` QR (covered until tapped; visible for 30 seconds) that fills the app in one scan, shows each phone's health («online» and «delivering» are separate facts), logs every code it sent, and emails the phone's owner once per outage when it goes quiet. The APK the download button offers is a copy of the latest GitHub release mirrored onto this site every six hours (`app/services/apk_mirror.py`), because GitHub's download host is slow or blocked from Iranian carriers — the phone that needs it.
+
 ### Stock forwarder app — two rules
 
-Any SMS-to-webhook app works. For [android_income_sms_gateway_webhook](https://github.com/bogkonstantin/android_income_sms_gateway_webhook):
+Any SMS-to-webhook app still works. For [android_income_sms_gateway_webhook](https://github.com/bogkonstantin/android_income_sms_gateway_webhook):
 
 1. sender `Divar`, text filter `اطلاعات تماس`, URL `https://sorinflow.com/api/scraper/otp-inbound`, HMAC on with the secret, body
    `{"kind":"contact","account":"<phone>","code":"%Regex=Code:\\s*(\\d{6})%","text":"%text%","sim":"%sim%","sentStamp":%sentStamp%,"receivedStamp":%receivedStamp%}`
@@ -907,9 +916,9 @@ The application starts a nightly backup scheduler that:
 - exports every known SQLAlchemy table to a gzip-compressed JSON snapshot;
 - stores snapshots under `data/backups/`;
 - retains the newest 14 local snapshots;
-- optionally sends each snapshot to the configured Telegram chat.
+- seals a copy under a key derived from `SECRET_KEY` (the snapshot holds password hashes, TOTP secrets and live Divar cookies) and sends it to the configured Telegram chat.
 
-A super admin can trigger the same flow with `POST /api/backup/run`. Restore with [`scripts/restore_backup.py`](scripts/restore_backup.py) against an **empty** database and a correctly configured `DATABASE_URL`:
+The Telegram bot token and chat id are entered on the admin panel («بکاپ و نسخهٔ خارج از سرور»: paste the token, «پیدا کن» lists the chats that have written to the bot, «ذخیره», then «همین حالا بکاپ بگیر و بفرست» to watch the first file arrive); the card shows the last shipment as a green or red line. A super admin can trigger the same flow with `POST /api/backup/run`. The sealed `.enc` copy restores with the same script, under the same `SECRET_KEY`. Restore with [`scripts/restore_backup.py`](scripts/restore_backup.py) against an **empty** database and a correctly configured `DATABASE_URL`:
 
 ```bash
 python scripts/restore_backup.py data/backups/sorinflow-backup-YYYYMMDD-HHMM.json.gz
@@ -923,10 +932,10 @@ The `k8s/` manifests describe a single-replica backend, PostgreSQL and Redis Sta
 
 1. builds the Docker image on pushes to `main`;
 2. pushes SHA and `latest` tags to GHCR;
-3. deploys through a self-hosted runner labeled `sorinflow`;
-4. imports the image into k3s and waits for rollout.
+3. deploys through a self-hosted runner labeled `sorinflow` — the datacenter blocks inbound SSH from abroad, so the runner on the box pulls the image and applies every manifest in `k8s/`;
+4. waits for the rollout and, if the new pod never becomes ready, **rolls back to the previous image on its own** before reporting the failure — under `strategy: Recreate` a bad image is an outage, not a canary.
 
-Cluster secrets and the self-hosted runner must already exist. Deployment scripts and manifests contain environment-specific hosts, domains, storage sizes, and assumptions; review them before use on another server.
+Cluster secrets and the self-hosted runner must already exist. To bring up a new server from a backup bundle — k3s, the old certificate, secrets, Postgres and the data volume restored before the app first starts, the runner registered — use [`scripts/new_server.sh`](scripts/new_server.sh); [`scripts/provision-host.sh`](scripts/provision-host.sh) does the host-level part (swap, journald cap, inotify limits, clock) and is what `new_server.sh` calls. The production image (the Playwright base) ships **no tz database**: use a fixed `+03:30` for Tehran, never `zoneinfo`, and keep `tests/test_no_system_tzdata.py` passing — an import-time `ZoneInfo` once crash-looped the only pod. Deployment scripts and manifests contain environment-specific hosts, domains, storage sizes, and assumptions; review them before use on another server.
 
 ## Operational constraints
 
@@ -958,31 +967,31 @@ Cluster secrets and the self-hosted runner must already exist. Deployment script
 
 ## Roadmap
 
-This section is derived from a full-repository audit (2026-09-01). Every item below is a real gap found in the code, not a wish. Severity and effort are the auditor's; ownership follows the split we already work to — Sobhan owns product, accounts and business decisions; Sahand owns the server and anything needing `kubectl`; implementation lands through Claude in this repo.
+This section is derived from a full-repository audit (2026-09-01), updated 2026-09-19 after the hardening pass. Every item below is a real gap found in the code, not a wish. Severity and effort are the auditor's; ownership follows the split we already work to — Sobhan owns product, accounts and business decisions; Sahand owns the server and anything needing `kubectl`; implementation lands through Claude in this repo.
 
 Nothing here is tracked as a `TODO` in the source — the codebase contains zero debt markers. This section is the tracker.
+
+**Shipped 2026-09-15 → 19, outside the audit list:** the server moved to a new 8 GB box with a backup-and-rebuild runbook; per-user Divar sessions with several numbers per person; the profile page with avatars and email/phone verification; «فرستندهٔ پیامک» as its own permission with per-device secrets and the QR setup; the SorinFlow Forwarder Android app and its APK mirror; the offsite backup on the panel; saved scrape schedules; the CRM call queue; the panel as a PWA with every asset self-hosted and browser errors reported home; automatic rollback in CI.
 
 ---
 
 ### Now — blocking or near-blocking (days)
 
-**1. Make the backup safe before it is shipped anywhere.** `app/services/backup_service.py:44-47` dumps every table with no exclusion list and no redaction. That includes `users.totp_secret` (the plaintext 2FA seed, not a hash — `app/models/user.py:27`), `users.hashed_password`, and the full Divar session JSON in `cookies.cookies` (`app/models/cookie.py:16-17`). Today that file only lands on the PVC, because `send_to_telegram` returns early without a bot token (`backup_service.py:64-66`). The moment issue #8 is wired up, all of it leaves the host nightly into a chat. Redact or exclude those three columns first; wire Telegram second. *Effort: small. Owner: Claude.*
+**1. Make the backup safe before it is shipped anywhere.** ✅ **Closed** 2026-09-18 — the copy that leaves the server is sealed under a `SECRET_KEY`-derived key (`backup_service.seal`).
 
-**2. Fix the restore path before relying on any backup.** `scripts/restore_backup.py:28-34` imports 7 of the 11 model modules, so `app_settings`, `portal_property_requests`, `portal_upgrade_tickets` and `email_logs` are absent from `Base.metadata` during a restore. The rows are in the backup file; the restore iterates `sorted_tables` (`:63`) and skips them without an error. `app_settings` holds the Fernet-encrypted Kavenegar and SMTP credentials and the maintenance-mode flag — a "successful" restore silently loses them. Three import lines. *Effort: small. Owner: Claude.*
+**2. Fix the restore path before relying on any backup.** ✅ **Closed** 2026-09-18 — `restore_backup.py` imports every model module (28/28) and opens the sealed `.enc` copy.
 
-**3. `PATCH /api/users/me/divar-phone` is an isolation bypass.** It takes an untyped dict and writes `current_user.divar_phone` with no validation and no audit (`app/api/routes/users.py:252-263`). That field is the filter that scopes scraping jobs, and the filter fails open on a falsy value (`app/api/routes/scraper.py:326-327`) — so any staff member can POST an empty string and see every user's jobs, or set a colleague's number and see theirs. Validate the format server-side (`^09\d{9}$`, matching the client check at `frontend/js/app.js:316`) and make the scoping filter refuse rather than fall through. Related: `POST /api/scraper/start` accepts a caller-chosen `divar_phone` with no ownership check (`scraper.py:234`), letting one account spend another's Divar reveal budget. *Effort: small. Owner: Claude.*
+**3. `PATCH /api/users/me/divar-phone` is an isolation bypass.** ✅ **Closed** 2026-09-19 — `/me/divar-phone` validates and normalises; the dead per-phone job filter is gone; a named number on a run must be the caller's for every role.
 
-**4. Correct the two rollback claims that `strategy: Recreate` invalidated.** `app/database.py:740-742` and `SECRETS.md:245-248` both still say a pod that fails startup leaves "the previous pod still serving — a failed deploy instead of an outage." Under Recreate (`k8s/04-backend.yaml:36-37`) the old pod is gone before the new one starts, so a crashlooping deploy is a full outage. The reasoning behind `_verify_auth_v2` raising is still sound; the stated consequence is not, and the Postgres-password rotation runbook is built on it. *Effort: small. Owner: Claude, then Sahand re-reads the rotation runbook before next use.*
+**4. Correct the two rollback claims that `strategy: Recreate` invalidated.** ✅ **Closed** 2026-09-18 — the deploy job rolls back on its own when the new pod never becomes ready; the docs no longer claim the old pod keeps serving.
 
-**5. Self-host the dashboard's CDN assets.** `frontend/index.html:12-15` and `:3656-3661` hard-load nine assets from cdn.jsdelivr.net and code.jquery.com with no fallback. Local copies of Bootstrap RTL CSS/JS, Bootstrap Icons and Chart.js are already committed and referenced by nothing. On an Iranian VPS serving Iranian users, a filtered CDN means an unstyled, non-functional login screen. `frontend/portal.html` already proves the fully self-hosted pattern works. Four of the nine are a `href` edit; jQuery, persian-date/-datepicker and qrcode need vendoring too. *Effort: small. Owner: Claude.*
+**5. Self-host the dashboard's CDN assets.** ✅ **Closed** 2026-09-19 — every asset is served from the site (`frontend/vendor/`), pinned to the versions the page used to fetch.
 
 **6. Fix or delete the entry points that don't exist.** `README.md:155-175` and `CONTRIBUTING.md:11-13` both open with `./local/start.sh`, which is git-ignored (`.gitignore:80`) — the first instruction a new contributor follows fails on a fresh clone. `scripts/server-setup.sh:118` applies `k8s/06-cert-issuer.yaml`, which does not exist, and installs cert-manager, which `k8s/06-traefik-acme.yaml` explicitly replaced. `scripts/deploy_remote.py` targets a deployment name and a registry that are both gone. Commit the three `local/` scripts (keeping `pgdata/`, `logs/` and `local.env` ignored); delete or rewrite the two dead scripts. *Effort: small. Owner: Claude.*
 
-**7. Bound `GET /api/stats/property-trends`.** `days: int = 30` with no `Query(ge=, le=)` and two COUNT queries per day in a Python loop (`app/api/routes/stats.py:357-401`). `days=100000` is 200,000 sequential round trips on a single-replica box. Every sibling route in the file already bounds its inputs. *Effort: small. Owner: Claude.*
+**7. Bound `GET /api/stats/property-trends`.** ✅ **Closed** 2026-09-19 — `days` is bounded 1–365.
 
-**8. Offsite backup — BLOCKED.** Issue #8, the only open issue. The nightly snapshot lives on the same PVC as the data it protects. **Blocked on:** Sahand creating a Telegram bot and supplying `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` into the cluster Secret, and on a decision about the destination — a private chat, not a group, since the file is every lead, contact and phone number in the system (Telegram also caps bot uploads at 50 MB, failing silently). Do item 1 before this ships. *Effort: small once unblocked. Owner: Sahand (token), Sobhan (destination decision), Claude (wiring).*
-
----
+**8. Offsite backup — BLOCKED.** ✅ **Closed** 2026-09-18 — the panel takes the bot token (encrypted) and finds the chat; the last shipment shows on the card. Waiting only on the token being entered.
 
 ### Next — weeks
 
@@ -992,17 +1001,17 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 **10. Finish the email marketing panel.** `/api/email/audiences`, `/api/email/broadcast` and `/api/email/export` exist, work, and read `marketing_opt_in` — and no UI calls any of them (`app/api/routes/email.py:278, :306, :345`). The SMS twin is fully wired (`frontend/js/app.js:8178, :8218`), so this is an unfinished port, not a design choice. Consent is being collected at every sign-up (`frontend/js/portal.js:124`) with no panel that can act on it. *Effort: medium. Owner: Claude.*
 
-**11. Close the remaining permission asymmetries.** Three of them: the CRM JSON exports are super_admin-only while the Excel exports of the same contact and deal tables are not (`crm.py:927/1532` vs `:883/1496`) — the same data walks out as `.xlsx` for any admin with `crm`. `root` is silently narrowed on the CRM task board (`crm.py:1297`) and on private files (`filing.py:64-66`), contradicting its documented "everything, always" contract — the identical bug was already found and fixed in `require_filing_admin` and the lesson was not carried across. And `POST /api/email/send` lets any admin with the `email` key mail an arbitrary address through the agency's SMTP account. *Effort: small. Owner: Claude.*
+**11. Close the remaining permission asymmetries.** ✅ **Closed** 2026-09-19 — JSON exports match the Excel ones; root is no longer narrowed on the task board or private files; the free-form email send is super_admin's.
 
-**12. Apply the other five manifests from CI.** The deploy job applies only `04-backend.yaml` and `05-ingress.yaml` (`.github/workflows/deploy.yml:236-239`). Namespace, Postgres, the Postgres init ConfigMap, Redis and the Traefik ACME config drift silently between repo and cluster — the exact failure mode that fixing `04` was meant to end. The deploy runs on the self-hosted runner with `kubectl`, so this needs no manual step. *Effort: small. Owner: Claude, verified by Sahand.*
+**12. Apply the other five manifests from CI.** ✅ **Closed** 2026-09-19 — CI applies all seven manifests.
 
-**13. Cluster hygiene, bundled into one manifest pass.** Postgres and Redis declare no resource requests, making them BestEffort — the first pods evicted under memory pressure, ranked ahead of the backend that *does* have requests (`k8s/02-postgres.yaml`, `03-redis.yaml`). Redis's readiness probe has never authenticated, because `$(REDIS_PASSWORD)` does not expand inside a probe exec — it reports ready whether the password works or not (`03-redis.yaml:49-53`, documented in `SECRETS.md:259-263` and never fixed). `/health` checks nothing (`app/main.py:666-673`), so readiness passes while Postgres is unreachable. And several settings the app reads have no `env` entry, so `kubectl patch secret` for them is a silent no-op — `LLM_API_KEY` (which `SECRETS.md:190` tells operators to rotate that way) and `SUPER_ADMIN_PASSWORD` among them, the latter meaning a rebuilt server would seed its first admin with the literal `CHANGE_ME`. *Effort: small each. Owner: Claude (manifests), Sahand (confirm on the node).*
+**13. Cluster hygiene, bundled into one manifest pass.** ✅ **Closed** 2026-09-19 — `/ready` checks Postgres and Redis for readiness (liveness stays process-only); the Redis probe authenticates and greps PONG; `SUPER_ADMIN_PASSWORD` reaches the pod. Postgres and Redis have had requests since the 2026-09-02 pass.
 
 **14. Settle `COOKIE_ROTATE_EVERY` with the data we now collect.** The threshold is still 100, still a guess. Commit `79e1444` added a challenge-budget histogram specifically to answer "how many reveals before Divar challenges" and nobody has read it back. Separately, `app.js` persists `scraper-rotate-every` to `localStorage` — if anyone once typed 20, every run since has silently used it while the placeholder still shows ۱۰۰. That is a thirty-second check that has been raised twice and never done. *Effort: small. Owner: Sobhan to check the browser value, Claude to read back the histogram.*
 
-**15. Delete or wire the remaining dead configuration.** `SCRAPER_DELAY_MIN`/`MAX` were the worst of these — advertised as the throttle an operator reaches for after a ban, and read by nothing, so the scraper ran five times faster than its own documented default. Wired on 2026-09-02. Still dead: `SCRAPER_TIMEOUT`, `DOMAIN_DNS_ONLY`, `DIVAR_BASE_URL`, `DEFAULT_CITY`, `KAVENEGAR_OTP_TEMPLATE` (superseded by a DB-backed setting). In the same pass: the SMS panel's `otp_template` field is stored and displayed but its only consumer `send_verify()` has zero callers, so login codes still go out on the plain advertising route. *Effort: small. Owner: Claude.*
+**15. Delete or wire the remaining dead configuration.** ✅ **Closed** 2026-09-19 — `SCRAPER_TIMEOUT`, `DOMAIN_DNS_ONLY`, `DIVAR_BASE_URL`, `DEFAULT_CITY` deleted; `KAVENEGAR_OTP_TEMPLATE` is read by `sms_service` and stays.
 
-**16. Small correctness debt, one pass.** `_maintenance_allows` is defined twice byte-identically in `app/main.py` (`:258` and `:297`); the first is dead and any future edit to it will look like it silently didn't work. `save_property` calls `rollback()` on the session the per-listing loop calls `refresh(job)` on, so one bad row can cascade into a run of failures that all read as scrape errors. The staff registration form on the login page POSTs with no Authorization header to a super_admin-only endpoint, from a function nothing calls. `migrations/` holds two `.sql` files nothing applies. `scraping_logs` is created on every boot and has no writer and no reader. `app/models/__init__.py` exports 12 of 20 models. The hash router writes `#/sms`, `#/email`, `#/portal` and `#/monitoring` into the URL and cannot read them back, so reload and Back desync (`frontend/js/app.js:548`). The portal's "remember me" checkbox is decorative — the token is written to `localStorage` unconditionally (`portal.js:23`). *Effort: small each. Owner: Claude.*
+**16. Small correctness debt, one pass.** ✅ **Closed** 2026-09-19 — the duplicate `_maintenance_allows`, `migrations/`, the hash router's missing sections and the models package export are done; `scraping_logs` now has a writer (`job_log.py`). Still open from this item: the dead staff-registration form and the portal's decorative «remember me».
 
 **17. Kavenegar SMS — BLOCKED.** `AUTH_SMS_PROVIDER=kavenegar` is set in production with no working key, so every verification code travels by email and `phone_verified` is false for every portal user. The SMS marketing audience therefore reads zero by construction — which is the honest count, not a bug. **Blocked on:** Sobhan completing Kavenegar's identity verification (احراز هویت); the provider currently returns 430/501 meaning only the account holder's own number can be messaged (`app/services/sms_service.py:95-102`). *Effort: small once unblocked. Owner: Sobhan.*
 
@@ -1012,7 +1021,7 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 ### Later — months, or conditional
 
-**19. Route-level tests.** No test issues a request to any API route module — 34 modules under `app/` are never imported by a test, including all 14 routers, led by `crm.py` at 2,177 lines. Fifty assertions across 13 test files use `inspect.getsource()` to check source *text* rather than behaviour, and those are exactly the ones that still run when Postgres is absent; the 22 real role/permission attack tests skip on SQLite. The suite is good where it exists (770 tests, real Postgres in CI, a gate that has already caught a total startup failure) — the gap is coverage of the request layer. *Effort: large. Owner: Claude, incrementally alongside other work.*
+**19. Route-level tests.** ◐ **Largely closed** 2026-09-15..19 — `test_auth_roles.py`, `test_profile.py`, `test_scrape_schedules.py`, `test_call_queue.py` and `test_backup_offsite.py` drive the real app on Postgres in CI; the remaining unexercised modules are the older CRM sub-routers.
 
 **20. Schema management.** Seventeen hand-written idempotent `ALTER` steps run at boot with no version table, no downgrade path and ordering defined by a Python tuple (`app/database.py:103-128`). Alembic is pinned and deliberately unused. This works and is well-guarded (`lock_timeout`, catalog pre-checks, per-step transactions) — but every schema change costs a hand-written guard, and the deploy deadlock of 2026-08-31 came out of exactly this area. Worth revisiting only when the migration count makes it cheaper than the status quo. *Effort: large. Conditional.*
 
