@@ -66,3 +66,27 @@ class TestThePriceColumn:
         head = html[html.index('id="properties-table"') - 900:html.index('id="properties-table"')]
         ths = re.findall(r"<th>([^<]*)</th>", head)
         assert ths[:2] == ["کد ملک", "عنوان"], ths
+
+
+class TestTheUsersList:
+    """Ten columns in a two-thirds card scrolled sideways and cut the username
+    off one end and the actions off the other (screenshot, 2026-09-20). One
+    row per account now, three zones that wrap — keyed on the card's own
+    width, because the list lives in a column, not in the window."""
+
+    def test_it_is_rows_not_a_scrolling_table(self):
+        html = Path("frontend/index.html").read_text(encoding="utf-8")
+        blk = html[html.index("لیست کاربران"):html.index('id="users-table"') + 40]
+        assert "table-responsive" not in blk and "<table" not in blk
+        assert 'class="user-list" id="users-table"' in html
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("async function loadUsers()"):js.index("async function openPermsEditor")]
+        assert "row.className = 'user-row'" in fn and "<td>" not in fn
+        for zone in ("ur-who", "ur-details", "ur-actions"):
+            assert f'class="{zone}"' in fn
+
+    def test_the_zones_wrap_by_the_cards_width(self):
+        assert "container-type: inline-size" in _block(".user-list {")
+        assert "@container (max-width: 720px)" in CSS and "@container (max-width: 460px)" in CSS
+        assert "grid-column: 1 / -1" in _block("@container (max-width: 720px)")
+        assert "overflow-wrap: anywhere" in CSS[CSS.index(".ur-name,"):CSS.index(".ur-details")]

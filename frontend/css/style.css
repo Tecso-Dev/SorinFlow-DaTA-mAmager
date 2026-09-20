@@ -2480,6 +2480,43 @@ body.filing-dragging .ftree-node, body.filing-dragging .folder-chip { outline: 1
 }
 .filing-advanced .form-label { font-size: .7rem; margin-bottom: .15rem; color: var(--text-muted); }
 
+/* ── لیست کاربران: rows that wrap, never a sideways scroll ──────────────────
+   Ten columns in a two-thirds card cut the username off one end and the
+   actions off the other on every laptop. One row per account instead:
+   who · details · actions, each zone free to wrap. */
+.user-list { display: flex; flex-direction: column; container-type: inline-size; }
+.user-row {
+  display: grid; grid-template-columns: minmax(170px, 1fr) minmax(0, 1.6fr) auto;
+  gap: .6rem 1rem; align-items: start; padding: .8rem 1rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+.user-row:last-child { border-bottom: 0; }
+.user-row:hover { background: rgba(99,102,241,.04); }
+.user-row.is-off { opacity: .6; }
+.ur-who { display: flex; gap: .6rem; align-items: flex-start; min-width: 0; }
+.ur-names { min-width: 0; }
+.ur-name { font-weight: 700; color: var(--text); display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+.ur-sub { font-size: .74rem; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: .15rem; }
+.ur-name, .ur-sub > span[dir="ltr"] { overflow-wrap: anywhere; min-width: 0; }
+.ur-details { display: flex; flex-direction: column; gap: .25rem; min-width: 0; font-size: .8rem; }
+.ur-line { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; color: var(--text-dim); }
+.ur-line > i { color: var(--text-muted); }
+.ur-val { overflow-wrap: anywhere; }
+.ur-contact { display: flex; flex-direction: column; gap: .2rem; }
+.ur-warn { white-space: normal; text-align: right; align-self: flex-start; }
+.ur-perms { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .2rem; }
+.ur-perms .badge { margin: 0 !important; }
+.ur-actions { display: flex; flex-wrap: wrap; gap: .3rem; justify-content: flex-end; max-width: 190px; }
+.ur-actions .btn { white-space: nowrap; }
+/* keyed on the card, not the window: the list lives in a two-thirds column */
+@container (max-width: 720px) {
+  .user-row { grid-template-columns: minmax(160px, 1fr) minmax(0, 1.4fr); }
+  .ur-actions { grid-column: 1 / -1; justify-content: flex-start; max-width: none; }
+}
+@container (max-width: 460px) {
+  .user-row { grid-template-columns: 1fr; }
+}
+
 /* ── Permission toggles (super_admin user editor) ─────────────────────────── */
 .perm-box{display:grid;grid-template-columns:1fr 1fr;gap:.35rem;
  border:1px solid var(--border,#2a2a2e);border-radius:8px;padding:.55rem;max-height:220px;overflow:auto}

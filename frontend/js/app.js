@@ -7212,7 +7212,8 @@ async function loadUsers() {
             // we send. Someone about to ring this number needs to know which of
             // the two they are looking at, so each contact carries its own tick.
             const tick = (val, ok, okText, noText) => !val ? '' :
-                `<div class="small" dir="ltr" style="white-space:nowrap">${esc(val)}
+                `<div class="ur-line"><i class="bi ${String(val).includes('@') ? 'bi-envelope' : 'bi-telephone'}"></i>
+                   <span dir="ltr" class="ur-val">${esc(val)}</span>
                    <span class="badge ${ok ? 'bg-success' : 'bg-warning text-dark'}"
                          title="${ok ? okText : noText}">${ok ? '✓' : '!'}</span>
                  </div>`;
@@ -7239,49 +7240,60 @@ async function loadUsers() {
                  tick(u.email, u.email_verified, 'ایمیل تأیید شده', 'ایمیل تأیید نشده'))
                 || '<span class="text-muted small">---</span>';
             const recoveryWarning = noRecovery ? `
-                <div class="badge bg-danger mt-1" style="white-space:normal;text-align:right"
+                <div class="badge bg-danger mt-1 ur-warn"
                      title="بازنشانی رمز و تأیید دومرحله‌ای هر دو به ایمیل نیاز دارند. بدون آن، اگر رمز این حساب گم شود تنها راه برگشت پایگاه داده است.">
                     <i class="bi bi-exclamation-triangle"></i> بدون ایمیل — قابل بازیابی نیست
                 </div>` : '';
 
-            const row = document.createElement('tr');
+            // One row per account, three zones that wrap: who they are, how to
+            // reach them and what they may open, what can be done to them. A
+            // ten-column table in a two-thirds card scrolled sideways on every
+            // laptop and hid the username and the actions at both ends.
+            const row = document.createElement('div');
+            row.className = 'user-row' + (u.is_active ? '' : ' is-off');
             row.innerHTML = `
-                <td>${esc(u.id)}</td>
-                <td><strong>${esc(u.username)}</strong> ${isSelf ? '<span class="badge bg-info">شما</span>' : ''}</td>
-                <td><div class="d-flex align-items-center gap-2">${avatarHtml(u, 30)}
-                    <div>${esc(u.full_name || '---')}${headline}</div></div></td>
-                <td><span class="badge ${rl.cls}">${esc(rl.label)}</span></td>
-                <td>${perms}</td>
-                <td>
-                    <span class="text-monospace small" dir="ltr">${esc(u.divar_phone || '---')}</span>
-                    <button class="btn btn-sm btn-link p-0 ms-1" onclick="promptSetDivarPhone(${esc(u.id)})" title="ویرایش شماره دیوار">
-                        <i class="bi bi-pencil-square"></i>
-                    </button>
-                </td>
-                <td>${contact}${nudge}${recoveryWarning}</td>
-                <td>
-                    <span class="badge ${u.is_active ? 'bg-success' : 'bg-secondary'}">
-                        ${u.is_active ? 'فعال' : 'غیرفعال'}
-                    </span>
-                </td>
-                <td>${esc(lastLogin)}</td>
-                <td>
+                <div class="ur-who">
+                    ${avatarHtml(u, 40)}
+                    <div class="ur-names">
+                        <div class="ur-name">${esc(u.full_name || u.username)}
+                            ${isSelf ? '<span class="badge bg-info">شما</span>' : ''}
+                            ${u.is_active ? '' : '<span class="badge bg-secondary">غیرفعال</span>'}
+                        </div>
+                        <div class="ur-sub"><span dir="ltr">${esc(u.username)}</span> · #${esc(u.id)}</div>
+                        ${headline}
+                        <div class="ur-sub"><span class="badge ${rl.cls}">${esc(rl.label)}</span>
+                            <span class="text-muted">آخرین ورود: ${esc(lastLogin)}</span></div>
+                    </div>
+                </div>
+                <div class="ur-details">
+                    <div class="ur-line" title="شماره‌ای که با آن در دیوار وارد می‌شود">
+                        <i class="bi bi-phone"></i>
+                        <span class="text-muted">دیوار:</span>
+                        <span dir="ltr">${esc(u.divar_phone || '---')}</span>
+                        <button class="btn btn-sm btn-link p-0" onclick="promptSetDivarPhone(${esc(u.id)})" title="ویرایش شماره دیوار">
+                            <i class="bi bi-pencil-square"></i>
+                        </button>
+                    </div>
+                    <div class="ur-contact">${contact}${nudge}${recoveryWarning}</div>
+                    ${u.role === 'admin' ? `<div class="ur-perms">${perms}</div>` : ''}
+                </div>
+                <div class="ur-actions">
                     ${u.role !== 'root' ? `
-                    <button class="btn btn-sm btn-outline-primary" onclick="openPermsEditor(${esc(u.id)})" title="دسترسی‌ها">
-                        <i class="bi bi-sliders"></i>
+                    <button class="btn btn-sm btn-outline-primary" onclick="openPermsEditor(${esc(u.id)})" title="نقش و دسترسی‌ها">
+                        <i class="bi bi-sliders"></i> دسترسی‌ها
                     </button>` : ''}
                     ${!isSelf && u.role !== 'root' ? `
                     <button class="btn btn-sm btn-outline-warning" onclick="toggleUserActive(${esc(u.id)}, ${!!u.is_active})" title="${u.is_active ? 'غیرفعال' : 'فعال'} کردن">
-                        <i class="bi bi-toggle-${u.is_active ? 'on' : 'off'}"></i>
+                        <i class="bi bi-toggle-${u.is_active ? 'on' : 'off'}"></i> ${u.is_active ? 'غیرفعال' : 'فعال'}
                     </button>
                     <button class="btn btn-sm btn-outline-info" onclick="promptResetPassword(${esc(u.id)})" title="تغییر رمز">
-                        <i class="bi bi-key"></i>
+                        <i class="bi bi-key"></i> رمز
                     </button>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${esc(u.id)})" title="حذف">
                         <i class="bi bi-trash"></i>
                     </button>
                     ` : ''}
-                </td>
+                </div>
             `;
             tbody.appendChild(row);
         });

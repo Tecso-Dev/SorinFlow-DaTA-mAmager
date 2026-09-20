@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260920b">
+    <link rel="stylesheet" href="css/style.css?v=20260920c">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -3482,25 +3482,9 @@
                                     <i class="bi bi-arrow-clockwise"></i>
                                 </button>
                             </div>
-                            <div class="table-responsive">
-                                <table class="table">
-                                    <thead>
-                                        <tr>
-                                            <th>#</th>
-                                            <th>نام کاربری</th>
-                                            <th>نام کامل</th>
-                                            <th>نقش</th>
-                                            <th>دسترسی‌ها</th>
-                                            <th>شماره دیوار</th>
-                                            <th>تماس</th>
-                                            <th>وضعیت</th>
-                                            <th>آخرین ورود</th>
-                                            <th>عملیات</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="users-table"></tbody>
-                                </table>
-                            </div>
+                            <!-- one row per account: who · details · actions. It wraps, never scrolls
+                                 sideways — ten columns in a two-thirds card did. -->
+                            <div class="user-list" id="users-table"></div>
                         </div>
                     </div>
                 </div>
@@ -4665,7 +4649,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260920b"></script>
+<script src="js/app.js?v=20260920c"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">
