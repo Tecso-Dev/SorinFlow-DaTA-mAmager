@@ -90,6 +90,16 @@ class TestRanking:
         cands = [P(2, "بلوار سعدی", 100, family="مغازه")]
         assert m.rank_similar(target, cands, limit=10) == []
 
+    def test_a_rental_is_compared_on_deposit_plus_converted_rent(self):
+        # 350/10 against 350/25: the deposits match, the price does not
+        target = P(1, "بلوار سعدی", 350_000_000, rent_price=10_000_000)
+        cands = [P(2, "بلوار سعدی", 350_000_000, rent_price=25_000_000),   # same deposit, 2.5× the rent
+                 P(3, "بلوار سعدی", 300_000_000, rent_price=12_000_000)]   # a real substitute
+        out = m.rank_similar(target, cands, limit=10)
+        assert [r["id"] for r in out] == [3]
+        assert out[0]["price_gap_pct"] <= 5
+        assert m.RENT_TO_DEPOSIT == 30, "the market's own «تبدیل» rate"
+
     def test_a_listing_with_no_price_is_ranked_last_not_dropped(self):
         target = P(1, "بلوار سعدی", 100)
         cands = [P(2, "بلوار سعدی", None), P(3, "بلوار سعدی", 101)]
@@ -102,8 +112,10 @@ class TestTheQueryAndThePanel:
     def test_the_price_fence_is_in_the_query_not_after_the_first_300_rows(self):
         src = Path("app/services/match_service.py").read_text(encoding="utf-8")
         fn = src[src.index("async def similar_to_property"):src.index("async def matches_for_customer")]
-        assert "PRICE_BAND_WIDE" in fn and ".between(lo, hi)" in fn
+        assert "PRICE_BAND_WIDE" in fn and "_comparable_sql(prop.listing_type).between(lo, hi)" in fn
         assert "q.limit(SIMILAR_POOL)" in fn and "CANDIDATE_POOL" not in fn
+        sql = src[src.index("def _comparable_sql"):src.index("def rank_similar")]
+        assert "func.coalesce(Property.rent_price, 0) * RENT_TO_DEPOSIT" in sql
 
     def test_the_modal_groups_by_district_and_names_the_gap(self):
         js = Path("frontend/js/app.js").read_text(encoding="utf-8")

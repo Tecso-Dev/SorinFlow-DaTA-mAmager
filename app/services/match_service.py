@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from loguru import logger
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -96,6 +96,22 @@ def _price_of(p: Property) -> Optional[int]:
     """The comparable headline number for a listing."""
     if p.listing_type == "rent":
         return p.deposit or p.rent_price
+    return p.total_price or p.price
+
+
+# «تبدیل»: the market swaps roughly 30 million of deposit for one million of
+# monthly rent, so 350/10 and 350/25 are not the same price even though the
+# deposits match. Rentals are compared on this one figure.
+RENT_TO_DEPOSIT = 30
+
+
+def _comparable(p: Property) -> Optional[int]:
+    """One number to compare prices on: the total for a sale, the deposit
+    plus the converted rent for a rental."""
+    if p.listing_type == "rent":
+        if not (p.deposit or p.rent_price):
+            return None
+        return (p.deposit or 0) + (p.rent_price or 0) * RENT_TO_DEPOSIT
     return p.total_price or p.price
 
 
@@ -382,11 +398,12 @@ def _brief(p: Property, score: int, reasons: List[str]) -> Dict[str, Any]:
     }
 
 
-def _price_columns(listing_type: Optional[str]):
-    """The columns that carry the headline number for this deal type."""
+def _comparable_sql(listing_type: Optional[str]):
+    """_comparable() as a SQL expression, so the fence is in the query."""
     if listing_type == "rent":
-        return (Property.deposit, Property.rent_price)
-    return (Property.total_price, Property.price)
+        return (func.coalesce(Property.deposit, 0)
+                + func.coalesce(Property.rent_price, 0) * RENT_TO_DEPOSIT)
+    return func.coalesce(Property.total_price, Property.price)
 
 
 def rank_similar(prop: Property, cands, limit: int = 12) -> List[Dict[str, Any]]:
@@ -399,7 +416,7 @@ def rank_similar(prop: Property, cands, limit: int = 12) -> List[Dict[str, Any]]
     have fewer than MIN_CLOSE listings, so a lead in a well-covered street
     never sees the other side of town.
     """
-    tp = _price_of(prop)
+    tp = _comparable(prop)
     tkey = district_key(prop.district) or district_key(prop.neighborhood)
     target_family = property_family(prop)
     rows = []
@@ -408,7 +425,7 @@ def rank_similar(prop: Property, cands, limit: int = 12) -> List[Dict[str, Any]]
             continue
         if target_family and property_family(c) not in (None, target_family):
             continue
-        cp = _price_of(c)
+        cp = _comparable(c)
         # relative to THIS listing's price: 150 against 100 is 50% off, not 33%
         gap = abs(tp - cp) / tp if tp and cp else None
         if gap is not None and gap > PRICE_BAND_WIDE:
@@ -431,8 +448,8 @@ def rank_similar(prop: Property, cands, limit: int = 12) -> List[Dict[str, Any]]
         b["same_district"] = r["same_district"]
         b["price_gap_pct"] = round(r["gap"] * 100) if r["gap"] is not None else None
         b["price_direction"] = (None if r["gap"] is None or not tp
-                                else "higher" if (_price_of(r["cand"]) or 0) > tp
-                                else "lower" if (_price_of(r["cand"]) or 0) < tp else "same")
+                                else "higher" if (_comparable(r["cand"]) or 0) > tp
+                                else "lower" if (_comparable(r["cand"]) or 0) < tp else "same")
         out.append(b)
     return out
 
@@ -452,11 +469,10 @@ async def similar_to_property(db: AsyncSession, prop: Property, limit: int = 12,
     # The outer fence goes into the query, so the pool is the listings that
     # could be offered at all — not the first 300 rows of the city, which is
     # what it used to be, and which missed most of the same street.
-    tp = _price_of(prop)
+    tp = _comparable(prop)
     if tp:
         lo, hi = int(tp * (1 - PRICE_BAND_WIDE)), int(tp * (1 + PRICE_BAND_WIDE))
-        a, b = _price_columns(prop.listing_type)
-        q = q.where(or_(a.between(lo, hi), b.between(lo, hi)))
+        q = q.where(_comparable_sql(prop.listing_type).between(lo, hi))
     cands = (await db.execute(q.limit(SIMILAR_POOL))).scalars().all()
     results = rank_similar(prop, cands, limit)
 
