@@ -2,7 +2,7 @@
 SorinFlow CRM — database models
 Contact, Deal, Note, Task, Reminder, SmsLog, Customer
 """
-from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Text, ForeignKey, DateTime, JSON
+from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Text, ForeignKey, DateTime, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -590,6 +590,42 @@ class CalendarEvent(Base):
             "sms_reminder": bool(self.sms_reminder),
             "sms_sent": bool(self.sms_sent),
             "created_by": self.created_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class CustomerMatch(Base):
+    """تطبیق خودکار — a listing that fits a customer's criteria, found by the
+    engine the moment the listing arrived, waiting for a consultant to ring.
+
+    One row per (listing, customer). The score and the reasons are frozen at
+    match time so the card says what the engine saw; `consultant` is the
+    customer's consultant then, which is who the card is for.
+    """
+    __tablename__ = "crm_customer_matches"
+    __table_args__ = (UniqueConstraint("property_id", "customer_id", name="uq_customer_match"),)
+
+    STATUSES = ("new", "contacted", "dismissed")
+
+    id = Column(Integer, primary_key=True, index=True)
+    property_id = Column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_id = Column(Integer, ForeignKey("crm_customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    score = Column(Integer, nullable=False, default=0)
+    reasons = Column(JSON, default=list)
+    consultant = Column(String(200), index=True)
+    status = Column(String(20), default="new", index=True)
+    decided_by = Column(String(200))
+    decided_at = Column(DateTime(timezone=True))
+    notified_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "property_id": self.property_id, "customer_id": self.customer_id,
+            "score": self.score, "reasons": self.reasons or [], "consultant": self.consultant,
+            "status": self.status, "decided_by": self.decided_by,
+            "decided_at": self.decided_at.isoformat() if self.decided_at else None,
+            "notified_at": self.notified_at.isoformat() if self.notified_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

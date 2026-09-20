@@ -193,6 +193,9 @@ class Settings(BaseSettings):
     apk_mirror_hours: float = Field(default=6, env="APK_MIRROR_HOURS")
     # Saved scrapes fire themselves at their hour (scrape_scheduler.py).
     scrape_scheduler: bool = Field(default=True, env="SCRAPE_SCHEDULER")
+    # New listings are scored against every customer's criteria as they arrive
+    # (app/crm/match_engine.py); the matches wait on the call queue.
+    match_engine: bool = Field(default=True, env="MATCH_ENGINE")
     logs_path: str = "/app/logs"
     
     # Divar URLs

@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260920f">
+    <link rel="stylesheet" href="css/style.css?v=20260920g">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -1487,7 +1487,7 @@
 
                 <!-- CRM Tab Nav -->
                 <ul class="nav nav-tabs mb-3 flex-wrap" id="crm-main-tabs" role="tablist">
-                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#crm-tab-calls" type="button"><i class="bi bi-telephone-outbound"></i> تماس‌های امروز <span class="badge bg-primary ms-1 d-none" id="calls-due-badge">۰</span></button></li>
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#crm-tab-calls" type="button"><i class="bi bi-telephone-outbound"></i> تماس‌های امروز <span class="badge bg-primary ms-1 d-none" id="calls-due-badge">۰</span><span class="badge bg-info text-dark ms-1 d-none" id="matches-due-badge" title="تطبیق‌های تازه">۰</span></button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-tasks" type="button"><i class="bi bi-check2-square"></i> وظایف</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-filing" type="button"><i class="bi bi-archive"></i> کمد و زونکن</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#crm-tab-calendar" type="button"><i class="bi bi-calendar3"></i> تقویم</button></li>
@@ -1506,6 +1506,29 @@
 
                     <!-- ── CALLS: the day's list, one tap per outcome ── -->
                     <div class="tab-pane fade show active" id="crm-tab-calls" role="tabpanel">
+                        <!-- موتور تطبیق خودکار: every new listing is scored against the customers'
+                             criteria as it arrives; the fits wait here for a call -->
+                        <div class="card mb-3" id="matches-card">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <span><i class="bi bi-bullseye"></i> مشتری‌هایی که دنبال آگهی‌های تازه بودند
+                                    <span id="matches-count" class="badge bg-secondary ms-1" style="font-size:.7rem"></span>
+                                </span>
+                                <div class="d-flex gap-2 align-items-center flex-wrap">
+                                    <span class="small text-muted" id="matches-stats"></span>
+                                    <button class="btn btn-sm btn-outline-primary crm-superadmin-only" onclick="runMatchesNow()" title="یک دور بررسی همین حالا">
+                                        <i class="bi bi-lightning-charge"></i> بررسی الان
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="loadMatches()" title="تازه‌سازی"><i class="bi bi-arrow-clockwise"></i></button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="cq-intro small text-muted mb-3">
+                                    هر آگهی تازه که اسکرپ می‌شود، خودکار با معیارهای مشتری‌ها (شهر، منطقه، نوع، بودجه، متراژ، خواب) سنجیده می‌شود.
+                                    چیزی که خوب بخواند اینجا می‌آید — و اگر تلگرام تنظیم باشد، همان لحظه پیام می‌رود. یک تماس، یک دکمه.
+                                </div>
+                                <div id="matches-list"><div class="text-muted small">در حال بارگذاری…</div></div>
+                            </div>
+                        </div>
                         <div class="card">
                             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <span><i class="bi bi-telephone-outbound"></i> تماس‌های امروز من
@@ -4715,7 +4738,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260920f"></script>
+<script src="js/app.js?v=20260920g"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

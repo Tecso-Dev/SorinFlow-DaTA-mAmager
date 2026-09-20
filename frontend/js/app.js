@@ -1396,7 +1396,7 @@ function showSection(sectionName) {
         case 'forwarder':  loadForwarders(); loadForwarderLog(); break;
         case 'profile':    loadProfile(); break;
         case 'proxies':    loadProxies(); break;
-        case 'crm':        _applyCrmRoleVisibility(); loadCalls(); break;
+        case 'crm':        _applyCrmRoleVisibility(); loadCalls(); loadMatches(); break;
         case 'insights':   insTab(_insTab); break;
         case 'portal':     loadPortalRequests(); break;
         case 'monitoring': loadMonitoring(); loadClientErrors(); break;
@@ -8350,6 +8350,86 @@ async function loadCallsSummary() {
             `</tbody></table></div>`;
     } catch (_) { box.innerHTML = ''; }
 }
+// ── تطبیق خودکار: the engine's fits, one card per customer × listing ──
+async function loadMatches() {
+    const box = document.getElementById('matches-list');
+    if (!box) return;
+    try {
+        const [d, s] = await Promise.all([apiCall('/crm/matches?status=new&limit=40'), apiCall('/crm/matches/summary')]);
+        const items = d.items || [];
+        document.getElementById('matches-count').textContent = formatNumber(d.total || 0);
+        document.getElementById('matches-stats').textContent =
+            `هر ${formatNumber(s.every_minutes)} دقیقه · آستانهٔ ${formatNumber(s.min_score)}٪`;
+        const badge = document.getElementById('matches-due-badge');
+        if (badge) { badge.textContent = formatNumber(s.new || 0); badge.classList.toggle('d-none', !s.new); }
+        box.innerHTML = items.length
+            ? items.map(_matchQueueCard).join('')
+            : `<div class="cq-empty"><i class="bi bi-bullseye"></i> فعلاً آگهی تازه‌ای با معیار مشتری‌ها نخوانده.
+               ${s.cursor ? '' : 'اولین اسکرپ که تمام شود، موتور تطبیق شروع می‌کند.'}</div>`;
+    } catch (e) {
+        box.innerHTML = `<div class="text-danger small">${esc(e.message || 'خطا')}</div>`;
+    }
+}
+
+function _matchQueueCard(m) {
+    const p = m.property || {}, c = m.customer || {};
+    const price = p.listing_type === 'rent'
+        ? [p.deposit ? 'رهن ' + formatPrice(p.deposit) : '', p.rent_price ? 'اجاره ' + formatPrice(p.rent_price) : ''].filter(Boolean).join(' · ')
+        : (p.price ? formatPrice(p.price) : '');
+    const meta = [p.district || p.city_name, p.area ? `${formatNumber(p.area)} متر` : '', p.rooms != null ? `${formatNumber(p.rooms)} خواب` : '', price]
+        .filter(Boolean).map(esc).join(' · ');
+    const wants = [c.desired_district, c.desired_specs, c.budget_max ? 'تا ' + formatPrice(c.budget_max) : '']
+        .filter(Boolean).map(esc).join(' · ');
+    const temp = { hot: ['bg-danger', 'داغ'], warm: ['bg-warning text-dark', 'گرم'], cold: ['bg-secondary', 'سرد'] }[c.temperature] || ['bg-secondary', c.temperature || ''];
+    const reasons = (m.reasons || []).map(r => `<span class="mq-reason">${esc(r)}</span>`).join('');
+    return `<div class="cq-card mq-card" id="mq-${m.id}">
+        <div class="cq-head">
+            <a class="cq-phone" href="tel:${safeTel(c.mobile1 || '')}" dir="ltr"><i class="bi bi-telephone-fill"></i> ${esc(c.mobile1 || '—')}</a>
+            <div class="cq-title">
+                <div><b>${esc(c.full_name || 'مشتری')}</b> <span class="badge ${temp[0]}">${temp[1]}</span>
+                    ${c.consultant_name ? `<span class="badge bg-primary-subtle text-primary-emphasis">${esc(c.consultant_name)}</span>` : ''}
+                    <span class="text-muted small">می‌خواست: ${wants || '—'}</span></div>
+                <div class="mq-prop"><i class="bi bi-house-door"></i>
+                    <a href="#" onclick="event.preventDefault(); viewProperty(${p.id})">${esc(p.title || 'آگهی')}</a>
+                    ${p.serial_no ? `<span class="serial-badge">${formatSerial(p.serial_no)}</span>` : ''}</div>
+                <div class="cq-meta">${meta}</div>
+                <div class="mq-reasons">${reasons}</div>
+            </div>
+            <div class="cq-badges"><span class="mq-score" title="میزان همخوانی">${formatNumber(m.score)}٪</span></div>
+        </div>
+        <div class="cq-actions">
+            <button class="btn btn-sm btn-success" onclick="mqDecide(${m.id}, 'contacted')"><i class="bi bi-check-lg"></i> تماس گرفتم</button>
+            <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${p.id})"><i class="bi bi-eye"></i> جزئیات ملک</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="shareFile(${p.id})"><i class="bi bi-share"></i> ارسال برای مشتری</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="mqDecide(${m.id}, 'dismissed')"><i class="bi bi-x-lg"></i> مناسب نیست</button>
+        </div>
+    </div>`;
+}
+
+async function mqDecide(id, status) {
+    let note = null;
+    if (status === 'contacted') {
+        note = await askText({ icon: 'bi-chat-left-text', title: 'تماس گرفتم', okLabel: 'ثبت',
+            body: 'نتیجه در پروندهٔ مشتری ثبت می‌شود.', field: { label: 'یادداشت (اختیاری)', placeholder: 'مثلاً بازدید فردا ۱۰' } });
+        if (note === null) return;
+    }
+    try {
+        await apiCall(`/crm/matches/${id}/decide`, { method: 'POST', body: JSON.stringify({ status, note }) });
+        const card = document.getElementById(`mq-${id}`);
+        if (card) { card.classList.add('cq-done'); setTimeout(() => card.remove(), 350); }
+        showToast('ثبت شد', status === 'contacted' ? 'در پروندهٔ مشتری نوشته شد' : '', 'success');
+        setTimeout(loadMatches, 400);
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function runMatchesNow() {
+    try {
+        const r = await apiCall('/crm/matches/run', { method: 'POST' });
+        showToast('بررسی شد', `${formatNumber(r.scanned || 0)} آگهی سنجیده شد، ${formatNumber(r.matched || 0)} تطبیق تازه`, 'success');
+        loadMatches();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
 // ═══ End call queue ═══════════════════════════════════════════
 
 function _applyCrmRoleVisibility() {

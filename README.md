@@ -529,7 +529,7 @@ All application routes are mounted below `/api`.
 | `/api/auth` | Divar OTP login and cookie/session management — sessions are owned; status, refresh and logout act on the caller's own only |
 | `/api/scraper` | Jobs, filters, single-URL collection, scrape-time OTP, and the per-run event log (`/jobs/{id}/events`) |
 | `/api/properties` | Property search, detail, update, soft deletion, and export |
-| `/api/crm` | Leads, contacts, customers, tasks, deals, notes, reminders, SMS, DPA, reports — 65 endpoints, the largest router |
+| `/api/crm` | Leads, contacts, customers, tasks, deals, notes, reminders, SMS, DPA, reports, the call queue and the matching engine's queue (`/matches`) — the largest router |
 | `/api/filing` | Cabinets → binders → folders (کمد ← زونکن ← پوشه), files moved in bulk or edited in place, private ones included |
 | `/api/proxies` | Proxy CRUD, import, activation, connectivity tests, and bulk removal |
 | `/api/stats` | Dashboard totals, health, logs, job summaries, and trends |
@@ -976,7 +976,7 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 **Shipped 2026-09-15 → 19, outside the audit list:** the server moved to a new 8 GB box with a backup-and-rebuild runbook; per-user Divar sessions with several numbers per person; the profile page with avatars and email/phone verification; «فرستندهٔ پیامک» as its own permission with per-device secrets and the QR setup; the SorinFlow Forwarder Android app and its APK mirror; the offsite backup on the panel; saved scrape schedules; the CRM call queue; the panel as a PWA with every asset self-hosted and browser errors reported home; automatic rollback in CI.
 
-**Shipped 2026-09-20:** «ملک‌های مشابه» ranks district-first inside a ±35% price fence; one dark theme on every browser (`color-scheme` meta, `data-bs-theme`, Dark Reader locked out); a laptop scale — 15px on 1024–1199 px screens, 17–18px and a 1720px content cap on wide ones; the filing tab as an explorer with folders inside binders, drag-and-drop filing, shift-click selection and an edit-in-place modal; the members table; Telegram through a proxy; a second SIM per forwarder device (`sim_phone2`, `account2` in the setup QR, a device may answer for the numbers inside it) with the app at 3.2.0 firing slot-bound rules when the ROM does not name the SIM.
+**Shipped 2026-09-20:** «ملک‌های مشابه» ranks district-first inside a ±35% price fence; one dark theme on every browser (`color-scheme` meta, `data-bs-theme`, Dark Reader locked out); a laptop scale — 15px on 1024–1199 px screens, 17–18px and a 1720px content cap on wide ones; the filing tab as an explorer with folders inside binders, drag-and-drop filing, shift-click selection and an edit-in-place modal; the members table; Telegram through a proxy; a second SIM per forwarder device (`sim_phone2`, `account2` in the setup QR, a device may answer for the numbers inside it) with the app at 3.2.0 firing slot-bound rules when the ROM does not name the SIM; the automatic matching engine (`app/crm/match_engine.py`): every new listing scored against every customer's criteria as it arrives, the fits on the call queue and in the Telegram chat, one row per listing×customer (`crm_customer_matches`) — which found that a zero district overlap had been scoring as «unknown».
 
 ---
 

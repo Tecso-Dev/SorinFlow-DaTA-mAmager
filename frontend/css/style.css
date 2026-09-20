@@ -3451,6 +3451,24 @@ html[data-theme="light"] .table thead th {
   #section-properties .table td:nth-child(2) { white-space: normal; min-width: 180px }
 }
 
+/* ── تطبیق خودکار: the engine's cards on the call queue ─────── */
+.mq-card { border-right: 3px solid var(--accent2); }
+.mq-prop { font-size: .82rem; margin-top: .25rem; display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
+.mq-prop i { color: var(--accent2); }
+.mq-prop a { color: var(--text); text-decoration: none; font-weight: 600; }
+.mq-prop a:hover { color: #a5f3fc; }
+.mq-reasons { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .3rem; }
+.mq-reason {
+  font-size: .66rem; padding: .08rem .45rem; border-radius: 999px;
+  background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.3); color: #6ee7b7;
+}
+.mq-score {
+  font-weight: 800; font-size: 1.05rem; color: var(--accent2);
+  background: rgba(6,182,212,.12); border: 1px solid rgba(6,182,212,.3); border-radius: var(--r-sm); padding: .2rem .55rem;
+}
+[data-theme="light"] .mq-reason { color: #047857; }
+[data-theme="light"] .mq-score { color: #0e7490; }
+
 /* ── PWA install hint (sidebar footer, phones only) ─────────── */
 .pwa-hint {
   position: relative; margin-bottom: .55rem; padding: .55rem .7rem;

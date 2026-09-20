@@ -206,6 +206,11 @@ async def lifespan(app: FastAPI):
     from app.services.scrape_scheduler import scheduler_loop as _sched
     schedule_task = asyncio.create_task(_sched())
 
+    # Every new listing is scored against the customers' criteria; the fits
+    # land on the call queue and in the Telegram chat.
+    from app.crm.match_engine import engine_loop as _match_loop
+    match_task = asyncio.create_task(_match_loop())
+
     # Google Cloud export. Returns immediately when disabled, which is the
     # shipped default — and when enabled on a host that cannot reach Google it
     # backs off rather than retrying every interval.
@@ -218,6 +223,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    match_task.cancel()
     schedule_task.cancel()
     apk_task.cancel()
     reminder_task.cancel()

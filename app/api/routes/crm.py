@@ -18,7 +18,7 @@ from app.models.lead import Lead
 from app.models.property import Property, allocate_serial_no
 from app.models.crm_models import (
     Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance,
-    ActivityLog, CalendarEvent,
+    ActivityLog, CalendarEvent, CustomerMatch,
 )
 from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
@@ -709,6 +709,105 @@ async def calls_summary(days: int = Query(1, ge=1, le=90),
         select(func.count()).select_from(_queue_query(None).subquery()))).scalar_one()
     return {"days": days, "agents": sorted(per.values(), key=lambda x: -x["calls"]),
             "unassigned_due": queue_total}
+
+
+# ── تطبیق خودکار — the engine's matches, on the call queue ────────────────────
+# A consultant sees the matches for their own customers (and for customers
+# nobody is assigned to); root and super_admin see everybody's.
+
+def _matches_visible_to(query, user):
+    if getattr(user, "role", None) in ("root", "super_admin"):
+        return query
+    agent = _agent_name(user)
+    return query.where(or_(CustomerMatch.consultant.is_(None), CustomerMatch.consultant == "",
+                           CustomerMatch.consultant == agent))
+
+
+class MatchDecisionIn(_BaseModel):
+    status: str
+    note: Optional[str] = None
+
+
+@router.get("/matches")
+async def list_matches(status: str = "new", limit: int = Query(40, ge=1, le=200),
+                       db: AsyncSession = Depends(get_db),
+                       current_user: User = Depends(get_current_user)):
+    """The listings that fit somebody's criteria, newest and strongest first,
+    with the listing and the customer beside each so the card is one call."""
+    if status not in CustomerMatch.STATUSES and status != "all":
+        raise HTTPException(status_code=400, detail="وضعیت نامعتبر است")
+    q = _matches_visible_to(select(CustomerMatch), current_user)
+    if status != "all":
+        q = q.where(CustomerMatch.status == status)
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
+    rows = (await db.execute(q.order_by(CustomerMatch.created_at.desc(), CustomerMatch.score.desc())
+                             .limit(limit))).scalars().all()
+    props = {p.id: p for p in (await db.execute(select(Property).where(
+        Property.id.in_({r.property_id for r in rows} or {0})))).scalars().all()}
+    custs = {c.id: c for c in (await db.execute(select(Customer).where(
+        Customer.id.in_({r.customer_id for r in rows} or {0})))).scalars().all()}
+    from app.services.match_service import _price_of
+    items = []
+    for r in rows:
+        p, c = props.get(r.property_id), custs.get(r.customer_id)
+        if not p or not c:
+            continue
+        d = r.to_dict()
+        d["property"] = {"id": p.id, "serial_no": p.serial_no, "title": p.title, "url": p.url,
+                         "city_name": p.city_name, "district": p.district, "area": p.area, "rooms": p.rooms,
+                         "listing_type": p.listing_type, "price": _price_of(p), "deposit": p.deposit,
+                         "rent_price": p.rent_price, "phone_number": p.phone_number,
+                         "thumbnail_url": p.thumbnail_url, "created_at": p.created_at.isoformat() if p.created_at else None}
+        d["customer"] = {"id": c.id, "full_name": c.full_name, "mobile1": c.mobile1, "mobile2": c.mobile2,
+                         "temperature": c.temperature, "consultant_name": c.consultant_name,
+                         "budget_max": c.budget_max, "desired_district": c.desired_district,
+                         "desired_specs": c.desired_specs, "deal_type": c.deal_type}
+        items.append(d)
+    return {"items": items, "total": total, "agent": _agent_name(current_user)}
+
+
+@router.get("/matches/summary")
+async def matches_summary(db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    q = _matches_visible_to(select(func.count(CustomerMatch.id)).where(CustomerMatch.status == "new"), current_user)
+    from app.crm import match_engine as _me
+    cursor = await _me._cursor(db)
+    return {"new": (await db.execute(q)).scalar_one(), "cursor": cursor,
+            "min_score": _me.MIN_SCORE, "every_minutes": _me.TICK_SECONDS // 60}
+
+
+@router.post("/matches/{match_id}/decide")
+async def decide_match(match_id: int, data: MatchDecisionIn,
+                       db: AsyncSession = Depends(get_db),
+                       current_user: User = Depends(get_current_user)):
+    """«تماس گرفتم» or «رد» — the card leaves the queue and the customer's
+    timeline says who did what."""
+    if data.status not in ("contacted", "dismissed", "new"):
+        raise HTTPException(status_code=400, detail="وضعیت نامعتبر است")
+    row = (await db.execute(_matches_visible_to(
+        select(CustomerMatch).where(CustomerMatch.id == match_id), current_user))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="تطبیق یافت نشد")
+    actor = _agent_name(current_user)
+    row.status = data.status
+    row.decided_by = actor if data.status != "new" else None
+    row.decided_at = _now_utc() if data.status != "new" else None
+    if data.status == "contacted":
+        prop = await db.get(Property, row.property_id)
+        _log_activity(db, "customer", row.customer_id, "match_call",
+                      f"تماس دربارهٔ ملک {prop.serial_no if prop else row.property_id}"
+                      + (f" — {data.note.strip()}" if data.note and data.note.strip() else ""), actor)
+    await db.commit()
+    return row.to_dict()
+
+
+@router.post("/matches/run")
+async def run_matches_now(db: AsyncSession = Depends(get_db),
+                          current_user: User = require_super_admin):
+    """One pass of the engine right now — for the button, and for the first
+    run after the customers were entered."""
+    from app.crm import match_engine as _me
+    return await _me.run_once(db)
 
 
 @router.post("/leads/{lead_id}/notify")

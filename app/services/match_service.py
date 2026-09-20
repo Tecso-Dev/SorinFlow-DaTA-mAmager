@@ -279,13 +279,25 @@ def score_for_customer(customer, cand: Property) -> Dict[str, Any]:
                 budget_penalty = max(0.15, 1 - (over - 0.10) * 1.6)
                 reasons.append("بالاتر از بودجه")
 
-    loc = _text_overlap(customer.desired_district, cand.district) \
-        or _text_overlap(customer.desired_district, cand.neighborhood) \
-        or _text_overlap(customer.desired_district, cand.address)
+    # The best of the three places a district can be written. Chained with
+    # `or`, a zero overlap on the district fell through to the (empty)
+    # neighbourhood and address and came back None — so a listing in the
+    # WRONG district scored as if the district were unknown, and the engine
+    # rang a گلها customer about a سعدی flat.
+    known = [o for o in (_text_overlap(customer.desired_district, cand.district),
+                         _text_overlap(customer.desired_district, cand.neighborhood),
+                         _text_overlap(customer.desired_district, cand.address)) if o is not None]
+    loc = max(known) if known else None
+    district_penalty = 1.0
     if loc is not None:
         parts.append((30, loc, ""))
         if loc > 0.3:
             reasons.append("منطقه درخواستی")
+        elif loc == 0:
+            # they named a district and this is not it: a real reason to
+            # rank it low, not a missing criterion
+            district_penalty = 0.6
+            reasons.append("منطقهٔ دیگر")
 
     # desired_specs is free text like «۱۰۰ متر / ۲ خواب» — pull numbers out
     specs = str(customer.desired_specs or "")
@@ -310,7 +322,7 @@ def score_for_customer(customer, cand: Property) -> Dict[str, Any]:
     # a budget cannot produce a 100% match, and neither can a listing whose
     # area was never recorded.
     coverage = 0.55 + 0.45 * (total_w / 100)
-    score = sum(w * v for w, v, _r in parts) / total_w * 100 * budget_penalty * coverage
+    score = sum(w * v for w, v, _r in parts) / total_w * 100 * budget_penalty * district_penalty * coverage
 
     # red lines act as a hard-ish filter
     red = str(customer.red_lines or "")
