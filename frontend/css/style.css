@@ -2480,41 +2480,122 @@ body.filing-dragging .ftree-node, body.filing-dragging .folder-chip { outline: 1
 }
 .filing-advanced .form-label { font-size: .7rem; margin-bottom: .15rem; color: var(--text-muted); }
 
-/* ── لیست کاربران: rows that wrap, never a sideways scroll ──────────────────
-   Ten columns in a two-thirds card cut the username off one end and the
-   actions off the other on every laptop. One row per account instead:
-   who · details · actions, each zone free to wrap. */
-.user-list { display: flex; flex-direction: column; container-type: inline-size; }
-.user-row {
-  display: grid; grid-template-columns: minmax(170px, 1fr) minmax(0, 1.6fr) auto;
-  gap: .6rem 1rem; align-items: start; padding: .8rem 1rem;
-  border-bottom: 1px solid var(--border-soft);
+/* ── اعضای تیم: the members table ─────────────────────────────────────────
+   Full width, one line per account, quiet pills, a menu instead of a row
+   of coloured buttons. The card scrolls nowhere: below 900px the rows
+   turn into stacked cards. */
+.users-toolbar { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: center; }
+.users-title { display: flex; align-items: center; gap: .45rem; font-weight: 700; }
+.users-count {
+  font-size: .68rem; font-weight: 600; color: var(--text-dim);
+  background: var(--surface3); border-radius: 999px; padding: .1rem .55rem;
 }
-.user-row:last-child { border-bottom: 0; }
-.user-row:hover { background: rgba(99,102,241,.04); }
-.user-row.is-off { opacity: .6; }
-.ur-who { display: flex; gap: .6rem; align-items: flex-start; min-width: 0; }
-.ur-names { min-width: 0; }
-.ur-name { font-weight: 700; color: var(--text); display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
-.ur-sub { font-size: .74rem; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: .15rem; }
-.ur-name, .ur-sub > span[dir="ltr"] { overflow-wrap: anywhere; min-width: 0; }
-.ur-details { display: flex; flex-direction: column; gap: .25rem; min-width: 0; font-size: .8rem; }
-.ur-line { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; color: var(--text-dim); }
-.ur-line > i { color: var(--text-muted); }
-.ur-val { overflow-wrap: anywhere; }
-.ur-contact { display: flex; flex-direction: column; gap: .2rem; }
-.ur-warn { white-space: normal; text-align: right; align-self: flex-start; }
-.ur-perms { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .2rem; }
-.ur-perms .badge { margin: 0 !important; }
-.ur-actions { display: flex; flex-wrap: wrap; gap: .3rem; justify-content: flex-end; max-width: 190px; }
-.ur-actions .btn { white-space: nowrap; }
-/* keyed on the card, not the window: the list lives in a two-thirds column */
-@container (max-width: 720px) {
-  .user-row { grid-template-columns: minmax(160px, 1fr) minmax(0, 1.4fr); }
-  .ur-actions { grid-column: 1 / -1; justify-content: flex-start; max-width: none; }
+.users-filters { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; margin-inline-start: auto; }
+.users-filters .form-select { width: auto; min-width: 140px; }
+.users-search {
+  display: flex; align-items: center; gap: .4rem; min-width: 220px;
+  background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: .3rem .6rem; color: var(--text-muted); transition: border-color .15s;
 }
-@container (max-width: 460px) {
-  .user-row { grid-template-columns: 1fr; }
+.users-search:focus-within { border-color: var(--accent); color: var(--text-dim); }
+.users-search input {
+  flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text);
+  font-size: .8rem; outline: 0; font-family: inherit;
+}
+.users-search input::placeholder { color: var(--text-muted); }
+
+.users-table { table-layout: auto; }
+.users-table > thead > tr > th { padding: .6rem 1rem; }
+.users-table > tbody > tr > td { padding: .8rem 1rem; vertical-align: middle; }
+.users-table .u-menu-th { width: 48px; }
+.u-row.is-off .u-who, .u-row.is-off .u-contact, .u-row.is-off .u-perms { opacity: .55; }
+.u-id { display: flex; align-items: center; gap: .65rem; min-width: 0; }
+.u-names { min-width: 0; }
+.u-name { font-weight: 700; color: var(--text); display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.u-you {
+  font-size: .62rem; font-weight: 600; color: var(--accent2);
+  background: rgba(6,182,212,.12); border: 1px solid rgba(6,182,212,.3);
+  border-radius: 999px; padding: 0 .45rem; line-height: 1.5;
+}
+.u-handle { font-size: .72rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.u-headline { font-size: .7rem; color: var(--text-muted); }
+.u-muted { color: var(--text-muted); font-size: .78rem; }
+
+/* role pills — one hue per role, all quiet */
+.pill {
+  display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap;
+  font-size: .72rem; font-weight: 600; line-height: 1; padding: .38rem .65rem;
+  border-radius: 999px; border: 1px solid transparent;
+  --p: var(--text-muted);
+  color: var(--p); background: color-mix(in srgb, var(--p) 12%, transparent);
+  border-color: color-mix(in srgb, var(--p) 28%, transparent);
+}
+.pill.role-root        { --p: #a78bfa; }
+.pill.role-super_admin { --p: #fbbf24; }
+.pill.role-admin       { --p: #60a5fa; }
+.pill.role-visitor     { --p: #94a3b8; }
+.u-perms-pill {
+  font: inherit; font-size: .74rem; color: var(--text-dim); cursor: pointer;
+  background: var(--surface3); border: 1px solid var(--border); border-radius: 999px;
+  padding: .28rem .6rem; display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap;
+}
+.u-perms-pill:hover { color: var(--text); border-color: var(--accent); }
+.u-perms-pill i { font-size: .6rem; }
+
+/* contact lines with a proof dot, not a yellow badge */
+.u-contact { font-size: .78rem; }
+.u-line { display: flex; align-items: center; gap: .4rem; color: var(--text-dim); line-height: 1.7; }
+.u-line > i.bi { color: var(--text-muted); font-size: .8rem; }
+.u-val { overflow-wrap: anywhere; }
+.u-tick { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+.u-tick.ok { background: var(--accent3); box-shadow: 0 0 0 3px rgba(16,185,129,.15); }
+.u-tick.no { background: var(--warning); box-shadow: 0 0 0 3px rgba(245,158,11,.15); }
+.u-divar .u-muted { font-size: .68rem; }
+.u-nudge { font-size: .72rem; }
+.badge.u-warn {
+  white-space: normal; text-align: right; font-weight: 500; font-size: .68rem;
+  background: rgba(239,68,68,.14) !important; color: #fca5a5; border: 1px solid rgba(239,68,68,.35);
+}
+[data-theme="light"] .badge.u-warn { color: #b91c1c; }
+
+/* state: a dot and a word */
+.u-state { display: inline-flex; align-items: center; gap: .4rem; font-size: .78rem; color: var(--text-dim); white-space: nowrap; }
+.u-state i { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.u-state.on i { background: var(--accent3); box-shadow: 0 0 0 3px rgba(16,185,129,.15); }
+.u-login { font-size: .76rem; color: var(--text-muted); white-space: nowrap; }
+
+/* the menu */
+.u-kebab {
+  width: 32px; height: 32px; border-radius: 8px; border: 1px solid transparent; background: transparent;
+  color: var(--text-muted); display: inline-flex; align-items: center; justify-content: center;
+}
+.u-kebab:hover, .u-kebab[aria-expanded="true"] { background: var(--surface3); color: var(--text); border-color: var(--border); }
+.dropdown-menu {
+  --bs-dropdown-bg: var(--surface2); --bs-dropdown-color: var(--text);
+  --bs-dropdown-border-color: var(--border); --bs-dropdown-link-color: var(--text-dim);
+  --bs-dropdown-link-hover-color: var(--text); --bs-dropdown-link-hover-bg: rgba(99,102,241,.12);
+  --bs-dropdown-divider-bg: var(--border); --bs-dropdown-border-radius: var(--r-sm);
+  font-size: .8rem; box-shadow: var(--shadow); text-align: right; min-width: 190px;
+}
+.dropdown-item { display: flex; align-items: center; gap: .5rem; }
+.dropdown-item i { width: 1rem; text-align: center; color: var(--text-muted); }
+.dropdown-item.text-danger i { color: inherit; }
+.users-empty { text-align: center; color: var(--text-muted); padding: 2.5rem 1rem; }
+.users-empty i { font-size: 2rem; display: block; margin-bottom: .5rem; }
+
+/* narrow: each row becomes a card, the menu in its corner */
+@media (max-width: 900px) {
+  .users-table thead { display: none; }
+  .users-table, .users-table tbody, .users-table tr { display: block; }
+  .users-table tr { position: relative; padding: .8rem 1rem; border-bottom: 1px solid var(--border-soft); }
+  .users-table > tbody > tr > td { display: flex; gap: .6rem; align-items: flex-start; padding: .25rem 0; border: 0; }
+  .users-table td[data-l]::before { content: attr(data-l); flex: 0 0 70px; color: var(--text-muted); font-size: .72rem; padding-top: .2rem; }
+  .users-table td.u-who { padding-bottom: .5rem; padding-inline-start: 0; }
+  .users-table td.u-menu { position: absolute; top: .55rem; left: .6rem; padding: 0; }
+  /* the label sits beside the first line; every contact line stacks under it */
+  .users-table td.u-contact { display: grid; grid-template-columns: 70px 1fr; gap: 0 .6rem; align-items: start; }
+  .users-table td.u-contact::before { grid-row: 1 / span 9; }
+  .users-table td.u-contact > * { grid-column: 2; }
 }
 
 /* ── Permission toggles (super_admin user editor) ─────────────────────────── */

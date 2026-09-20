@@ -70,23 +70,48 @@ class TestThePriceColumn:
 
 class TestTheUsersList:
     """Ten columns in a two-thirds card scrolled sideways and cut the username
-    off one end and the actions off the other (screenshot, 2026-09-20). One
-    row per account now, three zones that wrap — keyed on the card's own
-    width, because the list lives in a column, not in the window."""
+    off one end and the actions off the other (screenshot, 2026-09-20). Now a
+    full-width members table — who, role, access, contact, state, last login,
+    a menu — with the create form in a modal, and stacked cards below 900px."""
 
-    def test_it_is_rows_not_a_scrolling_table(self):
+    def test_it_is_a_full_width_table_with_the_form_in_a_modal(self):
         html = Path("frontend/index.html").read_text(encoding="utf-8")
-        blk = html[html.index("لیست کاربران"):html.index('id="users-table"') + 40]
-        assert "table-responsive" not in blk and "<table" not in blk
-        assert 'class="user-list" id="users-table"' in html
-        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
-        fn = js[js.index("async function loadUsers()"):js.index("async function openPermsEditor")]
-        assert "row.className = 'user-row'" in fn and "<td>" not in fn
-        for zone in ("ur-who", "ur-details", "ur-actions"):
-            assert f'class="{zone}"' in fn
+        sec = html[html.index('id="section-users"'):html.index('<!-- /.content-wrapper -->')]
+        assert 'class="table users-table"' in sec and 'id="users-table"' in sec
+        assert "table-responsive" not in sec[sec.index("users-card"):]
+        assert 'id="user-create-form"' not in sec, "the form lives in the modal now"
+        modal = html[html.index('id="newUserModal"'):html.index('id="cabinetModal"')]
+        assert 'id="user-create-form"' in modal and 'id="new-perms-box"' in modal
+        assert 'onclick="openNewUserModal()"' in sec
 
-    def test_the_zones_wrap_by_the_cards_width(self):
-        assert "container-type: inline-size" in _block(".user-list {")
-        assert "@container (max-width: 720px)" in CSS and "@container (max-width: 460px)" in CSS
-        assert "grid-column: 1 / -1" in _block("@container (max-width: 720px)")
-        assert "overflow-wrap: anywhere" in CSS[CSS.index(".ur-name,"):CSS.index(".ur-details")]
+    def test_search_and_filters_are_client_side(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("function renderUsers()"):js.index("function _userRow(u)")]
+        assert "users-search" in fn and "users-role-filter" in fn and "users-state-filter" in fn
+        assert "_usersAll.filter(" in fn
+        assert 'id="users-count"' in Path("frontend/index.html").read_text(encoding="utf-8")
+
+    def test_one_menu_per_row_instead_of_four_buttons(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("function _userRow(u)"):js.index("// Change an existing account's role")]
+        assert 'data-bs-toggle="dropdown"' in fn and "dropdown-item" in fn and fn.count("item(`") >= 4
+        assert "btn-outline-warning" not in fn and "btn-outline-danger" not in fn
+        # root is never edited from here; nobody deletes their own account
+        assert "u.role !== 'root' ? item(`openPermsEditor" in fn
+        assert "!isSelf && u.role !== 'root' ? '<li><hr class=\"dropdown-divider\"></li>' +" in fn
+
+    def test_the_pills_are_quiet_and_the_menu_is_dark(self):
+        assert ".pill.role-root" in CSS and ".pill.role-visitor" in CSS
+        blk = _block(".pill {")
+        assert "color-mix(in srgb, var(--p) 12%, transparent)" in blk
+        assert "--bs-dropdown-bg: var(--surface2)" in _block(".dropdown-menu {")
+        assert "--bs-" not in _block(".u-kebab {")
+
+    def test_below_900px_the_rows_are_cards(self):
+        blk = CSS[CSS.index("/* narrow: each row becomes a card"):]
+        blk = blk[:blk.index("/* ── Permission toggles")]
+        assert "@media (max-width: 900px)" in blk
+        assert ".users-table thead { display: none; }" in blk
+        assert "content: attr(data-l)" in blk
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert 'data-l="تماس"' in js and 'data-l="نقش"' in js

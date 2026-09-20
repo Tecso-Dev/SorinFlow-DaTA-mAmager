@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260920c">
+    <link rel="stylesheet" href="css/style.css?v=20260920d">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -3425,67 +3425,56 @@
                         </div>
                     </div>
                 </div>
-                <div class="row g-3">
-                    <div class="col-md-4">
-                        <div class="card">
-                            <div class="card-header">
+                <!-- اعضای تیم — one full-width table: who, role, access, contact, state,
+                     last login, and a menu. The create form lives in a modal. -->
+                <div class="card users-card">
+                    <div class="card-header users-toolbar">
+                        <div class="users-title">
+                            <i class="bi bi-people"></i> اعضای تیم
+                            <span class="users-count" id="users-count">۰</span>
+                        </div>
+                        <div class="users-filters">
+                            <label class="users-search">
+                                <i class="bi bi-search"></i>
+                                <input type="search" id="users-search" placeholder="نام، نام کاربری، ایمیل…" oninput="renderUsers()" autocomplete="off">
+                            </label>
+                            <select id="users-role-filter" class="form-select form-select-sm" onchange="renderUsers()">
+                                <option value="">همهٔ نقش‌ها</option>
+                                <option value="root">Root</option>
+                                <option value="super_admin">مدیر ارشد</option>
+                                <option value="admin">مدیر</option>
+                                <option value="visitor">بازدیدکننده</option>
+                            </select>
+                            <select id="users-state-filter" class="form-select form-select-sm" onchange="renderUsers()">
+                                <option value="">فعال و غیرفعال</option>
+                                <option value="active">فقط فعال</option>
+                                <option value="inactive">فقط غیرفعال</option>
+                            </select>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="loadUsers()" title="بازخوانی">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                            <button class="btn btn-sm btn-primary" onclick="openNewUserModal()">
                                 <i class="bi bi-person-plus"></i> کاربر جدید
-                            </div>
-                            <div class="card-body">
-                                <form id="user-create-form">
-                                    <div class="mb-2">
-                                        <label class="form-label">نام کاربری</label>
-                                        <input type="text" id="new-username" class="form-control form-control-sm" required
-                                               autocomplete="off">
-                                    </div>
-                                    <div class="mb-2">
-                                        <label class="form-label">نام کامل</label>
-                                        <input type="text" id="new-fullname" class="form-control form-control-sm" autocomplete="off">
-                                    </div>
-                                    <div class="mb-2">
-                                        <label class="form-label">ایمیل</label>
-                                        <input type="email" id="new-email" class="form-control form-control-sm" autocomplete="off">
-                                    </div>
-                                    <div class="mb-2">
-                                        <label class="form-label">رمز عبور</label>
-                                        <input type="password" id="new-password" class="form-control form-control-sm" required
-                                               autocomplete="new-password">
-                                    </div>
-                                    <div class="mb-2">
-                                        <label class="form-label">نقش</label>
-                                        <select id="new-role" class="form-select form-select-sm" onchange="syncNewUserPerms()">
-                                            <option value="admin">مدیر — دسترسی‌های انتخابی</option>
-                                            <option value="visitor">بازدیدکننده — فقط پورتال</option>
-                                        </select>
-                                    </div>
-                                    <div class="mb-2" id="new-perms-wrap">
-                                        <label class="form-label">دسترسی‌ها</label>
-                                        <div id="new-perms-box" class="perm-box"></div>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="form-label">شماره دیوار <small class="text-muted">(اختیاری)</small></label>
-                                        <input type="text" id="new-divar-phone" class="form-control form-control-sm"
-                                               placeholder="09xxxxxxxxx" autocomplete="off">
-                                    </div>
-                                    <button type="submit" class="btn btn-primary btn-w100 btn-sm">
-                                        <i class="bi bi-plus-circle"></i> ساخت کاربر
-                                    </button>
-                                </form>
-                            </div>
+                            </button>
                         </div>
                     </div>
-                    <div class="col-md-8">
-                        <div class="card">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <span><i class="bi bi-people"></i> لیست کاربران</span>
-                                <button class="btn btn-outline-secondary btn-sm" onclick="loadUsers()">
-                                    <i class="bi bi-arrow-clockwise"></i>
-                                </button>
-                            </div>
-                            <!-- one row per account: who · details · actions. It wraps, never scrolls
-                                 sideways — ten columns in a two-thirds card did. -->
-                            <div class="user-list" id="users-table"></div>
-                        </div>
+                    <table class="table users-table">
+                        <thead>
+                            <tr>
+                                <th>کاربر</th>
+                                <th>نقش</th>
+                                <th>دسترسی</th>
+                                <th>تماس</th>
+                                <th>وضعیت</th>
+                                <th>آخرین ورود</th>
+                                <th class="u-menu-th"><span class="visually-hidden">عملیات</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table"></tbody>
+                    </table>
+                    <div id="users-empty" class="users-empty d-none">
+                        <i class="bi bi-person-x"></i>
+                        <p>کاربری با این فیلتر پیدا نشد.</p>
                     </div>
                 </div>
             </div>
@@ -3916,6 +3905,59 @@
                     <i class="bi bi-chat-dots"></i> پیامک
                 </button>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">بستن</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- کاربر جدید — the create form, opened from the members table -->
+<div class="modal fade" id="newUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-person-plus"></i> کاربر جدید</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="user-create-form">
+                <div class="mb-2">
+                    <label class="form-label">نام کاربری</label>
+                    <input type="text" id="new-username" class="form-control form-control-sm" required
+                           autocomplete="off">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">نام کامل</label>
+                    <input type="text" id="new-fullname" class="form-control form-control-sm" autocomplete="off">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">ایمیل</label>
+                    <input type="email" id="new-email" class="form-control form-control-sm" autocomplete="off">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">رمز عبور</label>
+                    <input type="password" id="new-password" class="form-control form-control-sm" required
+                           autocomplete="new-password">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">نقش</label>
+                    <select id="new-role" class="form-select form-select-sm" onchange="syncNewUserPerms()">
+                        <option value="admin">مدیر — دسترسی‌های انتخابی</option>
+                        <option value="visitor">بازدیدکننده — فقط پورتال</option>
+                    </select>
+                </div>
+                <div class="mb-2" id="new-perms-wrap">
+                    <label class="form-label">دسترسی‌ها</label>
+                    <div id="new-perms-box" class="perm-box"></div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">شماره دیوار <small class="text-muted">(اختیاری)</small></label>
+                    <input type="text" id="new-divar-phone" class="form-control form-control-sm"
+                           placeholder="09xxxxxxxxx" autocomplete="off">
+                </div>
+                <button type="submit" class="btn btn-primary btn-w100 btn-sm">
+                    <i class="bi bi-plus-circle"></i> ساخت کاربر
+                </button>
+                </form>
             </div>
         </div>
     </div>
@@ -4649,7 +4691,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260920c"></script>
+<script src="js/app.js?v=20260920d"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

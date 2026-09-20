@@ -7175,131 +7175,153 @@ const ROLE_LABELS = {
 
 let _usersById = {};
 
+let _usersAll = [];
+
 async function loadUsers() {
     try {
         const data = await apiCall('/users');
-        const tbody = document.getElementById('users-table');
-        tbody.innerHTML = '';
         _usersById = {};
+        _usersAll = data.items || [];
+        _usersAll.forEach(u => { _usersById[u.id] = u; });
         await loadPermCatalog();
-
-        data.items.forEach(u => {
-            _usersById[u.id] = u;
-            const rl = ROLE_LABELS[u.role] || { label: u.role, cls: 'bg-dark' };
-            const lastLogin = u.last_login
-                ? new Date(u.last_login).toLocaleDateString('fa-IR')
-                : '---';
-            const isSelf = u.username === _currentUser?.username;
-
-            // Every field below is attacker-reachable: a visitor picks their own
-            // full_name at public sign-up and it lands in this table the moment a
-            // super_admin opens the page. Unescaped, an <img onerror> here runs in
-            // the panel origin and the bearer token is in localStorage — so the
-            // whole row goes through esc(), and the phone is read from
-            // _usersById by id rather than interpolated into an onclick where a
-            // single quote would break out of the attribute.
-            const perms = (u.role === 'admin')
-                ? (u.permissions || []).map(k => {
-                    const c = (_permCatalog || []).find(x => x.key === k);
-                    return `<span class="badge bg-secondary-subtle text-body-secondary me-1">${esc(c ? c.label : k)}</span>`;
-                  }).join('') || '<span class="text-muted small">—</span>'
-                : '<span class="text-muted small">—</span>';
-
-            // Whether the number has actually been proven, said plainly.
-            //
-            // A code that arrives by email proves the address and nothing about
-            // the phone, and until there is an SMS provider that is every code
-            // we send. Someone about to ring this number needs to know which of
-            // the two they are looking at, so each contact carries its own tick.
-            const tick = (val, ok, okText, noText) => !val ? '' :
-                `<div class="ur-line"><i class="bi ${String(val).includes('@') ? 'bi-envelope' : 'bi-telephone'}"></i>
-                   <span dir="ltr" class="ur-val">${esc(val)}</span>
-                   <span class="badge ${ok ? 'bg-success' : 'bg-warning text-dark'}"
-                         title="${ok ? okText : noText}">${ok ? '✓' : '!'}</span>
-                 </div>`;
-            // Somebody with a stuck «!» can be asked to fix it from here — the
-            // one screen where the person who notices is already looking.
-            const unverified = (u.email && !u.email_verified) || (u.phone && !u.phone_verified);
-            const nudge = unverified && !isSelf ? `
-                <button class="btn btn-sm btn-link p-0 ms-1" onclick="nudgeVerify(${esc(u.id)})"
-                        title="درخواست تأیید ایمیل / شماره از خود کاربر">
-                    <i class="bi bi-send-check"></i>
-                </button>` : '';
-            const headline = u.headline ? `<div class="small text-muted">${esc(u.headline)}</div>` : '';
-            // Issue #13. Both recovery paths — password reset and the email
-            // second factor — refuse an account with no address, correctly:
-            // enabling a factor an account cannot receive would lock it out.
-            // But that leaves a super_admin with no address and no way back
-            // except psql, and nothing on this screen said so. A privileged
-            // account you cannot recover is a latent lockout; name it here,
-            // where the person who can fix it is already looking.
-            const privileged = ['root', 'super_admin', 'admin'].includes(u.role);
-            const noRecovery = privileged && !(u.email || '').trim() && u.is_active;
-            const contact =
-                (tick(u.phone, u.phone_verified, 'شماره با پیامک تأیید شده', 'شماره تأیید نشده — کدی با پیامک ارسال نشده است') +
-                 tick(u.email, u.email_verified, 'ایمیل تأیید شده', 'ایمیل تأیید نشده'))
-                || '<span class="text-muted small">---</span>';
-            const recoveryWarning = noRecovery ? `
-                <div class="badge bg-danger mt-1 ur-warn"
-                     title="بازنشانی رمز و تأیید دومرحله‌ای هر دو به ایمیل نیاز دارند. بدون آن، اگر رمز این حساب گم شود تنها راه برگشت پایگاه داده است.">
-                    <i class="bi bi-exclamation-triangle"></i> بدون ایمیل — قابل بازیابی نیست
-                </div>` : '';
-
-            // One row per account, three zones that wrap: who they are, how to
-            // reach them and what they may open, what can be done to them. A
-            // ten-column table in a two-thirds card scrolled sideways on every
-            // laptop and hid the username and the actions at both ends.
-            const row = document.createElement('div');
-            row.className = 'user-row' + (u.is_active ? '' : ' is-off');
-            row.innerHTML = `
-                <div class="ur-who">
-                    ${avatarHtml(u, 40)}
-                    <div class="ur-names">
-                        <div class="ur-name">${esc(u.full_name || u.username)}
-                            ${isSelf ? '<span class="badge bg-info">شما</span>' : ''}
-                            ${u.is_active ? '' : '<span class="badge bg-secondary">غیرفعال</span>'}
-                        </div>
-                        <div class="ur-sub"><span dir="ltr">${esc(u.username)}</span> · #${esc(u.id)}</div>
-                        ${headline}
-                        <div class="ur-sub"><span class="badge ${rl.cls}">${esc(rl.label)}</span>
-                            <span class="text-muted">آخرین ورود: ${esc(lastLogin)}</span></div>
-                    </div>
-                </div>
-                <div class="ur-details">
-                    <div class="ur-line" title="شماره‌ای که با آن در دیوار وارد می‌شود">
-                        <i class="bi bi-phone"></i>
-                        <span class="text-muted">دیوار:</span>
-                        <span dir="ltr">${esc(u.divar_phone || '---')}</span>
-                        <button class="btn btn-sm btn-link p-0" onclick="promptSetDivarPhone(${esc(u.id)})" title="ویرایش شماره دیوار">
-                            <i class="bi bi-pencil-square"></i>
-                        </button>
-                    </div>
-                    <div class="ur-contact">${contact}${nudge}${recoveryWarning}</div>
-                    ${u.role === 'admin' ? `<div class="ur-perms">${perms}</div>` : ''}
-                </div>
-                <div class="ur-actions">
-                    ${u.role !== 'root' ? `
-                    <button class="btn btn-sm btn-outline-primary" onclick="openPermsEditor(${esc(u.id)})" title="نقش و دسترسی‌ها">
-                        <i class="bi bi-sliders"></i> دسترسی‌ها
-                    </button>` : ''}
-                    ${!isSelf && u.role !== 'root' ? `
-                    <button class="btn btn-sm btn-outline-warning" onclick="toggleUserActive(${esc(u.id)}, ${!!u.is_active})" title="${u.is_active ? 'غیرفعال' : 'فعال'} کردن">
-                        <i class="bi bi-toggle-${u.is_active ? 'on' : 'off'}"></i> ${u.is_active ? 'غیرفعال' : 'فعال'}
-                    </button>
-                    <button class="btn btn-sm btn-outline-info" onclick="promptResetPassword(${esc(u.id)})" title="تغییر رمز">
-                        <i class="bi bi-key"></i> رمز
-                    </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteUser(${esc(u.id)})" title="حذف">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                    ` : ''}
-                </div>
-            `;
-            tbody.appendChild(row);
-        });
+        renderUsers();
     } catch (error) {
         showToast('خطا', 'بارگیری کاربران ناموفق بود', 'danger');
     }
+}
+
+function openNewUserModal() {
+    syncNewUserPerms();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('newUserModal')).show();
+    setTimeout(() => document.getElementById('new-username')?.focus(), 300);
+}
+
+/** The members table: whatever the search and the two filters leave. */
+function renderUsers() {
+    const tbody = document.getElementById('users-table');
+    if (!tbody) return;
+    const q = (document.getElementById('users-search')?.value || '').trim().toLowerCase();
+    const role = document.getElementById('users-role-filter')?.value || '';
+    const state = document.getElementById('users-state-filter')?.value || '';
+    const rows = _usersAll.filter(u =>
+        (!role || u.role === role) &&
+        (!state || (state === 'active') === !!u.is_active) &&
+        (!q || [u.full_name, u.username, u.email, u.phone, u.divar_phone].some(v => (v || '').toLowerCase().includes(q))));
+    const count = document.getElementById('users-count');
+    if (count) count.textContent = formatNumber(rows.length) + (rows.length !== _usersAll.length ? ` از ${formatNumber(_usersAll.length)}` : '');
+    document.getElementById('users-empty')?.classList.toggle('d-none', rows.length > 0);
+    tbody.innerHTML = '';
+    rows.forEach(u => tbody.appendChild(_userRow(u)));
+}
+
+function _userRow(u) {
+    const rl = ROLE_LABELS[u.role] || { label: u.role, cls: 'bg-dark' };
+    const roleText = String(rl.label).replace(/^[^\w؀-ۿ]+/, '').trim();   // the pill carries no emoji
+    const lastLogin = u.last_login
+        ? new Date(u.last_login).toLocaleDateString('fa-IR')
+        : '—';
+    const isSelf = u.username === _currentUser?.username;
+
+    // Every field below is attacker-reachable: a visitor picks their own
+    // full_name at public sign-up and it lands in this table the moment a
+    // super_admin opens the page. Unescaped, an <img onerror> here runs in
+    // the panel origin and the bearer token is in localStorage — so the
+    // whole row goes through esc(), and the phone is read from
+    // _usersById by id rather than interpolated into an onclick where a
+    // single quote would break out of the attribute.
+    const permLabels = (u.permissions || []).map(k => {
+        const c = (_permCatalog || []).find(x => x.key === k);
+        return c ? c.label : k;
+    });
+    const perms = u.role === 'admin'
+        ? (permLabels.length
+            ? `<button class="u-perms-pill" onclick="openPermsEditor(${esc(u.id)})" title="${esc(permLabels.join('، '))}">
+                   ${formatNumber(permLabels.length)} بخش <i class="bi bi-chevron-down"></i></button>`
+            : '<span class="u-muted">هیچ بخشی</span>')
+        : (u.role === 'visitor' ? '<span class="u-muted">فقط پورتال</span>' : '<span class="u-muted">همهٔ بخش‌ها</span>');
+
+    // Whether the number has actually been proven, said plainly.
+    //
+    // A code that arrives by email proves the address and nothing about
+    // the phone, and until there is an SMS provider that is every code
+    // we send. Someone about to ring this number needs to know which of
+    // the two they are looking at, so each contact carries its own tick.
+    const tick = (val, ok, okText, noText) => !val ? '' :
+        `<div class="u-line"><i class="bi ${String(val).includes('@') ? 'bi-envelope' : 'bi-telephone'}"></i>
+           <span dir="ltr" class="u-val">${esc(val)}</span>
+           <i class="u-tick ${ok ? 'ok' : 'no'}" title="${ok ? okText : noText}"></i>
+         </div>`;
+    // Somebody with a stuck «!» can be asked to fix it from here — the
+    // one screen where the person who notices is already looking.
+    const unverified = (u.email && !u.email_verified) || (u.phone && !u.phone_verified);
+    const nudge = unverified && !isSelf ? `
+        <button class="btn btn-sm btn-link p-0 u-nudge" onclick="nudgeVerify(${esc(u.id)})"
+                title="درخواست تأیید ایمیل / شماره از خود کاربر">
+            <i class="bi bi-send-check"></i> درخواست تأیید
+        </button>` : '';
+    const headline = u.headline ? `<div class="u-headline">${esc(u.headline)}</div>` : '';
+    // Issue #13. Both recovery paths — password reset and the email
+    // second factor — refuse an account with no address, correctly:
+    // enabling a factor an account cannot receive would lock it out.
+    // But that leaves a super_admin with no address and no way back
+    // except psql, and nothing on this screen said so. A privileged
+    // account you cannot recover is a latent lockout; name it here,
+    // where the person who can fix it is already looking.
+    const privileged = ['root', 'super_admin', 'admin'].includes(u.role);
+    const noRecovery = privileged && !(u.email || '').trim() && u.is_active;
+    const contact =
+        (tick(u.phone, u.phone_verified, 'شماره با پیامک تأیید شده', 'شماره تأیید نشده — کدی با پیامک ارسال نشده است') +
+         tick(u.email, u.email_verified, 'ایمیل تأیید شده', 'ایمیل تأیید نشده') +
+         (u.divar_phone ? `<div class="u-line u-divar" title="شماره‌ای که با آن در دیوار وارد می‌شود">
+             <i class="bi bi-phone"></i><span dir="ltr" class="u-val">${esc(u.divar_phone)}</span><span class="u-muted">دیوار</span></div>` : ''))
+        || '<span class="u-muted">—</span>';
+    const recoveryWarning = noRecovery ? `
+        <div class="badge bg-danger mt-1 u-warn"
+             title="بازنشانی رمز و تأیید دومرحله‌ای هر دو به ایمیل نیاز دارند. بدون آن، اگر رمز این حساب گم شود تنها راه برگشت پایگاه داده است.">
+            <i class="bi bi-exclamation-triangle"></i> بدون ایمیل — قابل بازیابی نیست
+        </div>` : '';
+
+    // One menu instead of a row of coloured buttons. Root is never edited
+    // from here; nobody switches off, re-keys or deletes their own account.
+    const item = (fn, icon, label, cls = '') =>
+        `<li><button class="dropdown-item ${cls}" onclick="${fn}"><i class="bi ${icon}"></i> ${label}</button></li>`;
+    const menu = [
+        u.role !== 'root' ? item(`openPermsEditor(${esc(u.id)})`, 'bi-sliders', 'نقش و دسترسی‌ها') : '',
+        item(`promptSetDivarPhone(${esc(u.id)})`, 'bi-phone', 'شمارهٔ دیوار'),
+        !isSelf && u.role !== 'root' ? item(`promptResetPassword(${esc(u.id)})`, 'bi-key', 'تغییر رمز') : '',
+        !isSelf && u.role !== 'root' ? item(`toggleUserActive(${esc(u.id)}, ${!!u.is_active})`,
+            u.is_active ? 'bi-pause-circle' : 'bi-play-circle', u.is_active ? 'غیرفعال کردن' : 'فعال کردن') : '',
+        !isSelf && u.role !== 'root' ? '<li><hr class="dropdown-divider"></li>' +
+            item(`deleteUser(${esc(u.id)})`, 'bi-trash', 'حذف حساب', 'text-danger') : '',
+    ].join('');
+
+    const row = document.createElement('tr');
+    row.className = 'u-row' + (u.is_active ? '' : ' is-off');
+    row.innerHTML = `
+        <td class="u-who">
+            <div class="u-id">
+                ${avatarHtml(u, 36)}
+                <div class="u-names">
+                    <div class="u-name">${esc(u.full_name || u.username)}${isSelf ? '<span class="u-you">شما</span>' : ''}</div>
+                    <div class="u-handle" dir="ltr">${esc(u.username)}</div>
+                    ${headline}
+                </div>
+            </div>
+        </td>
+        <td data-l="نقش"><span class="pill role-${esc(u.role)}">${esc(roleText)}</span></td>
+        <td data-l="دسترسی" class="u-perms">${perms}</td>
+        <td data-l="تماس" class="u-contact">${contact}${nudge}${recoveryWarning}</td>
+        <td data-l="وضعیت"><span class="u-state ${u.is_active ? 'on' : 'off'}"><i></i>${u.is_active ? 'فعال' : 'غیرفعال'}</span></td>
+        <td data-l="آخرین ورود" class="u-login">${esc(lastLogin)}</td>
+        <td class="u-menu">
+            <div class="dropdown">
+                <button class="u-kebab" data-bs-toggle="dropdown" aria-expanded="false" title="عملیات">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <ul class="dropdown-menu">${menu}</ul>
+            </div>
+        </td>`;
+    return row;
 }
 
 
@@ -7395,6 +7417,7 @@ async function createUser(e) {
         });
         showToast('موفق', 'کاربر ساخته شد', 'success');
         e.target.reset();
+        bootstrap.Modal.getInstance(document.getElementById('newUserModal'))?.hide();
         loadUsers();
     } catch (error) {
         showToast('خطا', error.message, 'danger');
