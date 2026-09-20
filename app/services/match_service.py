@@ -23,9 +23,39 @@ from app.models.property import Property
 settings = get_settings()
 
 # ── tunables ────────────────────────────────────────────────────────────
-PRICE_TOLERANCE = 0.30   # ±30% is still "similar"
+PRICE_TOLERANCE = 0.20   # closeness curve: 0 at ±20%
 AREA_TOLERANCE = 0.35    # ±35%
-CANDIDATE_POOL = 300     # rows scored before trimming to the top N
+CANDIDATE_POOL = 300     # rows scored before trimming to the top N (customer matches)
+
+# «مشابه» for a listing means the same neighbourhood at about the same price.
+# The tight band is what a person calls the same price; the wide band is the
+# outer fence — nothing beyond it is offered at all, and inside it only when
+# the tight band has too little to show.
+PRICE_BAND = 0.15
+PRICE_BAND_WIDE = 0.35
+SIMILAR_POOL = 1500      # same city + same deal type, inside the wide band
+MIN_CLOSE = 3            # below this many tight matches the wide band is shown too
+
+# The parts of a district string that say nothing about WHICH district:
+# «خ گلها» and «خیابان گلها» are one place, so is «بلوار سعدی» and «سعدی».
+_DISTRICT_NOISE = ("خیابان", "خ.", "خ", "بلوار", "بلوار.", "کوی", "کوچه", "میدان", "شهرک",
+                   "بزرگراه", "اتوبان", "جاده", "محله", "منطقه", "شهید", "دکتر", "استاد")
+
+
+def district_key(text: Optional[str]) -> str:
+    """One spelling per district, so «خ گلها» and «خیابان گلها» compare equal.
+
+    Persian/Arabic letter variants unified, the road-type words dropped,
+    digits normalised, spaces collapsed. Empty when nothing is left."""
+    if not text:
+        return ""
+    # Arabic yeh/kaf and the two heh forms → Persian; tashkeel dropped
+    t = str(text).translate(str.maketrans({"ي": "ی", "ك": "ک", "ۀ": "ه", "ة": "ه"}))
+    t = "".join(ch for ch in t if not ("\u064b" <= ch <= "\u0652"))
+    t = t.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    t = t.replace("\u200c", " ").replace("-", " ").replace("،", " ")
+    words = [w for w in t.split() if w not in _DISTRICT_NOISE]
+    return " ".join(words).strip()
 
 
 # Canonical property families. Scraped rows carry whatever Persian text Divar
@@ -352,9 +382,65 @@ def _brief(p: Property, score: int, reasons: List[str]) -> Dict[str, Any]:
     }
 
 
+def _price_columns(listing_type: Optional[str]):
+    """The columns that carry the headline number for this deal type."""
+    if listing_type == "rent":
+        return (Property.deposit, Property.rent_price)
+    return (Property.total_price, Property.price)
+
+
+def rank_similar(prop: Property, cands, limit: int = 12) -> List[Dict[str, Any]]:
+    """Order candidates the way a consultant would: this neighbourhood first,
+    then by price closeness — and never beyond the wide price band.
+
+    Tiers, in order: (1) same district, price within ±15%; (2) same district,
+    within ±35%; (3) another district of the city, within ±15%; (4) another
+    district, within ±35%. The wide tiers are shown only when the tight ones
+    have fewer than MIN_CLOSE listings, so a lead in a well-covered street
+    never sees the other side of town.
+    """
+    tp = _price_of(prop)
+    tkey = district_key(prop.district) or district_key(prop.neighborhood)
+    target_family = property_family(prop)
+    rows = []
+    for c in cands:
+        if c.id == prop.id:
+            continue
+        if target_family and property_family(c) not in (None, target_family):
+            continue
+        cp = _price_of(c)
+        # relative to THIS listing's price: 150 against 100 is 50% off, not 33%
+        gap = abs(tp - cp) / tp if tp and cp else None
+        if gap is not None and gap > PRICE_BAND_WIDE:
+            continue
+        ckey = district_key(c.district) or district_key(c.neighborhood)
+        same = bool(tkey) and ckey == tkey
+        if not same and tkey and ckey:
+            same = (_text_overlap(tkey, ckey) or 0) >= 0.5
+        close = gap is not None and gap <= PRICE_BAND
+        tier = (1 if same and close else 2 if same else 3 if close else 4)
+        s = score_similarity(prop, c)
+        rows.append({"tier": tier, "same_district": same, "gap": gap,
+                     "score": s["score"], "reasons": s["reasons"], "cand": c})
+    rows.sort(key=lambda r: (r["tier"], r["gap"] if r["gap"] is not None else 1.0, -r["score"]))
+    tight = [r for r in rows if r["tier"] in (1, 3)]
+    chosen = rows if len(tight) < MIN_CLOSE else tight
+    out = []
+    for r in chosen[:limit]:
+        b = _brief(r["cand"], r["score"], r["reasons"])
+        b["same_district"] = r["same_district"]
+        b["price_gap_pct"] = round(r["gap"] * 100) if r["gap"] is not None else None
+        b["price_direction"] = (None if r["gap"] is None or not tp
+                                else "higher" if (_price_of(r["cand"]) or 0) > tp
+                                else "lower" if (_price_of(r["cand"]) or 0) < tp else "same")
+        out.append(b)
+    return out
+
+
 async def similar_to_property(db: AsyncSession, prop: Property, limit: int = 12,
                               use_llm: bool = True) -> List[Dict[str, Any]]:
-    """Listings most like `prop` (same city & listing type, ranked by score)."""
+    """Listings most like `prop`: same city, same deal type, same
+    neighbourhood first, price within a tight band."""
     q = select(Property).where(
         Property.is_active == True,
         Property.id != prop.id,
@@ -363,22 +449,16 @@ async def similar_to_property(db: AsyncSession, prop: Property, limit: int = 12,
         q = q.where(Property.city_name == prop.city_name)
     if prop.listing_type:
         q = q.where(Property.listing_type == prop.listing_type)
-
-    cands = (await db.execute(q.limit(CANDIDATE_POOL))).scalars().all()
-    # «مشابه این ملک» means the same kind of thing, so a different family is
-    # dropped rather than ranked low. Unreadable ones are kept — better a
-    # slightly noisy list than silently hiding real matches.
-    target_family = property_family(prop)
-    scored = []
-    for c in cands:
-        if target_family and property_family(c) not in (None, target_family):
-            continue
-        s = score_similarity(prop, c)
-        if s["score"] > 0:
-            scored.append((s["score"], s["reasons"], c))
-    scored.sort(key=lambda t: t[0], reverse=True)
-    top = scored[:limit]
-    results = [_brief(c, sc, rs) for sc, rs, c in top]
+    # The outer fence goes into the query, so the pool is the listings that
+    # could be offered at all — not the first 300 rows of the city, which is
+    # what it used to be, and which missed most of the same street.
+    tp = _price_of(prop)
+    if tp:
+        lo, hi = int(tp * (1 - PRICE_BAND_WIDE)), int(tp * (1 + PRICE_BAND_WIDE))
+        a, b = _price_columns(prop.listing_type)
+        q = q.where(or_(a.between(lo, hi), b.between(lo, hi)))
+    cands = (await db.execute(q.limit(SIMILAR_POOL))).scalars().all()
+    results = rank_similar(prop, cands, limit)
 
     if use_llm and results:
         ctx = (f"ملکی مشابه این: {prop.title} — {prop.area or '?'} متر، "

@@ -40,7 +40,16 @@
     })();
     </script>
     <!-- Tell browsers we handle theming ourselves — prevents forced/auto dark mode from mangling colors -->
-    <meta name="color-scheme" content="dark light">
+    <!-- One theme at a time, declared to the browser and to extensions.
+         «dark light» told Chrome the page supports both, so on a device set
+         to light it painted native controls light inside our dark UI, and
+         Chrome's «auto dark» on Android re-coloured the light theme. The
+         value follows the active theme (see applyTheme): dark → dark,
+         light → only light. darkreader-lock keeps Dark Reader off entirely —
+         the panel has its own dark palette and the extension's guess at one
+         is where «the text is a different colour on my laptop» came from. -->
+    <meta name="color-scheme" content="dark" id="meta-color-scheme">
+    <meta name="darkreader-lock">
     <title>SorinFlow — داشبورد مدیریت</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <!-- the panel as an app: manifest, home-screen icon, standalone on iOS -->
@@ -52,10 +61,20 @@
     <meta name="apple-mobile-web-app-title" content="SorinFlow">
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
     <!-- Apply saved theme before first paint to avoid flash -->
-    <script>document.documentElement.dataset.theme = localStorage.getItem('sf-theme') || 'dark';</script>
+    <script>
+    (function () {
+      var t = localStorage.getItem('sf-theme') || 'dark';
+      document.documentElement.dataset.theme = t;
+      // Bootstrap's own palette follows the same switch, so its selects,
+      // dropdowns, modals and close buttons never paint the other theme
+      document.documentElement.setAttribute('data-bs-theme', t);
+      var m = document.getElementById('meta-color-scheme');
+      if (m) m.setAttribute('content', t === 'light' ? 'only light' : 'dark');
+    })();
+    </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260919a">
+    <link rel="stylesheet" href="css/style.css?v=20260920a">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -4533,7 +4552,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260919a"></script>
+<script src="js/app.js?v=20260920a"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

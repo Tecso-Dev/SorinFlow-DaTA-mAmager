@@ -127,6 +127,10 @@ function currentTheme() { return document.documentElement.dataset.theme === 'lig
 
 function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
+    // the three declarations that have to agree, or some device paints half
+    // the page in the other theme: ours, Bootstrap's, and the browser's
+    document.documentElement.setAttribute('data-bs-theme', theme);
+    document.getElementById('meta-color-scheme')?.setAttribute('content', theme === 'light' ? 'only light' : 'dark');
     localStorage.setItem('sf-theme', theme);
     // sun shown in dark mode (click → light), moon in light mode
     document.querySelectorAll('.theme-icon').forEach(el => {
@@ -6307,6 +6311,23 @@ async function convertLeadToDeal(leadId) {
 }
 
 // ═══ تطابق‌سازی — similar properties & customer suggestions ═══════
+/** Listings grouped the way a consultant thinks: this neighbourhood first,
+ *  then the rest of the city. Only when the server says which is which. */
+function _matchGroups(items, source) {
+    if (!items.some(m => m.same_district !== undefined)) {
+        return `<div class="match-list">${items.map(_matchCard).join('')}</div>`;
+    }
+    const here = items.filter(m => m.same_district), there = items.filter(m => !m.same_district);
+    const where = source?.district ? esc(source.district) : 'همین منطقه';
+    const city = source?.city_name ? esc(source.city_name) : '';
+    let html = '';
+    if (here.length) html += `<div class="match-group"><i class="bi bi-geo-alt-fill"></i> ${where} <span>${formatNumber(here.length)} مورد</span></div>
+        <div class="match-list">${here.map(_matchCard).join('')}</div>`;
+    if (there.length) html += `<div class="match-group"><i class="bi bi-geo"></i> مناطق دیگر${city ? ` ${city}` : ''} <span>${formatNumber(there.length)} مورد</span></div>
+        <div class="match-list">${there.map(_matchCard).join('')}</div>`;
+    return html;
+}
+
 function _matchCard(m) {
     // the reverse direction returns people, not listings
     if (m.full_name !== undefined) return _customerMatchCard(m);
@@ -6331,6 +6352,7 @@ function _matchCard(m) {
         </div>
         <div class="match-side">
             <div class="match-price">${price}</div>
+            ${m.price_gap_pct != null ? `<div class="match-gap ${m.price_gap_pct <= 15 ? 'near' : 'far'}">${m.price_gap_pct === 0 ? 'همین قیمت' : `${formatNumber(m.price_gap_pct)}٪ ${m.price_direction === 'higher' ? 'گران‌تر' : 'ارزان‌تر'}`}</div>` : ''}
             <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${m.id})">
                 <i class="bi bi-eye"></i> جزئیات
             </button>
@@ -6379,7 +6401,7 @@ async function _openMatchModal(title, url, emptyMsg) {
         document.getElementById('match-modal-body').innerHTML = `
             ${src ? `<div class="match-source">مبنای تطابق: <b>${esc(src)}</b> — ${formatNumber(items.length)} مورد یافت شد
                 ${criteria ? `<div class="small mt-1">${criteria}</div>` : ''}</div>` : ''}
-            <div class="match-list">${items.map(_matchCard).join('')}</div>`;
+            ${_matchGroups(items, data.source)}`;
     } catch (e) {
         document.getElementById('match-modal-body').innerHTML =
             `<div class="alert alert-danger">خطا در تطابق‌سازی: ${esc(e.message)}</div>`;

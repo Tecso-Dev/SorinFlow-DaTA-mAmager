@@ -3251,3 +3251,14 @@ html[data-theme="light"] .table thead th {
   position: absolute; top: 2px; left: 6px; background: none; border: 0; color: var(--text-muted);
   font-size: 1rem; line-height: 1; cursor: pointer; padding: .2rem .4rem;
 }
+
+/* ── similar listings, grouped by neighbourhood ─────────────── */
+.match-group {
+  display: flex; align-items: center; gap: .45rem; margin: .9rem 0 .45rem;
+  font-size: .82rem; font-weight: 700; color: var(--text);
+}
+.match-group i { color: #818cf8 }
+.match-group span { font-weight: 400; color: var(--text-muted); font-size: .74rem }
+.match-gap { font-size: .7rem; margin-top: .15rem }
+.match-gap.near { color: #86efac }
+.match-gap.far { color: #fbbf24 }
