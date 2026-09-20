@@ -209,7 +209,9 @@ class TestThroughTheApp:
         # opening the binder shows all three; opening the folder shows one; the tray shows the fourth
         assert client.get(f"/api/filing/files?binder_id={binder['id']}", headers=h).json()["total"] == 3
         assert client.get(f"/api/filing/files?binder_id={one['id']}", headers=h).json()["total"] == 1
-        assert [x["id"] for x in client.get("/api/filing/files?unfiled=true", headers=h).json()["items"]] == [files[3]]
+        # CI runs every suite against one database, so the tray holds other tests' rows too
+        tray = [x["id"] for x in client.get("/api/filing/files?unfiled=true&limit=300", headers=h).json()["items"]]
+        assert files[3] in tray and not (set(files[:3]) & set(tray))
 
         # edit from inside the box — numbers arrive as the panel types them
         r = client.patch(f"/api/filing/files/{files[0]}", headers=h, json={
@@ -227,5 +229,7 @@ class TestThroughTheApp:
         # deleting the binder takes the folder with it and unfiles all three
         r = client.delete(f"/api/filing/binders/{binder['id']}", headers=h)
         assert r.status_code == 200 and r.json()["unfiled"] == 3
-        assert client.get("/api/filing/files?unfiled=true", headers=h).json()["total"] == 4
-        assert not [x for c in client.get("/api/filing/cabinets", headers=h).json()["items"] for x in c["binders"]]
+        tray = [x["id"] for x in client.get("/api/filing/files?unfiled=true&limit=300", headers=h).json()["items"]]
+        assert set(files) <= set(tray)
+        mine = next(c for c in client.get("/api/filing/cabinets", headers=h).json()["items"] if c["id"] == cab["id"])
+        assert mine["binders"] == []
