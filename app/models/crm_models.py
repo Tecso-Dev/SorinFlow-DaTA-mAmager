@@ -652,6 +652,10 @@ class Binder(Base):
 
     kind separates the two things an agency files: املاکی که داریم
     (property) and مشتری‌هایی که دنبال ملک‌اند (demand).
+
+    A پوشه (folder) is a binder with a parent: «اجاره» holds «یک‌خوابه» and
+    «دوخوابه» the way a real binder holds tabbed dividers. One level only —
+    a cabinet, a binder, a folder — because that is as deep as paper goes.
     """
     __tablename__ = "crm_binders"
 
@@ -668,13 +672,16 @@ class Binder(Base):
     deal_type = Column(String(20), default="")
     description = Column(String(300))
     sort_order = Column(Integer, default=0, index=True)
+    parent_id = Column(Integer, ForeignKey("crm_binders.id", ondelete="CASCADE"),
+                       nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     cabinet = relationship("Cabinet", back_populates="binders")
 
     def to_dict(self, file_count=None):
         return {
-            "id": self.id, "cabinet_id": self.cabinet_id, "name": self.name,
+            "id": self.id, "cabinet_id": self.cabinet_id, "parent_id": self.parent_id,
+            "name": self.name,
             "color": self.color, "kind": self.kind,
             "kind_label": self.KINDS.get(self.kind, self.kind),
             "deal_type": self.deal_type,

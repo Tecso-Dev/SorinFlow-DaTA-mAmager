@@ -238,7 +238,7 @@ flowchart TD
     P --> PANEL["Properties + CRM panels<br/>routes/properties.py, routes/crm.py"]
     P --> DPA["services/dpa_service.py<br/>daily performance"]
     P --> MATCH["services/match_service.py<br/>customer criteria matching"]
-    P --> FILE["Filing: binder_id, tags,<br/>is_private on the property row<br/>routes/filing.py"]
+    P --> FILE["Filing: binder_id (binder or folder), tags,<br/>is_private on the property row<br/>routes/filing.py"]
 
     JOB --> ORPH["Startup sweep marks<br/>orphaned running jobs failed<br/>main.py:70, called at :147"]
 ```
@@ -530,7 +530,7 @@ All application routes are mounted below `/api`.
 | `/api/scraper` | Jobs, filters, single-URL collection, scrape-time OTP, and the per-run event log (`/jobs/{id}/events`) |
 | `/api/properties` | Property search, detail, update, soft deletion, and export |
 | `/api/crm` | Leads, contacts, customers, tasks, deals, notes, reminders, SMS, DPA, reports — 65 endpoints, the largest router |
-| `/api/filing` | Cabinets and folders (کمد و زونکن), including private ones |
+| `/api/filing` | Cabinets → binders → folders (کمد ← زونکن ← پوشه), files moved in bulk or edited in place, private ones included |
 | `/api/proxies` | Proxy CRUD, import, activation, connectivity tests, and bulk removal |
 | `/api/stats` | Dashboard totals, health, logs, job summaries, and trends |
 | `/api/monitoring` | Service health, resource use, live logs, Divar connectivity probe, session verification, and `client-errors` (what broke in users' browsers). Also gates `/api/gcp` |
@@ -975,6 +975,8 @@ This section is derived from a full-repository audit (2026-09-01), updated 2026-
 Nothing here is tracked as a `TODO` in the source — the codebase contains zero debt markers. This section is the tracker.
 
 **Shipped 2026-09-15 → 19, outside the audit list:** the server moved to a new 8 GB box with a backup-and-rebuild runbook; per-user Divar sessions with several numbers per person; the profile page with avatars and email/phone verification; «فرستندهٔ پیامک» as its own permission with per-device secrets and the QR setup; the SorinFlow Forwarder Android app and its APK mirror; the offsite backup on the panel; saved scrape schedules; the CRM call queue; the panel as a PWA with every asset self-hosted and browser errors reported home; automatic rollback in CI.
+
+**Shipped 2026-09-20:** «ملک‌های مشابه» ranks district-first inside a ±35% price fence; one dark theme on every browser (`color-scheme` meta, `data-bs-theme`, Dark Reader locked out); a laptop scale — 15px on 1024–1199 px screens, 17–18px and a 1720px content cap on wide ones; the filing tab as an explorer with folders inside binders, drag-and-drop filing, shift-click selection and an edit-in-place modal.
 
 ---
 

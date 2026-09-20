@@ -523,6 +523,19 @@ async def _migrate_filing(conn):
             EXCEPTION WHEN duplicate_object OR undefined_table THEN NULL;
             END $$;
         """))
+        # پوشه — a binder inside a binder (2026-09-20). The table predates the
+        # column on every database that matters, so create_all cannot add it.
+        await conn.execute(text(
+            "ALTER TABLE crm_binders ADD COLUMN IF NOT EXISTS parent_id INTEGER"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_binders_parent_id ON crm_binders (parent_id)"))
+        await conn.execute(text("""
+            DO $$ BEGIN
+                ALTER TABLE crm_binders ADD CONSTRAINT fk_crm_binders_parent
+                    FOREIGN KEY (parent_id) REFERENCES crm_binders(id) ON DELETE CASCADE;
+            EXCEPTION WHEN duplicate_object OR undefined_table THEN NULL;
+            END $$;
+        """))
     except Exception as e:
         print(f"filing migration skipped: {e}")
 

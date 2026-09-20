@@ -110,7 +110,7 @@ body {
   background: var(--bg);
   color: var(--text);
   direction: rtl;
-  font-size: 13.5px;
+  font-size: .84375rem;   /* 13.5px at the default 16px — html font-size is the scale knob, see «Laptops» */
   line-height: 1.65;
   min-height: 100vh;
   overflow-x: hidden;
@@ -2306,70 +2306,80 @@ select.status-quick {
 }
 
 /* ══ کمد و زونکن ══════════════════════════════════════
-   Binders are drawn as spines on a shelf: the paper metaphor is the
-   whole point, so a consultant recognises their own filing at a glance. */
-.filing-cabinet {
-  border: 1px solid var(--border); border-radius: var(--r);
-  margin-bottom: 1rem; overflow: hidden;
-  background: color-mix(in srgb, var(--c) 5%, transparent);
-  border-right: 3px solid var(--c);
+   An explorer (2026-09-20): the tree of cabinets → binders → folders on
+   the start side, the open box's files on the other. The old shelf of
+   spines pushed the files below the fold, so a click on a binder looked
+   like nothing happened. */
+.filing-explorer { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 1rem; align-items: start; }
+.filing-tree { position: sticky; top: calc(var(--topbar-h) + .75rem); max-height: calc(100vh - var(--topbar-h) - 1.5rem); display: flex; flex-direction: column; }
+.filing-tree > .card-header { flex: none; }
+.filing-counts { display: flex; flex-wrap: wrap; gap: .3rem; padding: .5rem .7rem; border-bottom: 1px solid var(--border); }
+.filing-counts .badge { font-size: .62rem; font-weight: 500; }
+.filing-tree-body { overflow-y: auto; padding: .4rem; flex: 1; min-height: 0; }
+.ftree-cabinet { margin-top: .45rem; border-radius: var(--r-sm); border: 1px solid var(--border); overflow: hidden; }
+.ftree-cabinet-head {
+  display: flex; align-items: center; gap: .4rem; padding: .45rem .6rem; font-size: .8rem;
+  background: color-mix(in srgb, var(--c) 14%, var(--surface2)); border-right: 3px solid var(--c);
 }
-.filing-cabinet-head {
-  display: flex; align-items: center; gap: .55rem; flex-wrap: wrap;
-  padding: .6rem .9rem; font-size: .85rem;
-  background: color-mix(in srgb, var(--c) 12%, var(--surface2));
-  border-bottom: 1px solid var(--border);
+.ftree-cabinet-head i { color: var(--c); }
+.ftree-cabinet-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ftree-node {
+  display: flex; align-items: center; gap: .4rem; padding: .38rem .6rem; cursor: pointer;
+  font-size: .78rem; color: var(--text-dim); border-right: 3px solid transparent;
+  transition: background .12s, color .12s;
 }
-.filing-cabinet-head i { color: var(--c); }
-.filing-shelf {
-  display: flex; gap: .55rem; flex-wrap: wrap; padding: .9rem;
-  /* the shelf board the binders stand on */
-  background: linear-gradient(180deg, transparent 0%, transparent 78%,
-              color-mix(in srgb, var(--c) 22%, transparent) 78%, transparent 100%);
+.ftree-node i:first-child { color: var(--c, var(--text-muted)); flex: none; }
+.ftree-node.depth-1 { padding-right: .8rem; }
+.ftree-node.depth-2 { padding-right: 1.9rem; font-size: .74rem; }
+.ftree-node.tray { border: 1px dashed var(--border); border-radius: var(--r-sm); margin-bottom: .2rem; color: var(--text); }
+.ftree-node.tray i:first-child { color: var(--warning); }
+.ftree-node:hover { background: color-mix(in srgb, var(--c, var(--accent)) 10%, transparent); color: var(--text); }
+.ftree-node.active { background: color-mix(in srgb, var(--c, var(--accent)) 18%, transparent); color: var(--text); border-right-color: var(--c, var(--accent)); font-weight: 600; }
+.ftree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ftree-count { font-size: .64rem; color: var(--text-muted); background: var(--surface3); border-radius: 6px; padding: 0 .35rem; flex: none; }
+.ftree-edit { border: 0; background: none; color: var(--text-muted); padding: .05rem .25rem; border-radius: 4px; font-size: .72rem; opacity: 0; flex: none; }
+.ftree-node:hover .ftree-edit, .ftree-cabinet-head:hover .ftree-edit, .ftree-node.active .ftree-edit { opacity: 1; }
+.ftree-edit:hover { background: var(--surface3); color: var(--text); }
+
+/* where you are */
+.filing-crumb-bar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.filing-crumb { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; font-size: .85rem; }
+.filing-crumb .crumb-link { color: var(--text-dim); text-decoration: none; }
+.filing-crumb .crumb-link i { color: var(--c, var(--text-muted)); }
+.filing-crumb a.crumb-link:hover { color: var(--accent); }
+.filing-crumb .crumb-here { color: var(--text); font-weight: 700; }
+.filing-crumb .crumb-here i { color: var(--c, var(--accent)); }
+.filing-crumb .crumb-sep { font-size: .65rem; color: var(--text-muted); }
+
+/* the folders (tabbed dividers) of an open binder */
+.filing-folders { display: flex; flex-wrap: wrap; gap: .4rem; padding: .6rem .9rem; border-bottom: 1px solid var(--border); background: var(--surface2); }
+.folder-chip {
+  display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .7rem; cursor: pointer;
+  border-radius: 999px; font-size: .76rem; color: var(--text);
+  background: color-mix(in srgb, var(--c, var(--accent)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 40%, transparent);
 }
-.filing-binder {
-  position: relative; width: 108px; min-height: 132px; cursor: pointer;
-  padding: .5rem .45rem .55rem; border-radius: 5px 5px 3px 3px;
-  background: linear-gradient(160deg,
-      color-mix(in srgb, var(--c) 88%, #000) 0%,
-      color-mix(in srgb, var(--c) 62%, #000) 100%);
-  border: 1px solid color-mix(in srgb, var(--c) 55%, #000);
-  box-shadow: inset -3px 0 0 rgba(0,0,0,.22), 0 3px 10px rgba(0,0,0,.35);
-  color: #fff; transition: transform .16s, box-shadow .16s;
-  display: flex; flex-direction: column; gap: .25rem;
+.folder-chip i { color: var(--c, var(--accent)); }
+.folder-chip:hover { background: color-mix(in srgb, var(--c, var(--accent)) 26%, transparent); }
+.folder-chip.is-own { cursor: default; border-style: dashed; opacity: .85; }
+
+/* selecting & dragging */
+.filing-select-row { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; margin-bottom: .6rem; }
+.file-check { margin: 0; flex: none; cursor: pointer; }
+.file-card[draggable="true"] { cursor: grab; }
+.file-card:active { cursor: grabbing; }
+.file-where { font-size: .66rem; color: var(--text-dim); }
+.file-where i { color: var(--c, var(--accent)); }
+.drop-over { outline: 2px dashed var(--accent); outline-offset: -2px; background: color-mix(in srgb, var(--accent) 18%, transparent) !important; }
+body.filing-dragging .ftree-node, body.filing-dragging .folder-chip { outline: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent); }
+.filing-drag-ghost {
+  position: fixed; top: -200px; left: -200px; padding: .35rem .8rem; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: .8rem; font-weight: 600; pointer-events: none;
 }
-.filing-binder:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(0,0,0,.45); }
-.filing-binder.active { outline: 2px solid #fff; outline-offset: 2px; }
-/* the two ring holes down the spine */
-.filing-binder::before, .filing-binder::after {
-  content: ''; position: absolute; right: 8px; width: 11px; height: 11px;
-  border-radius: 50%; background: rgba(0,0,0,.3);
-  box-shadow: inset 0 1px 2px rgba(0,0,0,.5);
+@media (max-width: 900px) {
+  .filing-explorer { grid-template-columns: 1fr; }
+  .filing-tree { position: static; max-height: 300px; }
 }
-.filing-binder::before { top: 26px; }
-.filing-binder::after  { bottom: 22px; }
-.filing-binder-count {
-  align-self: flex-start; background: rgba(255,255,255,.9); color: #111;
-  border-radius: 5px; padding: 0 .32rem; font-size: .7rem; font-weight: 700;
-}
-.filing-binder-name {
-  font-size: .72rem; font-weight: 600; line-height: 1.35;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
-  overflow: hidden; text-shadow: 0 1px 2px rgba(0,0,0,.4);
-}
-/* «فایل ملکی • خرید و فروش» is too long for a 108px spine — keep it to two
-   lines inside the binder instead of spilling over the edge */
-.filing-binder-kind {
-  font-size: .55rem; line-height: 1.3; opacity: .85; margin-top: auto;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-  overflow: hidden; padding-left: .1rem;
-}
-.filing-binder-edit {
-  position: absolute; top: 3px; left: 3px; border: 0; background: none;
-  color: rgba(255,255,255,.75); font-size: .7rem; padding: .1rem .25rem;
-  border-radius: 4px; cursor: pointer;
-}
-.filing-binder-edit:hover { background: rgba(0,0,0,.28); color: #fff; }
 
 /* ═══ Draggable price range (two handles over one rail) ═══════════ */
 .range-slider { position: relative; height: 34px; margin-top: .1rem; }
@@ -2461,7 +2471,6 @@ select.status-quick {
 .file-card-actions .btn { padding: .1rem .35rem; font-size: .68rem; }
 #filing-archived-btn.active { background: var(--warning); color: #111; }
 
-[data-theme="light"] .filing-binder-count { background: #fff; }
 [data-theme="light"] .file-tag { background: rgba(124,58,237,.1); color: #6d28d9; }
 
 /* advanced filter drawer inside the filing tab */
@@ -3232,6 +3241,38 @@ html[data-theme="light"] .table thead th {
   .card canvas { max-width: 100% !important; height: auto !important }
   /* tables keep their own scroll; the page never scrolls sideways */
   body { overflow-x: hidden }
+}
+
+/* ── Laptops: one scale per screen class ──────────────────────
+   Measured 2026-09-20. Windows laptops run at 125–150% zoom, so a
+   1366 or 1920 screen reaches the panel as 1024–1280 CSS px — the
+   sidebar ate a quarter of it and the price column wrapped into four
+   lines. A 27" monitor arrives as 2560 px and the same sheet spread
+   13.5px text across it. Every size here is rem, so the html
+   font-size is the one knob: 15px on small laptops, 17–18px on wide
+   screens, and the content stops growing at 1720px. */
+@media (min-width: 901px) and (max-width: 1199px) {
+  html { font-size: 15px }
+  :root { --sidebar-w: 216px }
+  .content-wrapper { padding: 1rem 1.1rem }
+  .stat-card { padding: 1rem 1.1rem; margin-bottom: 1rem }
+  .stat-card .stat-icon { width: 38px; height: 38px; font-size: 1.15rem; margin-bottom: .7rem }
+  .welcome-banner { padding: 1.1rem 1.3rem }
+  .card-body { padding: .9rem }
+  .table > thead > tr > th, .table > tbody > tr > td { padding: .55rem .7rem }
+  #crm-main-tabs .nav-link { padding: .4rem .6rem; font-size: .78rem }
+}
+@media (min-width: 1600px) {
+  html { font-size: 17px }
+  .content-wrapper { width: 100%; max-width: 1720px; margin: 0 auto }
+}
+@media (min-width: 2200px) {
+  html { font-size: 18px }
+}
+/* a price never wraps mid-number; the title is the column that gives */
+@media (min-width: 901px) {
+  #section-properties .table td { white-space: nowrap }
+  #section-properties .table td:nth-child(2) { white-space: normal; min-width: 180px }
 }
 
 /* ── PWA install hint (sidebar footer, phones only) ─────────── */

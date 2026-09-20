@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260920a">
+    <link rel="stylesheet" href="css/style.css?v=20260920b">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -1562,45 +1562,52 @@
                     <!-- ── CALENDAR ── -->
                     <!-- ═══ کمد و زونکن ═══ -->
                     <div class="tab-pane fade" id="crm-tab-filing" role="tabpanel">
-                        <div class="card mb-3">
-                            <div class="card-header d-flex flex-wrap gap-2 align-items-center">
-                                <i class="bi bi-archive"></i> کمد و زونکن
-                                <div id="filing-counts" class="d-flex flex-wrap gap-2 ms-auto"></div>
-                                <button class="btn btn-sm btn-success" onclick="openCabinetModal()">
-                                    <i class="bi bi-plus-lg"></i> کمد جدید
-                                </button>
-                            </div>
-                            <div class="card-body">
-                                <div id="filing-shelves"></div>
-                            </div>
-                        </div>
-
-                        <div class="card">
-                            <div class="card-header d-flex flex-wrap gap-2 align-items-center">
-                                <i class="bi bi-folder2-open"></i>
-                                <span id="filing-files-title">فایل‌های بدون زونکن</span>
-                                <span class="badge bg-secondary" id="filing-files-count">۰</span>
-                                <div class="ms-auto d-flex flex-wrap gap-2">
-                                    <input type="text" id="filing-search" class="form-control form-control-sm"
-                                           style="width:190px" placeholder="جستجو یا کد ملک..."
-                                           onkeydown="if(event.key==='Enter')loadFilingFiles()">
-                                    <select id="filing-tag" class="form-select form-select-sm" style="width:150px"
-                                            onchange="loadFilingFiles()">
-                                        <option value="">همه برچسب‌ها</option>
-                                    </select>
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="loadFilingFiles()">
-                                        <i class="bi bi-search"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-primary" onclick="toggleAdvancedFilters()">
-                                        <i class="bi bi-sliders"></i> فیلتر پیشرفته
-                                        <span class="badge bg-primary d-none" id="filing-filter-count">۰</span>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-warning" id="filing-archived-btn"
-                                            onclick="toggleFilingArchived()">
-                                        <i class="bi bi-archive"></i> بایگانی
+                        <!-- کمد و زونکن — an explorer: the tree of cabinets on one side, the files
+                             of whatever is open on the other. Files are dragged onto the tree. -->
+                        <div class="filing-explorer">
+                            <aside class="filing-tree card" id="filing-tree-card">
+                                <div class="card-header d-flex align-items-center gap-2">
+                                    <i class="bi bi-archive"></i> کمدها
+                                    <button class="btn btn-sm btn-success ms-auto" onclick="openCabinetModal()" title="کمد جدید">
+                                        <i class="bi bi-plus-lg"></i> کمد
                                     </button>
                                 </div>
-                            </div>
+                                <div id="filing-counts" class="filing-counts"></div>
+                                <div id="filing-tree" class="filing-tree-body"></div>
+                            </aside>
+
+                            <div class="card filing-main">
+                                <div class="card-header filing-crumb-bar">
+                                    <nav id="filing-crumb" class="filing-crumb" aria-label="مسیر"></nav>
+                                    <span class="badge bg-secondary" id="filing-files-count">۰</span>
+                                    <span id="filing-files-title" class="visually-hidden">فایل‌های بدون زونکن</span>
+                                    <div class="ms-auto d-flex flex-wrap gap-2 align-items-center">
+                                        <button class="btn btn-sm btn-outline-success d-none" id="filing-new-folder-btn" onclick="newFolderHere()">
+                                            <i class="bi bi-folder-plus"></i> پوشهٔ جدید
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary d-none" id="filing-edit-box-btn" onclick="editOpenBox()">
+                                            <i class="bi bi-pencil"></i> ویرایش
+                                        </button>
+                                        <input type="text" id="filing-search" class="form-control form-control-sm"
+                                               style="width:190px" placeholder="جستجو یا کد ملک..."
+                                               onkeydown="if(event.key==='Enter')loadFilingFiles()">
+                                        <select id="filing-tag" class="form-select form-select-sm" style="width:150px"
+                                                onchange="loadFilingFiles()">
+                                            <option value="">همه برچسب‌ها</option>
+                                        </select>
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="loadFilingFiles()" title="جستجو">
+                                            <i class="bi bi-search"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-primary" onclick="toggleAdvancedFilters()">
+                                            <i class="bi bi-sliders"></i> فیلتر
+                                            <span class="badge bg-primary d-none" id="filing-filter-count">۰</span>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-warning" id="filing-archived-btn"
+                                                onclick="toggleFilingArchived()" title="فایل‌های بایگانی‌شده">
+                                            <i class="bi bi-archive"></i> بایگانی
+                                        </button>
+                                    </div>
+                                </div>
                             <div id="filing-advanced" class="filing-advanced d-none">
                                 <div class="row g-2">
                                     <div class="col-6 col-md-3">
@@ -1656,33 +1663,39 @@
                                     </div>
                                 </div>
                             </div>
-                            <div id="filing-bulk-bar" class="leads-bulk-bar d-none">
-                                <span><i class="bi bi-check2-square"></i> <b id="filing-bulk-count">۰</b> فایل انتخاب شده</span>
-                                <select id="filing-move-select" class="form-select form-select-sm" style="width:200px"
-                                        onchange="bulkMoveFiles(this.value); this.value='';">
-                                    <option value="">انتقال به زونکن...</option>
-                                </select>
-                                <button class="btn btn-sm btn-outline-info" onclick="bulkFileAction('pin')"><i class="bi bi-pin-angle"></i> سنجاق</button>
-                                <button class="btn btn-sm btn-outline-primary" onclick="bulkFileAction('tag')"><i class="bi bi-tag"></i> برچسب</button>
-                                <button class="btn btn-sm btn-outline-warning" onclick="bulkFileAction('archive')"><i class="bi bi-archive"></i> بایگانی</button>
-                                <select class="form-select form-select-sm" style="width:200px"
-                                        onchange="bulkFileAction(this.value); this.value='';">
-                                    <option value="">علامت‌های دیگر...</option>
-                                    <option value="unpin">لغو سنجاق</option>
-                                    <option value="unarchive">خارج کردن از بایگانی</option>
-                                    <option value="untag">برداشتن برچسب</option>
-                                    <option value="private">شخصی کردن</option>
-                                    <option value="public">عمومی کردن</option>
-                                    <option value="draft">پیش‌نویس</option>
-                                    <option value="undraft">لغو پیش‌نویس</option>
-                                </select>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="clearFileSelection()">لغو انتخاب</button>
-                            </div>
-                            <div class="card-body">
-                                <div id="filing-files" class="filing-files"></div>
-                                <div class="text-center mt-3">
-                                    <button id="filing-load-more" class="btn btn-sm btn-outline-primary d-none"
-                                            onclick="loadMoreFilingFiles()"></button>
+                                <div id="filing-folders" class="filing-folders d-none"></div>
+                                <div id="filing-bulk-bar" class="leads-bulk-bar d-none">
+                                    <span><i class="bi bi-check2-square"></i> <b id="filing-bulk-count">۰</b> فایل انتخاب شده</span>
+                                    <button class="btn btn-sm btn-primary" onclick="bulkMovePick()"><i class="bi bi-folder-symlink"></i> انتقال به…</button>
+                                    <button class="btn btn-sm btn-outline-info" onclick="bulkFileAction('pin')"><i class="bi bi-pin-angle"></i> سنجاق</button>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="bulkFileAction('tag')"><i class="bi bi-tag"></i> برچسب</button>
+                                    <button class="btn btn-sm btn-outline-warning" onclick="bulkFileAction('archive')"><i class="bi bi-archive"></i> بایگانی</button>
+                                    <select class="form-select form-select-sm" style="width:200px"
+                                            onchange="bulkFileAction(this.value); this.value='';">
+                                        <option value="">علامت‌های دیگر...</option>
+                                        <option value="unpin">لغو سنجاق</option>
+                                        <option value="unarchive">خارج کردن از بایگانی</option>
+                                        <option value="untag">برداشتن برچسب</option>
+                                        <option value="private">شخصی کردن</option>
+                                        <option value="public">عمومی کردن</option>
+                                        <option value="draft">پیش‌نویس</option>
+                                        <option value="undraft">لغو پیش‌نویس</option>
+                                    </select>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="clearFileSelection()">لغو انتخاب</button>
+                                </div>
+                                <div class="card-body">
+                                    <div class="filing-select-row">
+                                        <label class="form-check m-0">
+                                            <input class="form-check-input" type="checkbox" id="filing-select-all" onchange="selectAllFiles(this.checked)">
+                                            <span class="form-check-label small">انتخاب همه</span>
+                                        </label>
+                                        <span class="text-muted small">برای دسته‌بندی، فایل‌ها را بگیرید و روی زونکن یا پوشه رها کنید — یا چند فایل را تیک بزنید و «انتقال به…» را بزنید.</span>
+                                    </div>
+                                    <div id="filing-files" class="filing-files"></div>
+                                    <div class="text-center mt-3">
+                                        <button id="filing-load-more" class="btn btn-sm btn-outline-primary d-none"
+                                                onclick="loadMoreFilingFiles()"></button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -3980,14 +3993,14 @@
                         <label class="form-label">نام زونکن *</label>
                         <input type="text" id="bin-name" class="form-control" placeholder="مثلاً آپارتمان ۱۰۰ تا ۱۵۰ متر">
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-6" id="bin-kind-col">
                         <label class="form-label">نوع فایل</label>
                         <select id="bin-kind" class="form-select">
                             <option value="property">فایل ملکی</option>
                             <option value="demand">فایل متقاضی</option>
                         </select>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-6" id="bin-deal-col">
                         <label class="form-label">نوع معامله</label>
                         <select id="bin-deal" class="form-select">
                             <option value="">همه</option>
@@ -4013,6 +4026,106 @@
                 </button>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">انصراف</button>
                 <button type="button" class="btn btn-primary" onclick="saveBinder()"><i class="bi bi-check-lg"></i> ذخیره</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ویرایش فایل — what a consultant corrects by hand, from inside the box -->
+<div class="modal fade" id="fileEditModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square"></i> ویرایش فایل <span class="serial-badge" id="fe-serial"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label">عنوان *</label>
+                        <input type="text" id="fe-title" class="form-control">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">نوع معامله</label>
+                        <select id="fe-listing" class="form-select" onchange="_feTogglePrice()">
+                            <option value="buy">خرید و فروش</option>
+                            <option value="rent">رهن و اجاره</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">نوع ملک</label>
+                        <input type="text" id="fe-ptype" class="form-control" placeholder="آپارتمان، ویلایی، مغازه…">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">زونکن / پوشه</label>
+                        <select id="fe-binder" class="form-select"></select>
+                    </div>
+                    <div class="col-md-4 fe-buy">
+                        <label class="form-label">قیمت کل (تومان)</label>
+                        <input type="text" id="fe-total" class="form-control money-input" inputmode="numeric" dir="ltr">
+                    </div>
+                    <div class="col-md-4 fe-rent d-none">
+                        <label class="form-label">رهن / ودیعه (تومان)</label>
+                        <input type="text" id="fe-deposit" class="form-control money-input" inputmode="numeric" dir="ltr">
+                    </div>
+                    <div class="col-md-4 fe-rent d-none">
+                        <label class="form-label">اجارهٔ ماهانه (تومان)</label>
+                        <input type="text" id="fe-rent" class="form-control money-input" inputmode="numeric" dir="ltr">
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label">متراژ</label>
+                        <input type="number" id="fe-area" class="form-control" dir="ltr">
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label">خواب</label>
+                        <input type="number" id="fe-rooms" class="form-control" dir="ltr">
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label">طبقه</label>
+                        <input type="number" id="fe-floor" class="form-control" dir="ltr">
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label">سال ساخت</label>
+                        <input type="number" id="fe-year" class="form-control" dir="ltr">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">منطقه / محله</label>
+                        <input type="text" id="fe-district" class="form-control" placeholder="مثلاً بلوار سعدی">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">آدرس</label>
+                        <input type="text" id="fe-address" class="form-control">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">نام مالک / آگهی‌دهنده</label>
+                        <input type="text" id="fe-seller" class="form-control">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">شماره تماس</label>
+                        <input type="text" id="fe-phone" class="form-control" dir="ltr" inputmode="tel">
+                    </div>
+                    <div class="col-12 d-flex flex-wrap gap-3">
+                        <label class="form-check m-0"><input class="form-check-input" type="checkbox" id="fe-elevator"> <span class="form-check-label">آسانسور</span></label>
+                        <label class="form-check m-0"><input class="form-check-input" type="checkbox" id="fe-parking"> <span class="form-check-label">پارکینگ</span></label>
+                        <label class="form-check m-0"><input class="form-check-input" type="checkbox" id="fe-storage"> <span class="form-check-label">انباری</span></label>
+                        <label class="form-check m-0"><input class="form-check-input" type="checkbox" id="fe-balcony"> <span class="form-check-label">بالکن</span></label>
+                        <label class="form-check m-0 ms-auto"><input class="form-check-input" type="checkbox" id="fe-pinned"> <span class="form-check-label">سنجاق</span></label>
+                        <label class="form-check m-0"><input class="form-check-input" type="checkbox" id="fe-private"> <span class="form-check-label">فایل شخصی</span></label>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">برچسب‌ها</label>
+                        <input type="text" id="fe-tags" class="form-control" placeholder="قرارداد، فوری، ۱۴۰۵ — با ویرگول جدا کنید">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">توضیحات</label>
+                        <textarea id="fe-description" class="form-control" rows="4"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-primary me-auto" id="fe-view-btn"><i class="bi bi-eye"></i> جزئیات کامل</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">انصراف</button>
+                <button type="button" class="btn btn-primary" onclick="saveFileEdit()"><i class="bi bi-check-lg"></i> ذخیره</button>
             </div>
         </div>
     </div>
@@ -4552,7 +4665,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260920a"></script>
+<script src="js/app.js?v=20260920b"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

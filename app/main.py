@@ -352,12 +352,16 @@ async def _maintenance_allows(request: Request) -> bool:
 
 @app.middleware("http")
 async def maintenance_middleware(request: Request, call_next):
+    # Only the check is guarded. call_next used to sit inside the try as well,
+    # so a route that raised was run a second time against a body already
+    # consumed — the client waited forever and the log blamed maintenance.
     try:
-        if await _maintenance_allows(request):
-            return await call_next(request)
+        allowed = await _maintenance_allows(request)
     except Exception as e:
         # Never let a fault here close a site that was not put into maintenance.
         logger.warning(f"[maintenance] check failed, letting the request through: {e}")
+        allowed = True
+    if allowed:
         return await call_next(request)
 
     from app.services import maintenance as mt

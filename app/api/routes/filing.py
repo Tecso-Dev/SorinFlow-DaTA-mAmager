@@ -132,10 +132,36 @@ async def list_cabinets(
     items = []
     for c in cabinets:
         data = c.to_dict()
-        data["binders"] = [b.to_dict(file_count=counts.get(b.id, 0)) for b in c.binders]
+        data["binders"] = _nest(c.binders, counts)
         data["file_count"] = sum(b["file_count"] for b in data["binders"])
         items.append(data)
     return {"items": items, "total": len(items)}
+
+
+def _nest(binders, counts) -> list:
+    """Top-level binders with their folders inside; a binder's count is its
+    own files plus its folders', so the spine says what opening it shows."""
+    folders: dict = {}
+    for b in binders:
+        if b.parent_id:
+            folders.setdefault(b.parent_id, []).append(b.to_dict(file_count=counts.get(b.id, 0)))
+    out = []
+    for b in binders:
+        if b.parent_id:
+            continue
+        d = b.to_dict(file_count=counts.get(b.id, 0))
+        d["folders"] = folders.get(b.id, [])
+        d["own_count"] = d["file_count"]
+        d["file_count"] += sum(f["file_count"] for f in d["folders"])
+        out.append(d)
+    return out
+
+
+async def _binder_ids_within(db, binder_id: int) -> list:
+    """The binder and every folder in it — what «open this binder» shows."""
+    kids = (await db.execute(
+        select(Binder.id).where(Binder.parent_id == binder_id))).scalars().all()
+    return [binder_id, *kids]
 
 
 @router.post("/cabinets")
@@ -158,7 +184,9 @@ async def create_cabinet(
     db.add(cabinet)
     await db.commit()
     await db.refresh(cabinet)
-    return cabinet.to_dict(with_binders=True)
+    # not to_dict with the binders: touching the unloaded relationship on
+    # an async session raises MissingGreenlet, and «کمد جدید» never answered
+    return {**cabinet.to_dict(), "binders": [], "file_count": 0}
 
 
 @router.patch("/cabinets/{cabinet_id}")
@@ -233,7 +261,17 @@ async def create_binder(
     name = (data.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="نام زونکن الزامی است")
-    cabinet_id = data.get("cabinet_id")
+    parent = None
+    if data.get("parent_id"):
+        # a پوشه: lives in its parent's cabinet, files the same kind of thing
+        parent = (await db.execute(_cabinets_visible_to(
+            select(Binder).join(Cabinet, Binder.cabinet_id == Cabinet.id)
+            .where(Binder.id == data["parent_id"]), current_user))).scalar_one_or_none()
+        if not parent:
+            raise HTTPException(status_code=400, detail="زونکن مادر یافت نشد")
+        if parent.parent_id:
+            raise HTTPException(status_code=400, detail="پوشه داخل پوشه ساخته نمی‌شود — یک سطح کافی است")
+    cabinet_id = parent.cabinet_id if parent else data.get("cabinet_id")
     cabinet = (await db.execute(_cabinets_visible_to(
         select(Cabinet).where(Cabinet.id == cabinet_id), current_user))).scalar_one_or_none()
     if not cabinet:
@@ -241,14 +279,18 @@ async def create_binder(
 
     nxt = (await db.execute(select(func.max(Binder.sort_order))
                             .where(Binder.cabinet_id == cabinet_id))).scalar() or 0
-    kind = data.get("kind") if data.get("kind") in VALID_KINDS else "property"
-    deal = data.get("deal_type") if data.get("deal_type") in VALID_DEALS else ""
+    if parent:
+        kind, deal = parent.kind, parent.deal_type
+    else:
+        kind = data.get("kind") if data.get("kind") in VALID_KINDS else "property"
+        deal = data.get("deal_type") if data.get("deal_type") in VALID_DEALS else ""
     binder = Binder(
         cabinet_id=cabinet_id, name=name[:120],
-        color=data.get("color") or cabinet.color,
+        color=data.get("color") or (parent.color if parent else cabinet.color),
         kind=kind, deal_type=deal,
         description=(data.get("description") or "")[:300] or None,
         sort_order=nxt + 1,
+        parent_id=parent.id if parent else None,
     )
     db.add(binder)
     await db.commit()
@@ -278,13 +320,18 @@ async def update_binder(
         binder.deal_type = data["deal_type"]
     if "description" in data:
         binder.description = (data["description"] or "")[:300] or None
-    if "cabinet_id" in data and data["cabinet_id"]:
+    if "cabinet_id" in data and data["cabinet_id"] and not binder.parent_id:
+        # a folder stays in its parent's cabinet; a binder takes its folders along
         moved = (await db.execute(_cabinets_visible_to(
             select(Cabinet).where(Cabinet.id == data["cabinet_id"]),
             current_user))).scalar_one_or_none()
         if not moved:
             raise HTTPException(status_code=400, detail="کمد مقصد یافت نشد")
         binder.cabinet_id = moved.id
+        for fid in (await _binder_ids_within(db, binder.id))[1:]:
+            folder = await db.get(Binder, fid)
+            if folder:
+                folder.cabinet_id = moved.id
     await db.commit()
     await db.refresh(binder)
     return binder.to_dict()
@@ -303,10 +350,15 @@ async def delete_binder(
         .where(Binder.id == binder_id), current_user))).scalar_one_or_none()
     if not binder:
         raise HTTPException(status_code=404, detail="زونکن یافت نشد")
+    within = await _binder_ids_within(db, binder_id)
     props = (await db.execute(
-        select(Property).where(Property.binder_id == binder_id))).scalars().all()
+        select(Property).where(Property.binder_id.in_(within)))).scalars().all()
     for p in props:
         p.binder_id = None          # unfile, never delete the file itself
+    for fid in within[1:]:          # the folders inside go with the binder
+        folder = await db.get(Binder, fid)
+        if folder:
+            await db.delete(folder)
     await db.delete(binder)
     await db.commit()
     return {"success": True, "unfiled": len(props)}
@@ -367,7 +419,9 @@ async def list_files(
     if unfiled:
         q = q.where(Property.binder_id.is_(None))
     elif binder_id is not None:
-        q = q.where(Property.binder_id == binder_id)
+        # opening a binder shows what is on its tabbed dividers as well;
+        # opening a folder shows only that folder (it has no children)
+        q = q.where(Property.binder_id.in_(await _binder_ids_within(db, binder_id)))
 
     if tag:
         q = q.where(Property.tags.ilike(f"%{tag}%"))
@@ -490,6 +544,91 @@ async def bulk_file_action(
 
     await db.commit()
     return {"success": True, "updated": len(props), "skipped": skipped, "action": action}
+
+
+# ── ویرایش فایل ─────────────────────────────────────────────────────────
+# What a consultant corrects by hand after a scrape or a phone call. Kept
+# here rather than on /properties so a filing-only account can fix its own
+# files, and gated by the same visibility as every other read.
+FILE_TEXT = ("title", "description", "district", "neighborhood", "address",
+             "seller_name", "phone_number", "property_type", "listing_type",
+             "document_type", "building_direction", "corner_type", "unit_status")
+FILE_INT = ("area", "rooms", "floor", "total_floors", "year_built",
+            "total_price", "price", "price_per_meter", "deposit", "rent_price")
+FILE_BOOL = ("has_elevator", "has_parking", "has_storage", "has_balcony",
+             "is_pinned", "is_private", "is_draft")
+
+
+def _file_full(p: Property) -> dict:
+    """The brief plus everything the edit form can change."""
+    d = _file_brief(p)
+    for k in ("description", "address", "neighborhood", "floor", "total_floors", "year_built",
+              "total_price", "price", "price_per_meter", "has_elevator", "has_parking",
+              "has_storage", "has_balcony", "document_type", "building_direction",
+              "corner_type", "unit_status", "category_name"):
+        d[k] = getattr(p, k)
+    return d
+
+
+@router.get("/files/{property_id}")
+async def get_file(
+    property_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    prop = (await db.execute(_visible_to(
+        select(Property).where(Property.id == property_id), current_user))).scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=404, detail="فایل یافت نشد")
+    return _file_full(prop)
+
+
+@router.patch("/files/{property_id}")
+async def update_file(
+    property_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    prop = (await db.execute(_visible_to(
+        select(Property).where(Property.id == property_id), current_user))).scalar_one_or_none()
+    if not prop:
+        raise HTTPException(status_code=404, detail="فایل یافت نشد")
+    if "title" in data and not (data["title"] or "").strip():
+        raise HTTPException(status_code=400, detail="عنوان فایل خالی نمی‌تواند باشد")
+    for k in FILE_TEXT:
+        if k in data:
+            v = (str(data[k]).strip() if data[k] is not None else "")
+            setattr(prop, k, v[:500] or None)
+    for k in FILE_INT:
+        if k in data:
+            v = data[k]
+            if v in (None, ""):
+                setattr(prop, k, None)
+            else:
+                try:
+                    setattr(prop, k, int(str(v).replace("/", "").replace(",", "")))
+                except ValueError:
+                    raise HTTPException(status_code=400, detail=f"مقدار «{k}» عدد نیست")
+    for k in FILE_BOOL:
+        if k in data:
+            setattr(prop, k, bool(data[k]))
+    if "tags" in data:
+        prop.tags = join_tags(split_tags(data["tags"]))
+    if "binder_id" in data:
+        target = data["binder_id"]
+        if target:
+            ok = (await db.execute(_cabinets_visible_to(
+                select(Binder.id).join(Cabinet, Binder.cabinet_id == Cabinet.id)
+                .where(Binder.id == target), current_user))).scalar_one_or_none()
+            if not ok:
+                raise HTTPException(status_code=400, detail="زونکن مقصد یافت نشد")
+        prop.binder_id = target or None
+    if prop.is_private and not prop.created_by:
+        prop.created_by = _actor(current_user)
+    await db.commit()
+    await db.refresh(prop)
+    return _file_full(prop)
 
 
 @router.get("/tags")

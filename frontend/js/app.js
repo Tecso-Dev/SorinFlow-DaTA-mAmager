@@ -6452,6 +6452,9 @@ async function viewLead(id) {
                         <button class="btn btn-sm btn-outline-info" onclick="scheduleVisitForLead(${lead.id})">
                             <i class="bi bi-calendar-plus"></i> ثبت بازدید
                         </button>
+                        <button class="btn btn-sm btn-outline-warning" onclick="moveFilePick(${lead.property_id})" title="این فایل را در کمد و زونکن بگذارید">
+                            <i class="bi bi-folder-symlink"></i> بایگانی در زونکن
+                        </button>
                     </div>
                 </div>
                 <div class="col-md-4">
@@ -8938,8 +8941,10 @@ async function loadUpcomingEvents() {
 
 // ═══════════════════════════════════════════════════════════════════
 //  کمد و زونکن — filing
-//  A cabinet holds binders, a binder holds files. A "file" is a
-//  property; nothing is copied, only filed and marked.
+//  An explorer: the tree of cabinets → binders → folders on one side,
+//  the files of whatever is open on the other. A "file" is a property;
+//  nothing is copied, only filed and marked. Files are dragged onto
+//  the tree, or ticked and sent with «انتقال به…».
 // ═══════════════════════════════════════════════════════════════════
 const FILING_PALETTE = ['#fbbf24', '#34d399', '#38bdf8', '#a78bfa', '#f472b6',
                         '#fb923c', '#2dd4bf', '#f87171', '#a3e635', '#e879f9'];
@@ -8949,13 +8954,17 @@ const FILING_ICONS = ['bi-archive', 'bi-house-door', 'bi-key', 'bi-people',
                       'bi-briefcase', 'bi-folder'];
 const FILING_PAGE = 60;          // one screenful of files per request
 let _cabinets = [];
-let _activeBinder = null;        // null = the unfiled tray
+let _activeBinder = null;        // null = the unfiled tray; may be a folder
 let _filingArchived = false;
 let _filingOffset = 0;
+let _filingShown = [];           // ids on screen, in order — for shift-click and «انتخاب همه»
 let _selectedFiles = new Set();
-let _cabinetEditId = null, _binderEditId = null, _binderCabinetId = null;
+let _lastPickedFile = null;
+let _cabinetEditId = null, _binderEditId = null, _binderCabinetId = null, _binderParentId = null;
 let _cabColor = FILING_PALETTE[0], _binColor = FILING_PALETTE[2];
 let _cabIcon = FILING_ICONS[0];
+let _dragIds = null;             // the files under the cursor while dragging
+let _filingUnfiled = 0;          // for the tray's badge in the tree
 
 function _paletteHtml(selected, onpick) {
     return FILING_PALETTE.map(c =>
@@ -8981,10 +8990,11 @@ async function loadFiling() {
             apiCall('/filing/tags'),
         ]);
         _cabinets = cabs.items || [];
+        // the open box may have been renamed, emptied or deleted meanwhile
+        if (_activeBinder) _activeBinder = _allBinders().find(b => b.id === _activeBinder.id) || null;
         _renderFilingCounts(counts);
-        _renderShelves();
+        _renderTree();
         _renderTagFilter(tags.items || []);
-        _renderBinderPickers();
         await loadFilingFiles();
     } catch (e) {
         showToast('خطا', 'بارگیری کمدها ناموفق بود', 'danger');
@@ -8992,62 +9002,101 @@ async function loadFiling() {
 }
 
 function _renderFilingCounts(c) {
+    _filingUnfiled = c.unfiled || 0;
     const box = document.getElementById('filing-counts');
     if (!box) return;
     const chip = (label, value, cls) =>
         `<span class="badge ${cls}">${label}: ${formatNumber(value || 0)}</span>`;
     box.innerHTML =
-        chip('بایگانی‌شده در زونکن', c.filed, 'bg-primary-subtle text-primary-emphasis') +
+        chip('در زونکن', c.filed, 'bg-primary-subtle text-primary-emphasis') +
         chip('بدون زونکن', c.unfiled, 'bg-warning-subtle text-warning-emphasis') +
         chip('سنجاق', c.pinned, 'bg-info-subtle text-info-emphasis') +
         chip('بایگانی', c.archived, 'bg-secondary') +
         chip('شخصی', c.private, 'bg-danger-subtle text-danger-emphasis');
 }
 
-function _renderShelves() {
-    const wrap = document.getElementById('filing-shelves');
+/** Every binder and folder, flat. */
+function _allBinders() {
+    return _cabinets.flatMap(c => (c.binders || []).flatMap(b => [b, ...(b.folders || [])]));
+}
+function _cabinetOf(b) { return _cabinets.find(c => c.id === b?.cabinet_id) || null; }
+function _parentOf(b) { return b?.parent_id ? _allBinders().find(x => x.id === b.parent_id) || null : null; }
+
+// ── the tree ────────────────────────────────────────────────────────
+function _renderTree() {
+    const wrap = document.getElementById('filing-tree');
     if (!wrap) return;
+    const on = id => (_activeBinder ? _activeBinder.id === id : id === null) && !_filingArchived;
+    const node = (b, depth) => `
+        <div class="ftree-node${on(b.id) ? ' active' : ''} depth-${depth}" data-drop="${b.id}"
+             style="--c:${b.color}" onclick="openBinder(${b.id})" title="${esc(b.name)}${b.description ? ' — ' + esc(b.description) : ''}">
+            <i class="bi ${depth === 2 ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i>
+            <span class="ftree-name">${esc(b.name)}</span>
+            <span class="ftree-count">${formatNumber(b.file_count || 0)}</span>
+            <button class="ftree-edit" onclick="event.stopPropagation(); openBinderModal(${b.id}, ${b.cabinet_id})" title="ویرایش"><i class="bi bi-three-dots"></i></button>
+        </div>
+        ${(b.folders || []).map(f => node(f, 2)).join('')}`;
+    const tray = `
+        <div class="ftree-node tray${on(null) ? ' active' : ''}" data-drop="none" onclick="openBinder(null)">
+            <i class="bi bi-inbox-fill"></i><span class="ftree-name">بدون زونکن</span>
+            <span class="ftree-count">${formatNumber(_filingUnfiled)}</span>
+        </div>`;
     if (!_cabinets.length) {
-        wrap.innerHTML = `<div class="text-center text-muted py-4">
-            <i class="bi bi-archive" style="font-size:2rem"></i>
-            <p class="mt-2">هنوز کمدی نساخته‌اید. با «کمد جدید» شروع کنید.</p></div>`;
+        wrap.innerHTML = tray + `<div class="text-center text-muted small py-4">
+            <i class="bi bi-archive" style="font-size:1.8rem"></i>
+            <p class="mt-2 mb-0">هنوز کمدی نساخته‌اید. با «+ کمد» شروع کنید.</p></div>`;
+        _wireDropTargets(wrap);
         return;
     }
-    wrap.innerHTML = _cabinets.map(cab => `
-        <div class="filing-cabinet" style="--c:${cab.color}">
-            <div class="filing-cabinet-head">
+    wrap.innerHTML = tray + _cabinets.map(cab => `
+        <div class="ftree-cabinet" style="--c:${cab.color}">
+            <div class="ftree-cabinet-head">
                 <i class="bi ${esc(cab.icon) || 'bi-archive'}"></i>
                 <b>${esc(cab.name)}</b>
-                <span class="text-muted small">${formatNumber(cab.file_count || 0)} فایل</span>
-                ${cab.owner ? '<span class="badge bg-danger-subtle text-danger-emphasis">شخصی</span>' : ''}
-                <div class="ms-auto d-flex gap-1">
-                    <button class="btn btn-sm btn-outline-success" onclick="openBinderModal(null, ${cab.id})" title="زونکن جدید">
-                        <i class="bi bi-plus-lg"></i>
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="openCabinetModal(${cab.id})" title="ویرایش کمد">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                </div>
+                ${cab.owner ? '<i class="bi bi-lock-fill text-danger small" title="کمد شخصی"></i>' : ''}
+                <span class="ftree-count">${formatNumber(cab.file_count || 0)}</span>
+                <button class="ftree-edit" onclick="openBinderModal(null, ${cab.id})" title="زونکن جدید"><i class="bi bi-plus-lg"></i></button>
+                <button class="ftree-edit" onclick="openCabinetModal(${cab.id})" title="ویرایش کمد"><i class="bi bi-pencil"></i></button>
             </div>
-            <div class="filing-shelf">
-                ${(cab.binders || []).map(_binderSpine).join('') ||
-                  '<div class="text-muted small py-3">این کمد خالی است</div>'}
-            </div>
+            ${(cab.binders || []).map(b => node(b, 1)).join('') ||
+              '<div class="text-muted small px-3 py-1">این کمد خالی است</div>'}
         </div>`).join('');
+    _wireDropTargets(wrap);
 }
 
-/** A binder drawn as a spine on the shelf, like the paper it replaces. */
-function _binderSpine(b) {
-    const active = _activeBinder && _activeBinder.id === b.id;
-    return `<div class="filing-binder${active ? ' active' : ''}" style="--c:${b.color}"
-                 onclick="openBinder(${b.id})" title="${esc(b.name)}${b.description ? ' — ' + esc(b.description) : ''}">
-        <button class="filing-binder-edit" onclick="event.stopPropagation(); openBinderModal(${b.id}, ${b.cabinet_id})" title="ویرایش">
-            <i class="bi bi-three-dots"></i>
-        </button>
-        <div class="filing-binder-count">${formatNumber(b.file_count || 0)}</div>
-        <div class="filing-binder-name">${esc(b.name)}</div>
-        <div class="filing-binder-kind">${esc(b.kind_label)}${b.deal_label ? ' • ' + esc(b.deal_label) : ''}</div>
-    </div>`;
+/** Breadcrumb + the buttons that only make sense inside a box. */
+function _renderCrumb() {
+    const nav = document.getElementById('filing-crumb');
+    if (!nav) return;
+    const parts = [];
+    if (_filingArchived) parts.push('<span class="crumb-here"><i class="bi bi-archive"></i> بایگانی</span>');
+    else if (!_activeBinder) parts.push('<span class="crumb-here"><i class="bi bi-inbox"></i> فایل‌های بدون زونکن</span>');
+    else {
+        const cab = _cabinetOf(_activeBinder), parent = _parentOf(_activeBinder);
+        if (cab) parts.push(`<span class="crumb-link" style="--c:${cab.color}"><i class="bi ${esc(cab.icon)}"></i> ${esc(cab.name)}</span>`);
+        if (parent) parts.push(`<a href="#" class="crumb-link" onclick="event.preventDefault(); openBinder(${parent.id})"><i class="bi bi-journal-bookmark"></i> ${esc(parent.name)}</a>`);
+        parts.push(`<span class="crumb-here" style="--c:${_activeBinder.color}"><i class="bi ${parent ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i> ${esc(_activeBinder.name)}</span>`);
+    }
+    nav.innerHTML = parts.join('<i class="bi bi-chevron-left crumb-sep"></i>');
+    // «پوشهٔ جدید» only inside a binder (folders do not nest); «ویرایش» for any open box
+    document.getElementById('filing-new-folder-btn')?.classList.toggle('d-none', !_activeBinder || !!_activeBinder.parent_id || _filingArchived);
+    document.getElementById('filing-edit-box-btn')?.classList.toggle('d-none', !_activeBinder || _filingArchived);
+}
+
+/** The folder chips above the files of an open binder. */
+function _renderFolders() {
+    const box = document.getElementById('filing-folders');
+    if (!box) return;
+    const folders = (!_filingArchived && _activeBinder && !_activeBinder.parent_id) ? (_activeBinder.folders || []) : [];
+    box.classList.toggle('d-none', !folders.length);
+    box.innerHTML = folders.map(f => `
+        <div class="folder-chip" data-drop="${f.id}" style="--c:${f.color}" onclick="openBinder(${f.id})" title="باز کردن پوشه">
+            <i class="bi bi-folder-fill"></i> ${esc(f.name)} <span class="ftree-count">${formatNumber(f.file_count || 0)}</span>
+        </div>`).join('') + (folders.length ? `
+        <div class="folder-chip is-own" data-drop="${_activeBinder.id}" title="فایل‌هایی که مستقیم در زونکن‌اند">
+            <i class="bi bi-journal-bookmark"></i> خودِ زونکن <span class="ftree-count">${formatNumber(_activeBinder.own_count || 0)}</span>
+        </div>` : '');
+    _wireDropTargets(box);
 }
 
 function _renderTagFilter(tags) {
@@ -9070,25 +9119,23 @@ function _selectTag(sel, value) {
     sel.value = value;
 }
 
-/** The "move to binder" dropdown. Scoped by id: the bulk bar holds other
- *  selects now, and they must not be overwritten with binder options. */
-function _renderBinderPickers() {
-    const sel = document.getElementById('filing-move-select');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">انتقال به زونکن...</option>' +
-        _cabinets.map(c => `<optgroup label="${esc(c.name)}">` +
-            (c.binders || []).map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('') +
-            '</optgroup>').join('') +
-        '<option value="none">— خارج کردن از زونکن —</option>';
+/** «کمد › زونکن › پوشه» for every box, as [id, label] pairs for a picker. */
+function _binderChoices(withNone = true) {
+    const out = [];
+    for (const c of _cabinets) for (const b of (c.binders || [])) {
+        out.push([String(b.id), `${c.name} › ${b.name}`]);
+        for (const f of (b.folders || [])) out.push([String(f.id), `${c.name} › ${b.name} › ${f.name}`]);
+    }
+    if (withNone) out.push(['none', '— خارج کردن از زونکن —']);
+    return out;
 }
 
 function openBinder(id) {
-    _activeBinder = _allBinders().find(b => b.id === id) || null;
+    _activeBinder = id == null ? null : (_allBinders().find(b => b.id === id) || null);
     _setFilingArchived(false);
-    _renderShelves();
+    _renderTree();
     loadFilingFiles();
 }
-function _allBinders() { return _cabinets.flatMap(c => c.binders || []); }
 
 /** Deleting a cabinet or binder unfiles everything behind it, so the server
  *  restricts it to an admin — hide the button rather than let it 403. */
@@ -9104,7 +9151,27 @@ function _setFilingArchived(on) {
 
 function toggleFilingArchived() {
     _setFilingArchived(!_filingArchived);
+    _renderTree();
     loadFilingFiles();
+}
+
+async function newFolderHere() {
+    if (!_activeBinder || _activeBinder.parent_id) return;
+    const name = await askText({
+        icon: 'bi-folder-plus', title: 'پوشهٔ جدید',
+        body: `داخل زونکن <b>${esc(_activeBinder.name)}</b> — مثلاً «یک‌خوابه»، «زیر ۲ میلیارد»، «فوری».`,
+        field: { label: 'نام پوشه', placeholder: 'نام پوشه' },
+    });
+    if (!name) return;
+    try {
+        await apiCall('/filing/binders', { method: 'POST', body: JSON.stringify({ name, parent_id: _activeBinder.id }) });
+        showToast('موفق', 'پوشه ساخته شد', 'success');
+        loadFiling();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+function editOpenBox() {
+    if (_activeBinder) openBinderModal(_activeBinder.id, _activeBinder.cabinet_id);
 }
 
 async function loadFilingFiles(append = false) {
@@ -9112,6 +9179,7 @@ async function loadFilingFiles(append = false) {
     if (!box) return;
     if (!append) {
         _filingOffset = 0;
+        _filingShown = [];
         // a selection made before the filter changed would still be acted on
         // by the bulk bar while its cards are nowhere on screen
         clearFileSelection();
@@ -9134,15 +9202,19 @@ async function loadFilingFiles(append = false) {
         ? 'فایل‌های بایگانی‌شده'
         : (_activeBinder ? `زونکن: ${_activeBinder.name}`
                          : (narrowed ? 'نتیجهٔ جستجو در همهٔ زونکن‌ها' : 'فایل‌های بدون زونکن'));
+    _renderCrumb();
+    _renderFolders();
     try {
         const data = await apiCall(url);
         const items = data.items || [];
         const total = data.total || 0;
         document.getElementById('filing-files-count').textContent = formatNumber(total);
+        _filingShown = append ? _filingShown.concat(items.map(f => f.id)) : items.map(f => f.id);
         if (!items.length && !append) {
             box.innerHTML = `<div class="text-center text-muted py-4">
                 <i class="bi bi-inbox" style="font-size:2rem"></i>
-                <p class="mt-2">فایلی اینجا نیست</p></div>`;
+                <p class="mt-2">${narrowed ? 'چیزی با این فیلتر پیدا نشد' : 'فایلی اینجا نیست'}</p>
+                ${!narrowed && !_activeBinder && !_filingArchived ? '<p class="small">همهٔ فایل‌ها دسته‌بندی شده‌اند 👌</p>' : ''}</div>`;
             _renderFilingMore(0, 0);
             return;
         }
@@ -9185,9 +9257,18 @@ function _fileCard(f) {
     const tags = (f.tags || []).map(t =>
         `<span class="file-tag" data-tag="${esc(t)}"
                onclick="event.stopPropagation(); filterByTag(this.dataset.tag)">${esc(t)}</span>`).join('');
-    return `<div class="file-card${_selectedFiles.has(f.id) ? ' selected' : ''}" data-id="${f.id}"
-                 onclick="toggleFileSelection(${f.id}, this)">
+    // inside a binder, say which folder the file sits in
+    const where = f.binder_id && f.binder_id !== _activeBinder?.id ? _allBinders().find(b => b.id === f.binder_id) : null;
+    const price = f.listing_type === 'rent'
+        ? `${f.deposit ? 'رهن ' + formatPrice(f.deposit) : ''}${f.deposit && f.rent_price ? ' · ' : ''}${f.rent_price ? 'اجاره ' + formatPrice(f.rent_price) : ''}` || '—'
+        : (f.price ? formatPrice(f.price) : '—');
+    const sel = _selectedFiles.has(f.id);
+    return `<div class="file-card${sel ? ' selected' : ''}" data-id="${f.id}" draggable="true"
+                 onclick="onFileCardClick(event, ${f.id}, this)" ondblclick="viewProperty(${f.id})"
+                 ondragstart="onFileDragStart(event, ${f.id})" ondragend="onFileDragEnd()">
         <div class="file-card-head">
+            <input type="checkbox" class="form-check-input file-check" ${sel ? 'checked' : ''}
+                   onclick="event.stopPropagation(); toggleFileSelection(${f.id}, this.closest('.file-card'))" title="انتخاب">
             <span class="serial-badge">${formatSerial(f.serial_no)}</span>
             <div class="file-marks">${marks.join('')}</div>
         </div>
@@ -9197,10 +9278,13 @@ function _fileCard(f) {
             ${f.rooms != null ? ' • ' + formatNumber(f.rooms) + ' خواب' : ''}
             ${f.district ? ' • ' + esc(f.district) : (f.city_name ? ' • ' + esc(f.city_name) : '')}
         </div>
-        <div class="file-card-price">${f.price ? formatPrice(f.price) : '—'}</div>
+        <div class="file-card-price">${price}</div>
+        ${where ? `<div class="file-where" style="--c:${where.color}"><i class="bi ${where.parent_id ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i> ${esc(where.name)}</div>` : ''}
         ${tags ? `<div class="file-tags">${tags}</div>` : ''}
         <div class="file-card-actions" onclick="event.stopPropagation()">
             <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${f.id})" title="جزئیات"><i class="bi bi-eye"></i></button>
+            <button class="btn btn-sm btn-outline-primary" onclick="openFileEdit(${f.id})" title="ویرایش فایل"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-success" onclick="moveFilePick(${f.id})" title="انتقال به زونکن / پوشه"><i class="bi bi-folder-symlink"></i></button>
             <button class="btn btn-sm btn-outline-info" onclick="quickFileAction(${f.id}, '${f.is_pinned ? 'unpin' : 'pin'}')" title="سنجاق"><i class="bi bi-pin-angle"></i></button>
             <button class="btn btn-sm btn-outline-warning" onclick="quickFileAction(${f.id}, '${f.is_archived ? 'unarchive' : 'archive'}')" title="بایگانی"><i class="bi bi-archive"></i></button>
             <button class="btn btn-sm btn-outline-success" onclick="showSimilarForProperty(${f.id})" title="ملک‌های مشابه"><i class="bi bi-diagram-3"></i></button>
@@ -9217,14 +9301,40 @@ function filterByTag(tag) {
     loadFilingFiles();
 }
 
+// ── selecting ───────────────────────────────────────────────────────
+// click = toggle, shift+click = the run since the last pick, double-click = open.
+function onFileCardClick(e, id, el) {
+    if (e.shiftKey && _lastPickedFile != null && _filingShown.includes(_lastPickedFile)) {
+        const a = _filingShown.indexOf(_lastPickedFile), b = _filingShown.indexOf(id);
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        for (const fid of _filingShown.slice(lo, hi + 1)) _selectedFiles.add(fid);
+        _paintSelection();
+        return;
+    }
+    toggleFileSelection(id, el);
+}
 function toggleFileSelection(id, el) {
     if (_selectedFiles.has(id)) _selectedFiles.delete(id); else _selectedFiles.add(id);
-    el?.classList.toggle('selected', _selectedFiles.has(id));
-    _updateFileBulkBar();
+    _lastPickedFile = id;
+    _paintSelection();
+}
+function selectAllFiles(on) {
+    if (on) _filingShown.forEach(id => _selectedFiles.add(id)); else _selectedFiles.clear();
+    _paintSelection();
 }
 function clearFileSelection() {
     _selectedFiles.clear();
-    document.querySelectorAll('.file-card.selected').forEach(c => c.classList.remove('selected'));
+    _paintSelection();
+}
+function _paintSelection() {
+    document.querySelectorAll('.file-card').forEach(c => {
+        const on = _selectedFiles.has(Number(c.dataset.id));
+        c.classList.toggle('selected', on);
+        const chk = c.querySelector('.file-check');
+        if (chk) chk.checked = on;
+    });
+    const all = document.getElementById('filing-select-all');
+    if (all) all.checked = _filingShown.length > 0 && _filingShown.every(id => _selectedFiles.has(id));
     _updateFileBulkBar();
 }
 function _updateFileBulkBar() {
@@ -9233,6 +9343,68 @@ function _updateFileBulkBar() {
     bar.classList.toggle('d-none', _selectedFiles.size === 0);
     const n = document.getElementById('filing-bulk-count');
     if (n) n.textContent = formatNumber(_selectedFiles.size);
+}
+
+// ── drag & drop onto the tree / folder chips ───────────────────────
+function onFileDragStart(e, id) {
+    // dragging a ticked card carries the whole selection
+    _dragIds = _selectedFiles.has(id) ? [..._selectedFiles] : [id];
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', String(id)); } catch (_) {}
+    document.body.classList.add('filing-dragging');
+    const ghost = document.getElementById('filing-drag-ghost') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'filing-drag-ghost', className: 'filing-drag-ghost' }));
+    ghost.textContent = _dragIds.length > 1 ? `${formatNumber(_dragIds.length)} فایل` : 'فایل';
+    try { e.dataTransfer.setDragImage(ghost, 20, 20); } catch (_) {}
+}
+function onFileDragEnd() {
+    _dragIds = null;
+    document.body.classList.remove('filing-dragging');
+    document.querySelectorAll('.drop-over').forEach(el => el.classList.remove('drop-over'));
+}
+function _wireDropTargets(root) {
+    root.querySelectorAll('[data-drop]').forEach(el => {
+        if (el.dataset.dropWired) return;
+        el.dataset.dropWired = '1';
+        el.addEventListener('dragover', e => { if (_dragIds) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; el.classList.add('drop-over'); } });
+        el.addEventListener('dragleave', () => el.classList.remove('drop-over'));
+        el.addEventListener('drop', e => {
+            e.preventDefault(); el.classList.remove('drop-over');
+            if (!_dragIds) return;
+            const target = el.dataset.drop;
+            _moveFiles(_dragIds, target === 'none' ? null : Number(target));
+            onFileDragEnd();
+        });
+    });
+}
+
+async function _moveFiles(ids, binderId) {
+    const box = binderId ? _allBinders().find(b => b.id === binderId) : null;
+    await _fileBulk({ ids, action: 'move', binder_id: binderId },
+                    binderId ? `به «${box?.name || 'زونکن'}» منتقل شد` : 'از زونکن خارج شد');
+}
+
+/** A picker listing every box as «کمد › زونکن › پوشه». */
+async function _pickBinder(title, body) {
+    // reachable from the lead modal before the filing tab was ever opened
+    if (!_cabinets.length) {
+        try { _cabinets = (await apiCall('/filing/cabinets')).items || []; } catch (_) {}
+    }
+    if (!_cabinets.length) { showToast('راهنما', 'اول در تب «کمد و زونکن» یک کمد و زونکن بسازید', 'info'); return undefined; }
+    const v = await _askOpen({
+        icon: 'bi-folder-symlink', title, body, okLabel: 'انتقال',
+        field: { label: 'مقصد', options: _binderChoices(true), value: _activeBinder ? String(_activeBinder.id) : undefined },
+    });
+    if (v == null || v === '') return undefined;
+    return v === 'none' ? null : Number(v);
+}
+async function moveFilePick(id) {
+    const target = await _pickBinder('انتقال فایل', 'این فایل به کدام زونکن یا پوشه برود؟');
+    if (target !== undefined) await _moveFiles([id], target);
+}
+async function bulkMovePick() {
+    if (!_selectedFiles.size) return;
+    const target = await _pickBinder('انتقال گروهی', `<b>${formatNumber(_selectedFiles.size)}</b> فایل انتخاب‌شده به کدام زونکن یا پوشه بروند؟`);
+    if (target !== undefined) await _moveFiles([..._selectedFiles], target);
 }
 
 const FILE_ACTION_FA = {
@@ -9271,9 +9443,7 @@ async function bulkFileAction(action) {
 }
 async function bulkMoveFiles(binderId) {
     if (!binderId || !_selectedFiles.size) return;
-    await _fileBulk({ ids: [..._selectedFiles], action: 'move',
-                      binder_id: binderId === 'none' ? null : Number(binderId) },
-                    binderId === 'none' ? 'از زونکن خارج شد' : 'به زونکن منتقل شد');
+    await _moveFiles([..._selectedFiles], binderId === 'none' ? null : Number(binderId));
 }
 async function bulkTagFiles(action = 'tag') {
     if (!_selectedFiles.size) return;
@@ -9287,6 +9457,71 @@ async function bulkTagFiles(action = 'tag') {
     });
     if (!tags || !tags.trim()) return;
     await _fileBulk({ ids: [..._selectedFiles], action, tags }, FILE_ACTION_FA[action]);
+}
+
+// ── ویرایش فایل ─────────────────────────────────────────────────────
+let _fileEditId = null;
+function _feTogglePrice() {
+    const rent = document.getElementById('fe-listing').value === 'rent';
+    document.querySelectorAll('#fileEditModal .fe-rent').forEach(el => el.classList.toggle('d-none', !rent));
+    document.querySelectorAll('#fileEditModal .fe-buy').forEach(el => el.classList.toggle('d-none', rent));
+}
+async function openFileEdit(id) {
+    try {
+        const f = await apiCall(`/filing/files/${id}`);
+        _fileEditId = id;
+        const set = (k, v) => { const el = document.getElementById(k); if (el) el.value = v ?? ''; };
+        const chk = (k, v) => { const el = document.getElementById(k); if (el) el.checked = !!v; };
+        document.getElementById('fe-serial').textContent = formatSerial(f.serial_no);
+        set('fe-title', f.title); set('fe-listing', f.listing_type === 'rent' ? 'rent' : 'buy');
+        set('fe-ptype', f.property_type || f.category_name);
+        set('fe-total', f.total_price || f.price ? _groupMoney(String(f.total_price || f.price)) : '');
+        set('fe-deposit', f.deposit ? _groupMoney(String(f.deposit)) : '');
+        set('fe-rent', f.rent_price ? _groupMoney(String(f.rent_price)) : '');
+        set('fe-area', f.area); set('fe-rooms', f.rooms); set('fe-floor', f.floor); set('fe-year', f.year_built);
+        set('fe-district', f.district); set('fe-address', f.address);
+        set('fe-seller', f.seller_name); set('fe-phone', f.phone_number);
+        chk('fe-elevator', f.has_elevator); chk('fe-parking', f.has_parking);
+        chk('fe-storage', f.has_storage); chk('fe-balcony', f.has_balcony);
+        chk('fe-pinned', f.is_pinned); chk('fe-private', f.is_private);
+        set('fe-tags', Array.isArray(f.tags) ? f.tags.join('، ') : (f.tags || ''));
+        set('fe-description', f.description);
+        const sel = document.getElementById('fe-binder');
+        sel.innerHTML = '<option value="">— بدون زونکن —</option>' +
+            _binderChoices(false).map(([v, l]) => `<option value="${v}"${Number(v) === f.binder_id ? ' selected' : ''}>${esc(l)}</option>`).join('');
+        document.getElementById('fe-view-btn').onclick = () => viewProperty(id);
+        _feTogglePrice();
+        initMoneyInputs(document.getElementById('fileEditModal'));
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fileEditModal')).show();
+    } catch (e) { showToast('خطا', e.message || 'بارگیری فایل ناموفق بود', 'danger'); }
+}
+async function saveFileEdit() {
+    if (!_fileEditId) return;
+    const v = k => document.getElementById(k)?.value.trim() ?? '';
+    const on = k => !!document.getElementById(k)?.checked;
+    const title = v('fe-title');
+    if (!title) { showToast('خطا', 'عنوان فایل الزامی است', 'warning'); return; }
+    const rent = v('fe-listing') === 'rent';
+    const body = {
+        title, listing_type: v('fe-listing'), property_type: v('fe-ptype'),
+        total_price: rent ? null : _intOrNull('fe-total'),
+        deposit: rent ? _intOrNull('fe-deposit') : null,
+        rent_price: rent ? _intOrNull('fe-rent') : null,
+        area: v('fe-area'), rooms: v('fe-rooms'), floor: v('fe-floor'), year_built: v('fe-year'),
+        district: v('fe-district'), address: v('fe-address'),
+        seller_name: v('fe-seller'), phone_number: v('fe-phone'),
+        has_elevator: on('fe-elevator'), has_parking: on('fe-parking'),
+        has_storage: on('fe-storage'), has_balcony: on('fe-balcony'),
+        is_pinned: on('fe-pinned'), is_private: on('fe-private'),
+        tags: v('fe-tags'), description: v('fe-description'),
+        binder_id: v('fe-binder') ? Number(v('fe-binder')) : null,
+    };
+    try {
+        await apiCall(`/filing/files/${_fileEditId}`, { method: 'PATCH', body: JSON.stringify(body) });
+        showToast('موفق', 'فایل ذخیره شد', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('fileEditModal'))?.hide();
+        loadFiling();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
 // ── cabinet / binder modals ────────────────────────────────────────
@@ -9332,18 +9567,26 @@ async function deleteCabinet() {
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
-function openBinderModal(id = null, cabinetId = null) {
+/** One modal for a binder and for a folder: a folder is a binder with a
+ *  parent, so it has no kind or deal of its own (it inherits them). */
+function openBinderModal(id = null, cabinetId = null, parentId = null) {
     _binderEditId = id;
     _binderCabinetId = cabinetId;
     const bin = id ? _allBinders().find(b => b.id === id) : null;
+    _binderParentId = bin ? bin.parent_id : parentId;
+    const folder = !!_binderParentId;
     document.getElementById('binder-modal-title').innerHTML = id
-        ? '<i class="bi bi-journal-bookmark"></i> ویرایش زونکن'
-        : '<i class="bi bi-journal-plus"></i> زونکن جدید';
+        ? `<i class="bi ${folder ? 'bi-folder' : 'bi-journal-bookmark'}"></i> ${folder ? 'ویرایش پوشه' : 'ویرایش زونکن'}`
+        : `<i class="bi ${folder ? 'bi-folder-plus' : 'bi-journal-plus'}"></i> ${folder ? 'پوشهٔ جدید' : 'زونکن جدید'}`;
     document.getElementById('bin-name').value = bin?.name || '';
     document.getElementById('bin-kind').value = bin?.kind || 'property';
     document.getElementById('bin-deal').value = bin?.deal_type || '';
     document.getElementById('bin-description').value = bin?.description || '';
-    document.getElementById('bin-delete-btn').classList.toggle('d-none', !id || !_canManageFiling());
+    document.getElementById('bin-kind-col')?.classList.toggle('d-none', folder);
+    document.getElementById('bin-deal-col')?.classList.toggle('d-none', folder);
+    const del = document.getElementById('bin-delete-btn');
+    del.classList.toggle('d-none', !id || !_canManageFiling());
+    del.innerHTML = `<i class="bi bi-trash"></i> ${folder ? 'حذف پوشه' : 'حذف زونکن'}`;
     pickBinColor(bin?.color || FILING_PALETTE[2]);
     bootstrap.Modal.getOrCreateInstance(document.getElementById('binderModal')).show();
 }
@@ -9357,11 +9600,12 @@ async function saveBinder() {
         deal_type: document.getElementById('bin-deal').value,
         description: document.getElementById('bin-description').value.trim(),
         cabinet_id: _binderCabinetId,
+        parent_id: _binderParentId || null,
     });
     try {
         if (_binderEditId) await apiCall(`/filing/binders/${_binderEditId}`, { method: 'PATCH', body });
         else await apiCall('/filing/binders', { method: 'POST', body });
-        showToast('موفق', 'زونکن ذخیره شد', 'success');
+        showToast('موفق', _binderParentId ? 'پوشه ذخیره شد' : 'زونکن ذخیره شد', 'success');
         bootstrap.Modal.getInstance(document.getElementById('binderModal'))?.hide();
         loadFiling();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
@@ -9369,12 +9613,15 @@ async function saveBinder() {
 
 async function deleteBinder() {
     if (!_binderEditId) return;
-    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'این زونکن حذف شود؟ فایل‌ها حذف نمی‌شوند، فقط از زونکن خارج می‌شوند.' })) return;
+    const folder = !!_binderParentId;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف',
+        body: folder ? 'این پوشه حذف شود؟ فایل‌ها حذف نمی‌شوند، فقط از پوشه خارج می‌شوند.'
+                     : 'این زونکن و پوشه‌هایش حذف شوند؟ فایل‌ها حذف نمی‌شوند، فقط از زونکن خارج می‌شوند.' })) return;
     try {
         const r = await apiCall(`/filing/binders/${_binderEditId}`, { method: 'DELETE' });
-        showToast('موفق', `زونکن حذف شد — ${formatNumber(r.unfiled)} فایل بدون زونکن شد`, 'success');
+        showToast('موفق', `${folder ? 'پوشه' : 'زونکن'} حذف شد — ${formatNumber(r.unfiled)} فایل بدون زونکن شد`, 'success');
         bootstrap.Modal.getInstance(document.getElementById('binderModal'))?.hide();
-        if (_activeBinder?.id === _binderEditId) _activeBinder = null;
+        if (_activeBinder?.id === _binderEditId) _activeBinder = folder ? (_parentOf(_activeBinder) || null) : null;
         loadFiling();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
