@@ -342,6 +342,24 @@ async def email_broadcast(payload: BroadcastIn,
     return {"ok": failed == 0, "sent": sent, "failed": failed, "total": len(addresses)}
 
 
+class BroadcastPreviewIn(BaseModel):
+    subject: str = Field("", max_length=200)
+    message: str = Field("", max_length=4000)
+    cta_label: Optional[str] = None
+    cta_url: Optional[str] = None
+
+
+@router.post("/broadcast/preview", response_class=HTMLResponse)
+async def broadcast_preview(payload: BroadcastPreviewIn, _: User = _super_admin):
+    """What the recipients will see — the same template the broadcast uses,
+    rendered from what is in the form right now, so the send is never the
+    first time anybody looks at it."""
+    _, html, _text = tpl.notification(
+        payload.subject or "موضوع ایمیل", payload.message or "متن ایمیل اینجا می‌آید.",
+        cta_label=payload.cta_label or "", cta_url=payload.cta_url or "")
+    return HTMLResponse(html)
+
+
 @router.get("/export")
 async def export_audience(audience: str = Query("marketing"),
                           db: AsyncSession = Depends(get_db),

@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260920h">
+    <link rel="stylesheet" href="css/style.css?v=20260920i">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -3272,15 +3272,78 @@
                     </div>
                 </div>
 
+                <!-- کمپین ایمیلی — the broadcast, ported from the SMS panel: a named audience,
+                     its count shown and sent back for the server to verify, a preview before the send -->
+                <div class="card mb-3 crm-superadmin-only" id="em-campaign-card">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-megaphone"></i> کمپین ایمیلی
+                        <span class="badge bg-warning text-dark">فقط مدیر ارشد</span>
+                        <span class="ms-auto small text-muted">گیرندگان فقط کسانی‌اند که ایمیلشان تأیید شده — و برای گروه تبلیغاتی، رضایت داده‌اند</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-lg-5">
+                                <div class="mb-2">
+                                    <label class="form-label small">گروه گیرندگان</label>
+                                    <div id="em-audiences" class="d-flex flex-column gap-1">
+                                        <span class="text-muted small">در حال بارگذاری…</span>
+                                    </div>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small">موضوع</label>
+                                    <input type="text" id="em-bc-subject" class="form-control form-control-sm" maxlength="200"
+                                           placeholder="مثلاً فایل‌های تازهٔ این هفته" oninput="emPreviewSoon()">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small">متن</label>
+                                    <textarea id="em-bc-body" class="form-control form-control-sm" rows="6" maxlength="4000"
+                                              placeholder="سلام…" oninput="emPreviewSoon()"></textarea>
+                                    <div class="form-text small" id="em-bc-count">۰ کاراکتر</div>
+                                </div>
+                                <div class="row g-2 mb-2">
+                                    <div class="col-5">
+                                        <label class="form-label small">دکمه (اختیاری)</label>
+                                        <input type="text" id="em-bc-cta" class="form-control form-control-sm" maxlength="40"
+                                               placeholder="دیدن فایل‌ها" oninput="emPreviewSoon()">
+                                    </div>
+                                    <div class="col-7">
+                                        <label class="form-label small">لینک دکمه</label>
+                                        <input type="text" id="em-bc-url" class="form-control form-control-sm" dir="ltr"
+                                               placeholder="https://sorinflow.com/…" oninput="emPreviewSoon()">
+                                    </div>
+                                </div>
+                                <button class="btn btn-warning btn-sm" id="em-bc-btn" onclick="sendEmailBroadcast()" disabled>
+                                    <i class="bi bi-megaphone"></i> ارسال به گروه انتخاب‌شده
+                                </button>
+                                <span id="em-bc-result" class="small ms-2"></span>
+                            </div>
+                            <div class="col-lg-7">
+                                <label class="form-label small">پیش‌نمایش — همان چیزی که گیرنده می‌بیند</label>
+                                <iframe id="em-bc-preview" title="پیش‌نمایش کمپین"
+                                        style="width:100%;height:440px;border:1px solid var(--border);border-radius:10px;background:#030305"></iframe>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                         <span><i class="bi bi-clock-history"></i> تاریخچهٔ ارسال</span>
-                        <select id="em-filter-status" class="form-select form-select-sm"
-                                style="max-width:150px" onchange="loadEmailMessages()">
-                            <option value="">همهٔ وضعیت‌ها</option>
-                            <option value="sent">ارسال‌شده</option>
-                            <option value="failed">ناموفق</option>
-                        </select>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <select id="em-filter-template" class="form-select form-select-sm"
+                                    style="max-width:170px" onchange="loadEmailMessages()">
+                                <option value="">همهٔ قالب‌ها</option>
+                                <option value="broadcast">کمپین‌ها</option>
+                                <option value="login_code">کد ورود</option>
+                                <option value="notification">ارسال دستی</option>
+                            </select>
+                            <select id="em-filter-status" class="form-select form-select-sm"
+                                    style="max-width:150px" onchange="loadEmailMessages()">
+                                <option value="">همهٔ وضعیت‌ها</option>
+                                <option value="sent">ارسال‌شده</option>
+                                <option value="failed">ناموفق</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="card-body p-0">
                         <div class="table-responsive">
@@ -4760,7 +4823,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260920h"></script>
+<script src="js/app.js?v=20260920i"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

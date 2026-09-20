@@ -11247,9 +11247,138 @@ async function loadEmail() {
     document.getElementById('em-settings-card')?.classList.toggle('d-none', !isBoss);
 
     loadEmailStats();
-    if (isBoss) loadEmailSettings();
+    if (isBoss) { loadEmailSettings(); loadEmailAudiences(); emPreviewSoon(); }
     loadEmailTemplates();
     loadEmailMessages();
+}
+
+// ── کمپین ایمیلی — the broadcast ────────────────────────────────────
+// Same shape as the SMS panel: a named group, its count shown and sent
+// back with the request, so a group that grew since is refused by the
+// server instead of quietly mailed.
+let _emAudience = null, _emAudienceCount = 0, _emPreviewTimer = null;
+
+async function loadEmailAudiences() {
+    const box = document.getElementById('em-audiences');
+    if (!box) return;
+    try {
+        const d = await apiCall('/email/audiences');
+        box.innerHTML = (d.audiences || []).map(a => `
+            <label class="d-flex align-items-center gap-2">
+              <input type="radio" name="em-aud" value="${esc(a.key)}"
+                     data-count="${a.count === null ? 0 : a.count}" onchange="emPickAudience(this)">
+              <span>${esc(a.label)}</span>
+              <span class="badge bg-secondary">${a.count === null ? '—' : faNum(a.count)}</span>
+              <button type="button" class="btn btn-sm btn-link p-0 ms-auto" onclick="exportEmailAudience('${esc(a.key)}')"
+                      title="دانلود آدرس‌ها (CSV)"><i class="bi bi-download"></i></button>
+            </label>`).join('') || '<span class="text-muted small">گروهی نیست</span>';
+    } catch (_) {
+        box.innerHTML = '<span class="text-muted small">گروه‌ها خوانده نشد</span>';
+    }
+}
+
+function emPickAudience(el) {
+    _emAudience = el.value;
+    _emAudienceCount = Number(el.dataset.count || 0);
+    _emSyncButton();
+}
+
+function _emSyncButton() {
+    const btn = document.getElementById('em-bc-btn');
+    if (!btn) return;
+    const ready = _emAudienceCount > 0
+        && document.getElementById('em-bc-subject')?.value.trim()
+        && document.getElementById('em-bc-body')?.value.trim();
+    btn.disabled = !ready || !['root', 'super_admin'].includes(_currentUser?.role);
+    btn.innerHTML = `<i class="bi bi-megaphone"></i> ارسال به ${faNum(_emAudienceCount)} گیرنده`;
+}
+
+/** The preview follows the form, a beat behind the typing. */
+function emPreviewSoon() {
+    const n = document.getElementById('em-bc-count');
+    if (n) n.textContent = `${faNum((document.getElementById('em-bc-body')?.value || '').length)} کاراکتر`;
+    _emSyncButton();
+    clearTimeout(_emPreviewTimer);
+    _emPreviewTimer = setTimeout(emPreview, 400);
+}
+
+async function emPreview() {
+    const frame = document.getElementById('em-bc-preview');
+    if (!frame) return;
+    const body = {
+        subject: document.getElementById('em-bc-subject')?.value.trim() || '',
+        message: document.getElementById('em-bc-body')?.value.trim() || '',
+        cta_label: document.getElementById('em-bc-cta')?.value.trim() || null,
+        cta_url: document.getElementById('em-bc-url')?.value.trim() || null,
+    };
+    try {
+        const html = await apiCall('/email/broadcast/preview', { method: 'POST', body: JSON.stringify(body), raw: true });
+        frame.srcdoc = html;
+    } catch (e) {
+        frame.srcdoc = `<p style="font-family:sans-serif;color:#f87171;padding:1rem">${esc(e.message || 'پیش‌نمایش در دسترس نیست')}</p>`;
+    }
+}
+
+async function sendEmailBroadcast() {
+    const subject = document.getElementById('em-bc-subject')?.value.trim();
+    const message = document.getElementById('em-bc-body')?.value.trim();
+    const cta_label = document.getElementById('em-bc-cta')?.value.trim() || null;
+    const cta_url = document.getElementById('em-bc-url')?.value.trim() || null;
+    const out = document.getElementById('em-bc-result');
+    if (!_emAudience || !subject || !message) {
+        if (out) { out.textContent = 'گروه، موضوع و متن لازم است'; out.className = 'small text-warning'; }
+        return;
+    }
+    if (cta_label && !/^https?:\/\//.test(cta_url || '')) {
+        if (out) { out.textContent = 'لینک دکمه باید با http شروع شود'; out.className = 'small text-warning'; }
+        return;
+    }
+    // The last stop before an irreversible send; the count repeated here is
+    // the number the server will verify against the live audience.
+    if (!await askConfirm({ icon: 'bi-megaphone', title: 'ارسال کمپین', tone: 'warning', okLabel: 'بفرست',
+        body: `«<b>${esc(subject)}</b>» به <b>${faNum(_emAudienceCount)}</b> گیرنده فرستاده شود؟`,
+        note: 'ارسال گروهی برگشت‌پذیر نیست. پیش‌نمایش را دیده‌اید؟' })) return;
+
+    const btn = document.getElementById('em-bc-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> در حال ارسال…'; }
+    if (out) out.textContent = '';
+    try {
+        const d = await apiCall('/email/broadcast', {
+            method: 'POST',
+            body: JSON.stringify({ audience: _emAudience, subject, message, cta_label, cta_url,
+                                   confirm_count: _emAudienceCount }),
+        });
+        if (out) {
+            out.textContent = `ارسال‌شده: ${faNum(d.sent)} · ناموفق: ${faNum(d.failed)}`;
+            out.className = 'small ' + (d.failed ? 'text-warning' : 'text-success');
+        }
+        showToast(d.failed ? 'ارسال با خطا' : 'ارسال شد', `${faNum(d.sent)} از ${faNum(d.total)} ایمیل رفت`, d.failed ? 'warning' : 'success');
+        document.getElementById('em-bc-body').value = '';
+        document.getElementById('em-bc-subject').value = '';
+        emPreviewSoon();
+        loadEmailMessages(); loadEmailStats();
+    } catch (e) {
+        if (out) { out.textContent = e.message || 'ناموفق'; out.className = 'small text-danger'; }
+        // a 409 means the group changed under us: reload the counts
+        if (/تغییر کرده/.test(e.message || '')) loadEmailAudiences();
+    } finally {
+        _emSyncButton();
+    }
+}
+
+/** The addresses of one group as a CSV file, from the browser. */
+async function exportEmailAudience(key) {
+    try {
+        const d = await apiCall(`/email/export?audience=${encodeURIComponent(key)}`);
+        if (!d.emails?.length) { showToast('خالی', 'این گروه آدرسی ندارد', 'info'); return; }
+        const csv = '\ufeffemail\n' + d.emails.join('\n') + '\n';
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        a.download = `sorinflow-emails-${key}.csv`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        showToast('دانلود شد', `${faNum(d.count)} آدرس — ${esc(d.label)}`, 'success');
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
 async function loadEmailStats() {
@@ -11434,8 +11563,10 @@ async function loadEmailMessages() {
     const body = document.getElementById('em-messages-body');
     if (!body) return;
     const status = document.getElementById('em-filter-status')?.value || '';
+    const template = document.getElementById('em-filter-template')?.value || '';
     const qs = new URLSearchParams({ limit: '50' });
     if (status) qs.set('status', status);
+    if (template) qs.set('template', template);
     try {
         const d = await apiCall(`/email/messages?${qs}`);
         if (!d.items?.length) {
