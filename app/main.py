@@ -211,6 +211,11 @@ async def lifespan(app: FastAPI):
     from app.crm.match_engine import engine_loop as _match_loop
     match_task = asyncio.create_task(_match_loop())
 
+    # A listing whose price came down is announced, and re-matched — it may
+    # fit a budget it did not fit last week.
+    from app.crm.price_watch import watch_loop as _price_loop
+    price_task = asyncio.create_task(_price_loop())
+
     # Google Cloud export. Returns immediately when disabled, which is the
     # shipped default — and when enabled on a host that cannot reach Google it
     # backs off rather than retrying every interval.
@@ -223,6 +228,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    price_task.cancel()
     match_task.cancel()
     schedule_task.cancel()
     apk_task.cancel()

@@ -18,7 +18,7 @@ from app.models.lead import Lead
 from app.models.property import Property, allocate_serial_no
 from app.models.crm_models import (
     Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance,
-    ActivityLog, CalendarEvent, CustomerMatch,
+    ActivityLog, CalendarEvent, CustomerMatch, PriceAlert,
 )
 from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
@@ -808,6 +808,80 @@ async def run_matches_now(db: AsyncSession = Depends(get_db),
     run after the customers were entered."""
     from app.crm import match_engine as _me
     return await _me.run_once(db)
+
+
+# ── هشدار کاهش قیمت — the watcher's alerts ────────────────────────────────────
+# Listings are the agency's, not a consultant's, so everybody with CRM sees
+# every cut; «دیدم» is per alert, not per person.
+
+class PriceAlertDecisionIn(_BaseModel):
+    status: str
+
+
+@router.get("/price-drops")
+async def list_price_drops(status: str = "new", limit: int = Query(40, ge=1, le=200),
+                           db: AsyncSession = Depends(get_db),
+                           current_user: User = Depends(get_current_user)):
+    if status not in PriceAlert.STATUSES and status != "all":
+        raise HTTPException(status_code=400, detail="وضعیت نامعتبر است")
+    q = select(PriceAlert)
+    if status != "all":
+        q = q.where(PriceAlert.status == status)
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
+    rows = (await db.execute(q.order_by(PriceAlert.moved_at.desc()).limit(limit))).scalars().all()
+    props = {p.id: p for p in (await db.execute(select(Property).where(
+        Property.id.in_({r.property_id for r in rows} or {0})))).scalars().all()}
+    # the lead on the listing, so the card can be a call
+    leads = {}
+    if rows:
+        for l in (await db.execute(select(Lead).where(Lead.property_id.in_({r.property_id for r in rows})))).scalars().all():
+            leads.setdefault(l.property_id, l)
+    items = []
+    for r in rows:
+        p = props.get(r.property_id)
+        if not p:
+            continue
+        d = r.to_dict()
+        l = leads.get(p.id)
+        d["property"] = {"id": p.id, "serial_no": p.serial_no, "title": p.title, "url": p.url,
+                         "city_name": p.city_name, "district": p.district, "area": p.area, "rooms": p.rooms,
+                         "listing_type": p.listing_type, "total_price": p.total_price, "price": p.price,
+                         "deposit": p.deposit, "rent_price": p.rent_price, "phone_number": p.phone_number,
+                         "thumbnail_url": p.thumbnail_url}
+        d["lead"] = {"id": l.id, "status": l.status, "assigned_to": l.assigned_to} if l else None
+        items.append(d)
+    return {"items": items, "total": total}
+
+
+@router.get("/price-drops/summary")
+async def price_drops_summary(db: AsyncSession = Depends(get_db),
+                              current_user: User = Depends(get_current_user)):
+    from app.crm import price_watch as _pw
+    new = (await db.execute(select(func.count(PriceAlert.id)).where(PriceAlert.status == "new"))).scalar_one()
+    return {"new": new, "min_drop_pct": _pw.MIN_DROP_PCT, "every_minutes": _pw.TICK_SECONDS // 60}
+
+
+@router.post("/price-drops/{alert_id}/decide")
+async def decide_price_drop(alert_id: int, data: PriceAlertDecisionIn,
+                            db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    if data.status not in PriceAlert.STATUSES:
+        raise HTTPException(status_code=400, detail="وضعیت نامعتبر است")
+    row = await db.get(PriceAlert, alert_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="هشدار یافت نشد")
+    row.status = data.status
+    row.seen_by = _agent_name(current_user) if data.status != "new" else None
+    row.seen_at = _now_utc() if data.status != "new" else None
+    await db.commit()
+    return row.to_dict()
+
+
+@router.post("/price-drops/run")
+async def run_price_watch_now(db: AsyncSession = Depends(get_db),
+                              current_user: User = require_super_admin):
+    from app.crm import price_watch as _pw
+    return await _pw.run_once(db)
 
 
 @router.post("/leads/{lead_id}/notify")

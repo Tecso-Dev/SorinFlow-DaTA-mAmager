@@ -630,6 +630,44 @@ class CustomerMatch(Base):
         }
 
 
+class PriceAlert(Base):
+    """هشدار کاهش قیمت — a listing whose price came down since we last saw it.
+
+    The scraper writes the price trail; nothing read it back. One row per
+    (listing, move) so a cut is announced once, with the two figures frozen
+    so the card says what happened even after the next move.
+    """
+    __tablename__ = "crm_price_alerts"
+    __table_args__ = (UniqueConstraint("property_id", "moved_at", name="uq_price_alert"),)
+
+    STATUSES = ("new", "seen", "dismissed")
+
+    id = Column(Integer, primary_key=True, index=True)
+    property_id = Column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
+    listing_type = Column(String(20))
+    from_amount = Column(BigInteger, nullable=False)     # the comparable figure before
+    to_amount = Column(BigInteger, nullable=False)       # and after (deposit + 30×rent for rentals)
+    delta_pct = Column(Integer, nullable=False)          # negative: a cut
+    moved_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    matches_created = Column(Integer, default=0, nullable=False)
+    status = Column(String(20), default="new", index=True)
+    seen_by = Column(String(200))
+    seen_at = Column(DateTime(timezone=True))
+    notified_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "property_id": self.property_id, "listing_type": self.listing_type,
+            "from_amount": self.from_amount, "to_amount": self.to_amount, "delta_pct": self.delta_pct,
+            "moved_at": self.moved_at.isoformat() if self.moved_at else None,
+            "matches_created": self.matches_created or 0, "status": self.status,
+            "seen_by": self.seen_by, "seen_at": self.seen_at.isoformat() if self.seen_at else None,
+            "notified_at": self.notified_at.isoformat() if self.notified_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class ActivityLog(Base):
     """Timeline entry — who did what to a lead / customer / deal, and when."""
     __tablename__ = "crm_activity_log"

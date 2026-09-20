@@ -3469,6 +3469,17 @@ html[data-theme="light"] .table thead th {
 [data-theme="light"] .mq-reason { color: #047857; }
 [data-theme="light"] .mq-score { color: #0e7490; }
 
+/* ── هشدار کاهش قیمت: the watcher's cards ───────────────────── */
+.pd-card { border-right: 3px solid var(--warning2); }
+.pd-move { margin-top: .3rem; font-size: .84rem; display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.pd-from { color: var(--text-muted); text-decoration: line-through; }
+.pd-to { color: var(--accent3); font-weight: 700; }
+.pd-pct {
+  font-weight: 800; font-size: 1.05rem; color: var(--warning2);
+  background: rgba(251,146,60,.12); border: 1px solid rgba(251,146,60,.35); border-radius: var(--r-sm); padding: .2rem .55rem;
+}
+[data-theme="light"] .pd-pct { color: #c2410c; }
+
 /* ── PWA install hint (sidebar footer, phones only) ─────────── */
 .pwa-hint {
   position: relative; margin-bottom: .55rem; padding: .55rem .7rem;

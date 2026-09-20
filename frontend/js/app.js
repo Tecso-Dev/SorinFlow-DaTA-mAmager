@@ -1396,7 +1396,7 @@ function showSection(sectionName) {
         case 'forwarder':  loadForwarders(); loadForwarderLog(); break;
         case 'profile':    loadProfile(); break;
         case 'proxies':    loadProxies(); break;
-        case 'crm':        _applyCrmRoleVisibility(); loadCalls(); loadMatches(); break;
+        case 'crm':        _applyCrmRoleVisibility(); loadCalls(); loadMatches(); loadPriceDrops(); break;
         case 'insights':   insTab(_insTab); break;
         case 'portal':     loadPortalRequests(); break;
         case 'monitoring': loadMonitoring(); loadClientErrors(); break;
@@ -8427,6 +8427,76 @@ async function runMatchesNow() {
         const r = await apiCall('/crm/matches/run', { method: 'POST' });
         showToast('بررسی شد', `${formatNumber(r.scanned || 0)} آگهی سنجیده شد، ${formatNumber(r.matched || 0)} تطبیق تازه`, 'success');
         loadMatches();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// ── هشدار کاهش قیمت: the watcher's alerts, newest cut first ──
+async function loadPriceDrops() {
+    const box = document.getElementById('drops-list');
+    if (!box) return;
+    try {
+        const [d, s] = await Promise.all([apiCall('/crm/price-drops?status=new&limit=40'), apiCall('/crm/price-drops/summary')]);
+        const items = d.items || [];
+        document.getElementById('drops-count').textContent = formatNumber(d.total || 0);
+        document.getElementById('drops-stats').textContent =
+            `هر ${formatNumber(s.every_minutes)} دقیقه · کاهش ${formatNumber(s.min_drop_pct)}٪ به بالا`;
+        box.innerHTML = items.length
+            ? items.map(_dropCard).join('')
+            : '<div class="cq-empty"><i class="bi bi-graph-down-arrow"></i> از آخرین بررسی، قیمتی پایین نیامده.</div>';
+    } catch (e) {
+        box.innerHTML = `<div class="text-danger small">${esc(e.message || 'خطا')}</div>`;
+    }
+}
+
+function _dropCard(a) {
+    const p = a.property || {};
+    const rent = a.listing_type === 'rent';
+    const now = rent
+        ? [p.deposit ? 'رهن ' + formatPrice(p.deposit) : '', p.rent_price ? 'اجاره ' + formatPrice(p.rent_price) : ''].filter(Boolean).join(' · ')
+        : formatPrice(p.total_price || p.price);
+    const meta = [p.district || p.city_name, p.area ? `${formatNumber(p.area)} متر` : '', p.rooms != null ? `${formatNumber(p.rooms)} خواب` : '']
+        .filter(Boolean).map(esc).join(' · ');
+    const phone = p.phone_number ? `<a class="cq-phone" href="tel:${safeTel(p.phone_number)}" dir="ltr"><i class="bi bi-telephone-fill"></i> ${esc(p.phone_number)}</a>` : '';
+    const lead = a.lead ? `<span class="badge bg-secondary">لید #${formatNumber(a.lead.id)}${a.lead.assigned_to ? ' · ' + esc(a.lead.assigned_to) : ''}</span>` : '';
+    const fits = a.matches_created ? `<span class="badge bg-info text-dark"><i class="bi bi-bullseye"></i> ${formatNumber(a.matches_created)} مشتری هم‌خوان</span>` : '';
+    return `<div class="cq-card pd-card" id="pd-${a.id}">
+        <div class="cq-head">
+            ${phone}
+            <div class="cq-title">
+                <a href="#" onclick="event.preventDefault(); viewProperty(${p.id})">${esc(p.title || 'آگهی')}</a>
+                ${p.serial_no ? `<span class="serial-badge">${formatSerial(p.serial_no)}</span>` : ''}
+                <div class="cq-meta">${meta}</div>
+                <div class="pd-move"><span class="pd-from">${formatPrice(a.from_amount)}</span> <i class="bi bi-arrow-left"></i>
+                    <span class="pd-to">${formatPrice(a.to_amount)}</span>
+                    ${rent ? `<span class="text-muted small">(رهن + ۳۰ × اجاره) — الان: ${now}</span>` : ''}</div>
+                <div class="mt-1">${lead} ${fits}</div>
+            </div>
+            <div class="cq-badges"><span class="pd-pct">${formatNumber(a.delta_pct)}٪</span>
+                <span class="small text-muted">${_cqWhen(a.moved_at)}</span></div>
+        </div>
+        <div class="cq-actions">
+            <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${p.id})"><i class="bi bi-eye"></i> جزئیات</button>
+            <button class="btn btn-sm btn-outline-success" onclick="showCustomersForProperty(${p.id})"><i class="bi bi-person-check"></i> متقاضیان هم‌خوان</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="shareFile(${p.id})"><i class="bi bi-share"></i> ارسال برای مشتری</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="pdDecide(${a.id}, 'seen')"><i class="bi bi-check2"></i> دیدم</button>
+        </div>
+    </div>`;
+}
+
+async function pdDecide(id, status) {
+    try {
+        await apiCall(`/crm/price-drops/${id}/decide`, { method: 'POST', body: JSON.stringify({ status }) });
+        const card = document.getElementById(`pd-${id}`);
+        if (card) { card.classList.add('cq-done'); setTimeout(() => card.remove(), 350); }
+        setTimeout(loadPriceDrops, 400);
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+async function runPriceWatchNow() {
+    try {
+        const r = await apiCall('/crm/price-drops/run', { method: 'POST' });
+        showToast('بررسی شد', `${formatNumber(r.scanned || 0)} تغییر قیمت سنجیده شد، ${formatNumber(r.drops || 0)} کاهش، ${formatNumber(r.matches || 0)} تطبیق تازه`, 'success');
+        loadPriceDrops(); loadMatches();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 

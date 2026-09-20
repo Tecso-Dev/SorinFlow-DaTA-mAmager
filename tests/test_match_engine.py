@@ -53,7 +53,7 @@ class TestTheShape:
         assert 'id="matches-card"' in HTML and 'id="matches-list"' in HTML
         tabs = HTML[HTML.index('id="crm-main-tabs"'):HTML.index('id="crm-tabs-content"')]
         assert 'id="matches-due-badge"' in tabs
-        assert "case 'crm':        _applyCrmRoleVisibility(); loadCalls(); loadMatches(); break;" in JS
+        assert "case 'crm':        _applyCrmRoleVisibility(); loadCalls(); loadMatches(); loadPriceDrops(); break;" in JS
         fn = JS[JS.index("function _matchQueueCard"):JS.index("async function mqDecide")]
         assert "mqDecide(${m.id}, 'contacted')" in fn and "mqDecide(${m.id}, 'dismissed')" in fn
         assert "viewProperty(${p.id})" in fn and "shareFile(${p.id})" in fn
@@ -166,16 +166,19 @@ class TestThroughTheApp:
         by_prop = {}
         for m in allm:
             by_prop.setdefault(m["property_id"], set()).add(m["customer"]["full_name"])
-        assert by_prop.get(ids["fit"]) == {"خریدار گلها", "مشتری همکار"}
+        # other suites share the database in CI, so containment, not equality
+        assert {"خریدار گلها", "مشتری همکار"} <= by_prop.get(ids["fit"], set())
         assert ids["shop"] not in by_prop and ids["dear"] not in by_prop
         one = next(m for m in allm if m["property_id"] == ids["fit"] and m["customer"]["full_name"] == "خریدار گلها")
         assert one["score"] >= 55 and "داخل بودجه" in one["reasons"] and one["consultant"] == "مینا رضایی"
         assert one["property"]["serial_no"] is not None or one["property"]["title"].startswith("آپارتمان")
 
         # مینا sees her own customer's match, not her colleague's
-        mine = client.get("/api/crm/matches?status=new&limit=50", headers=mina).json()["items"]
+        mine = [m for m in client.get("/api/crm/matches?status=new&limit=50", headers=mina).json()["items"]
+                if m["property_id"] == ids["fit"]]
         assert {m["customer"]["full_name"] for m in mine} == {"خریدار گلها"}
-        assert client.get("/api/crm/matches/summary", headers=mina).json()["new"] == 1
+        before = client.get("/api/crm/matches/summary", headers=mina).json()["new"]
+        assert before >= 1
 
         # a second pass finds nothing new — the cursor moved
         again = client.post("/api/crm/matches/run", headers=boss).json()
@@ -184,7 +187,7 @@ class TestThroughTheApp:
         # «تماس گرفتم» takes it off the queue and lands on the customer's timeline
         r = client.post(f"/api/crm/matches/{one['id']}/decide", headers=mina, json={"status": "contacted", "note": "بازدید فردا"})
         assert r.status_code == 200 and r.json()["status"] == "contacted" and r.json()["decided_by"] == "مینا رضایی"
-        assert client.get("/api/crm/matches/summary", headers=mina).json()["new"] == 0
+        assert client.get("/api/crm/matches/summary", headers=mina).json()["new"] == before - 1
         tl = client.get(f"/api/crm/activity/customer/{one['customer_id']}", headers=mina).json()
         acts = tl if isinstance(tl, list) else tl.get("items", [])
         assert any(a["action"] == "match_call" and "بازدید فردا" in a["detail"] for a in acts)
