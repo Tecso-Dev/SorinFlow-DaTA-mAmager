@@ -2619,6 +2619,15 @@ body.filing-dragging .ftree-node, body.filing-dragging .folder-chip { outline: 1
   .jobs-table .job-actions .btn { margin-bottom: .2rem; }
   .jobs-table .job-when { font-size: .66rem; }
 }
+@media (min-width: 901px) and (max-width: 1199px) {
+  /* the start time is in the job's own log; the column goes before the counts do */
+  .jobs-table > thead > tr > th:nth-child(8), .jobs-table > tbody > tr > td:nth-child(8) { display: none; }
+}
+@media (min-width: 901px) and (max-width: 1023px) {
+  /* a 1366 laptop at 150%: the two-thirds card is too narrow for any table —
+     the new-scrape form goes on top and the jobs get the whole width */
+  #section-scraper .col-md-4, #section-scraper .col-md-8 { width: 100%; }
+}
 
 .leads-table > tbody > tr > td { vertical-align: middle; padding: .6rem .7rem; }
 .leads-table > thead > tr > th { padding: .6rem .7rem; }
@@ -2632,6 +2641,14 @@ body.filing-dragging .ftree-node, body.filing-dragging .folder-chip { outline: 1
   .leads-table .leads-spec { display: none; }
   .leads-table .status-quick { min-width: 110px; font-size: .74rem; }
   .leads-table > tbody > tr > td, .leads-table > thead > tr > th { padding: .5rem .5rem; }
+}
+@media (min-width: 901px) and (max-width: 1023px) {
+  /* the dates are in the lead itself; the price and the phone are not */
+  .leads-table .leads-date, .leads-table > thead > tr > th:nth-child(8) { display: none; }
+  .leads-table .status-quick { min-width: 100px; }
+  .leads-table .leads-title { min-width: 120px; }
+  .leads-table > tbody > tr > td, .leads-table > thead > tr > th { padding: .45rem .35rem; }
+  .leads-table .leads-actions .btn { padding: .1rem .35rem; }
 }
 /* on a phone the leads list still scrolls inside the card — the phone
    block keeps the page itself from scrolling sideways */

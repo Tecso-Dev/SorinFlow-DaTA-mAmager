@@ -4799,7 +4799,7 @@ async function loadForwarders() {
             const st = FW_STATE[h.state] || FW_STATE.never_seen;
             return `<tr>
                 <td>${esc(dv.label || '—')}<div class="small text-muted" dir="ltr">${esc(dv.device_id)}</div></td>
-                <td dir="ltr">${esc(dv.sim_phone || '—')}</td>
+                <td>${_fwSimsCell(dv)}</td>
                 <td><span class="badge ${st.cls}">${st.fa}</span>
                     <div class="small text-muted">${esc(h.message_fa || '')}</div></td>
                 <td class="small">${_fwAgo(h.seconds_since_code)}</td>
@@ -4808,7 +4808,9 @@ async function loadForwarders() {
                   <button class="btn btn-sm btn-outline-primary" onclick="fwGuide(${dv.id})"
                           title="راهنمای نصب و تنظیمات"><i class="bi bi-book"></i></button>
                   <button class="btn btn-sm btn-outline-secondary" onclick="fwEditPhone(${dv.id})"
-                          title="تغییر شماره"><i class="bi bi-pencil"></i></button>
+                          title="شمارهٔ سیم‌کارت اول"><i class="bi bi-sim"></i> ۱</button>
+                  <button class="btn btn-sm btn-outline-secondary" onclick="fwEditPhone(${dv.id}, 2)"
+                          title="شمارهٔ سیم‌کارت دوم (گوشی دو سیم‌کارته)"><i class="bi bi-sim"></i> ۲</button>
                   <button class="btn btn-sm btn-outline-secondary" onclick="fwTest(${dv.id})"
                           title="بررسی اتصال"><i class="bi bi-activity"></i></button>
                   <button class="btn btn-sm btn-outline-warning" onclick="fwRotate(${dv.id})"
@@ -4824,6 +4826,14 @@ async function loadForwarders() {
     } catch (e) {
         tb.innerHTML = `<tr><td colspan="6" class="text-danger small p-3">${esc(e.message || 'خطا')}</td></tr>`;
     }
+}
+
+/** Both numbers with their slot, so a dual-SIM phone reads as one phone. */
+function _fwSimsCell(dv) {
+    const sim = (n, p) => p
+        ? `<div class="small" dir="ltr"><span class="text-muted">SIM ${n}</span> ${esc(p)}</div>`
+        : (n === 1 ? '<div class="small text-muted">—</div>' : '');
+    return sim(1, dv.sim_phone) + sim(2, dv.sim_phone2);
 }
 
 const FW_REASON = {
@@ -4904,10 +4914,20 @@ async function addForwarderDevice() {
                  validate: v => /^0?9\d{9}$/.test(v.replace(/\D/g, '')) ? '' : 'شمارهٔ موبایل معتبر نیست' },
     });
     if (sim === null) return;
+    const sim2 = await askText({
+        icon: 'bi-sim', title: 'سیم‌کارت دوم (اختیاری)',
+        body: 'اگر گوشی <b>دو سیم‌کارته</b> است و از هر دو برای دیوار استفاده می‌کنید، شمارهٔ سیم‌کارت دوم را بدهید؛ وگرنه خالی بگذارید.',
+        note: 'برنامه برای هر سیم‌کارت جداگانه گوش می‌دهد و کد هر شماره را برای همان حساب دیوار می‌فرستد.',
+        okLabel: 'ادامه',
+        field: { label: 'شمارهٔ سیم‌کارت دوم', placeholder: '09xxxxxxxxx یا خالی',
+                 dir: 'ltr', inputmode: 'numeric',
+                 validate: v => (!v.trim() || /^0?9\d{9}$/.test(v.replace(/\D/g, ''))) ? '' : 'شمارهٔ موبایل معتبر نیست' },
+    });
+    if (sim2 === null) return;
     try {
         const d = await apiCall('/forwarder/devices', {
             method: 'POST',
-            body: JSON.stringify({ label: label.trim(), sim_phone: sim.trim() }),
+            body: JSON.stringify({ label: label.trim(), sim_phone: sim.trim(), sim_phone2: sim2.trim() || null }),
         });
         showToast('اضافه شد', 'حالا راهنما را دنبال کنید', 'success');
         await loadForwarders();
@@ -4936,19 +4956,23 @@ async function fwRotate(id) {
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
-async function fwEditPhone(id) {
+async function fwEditPhone(id, slot = 1) {
+    const second = slot === 2;
     const sim = await askText({
-        icon: 'bi-sim', title: 'تغییر شماره',
-        body: 'شمارهٔ سیم‌کارتی که داخل این گوشی است — <b>همان شماره‌ای که کد دیوار روی آن می‌آید</b>.',
+        icon: 'bi-sim', title: second ? 'سیم‌کارت دوم' : 'سیم‌کارت اول',
+        body: second
+            ? 'شمارهٔ سیم‌کارت <b>دوم</b> این گوشی — برای گوشی دو سیم‌کارته که از هر دو برای دیوار استفاده می‌کنید. خالی یعنی سیم‌کارت دوم ندارد.'
+            : 'شمارهٔ سیم‌کارتی که داخل این گوشی است — <b>همان شماره‌ای که کد دیوار روی آن می‌آید</b>.',
         note: 'کد راه‌اندازی با شمارهٔ تازه ساخته می‌شود؛ گوشی را دوباره اسکن کنید.',
-        field: { label: 'شمارهٔ موبایل', placeholder: '09123456789',
+        okLabel: 'ذخیره',
+        field: { label: 'شمارهٔ موبایل', placeholder: second ? '09xxxxxxxxx یا خالی' : '09123456789',
                  dir: 'ltr', inputmode: 'numeric',
-                 validate: v => /^0?9\d{9}$/.test(v.replace(/\D/g, '')) ? '' : 'شمارهٔ موبایل معتبر نیست' },
+                 validate: v => ((second && !v.trim()) || /^0?9\d{9}$/.test(v.replace(/\D/g, ''))) ? '' : 'شمارهٔ موبایل معتبر نیست' },
     });
     if (sim === null) return;
     try {
         await apiCall(`/forwarder/devices/${id}`, {
-            method: 'PATCH', body: JSON.stringify({ sim_phone: sim.trim() }),
+            method: 'PATCH', body: JSON.stringify(second ? { sim_phone2: sim.trim() } : { sim_phone: sim.trim() }),
         });
         await loadForwarders();
         // The number is inside the QR and the template; a guide open on this
@@ -5138,6 +5162,15 @@ async function fwGuide(id, cfg) {
               ${_fwCopyRow('قالب پیام', r2.template)}
               <div class="fw-note">آدرس و هدرها همان قبلی است.</div>
             </div>
+            ${(c.rules_sim2 || []).length ? `
+            <div class="fw-note mt-2"><b>گوشی دو سیم‌کارته:</b> کد QR بالا هر دو شماره را دارد و برنامهٔ SorinFlow Forwarder
+              خودش برای هر سیم‌کارت یک جفت قانون می‌سازد (SIM 1 ← <span dir="ltr">${esc(c.accounts[0])}</span>،
+              SIM 2 ← <span dir="ltr">${esc(c.accounts[1])}</span>). در برنامهٔ عمومی، همین دو قانون را یک بار دیگر
+              با «SIM slot = 2» و این قالب‌ها بسازید:</div>
+            <div class="fw-fields">
+              ${_fwCopyRow('قالب پیام — سیم‌کارت دوم، اطلاعات تماس', c.rules_sim2[0].template)}
+              ${_fwCopyRow('قالب پیام — سیم‌کارت دوم، کد ورود', c.rules_sim2[1].template)}
+            </div>` : ''}
           </li>
         </ol>
 

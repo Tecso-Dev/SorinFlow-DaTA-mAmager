@@ -124,6 +124,7 @@ async def init_db():
                  _backfill_forwarder_permission,
                  _migrate_profile,
                  _migrate_call_queue,
+                 _migrate_forwarder_sim2,
                  _backfill_advertiser_signals,
                  _migrate_cookie_usage,
                  _migrate_property_quality,
@@ -359,6 +360,18 @@ async def _backfill_cookie_owner(conn):
                   f"{rest.rowcount or 0} to the super admin")
     except Exception as e:
         print(f"cookie owner backfill skipped: {e}")
+
+
+async def _migrate_forwarder_sim2(conn):
+    """A dual-SIM phone: the second number on the device row (2026-09-20)."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE forwarder_devices ADD COLUMN IF NOT EXISTS sim_phone2 VARCHAR(20)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_forwarder_devices_sim_phone2 ON forwarder_devices (sim_phone2)"))
+    except Exception as e:
+        print(f"forwarder sim2 migration skipped: {e}")
 
 
 async def _migrate_call_queue(conn):

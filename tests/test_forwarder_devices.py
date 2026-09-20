@@ -393,9 +393,11 @@ class TestTheSetupGuideIsActuallyUsable:
         import inspect, re
         from app.api.routes import forwarder as R
         src = inspect.getsource(R.device_config)
-        tpl_src = src[src.index("tpl = ("):src.index("headers = {")]
-        ns = {"acct": "09058432452"}
-        exec(compile(tpl_src.strip(), "<tpl>", "exec"), ns)
+        # the template is built by a helper now (one per SIM); run that block
+        import textwrap
+        tpl_src = src[src.index("    def _tpl(account"):src.index("    headers = {")]
+        ns = {"acct": "09058432452", "acct2": ""}
+        exec(compile(textwrap.dedent(tpl_src), "<tpl>", "exec"), ns)
         return ns["tpl"]
 
     def test_the_template_builds_without_a_format_error(self):

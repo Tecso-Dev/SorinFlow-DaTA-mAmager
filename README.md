@@ -976,7 +976,7 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 **Shipped 2026-09-15 → 19, outside the audit list:** the server moved to a new 8 GB box with a backup-and-rebuild runbook; per-user Divar sessions with several numbers per person; the profile page with avatars and email/phone verification; «فرستندهٔ پیامک» as its own permission with per-device secrets and the QR setup; the SorinFlow Forwarder Android app and its APK mirror; the offsite backup on the panel; saved scrape schedules; the CRM call queue; the panel as a PWA with every asset self-hosted and browser errors reported home; automatic rollback in CI.
 
-**Shipped 2026-09-20:** «ملک‌های مشابه» ranks district-first inside a ±35% price fence; one dark theme on every browser (`color-scheme` meta, `data-bs-theme`, Dark Reader locked out); a laptop scale — 15px on 1024–1199 px screens, 17–18px and a 1720px content cap on wide ones; the filing tab as an explorer with folders inside binders, drag-and-drop filing, shift-click selection and an edit-in-place modal.
+**Shipped 2026-09-20:** «ملک‌های مشابه» ranks district-first inside a ±35% price fence; one dark theme on every browser (`color-scheme` meta, `data-bs-theme`, Dark Reader locked out); a laptop scale — 15px on 1024–1199 px screens, 17–18px and a 1720px content cap on wide ones; the filing tab as an explorer with folders inside binders, drag-and-drop filing, shift-click selection and an edit-in-place modal; the members table; Telegram through a proxy; a second SIM per forwarder device (`sim_phone2`, `account2` in the setup QR, a device may answer for the numbers inside it) with the app at 3.2.0 firing slot-bound rules when the ROM does not name the SIM.
 
 ---
 

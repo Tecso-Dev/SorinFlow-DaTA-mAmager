@@ -58,7 +58,19 @@ def _base_url() -> str:
 class DeviceIn(BaseModel):
     label: Optional[str] = Field(None, max_length=80)
     sim_phone: Optional[str] = Field(None, max_length=20)
+    sim_phone2: Optional[str] = Field(None, max_length=20)   # the second SIM of a dual-SIM phone
     note: Optional[str] = None
+
+
+def _phone(v: Optional[str]) -> Optional[str]:
+    """Digits only, Persian digits included; None when nothing is left."""
+    t = str(v or "").translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+    d = "".join(ch for ch in t if ch.isdigit())
+    if not d:
+        return None
+    if not (10 <= len(d) <= 13):
+        raise HTTPException(status_code=400, detail="شمارهٔ موبایل معتبر نیست")
+    return d
 
 
 class DeviceEdit(DeviceIn):
@@ -100,10 +112,14 @@ async def create_device(data: DeviceIn, db: AsyncSession = Depends(get_db),
                         user: User = Depends(get_current_user)):
     """Register a phone. The secret is shown in full here and nowhere else in
     a list — the setup guide reads it from the config endpoint below."""
+    sim1, sim2 = _phone(data.sim_phone), _phone(data.sim_phone2)
+    if sim1 and sim2 and fw.same_phone(sim1, sim2):
+        raise HTTPException(status_code=400, detail="دو سیم‌کارت نمی‌توانند یک شماره باشند")
     row = ForwarderDevice(
         user_id=user.id,
         label=(data.label or "").strip() or "گوشی من",
-        sim_phone=(data.sim_phone or "").strip() or None,
+        sim_phone=sim1,
+        sim_phone2=sim2,
         note=data.note,
     )
     db.add(row)
@@ -121,7 +137,11 @@ async def edit_device(device_id: int, data: DeviceEdit,
     if data.label is not None:
         row.label = data.label.strip() or row.label
     if data.sim_phone is not None:
-        row.sim_phone = data.sim_phone.strip() or None
+        row.sim_phone = _phone(data.sim_phone)
+    if data.sim_phone2 is not None:
+        row.sim_phone2 = _phone(data.sim_phone2)
+    if row.sim_phone and row.sim_phone2 and fw.same_phone(row.sim_phone, row.sim_phone2):
+        raise HTTPException(status_code=400, detail="دو سیم‌کارت نمی‌توانند یک شماره باشند")
     if data.note is not None:
         row.note = data.note
     if data.is_active is not None:
@@ -168,17 +188,20 @@ async def device_config(device_id: int, db: AsyncSession = Depends(get_db),
     row = await _mine(db, user, device_id)
     base = _base_url()
     acct = row.sim_phone or (user.divar_phone or "")
+    acct2 = row.sim_phone2 or ""
     # A token, not %s. The template is made OF %placeholders% — %text%, %sim%,
     # %battery% — so Python's own % formatting reads them as format specifiers
     # and raises «not enough arguments for format string». The guide then 500s
     # and a new user's first click is a broken page.
-    tpl = (
-        '{"kind":"__KIND__","account":"' + acct + '",'
-        '"code":"%Regex=Code:\\\\s*(\\\\d{6})%",'
-        '"text":"%text%","sim":"%sim%",'
-        '"sentStamp":%sentStamp%,"receivedStamp":%receivedStamp%,'
-        '"battery":%battery%,"network":"%network%"}'
-    )
+    def _tpl(account: str) -> str:
+        return (
+            '{"kind":"__KIND__","account":"' + account + '",'
+            '"code":"%Regex=Code:\\\\s*(\\\\d{6})%",'
+            '"text":"%text%","sim":"%sim%",'
+            '"sentStamp":%sentStamp%,"receivedStamp":%receivedStamp%,'
+            '"battery":%battery%,"network":"%network%"}'
+        )
+    tpl, tpl2 = _tpl(acct), _tpl(acct2)
     headers = {
         "User-agent": "SMS Forwarder App",
         "X-Forwarder-Id": row.device_id,
@@ -194,12 +217,13 @@ async def device_config(device_id: int, db: AsyncSession = Depends(get_db),
     #
     # It carries THIS device's secret, never the global OTP_INBOUND_SECRET:
     # one QR configures one phone for one user's accounts.
-    setup_payload = "sorinflow://setup?" + urlencode({
-        "server": base,
-        "account": "".join(ch for ch in acct if ch.isdigit()),
-        "device": row.device_id,
-        "secret": row.secret,
-    })
+    # account2 is the SIM in slot 2: the app then binds one rule pair to each
+    # slot and heartbeats for both numbers. Absent on a single-SIM phone.
+    payload = {"server": base, "account": "".join(ch for ch in acct if ch.isdigit())}
+    if acct2:
+        payload["account2"] = "".join(ch for ch in acct2 if ch.isdigit())
+    payload.update({"device": row.device_id, "secret": row.secret})
+    setup_payload = "sorinflow://setup?" + urlencode(payload)
 
     return {
         "device": row.to_dict(reveal_secret=True),
@@ -224,6 +248,19 @@ async def device_config(device_id: int, db: AsyncSession = Depends(get_db),
              "template": tpl.replace("__KIND__", "login"),
              "why_fa": "کد ورود به حساب دیوار"},
         ],
+        # the same two rules for the second SIM, bound to slot 2 in the app —
+        # empty on a single-SIM phone
+        "rules_sim2": [
+            {"name_fa": "کد اطلاعات تماس — سیم‌کارت دوم", "sender": "*", "sim_slot": 2,
+             "text_filter": "اطلاعات تماس",
+             "template": tpl2.replace("__KIND__", "contact"),
+             "why_fa": "همان قانون، برای شمارهٔ سیم‌کارت دوم"},
+            {"name_fa": "کد ورود — سیم‌کارت دوم", "sender": "*", "sim_slot": 2,
+             "text_filter": "کد تایید",
+             "template": tpl2.replace("__KIND__", "login"),
+             "why_fa": "کد ورود برای شمارهٔ سیم‌کارت دوم"},
+        ] if acct2 else [],
+        "accounts": [a for a in (acct, acct2) if a],
         "advanced_fa": {
             "retries": 10,
             "store_failed": True,
@@ -261,7 +298,7 @@ async def device_events(device_id: int, limit: int = 50,
             d = _json.loads(e.details) if e.details else {}
         except Exception:
             d = {}
-        if row.sim_phone and not fw.same_phone(d.get("account"), row.sim_phone):
+        if row.sims() and not any(fw.same_phone(d.get("account"), p) for p in row.sims()):
             continue
         out.append({
             "at": e.created_at.isoformat() if e.created_at else None,

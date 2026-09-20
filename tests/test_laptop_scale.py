@@ -36,7 +36,7 @@ class TestTheKnob:
         assert not re.search(r"font-size:\s*13\.5px", body)
 
     def test_small_laptops_get_a_smaller_scale_and_a_narrower_sidebar(self):
-        blk = _block("@media (min-width: 901px) and (max-width: 1199px)")
+        blk = _block("@media (min-width: 901px) and (max-width: 1199px) {\n  html { font-size: 15px }")
         assert "html { font-size: 15px }" in blk
         assert "--sidebar-w: 216px" in blk
         assert "#crm-main-tabs .nav-link" in blk, "eleven tabs must not wrap into a wall"
@@ -139,6 +139,14 @@ class TestTheAuditOfTheOtherSections:
     def test_the_specs_column_steps_aside_on_small_laptops(self):
         blk = _block("@media (max-width: 1199px) {\n  .leads-table .leads-spec")
         assert ".leads-table .leads-spec { display: none; }" in blk
+
+    def test_the_narrowest_laptop_band_still_fits(self):
+        """A 1366 laptop at Windows' 150% zoom is 911 CSS px: the leads drop
+        the date column, the scraper form goes above the jobs."""
+        blk = _block("@media (min-width: 901px) and (max-width: 1023px) {\n  /* the dates are in the lead")
+        assert ".leads-table .leads-date, .leads-table > thead > tr > th:nth-child(8) { display: none; }" in blk
+        blk = _block("@media (min-width: 901px) and (max-width: 1023px) {\n  /* a 1366 laptop at 150%")
+        assert "#section-scraper .col-md-4, #section-scraper .col-md-8 { width: 100%; }" in blk
 
     def test_the_jobs_table_keeps_its_markup_but_fits(self):
         js = Path("frontend/js/app.js").read_text(encoding="utf-8")

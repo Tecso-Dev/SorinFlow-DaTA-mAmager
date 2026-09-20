@@ -96,7 +96,7 @@ async def warn_owner(device: ForwarderDevice, health: dict, db) -> bool:
     body = (
         f"{what}{when}\n\n"
         f"دستگاه: {device.label or device.device_id}\n"
-        f"شمارهٔ سیم‌کارت: {device.sim_phone or '—'}\n\n"
+        f"شمارهٔ سیم‌کارت: {' و '.join(device.sims()) or '—'}\n\n"
         f"{how}\n\n"
         "تا وقتی این درست نشود، اسکرپر برای هر کد تأیید منتظر می‌ماند و "
         "شمارهٔ تماس آگهی‌ها گرفته نمی‌شود."

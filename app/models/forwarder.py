@@ -55,8 +55,11 @@ class ForwarderDevice(Base):
 
     label = Column(String(80))                    # «شیائومی سبحان»
     # The SIM in this phone, so the panel can say which Divar account it
-    # answers for. Informational: authority comes from user_id.
+    # answers for. A dual-SIM phone has two; the app binds a rule pair to each
+    # slot and the setup QR carries both. Authority still comes from user_id,
+    # but a device may answer for the numbers physically inside it.
     sim_phone = Column(String(20), index=True)
+    sim_phone2 = Column(String(20), index=True)
 
     is_active = Column(Boolean, default=True, nullable=False)
 
@@ -79,6 +82,10 @@ class ForwarderDevice(Base):
     note = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    def sims(self) -> list:
+        """The numbers inside this phone, in slot order, empties dropped."""
+        return [p for p in (self.sim_phone, self.sim_phone2) if p]
+
     def masked_secret(self) -> str:
         s = self.secret or ""
         return f"{s[:6]}…{s[-4:]}" if len(s) > 12 else "—"
@@ -90,6 +97,7 @@ class ForwarderDevice(Base):
             "user_id": self.user_id,
             "label": self.label,
             "sim_phone": self.sim_phone,
+            "sim_phone2": self.sim_phone2,
             "is_active": self.is_active,
             "secret": self.secret if reveal_secret else None,
             "secret_masked": self.masked_secret(),

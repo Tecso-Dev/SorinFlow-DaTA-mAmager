@@ -85,7 +85,8 @@ def verify_signature(secret: str, raw: bytes, signature: str, plain: str) -> boo
     return False
 
 
-async def owns_divar_account(db, user_id: int, account: Optional[str]) -> bool:
+async def owns_divar_account(db, user_id: int, account: Optional[str],
+                             device: Optional[ForwarderDevice] = None) -> bool:
     """Whether this user owns the Divar session the code claims to be for.
 
     A user with no owned sessions is not silently allowed: that was the state
@@ -93,6 +94,12 @@ async def owns_divar_account(db, user_id: int, account: Optional[str]) -> bool:
     would make the check do nothing on exactly the installation that needs it.
     Sessions with no owner at all are the migration's problem, and are matched
     so an un-migrated install keeps working.
+
+    A number with no session yet is answerable when it is one of the SIMs the
+    panel says are inside THIS phone: the first login code for a fresh SIM —
+    the second SIM of a dual-SIM handset above all — has to get through before
+    any session exists. A session owned by somebody else still wins over a SIM
+    claim, so one person cannot enrol a colleague's number on their own phone.
     """
     from app.models.cookie import Cookie
 
@@ -106,7 +113,7 @@ async def owns_divar_account(db, user_id: int, account: Optional[str]) -> bool:
         # Unowned (pre-migration) sessions are answerable by anyone, which is
         # the behaviour that existed before this file. Owned ones are not.
         return owner is None or owner == user_id
-    return False
+    return bool(device) and any(same_phone(p, account) for p in device.sims())
 
 
 async def authenticate(db, *, device_id: Optional[str], raw: bytes,
@@ -124,7 +131,7 @@ async def authenticate(db, *, device_id: Optional[str], raw: bytes,
             raise ForwarderAuthError(401, "bad signature")
         if not verify_signature(device.secret, raw, signature, plain):
             raise ForwarderAuthError(401, "bad signature")
-        if account and not await owns_divar_account(db, device.user_id, account):
+        if account and not await owns_divar_account(db, device.user_id, account, device):
             raise ForwarderAuthError(
                 403, "this device may not answer for that Divar account")
         return device, "device"
