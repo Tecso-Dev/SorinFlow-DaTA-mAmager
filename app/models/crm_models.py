@@ -70,6 +70,10 @@ class Deal(Base):
     seller = relationship("Contact", foreign_keys=[seller_contact_id])
 
     def to_dict(self):
+        # Only relationships that are already loaded: touching a lazy one on
+        # an async session raises MissingGreenlet, and every deal that had a
+        # buyer or seller took the whole «معاملات» tab down with a 500.
+        buyer, seller = self.__dict__.get("buyer"), self.__dict__.get("seller")
         return {
             "id": self.id,
             "title": self.title,
@@ -78,8 +82,8 @@ class Deal(Base):
             "property_id": self.property_id,
             "buyer_contact_id": self.buyer_contact_id,
             "seller_contact_id": self.seller_contact_id,
-            "buyer_name": self.buyer.name if self.buyer else None,
-            "seller_name": self.seller.name if self.seller else None,
+            "buyer_name": buyer.name if buyer else None,
+            "seller_name": seller.name if seller else None,
             "amount": self.amount,
             "commission": self.commission,
             "commission_paid": self.commission_paid,

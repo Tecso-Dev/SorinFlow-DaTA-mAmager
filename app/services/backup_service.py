@@ -9,6 +9,8 @@ with scripts/restore_backup.py.
 import asyncio
 import gzip
 import json
+import re
+import time
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
@@ -27,6 +29,7 @@ BACKUP_DIR = Path("data/backups")
 # when set, like every other credential the panel accepts (see secret_box).
 KEY_TOKEN = "backup_telegram_token"     # encrypted
 KEY_CHAT = "backup_telegram_chat"
+KEY_PROXY = "backup_telegram_proxy"     # encrypted — a proxy URL carries its password
 # What happened the last time a file was shipped: shown on the panel so a
 # broken offsite copy is a red line on a screen, not a warning in a log.
 KEY_LAST = "backup_last_offsite"
@@ -88,6 +91,46 @@ async def resolve_telegram(db=None) -> dict:
     return cfg
 
 
+PROXY_SCHEMES = ("http", "https", "socks5", "socks5h", "socks4")
+
+
+def valid_proxy(url: str) -> bool:
+    """http://host:port, socks5://user:pass@host:port — nothing else."""
+    m = re.match(r"^(?P<scheme>[a-z0-9]+)://(?:[^@/\s]+@)?(?P<host>[^:/\s]+)(?::(?P<port>\d{1,5}))?/?$", url.strip())
+    return bool(m) and m.group("scheme") in PROXY_SCHEMES
+
+
+async def resolve_proxy(db=None) -> str:
+    """The proxy every Telegram call goes through — environment first, then
+    the panel. Empty means a direct connection, which from this server is a
+    connection that never answers: api.telegram.org is blocked in Iran."""
+    proxy = (settings.telegram_proxy or "").strip()
+    if proxy or db is None:
+        return proxy
+    try:
+        raw = (await secret_box.get_many(db, (KEY_PROXY,))).get(KEY_PROXY)
+        return secret_box.decrypt(raw).strip() if raw else ""
+    except Exception as e:
+        logger.warning(f"[backup] saved telegram proxy unreadable: {e}")
+        return ""
+
+
+def telegram_client(proxy: str = "", timeout: float = 20) -> httpx.AsyncClient:
+    """One client for every Bot API call, so the proxy is never forgotten."""
+    return httpx.AsyncClient(timeout=timeout, proxy=proxy or None)
+
+
+async def telegram_ping(token: str, proxy: str) -> dict:
+    """getMe through the proxy: the bot's name and how long the round trip took."""
+    started = time.monotonic()
+    async with telegram_client(proxy, timeout=20) as client:
+        me = await client.get(f"https://api.telegram.org/bot{token}/getMe")
+    body = me.json() if me.headers.get("content-type", "").startswith("application/json") else {}
+    if me.status_code != 200 or not body.get("ok"):
+        raise ValueError(body.get("description") or "توکن ربات پذیرفته نشد")
+    return {"bot": body["result"].get("username", ""), "ms": int((time.monotonic() - started) * 1000)}
+
+
 async def _remember_offsite(db, outcome: dict) -> None:
     """Keep the last outcome where the panel can read it. Never raises."""
     try:
@@ -123,6 +166,7 @@ async def send_to_telegram(path: Path, db=None) -> bool:
     if not token or not chat_id:
         logger.warning("[backup] TELEGRAM_BOT_TOKEN/CHAT_ID not set — offsite copy skipped")
         return False
+    proxy = await resolve_proxy(db)
 
     size_kb = path.stat().st_size // 1024
     sealed = seal(path)
@@ -135,7 +179,7 @@ async def send_to_telegram(path: Path, db=None) -> bool:
     )
     url = f"https://api.telegram.org/bot{token}/sendDocument"
     try:
-        async with httpx.AsyncClient(timeout=180) as client:
+        async with telegram_client(proxy, timeout=180) as client:
             with open(sealed, "rb") as f:
                 resp = await client.post(
                     url,
@@ -153,7 +197,10 @@ async def send_to_telegram(path: Path, db=None) -> bool:
             logger.error(f"[backup] telegram upload failed: {resp.status_code} {resp.text[:200]}")
     except Exception as e:
         ok, error = False, f"{type(e).__name__}: {e}"
-        logger.error(f"[backup] telegram upload error: {e}")
+        if not proxy:
+            # the usual reason on this server, said where the panel shows it
+            error = "تلگرام از ایران در دسترس نیست — پراکسی تلگرام را تنظیم کنید"
+        logger.error(f"[backup] telegram upload error ({'via proxy' if proxy else 'direct'}): {e}")
     finally:
         sealed.unlink(missing_ok=True)
     if db is not None:
@@ -182,10 +229,10 @@ def local_snapshots() -> list:
     return out
 
 
-async def telegram_probe(token: str) -> dict:
+async def telegram_probe(token: str, proxy: str = "") -> dict:
     """Who the bot is, and which chats have written to it — so the panel can
     fill in the chat id instead of somebody reading JSON off a curl."""
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with telegram_client(proxy, timeout=20) as client:
         me = await client.get(f"https://api.telegram.org/bot{token}/getMe")
         mb = me.json() if me.headers.get("content-type", "").startswith("application/json") else {}
         if me.status_code != 200 or not mb.get("ok"):

@@ -61,7 +61,9 @@ async def send_telegram(prop: Property, lead: Lead) -> bool:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        # the same proxy the backup uses: Telegram is blocked from this server
+        from app.services.backup_service import resolve_proxy, telegram_client
+        async with telegram_client(await resolve_proxy(), timeout=10) as client:
             resp = await client.post(url, json={
                 "chat_id": chat_id,
                 "text": message,

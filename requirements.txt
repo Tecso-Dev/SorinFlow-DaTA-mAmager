@@ -31,6 +31,7 @@ beautifulsoup4==4.12.3
 # selects it by name — removing it would fail at runtime, not at import.
 lxml==6.1.2
 httpx==0.26.0
+socksio==1.0.0          # socks5:// proxies for the Telegram calls
 
 # Image Processing
 Pillow==12.3.0

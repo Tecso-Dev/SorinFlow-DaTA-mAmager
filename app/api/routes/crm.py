@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_, not_
+from sqlalchemy.orm import selectinload
 import io
 from loguru import logger
 
@@ -1712,19 +1713,11 @@ async def list_deals(
         select(Deal).order_by(Deal.created_at.desc()),
         status=status, deal_type=deal_type)
     count = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar_one()
-    items = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
-    result = []
-    for d in items:
-        row = d.to_dict()
-        # Fetch linked contact names
-        if d.buyer_contact_id and not row.get("buyer_name"):
-            r = await db.execute(select(Contact.name).where(Contact.id == d.buyer_contact_id))
-            row["buyer_name"] = r.scalar_one_or_none()
-        if d.seller_contact_id and not row.get("seller_name"):
-            r = await db.execute(select(Contact.name).where(Contact.id == d.seller_contact_id))
-            row["seller_name"] = r.scalar_one_or_none()
-        result.append(row)
-    return {"items": result, "total": count}
+    # the two contacts come along in one query each, so to_dict never has to
+    # reach for a relationship that is not loaded
+    items = (await db.execute(query.options(selectinload(Deal.buyer), selectinload(Deal.seller))
+                              .limit(limit).offset(offset))).scalars().all()
+    return {"items": [d.to_dict() for d in items], "total": count}
 
 
 @router.post("/deals")

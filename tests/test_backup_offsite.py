@@ -10,6 +10,7 @@ import os
 import sys
 import asyncio
 import json
+import re
 from pathlib import Path
 
 import httpx
@@ -208,3 +209,80 @@ class TestTheSealedCopy:
         sealed = bk.seal(f)
         assert ns["load_payload"](sealed)["tables"]["users"] == [{"id": 1}]
         assert ns["load_payload"](f)["created_at"] == "t"
+
+
+# ── the proxy ────────────────────────────────────────────────────────────────
+# The server is in Iran and api.telegram.org is blocked there. Sobhan entered
+# the token and the chat and watched «در حال پرسیدن از تلگرام…» never finish.
+# Every Bot API call now goes through a proxy: environment first, then the
+# panel, encrypted at rest because the URL carries the proxy's password.
+
+class TestTheProxy:
+
+    def test_nothing_set_means_direct(self, store, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
+        assert asyncio.run(bk.resolve_proxy(store)) == ""
+
+    def test_the_panel_value_is_used_and_encrypted_at_rest(self, store, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
+        store.rows[bk.KEY_PROXY] = secret_box.encrypt("socks5://u:p@proxy.example:1080")
+        assert "socks5://u:p@proxy.example:1080" not in store.rows[bk.KEY_PROXY]
+        assert asyncio.run(bk.resolve_proxy(store)) == "socks5://u:p@proxy.example:1080"
+
+    def test_the_environment_wins(self, store, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_proxy", "http://env-proxy:3128", raising=False)
+        store.rows[bk.KEY_PROXY] = secret_box.encrypt("socks5://panel:1080")
+        assert asyncio.run(bk.resolve_proxy(store)) == "http://env-proxy:3128"
+
+    def test_only_proxy_urls_are_accepted(self):
+        for ok in ("http://1.2.3.4:3128", "socks5://user:pa%40ss@host.example:1080", "https://proxy.example"):
+            assert bk.valid_proxy(ok), ok
+        for bad in ("ftp://x:1", "1.2.3.4:3128", "socks5://", "http://host:port", "javascript:alert(1)"):
+            assert not bk.valid_proxy(bad), bad
+
+    def test_every_call_is_made_through_it(self, monkeypatch):
+        seen = []
+        real = httpx.AsyncClient
+
+        class Fake(real):
+            def __init__(self, *a, **kw):
+                seen.append(kw.get("proxy"))
+                kw.pop("proxy", None)
+                kw["transport"] = httpx.MockTransport(lambda req: httpx.Response(
+                    200, json={"ok": True, "result": {"username": "b", "id": 1} if "getMe" in str(req.url) else []}))
+                super().__init__(*a, **kw)
+        monkeypatch.setattr(bk.httpx, "AsyncClient", Fake)
+        asyncio.run(bk.telegram_probe("1:x", "socks5://p:1080"))
+        asyncio.run(bk.telegram_ping("1:x", "http://q:3128"))
+        assert seen == ["socks5://p:1080", "http://q:3128"]
+
+    def test_a_shipment_without_a_proxy_that_fails_says_why(self, store, monkeypatch, tmp_path):
+        monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
+        store.rows[bk.KEY_TOKEN] = secret_box.encrypt("1:x")
+        store.rows[bk.KEY_CHAT] = "5"
+        _telegram(monkeypatch, lambda req: (_ for _ in ()).throw(httpx.ConnectTimeout("blocked")))
+        f = tmp_path / "sorinflow-backup-x.json.gz"
+        f.write_bytes(b"x")
+        assert asyncio.run(bk.send_to_telegram(f, store)) is False
+        assert "پراکسی" in json.loads(store.rows[bk.KEY_LAST])["error"]
+
+    def test_the_routes_take_and_mask_it(self):
+        src = Path("app/api/routes/backup.py").read_text(encoding="utf-8")
+        assert "proxy: Optional[str] = Field(None, max_length=300)" in src
+        assert "secret_box.encrypt(proxy)" in src, "stored encrypted, like the token"
+        assert '@router.post("/proxy-test")' in src
+        assert '"proxy_masked": _mask_proxy(proxy)' in src
+        assert re.sub(r"://[^@/]+@", "://***@", "socks5://u:p@h:1") == "socks5://***@h:1"
+
+    def test_the_crm_notifier_uses_the_same_proxy(self):
+        src = Path("app/crm/notification.py").read_text(encoding="utf-8")
+        assert "telegram_client(await resolve_proxy(), timeout=10)" in src
+        assert "httpx.AsyncClient(" not in src[src.index("async def send_telegram"):src.index("def _sync_send_email")]
+
+    def test_the_panel_has_the_field_and_socks_is_installable(self):
+        html = Path("frontend/index.html").read_text(encoding="utf-8")
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert 'id="bk-proxy"' in html and 'onclick="bkProxyTest()"' in html
+        assert "async function bkProxyTest" in js and "bkClearProxy" in js
+        assert "if (proxy) body.proxy = proxy;" in js
+        assert "socksio" in Path("requirements.txt").read_text(encoding="utf-8")

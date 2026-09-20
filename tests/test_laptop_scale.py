@@ -115,3 +115,62 @@ class TestTheUsersList:
         assert "content: attr(data-l)" in blk
         js = Path("frontend/js/app.js").read_text(encoding="utf-8")
         assert 'data-l="تماس"' in js and 'data-l="نقش"' in js
+
+
+class TestTheAuditOfTheOtherSections:
+    """2026-09-20: every section and every CRM tab measured at 1093px with
+    seeded data. Two tables still scrolled sideways — scraper jobs (nine
+    columns in a two-thirds card) and CRM leads (eleven columns). Both fit
+    now; the leads list also gained a menu like the members table."""
+
+    def test_the_leads_table_has_nine_columns_and_no_scroll_wrapper(self):
+        html = Path("frontend/index.html").read_text(encoding="utf-8")
+        i = html.index('id="crm-leads-table"')
+        head = html[html.rindex('<table class="table leads-table">', 0, i):i]
+        assert head.count("<th ") + head.count("<th>") == 9   # "<thead" is not a column
+        assert "<th>شهر</th>" not in head and "اطلاع‌رسانی</th>" not in head, "the city rides under the title, the notice under the date"
+        assert "table-responsive" not in html[i - 1500:i]
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("async function loadLeads()"):js.index("_renderLeadsPagination(data.total ?? data.items.length)")]
+        assert 'colspan="9"' in fn and "const where = [lead.city_name" in fn
+        assert 'data-bs-toggle="dropdown"' in fn and "deleteLead(${lead.id})" in fn
+        assert "moveFilePick(${lead.property_id})" in fn, "a lead files its property from the list too"
+
+    def test_the_specs_column_steps_aside_on_small_laptops(self):
+        blk = _block("@media (max-width: 1199px) {\n  .leads-table .leads-spec")
+        assert ".leads-table .leads-spec { display: none; }" in blk
+
+    def test_the_jobs_table_keeps_its_markup_but_fits(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("function _renderJobsTable"):js.index("const _dismissedOtpKeys")]
+        assert 'class="job-id"' in fn and 'class="job-reason"' in fn and 'class="job-actions"' in fn
+        assert "max-width:190px" not in fn, "the reason is clamped by CSS now"
+        blk = _block("@media (min-width: 901px) and (max-width: 1399px) {\n  /* the id is a tooltip-only detail")
+        assert "td:first-child { display: none; }" in blk
+        assert '<table class="table jobs-table">' in Path("frontend/index.html").read_text(encoding="utf-8")
+
+
+class TestDealsNoLongerFiveHundred:
+    """Found by the audit: Deal.to_dict read self.buyer / self.seller, lazy
+    relationships on an async session — MissingGreenlet, and the whole
+    «معاملات» tab answered 500 for any deal that had a contact."""
+
+    def test_to_dict_reads_only_what_is_loaded(self):
+        src = Path("app/models/crm_models.py").read_text(encoding="utf-8")
+        fn = src[src.index("class Deal(Base)"):src.index("class Note(Base)")]
+        assert 'self.__dict__.get("buyer")' in fn and "self.buyer.name" not in fn
+
+    def test_the_list_loads_the_contacts_up_front(self):
+        src = Path("app/api/routes/crm.py").read_text(encoding="utf-8")
+        fn = src[src.index("async def list_deals"):src.index('@router.post("/deals")')]
+        assert "selectinload(Deal.buyer), selectinload(Deal.seller)" in fn
+
+    def test_the_table_shows_names_not_ids(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert "d.buyer_name ? esc(d.buyer_name)" in js and "d.seller_name ? esc(d.seller_name)" in js
+
+    def test_through_the_model(self):
+        from app.models.crm_models import Deal
+        d = Deal(title="x", buyer_contact_id=1, seller_contact_id=2)
+        row = d.to_dict()      # nothing loaded → nothing touched, no IO
+        assert row["buyer_name"] is None and row["buyer_contact_id"] == 1

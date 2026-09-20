@@ -2598,6 +2598,47 @@ body.filing-dragging .ftree-node, body.filing-dragging .folder-chip { outline: 1
   .users-table td.u-contact > * { grid-column: 2; }
 }
 
+/* ── the two tables that still scrolled on a laptop (audit 2026-09-20) ──
+   Scraper jobs: nine columns in a two-thirds card. Leads: eleven columns.
+   Both now fit at 1024–1280px without a sideways scroll. */
+.jobs-table > tbody > tr > td { padding: .55rem .6rem; vertical-align: middle; }
+.jobs-table > thead > tr > th { padding: .55rem .6rem; }
+.jobs-table .job-id { font-size: .7rem; padding: .1rem .3rem; }
+.jobs-table .job-reason { font-size: .66rem; color: var(--text-muted); margin-top: .25rem; max-width: 150px; line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.jobs-table .job-progress { min-width: 64px; }
+.jobs-table .job-when { font-size: .72rem; color: var(--text-dim); max-width: 92px; line-height: 1.4; }
+.jobs-table .job-actions { white-space: nowrap; }
+.jobs-table .job-actions .btn { padding: .15rem .4rem; }
+.jobs-table .badge { white-space: normal; text-align: right; line-height: 1.35; }
+@media (min-width: 901px) and (max-width: 1399px) {
+  /* the id is a tooltip-only detail on a laptop; the buttons wrap */
+  .jobs-table > thead > tr > th:first-child, .jobs-table > tbody > tr > td:first-child { display: none; }
+  .jobs-table > tbody > tr > td, .jobs-table > thead > tr > th { padding: .5rem .45rem; }
+  .jobs-table .job-actions { white-space: normal; max-width: 70px; }
+  .jobs-table .job-actions .btn { margin-bottom: .2rem; }
+  .jobs-table .job-when { font-size: .66rem; }
+}
+
+.leads-table > tbody > tr > td { vertical-align: middle; padding: .6rem .7rem; }
+.leads-table > thead > tr > th { padding: .6rem .7rem; }
+.leads-table .leads-title { min-width: 150px; }
+.leads-table .leads-title-text { color: var(--text); font-weight: 600; font-size: .8rem; line-height: 1.4; }
+.leads-table .leads-price, .leads-table .leads-phone, .leads-table .leads-date { white-space: nowrap; }
+.leads-table .status-quick { min-width: 122px; }
+.leads-table .leads-actions { display: inline-flex; align-items: center; gap: .2rem; }
+.leads-table .leads-actions .btn { padding: .15rem .45rem; }
+@media (max-width: 1199px) {
+  .leads-table .leads-spec { display: none; }
+  .leads-table .status-quick { min-width: 110px; font-size: .74rem; }
+  .leads-table > tbody > tr > td, .leads-table > thead > tr > th { padding: .5rem .5rem; }
+}
+/* on a phone the leads list still scrolls inside the card — the phone
+   block keeps the page itself from scrolling sideways */
+@media (max-width: 900px) {
+  .leads-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
+
 /* ── Permission toggles (super_admin user editor) ─────────────────────────── */
 .perm-box{display:grid;grid-template-columns:1fr 1fr;gap:.35rem;
  border:1px solid var(--border,#2a2a2e);border-radius:8px;padding:.55rem;max-height:220px;overflow:auto}

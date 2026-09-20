@@ -3470,9 +3470,52 @@ async function loadBackup() {
         if (s.chat_id && !chat.value) chat.value = s.chat_id;
         document.getElementById('bk-token').disabled = s.source === 'env';
         chat.disabled = s.source === 'env';
+        const ph = document.getElementById('bk-proxy-hint');
+        const px = document.getElementById('bk-proxy');
+        if (ph && px) {
+            if (s.proxy_masked) {
+                ph.innerHTML = `ذخیره‌شده: <span dir="ltr">${esc(s.proxy_masked)}</span>${s.proxy_source === 'env' ? ' (از محیط سرور)' : ''}
+                    — برای عوض کردن، آدرس تازه را بنویسید و ذخیره کنید؛ <a href="#" onclick="event.preventDefault(); bkClearProxy()">حذف پراکسی</a>`;
+                px.placeholder = 'بدون تغییر';
+            } else {
+                ph.innerHTML = 'یک پراکسی خارج از ایران (http یا socks5). تلگرام از سرورهای ایران مسدود است و بدون پراکسی، ارسال نسخه و «پیدا کن» هیچ‌وقت جواب نمی‌گیرند.';
+            }
+            px.disabled = s.proxy_source === 'env';
+            document.getElementById('bk-proxy-test').disabled = false;
+        }
     } catch (e) {
         badge.textContent = 'نامشخص'; badge.className = 'badge bg-secondary';
     }
+}
+
+/** getMe through the proxy being typed (or the saved one): the bot's name
+ *  and the round trip, or the reason it did not answer. */
+async function bkProxyTest() {
+    const out = document.getElementById('bk-proxy-result');
+    const btn = document.getElementById('bk-proxy-test');
+    const proxy = document.getElementById('bk-proxy').value.trim();
+    const tok = document.getElementById('bk-token').value.trim();
+    btn.disabled = true; out.className = 'small text-muted'; out.textContent = 'در حال تست…';
+    try {
+        const r = await apiCall('/backup/proxy-test', { method: 'POST',
+            body: JSON.stringify({ proxy: proxy || null, bot_token: tok || null }) });
+        out.className = 'small text-success';
+        out.innerHTML = `✓ ربات <b dir="ltr">@${esc(r.bot)}</b> در ${formatNumber(r.ms)} ms جواب داد${r.proxy ? ` <span class="text-muted" dir="ltr">(${esc(r.proxy)})</span>` : ' <span class="text-warning">— بدون پراکسی</span>'}`;
+    } catch (e) {
+        out.className = 'small text-danger'; out.textContent = e.message;
+    }
+    btn.disabled = false;
+}
+
+async function bkClearProxy() {
+    if (!await askConfirm({ icon: 'bi-x-circle', title: 'حذف پراکسی', tone: 'warning', okLabel: 'حذف',
+        body: 'پراکسی تلگرام حذف شود؟ تا پراکسی تازه‌ای ندهید، نسخه‌ها به تلگرام نمی‌رسند.' })) return;
+    try {
+        await apiCall('/backup/settings', { method: 'PUT', body: JSON.stringify({ proxy: '' }) });
+        document.getElementById('bk-proxy').value = '';
+        showToast('حذف شد', 'پراکسی تلگرام حذف شد', 'success');
+        loadBackup();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
 async function bkProbe() {
@@ -3481,7 +3524,8 @@ async function bkProbe() {
     box.classList.remove('d-none');
     box.innerHTML = '<span class="small text-muted">در حال پرسیدن از تلگرام…</span>';
     try {
-        const r = await apiCall('/backup/probe', { method: 'POST', body: JSON.stringify({ bot_token: tok || null }) });
+        const proxy = document.getElementById('bk-proxy')?.value.trim() || null;
+        const r = await apiCall('/backup/probe', { method: 'POST', body: JSON.stringify({ bot_token: tok || null, proxy }) });
         if (!r.chats.length) {
             box.innerHTML = `<div class="small text-warning">ربات <b dir="ltr">@${esc(r.bot)}</b> پیدا شد، ولی ${esc(r.hint_fa || 'چتی ندارد')}</div>`;
             return;
@@ -3497,11 +3541,14 @@ async function bkProbe() {
 async function bkSave() {
     const tok = document.getElementById('bk-token').value.trim();
     const chat = document.getElementById('bk-chat').value.trim();
+    const proxy = document.getElementById('bk-proxy')?.value.trim() || '';
     const body = { chat_id: chat };
     if (tok) body.bot_token = tok;      // an empty field means «leave the saved one»
+    if (proxy) body.proxy = proxy;      // same here — «حذف پراکسی» is the way to clear it
     try {
         await apiCall('/backup/settings', { method: 'PUT', body: JSON.stringify(body) });
         document.getElementById('bk-token').value = '';
+        if (proxy) document.getElementById('bk-proxy').value = '';
         showToast('ذخیره شد', 'حالا «همین حالا بکاپ بگیر و بفرست» را بزنید تا ببینید می‌رسد', 'success');
         loadBackup();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
@@ -3922,7 +3969,7 @@ function _renderJobsTable(items) {
         const statusClass = `status-${job.status}`;
         const statusLabel = JOB_STATUS_FA[job.status] || job.status;
         row.innerHTML = `
-            <td><code>${job.job_id.substring(0, 8)}...</code></td>
+            <td><code class="job-id" title="${esc(job.job_id)}">${job.job_id.substring(0, 6)}</code></td>
             <td>${job.category_name ? `<span class="badge bg-primary">${esc(job.category_name)}</span>` : '—'}</td>
             <td>${esc(job.city_name) || '—'}</td>
             <td>
@@ -3930,12 +3977,12 @@ function _renderJobsTable(items) {
                 ${job.resumed_from ? `<div class="text-muted" style="font-size:.66rem" title="این اجرا ادامهٔ اجرای قبلی است">
                     <i class="bi bi-arrow-return-left"></i> ادامهٔ ${esc(String(job.resumed_from).slice(0, 8))}</div>` : ''}
                 ${job.finish_reason ? `
-                    <div style="font-size:.68rem;color:var(--text-muted,#aaa);margin-top:.3rem;max-width:190px;line-height:1.5;">
+                    <div class="job-reason" title="${esc(job.finish_reason)}">
                         ${esc(job.finish_reason)}
                     </div>` : ''}
             </td>
             <td>
-                <div style="min-width:90px">
+                <div class="job-progress">
                     <div class="progress" style="height:5px;background:var(--border,#333);border-radius:3px;">
                         <div class="progress-bar" role="progressbar"
                              style="width:${job.progress}%;border-radius:3px;"></div>
@@ -3962,8 +4009,8 @@ function _renderJobsTable(items) {
                 <span class="text-muted">/</span>
                 <bdi class="text-muted" title="از قبل موجود بود — یا همان بود و رد شد، یا با اطلاعات تازه به‌روز شد">${job.updated_items}</bdi>
             </td>
-            <td>${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
-            <td>
+            <td class="job-when">${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
+            <td class="job-actions">
                 <button class="btn btn-sm btn-outline-secondary" onclick="showJobLog('${job.job_id}')"
                         title="گزارش این اسکرپ">
                     <i class="bi bi-list-ul"></i>
@@ -6012,7 +6059,7 @@ async function loadLeads() {
         if (data.items.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="text-center text-muted py-4">
+                    <td colspan="9" class="text-center text-muted py-4">
                         <i class="bi bi-inbox" style="font-size:2rem;"></i>
                         <p class="mt-2">هیچ لیدی یافت نشد</p>
                     </td>
@@ -6023,9 +6070,11 @@ async function loadLeads() {
 
         data.items.forEach(lead => {
             const st = CRM_STATUS_LABELS[lead.status] || { label: lead.status, cls: 'bg-secondary' };
-            const notifiedBadge = lead.notified
-                ? `<span class="badge bg-success"><i class="bi bi-check-circle"></i> بله</span>`
-                : `<span class="badge bg-secondary">خیر</span>`;
+            // «اطلاع‌رسانی» lost its column: it is a line under the date now
+            const notifiedLine = lead.notified
+                ? `<small class="lead-subline text-success" title="اطلاع‌رسانی انجام شده"><i class="bi bi-bell-fill"></i> اطلاع داده شد</small>`
+                : '';
+            const where = [lead.city_name, lead.area ? formatNumber(lead.area) + ' متر' : ''].filter(Boolean).join(' · ');
             const createdAt = lead.created_at
                 ? new Date(lead.created_at).toLocaleDateString('fa-IR')
                 : '---';
@@ -6041,45 +6090,52 @@ async function loadLeads() {
                 <td>${lead.serial_no != null
                         ? `<span class="serial-badge" title="کد ملک — همان کدی که در لیست املاک است">${formatSerial(lead.serial_no)}</span>`
                         : '<span class="text-muted" title="ملک این لید حذف شده است">—</span>'}</td>
-                <td title="${esc(lead.property_title)}">${esc((lead.property_title || '---').substring(0, 35))}... ${agencyBadge(lead)}</td>
-                <td>${lead.city_name || '---'}</td>
-                <td>
+                <td class="leads-title" title="${esc(lead.property_title)}">
+                    <div class="leads-title-text">${esc((lead.property_title || '---').substring(0, 35))}... ${agencyBadge(lead)}</div>
+                    ${where ? `<small class="lead-subline">${esc(where)}</small>` : ''}
+                </td>
+                <td class="leads-price">
                     <div>${formatPrice(lead.price)}</div>
                     ${lead.price_per_meter ? `<small class="lead-subline" title="قیمت هر متر">${formatPrice(lead.price_per_meter)} <span class="opacity-75">/ متر</span></small>` : ''}
                 </td>
-                <td>${_leadSpecChips(lead)}</td>
-                <td>
+                <td class="leads-spec">${_leadSpecChips(lead)}</td>
+                <td class="leads-phone">
                     ${lead.phone_number
                         ? `<a href="tel:${safeTel(lead.phone_number)}" class="text-success fw-bold">${lead.phone_number}</a>`
                         : noPhoneCell(lead)}
                 </td>
                 <td>
-                    <select class="form-select form-select-sm status-quick ${st.cls}" style="min-width:130px"
+                    <select class="form-select form-select-sm status-quick ${st.cls}"
                             onchange="quickLeadStatus(${lead.id}, this.value, this)">
                         ${Object.entries(CRM_STATUS_LABELS).map(([val, info]) =>
                             `<option value="${val}" ${lead.status === val ? 'selected' : ''}>${info.label}</option>`
                         ).join('')}
                     </select>
                 </td>
-                <td>${notifiedBadge}</td>
-                <td>
+                <td class="leads-date">
                     <div>${createdAt}</div>
                     ${scrapedAt ? `<small class="lead-subline" title="تاریخ برداشت آگهی"><i class="bi bi-download"></i> ${scrapedAt}</small>` : ''}
+                    ${notifiedLine}
                 </td>
-                <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="viewLead(${lead.id})" title="ویرایش">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                    ${!lead.notified ? `
-                    <button class="btn btn-sm btn-outline-success" onclick="notifyLead(${lead.id})" title="ارسال اطلاع">
-                        <i class="bi bi-bell"></i>
-                    </button>` : ''}
-                    <a href="${safeUrl(lead.property_url)}" target="_blank" class="btn btn-sm btn-outline-secondary" title="باز کردن آگهی">
-                        <i class="bi bi-box-arrow-up-left"></i>
-                    </a>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteLead(${lead.id})" title="حذف لید">
-                        <i class="bi bi-trash"></i>
-                    </button>
+                <td class="u-menu">
+                    <div class="leads-actions">
+                        <button class="btn btn-sm btn-outline-primary" onclick="viewLead(${lead.id})" title="ویرایش لید">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <div class="dropdown">
+                            <button class="u-kebab" data-bs-toggle="dropdown" aria-expanded="false" title="بیشتر">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <ul class="dropdown-menu">
+                                ${!lead.notified ? `<li><button class="dropdown-item" onclick="notifyLead(${lead.id})"><i class="bi bi-bell"></i> ارسال اطلاع</button></li>` : ''}
+                                <li><a class="dropdown-item" href="${safeUrl(lead.property_url)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-left"></i> باز کردن آگهی</a></li>
+                                <li><button class="dropdown-item" onclick="showSimilarForLead(${lead.id})"><i class="bi bi-diagram-3"></i> ملک‌های مشابه</button></li>
+                                <li><button class="dropdown-item" onclick="moveFilePick(${lead.property_id})"><i class="bi bi-folder-symlink"></i> بایگانی در زونکن</button></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><button class="dropdown-item text-danger" onclick="deleteLead(${lead.id})"><i class="bi bi-trash"></i> حذف لید</button></li>
+                            </ul>
+                        </div>
+                    </div>
                 </td>
             `;
             tbody.appendChild(row);
@@ -7777,8 +7833,8 @@ async function loadDeals() {
                 <td>${dealTypeLabel}</td>
                 <td><span class="badge ${s.cls}">${s.label}</span></td>
                 <td>${amount}</td>
-                <td>${d.buyer_contact_id || '—'}</td>
-                <td>${d.seller_contact_id || '—'}</td>
+                <td>${d.buyer_name ? esc(d.buyer_name) : (d.buyer_contact_id ? `#${d.buyer_contact_id}` : '—')}</td>
+                <td>${d.seller_name ? esc(d.seller_name) : (d.seller_contact_id ? `#${d.seller_contact_id}` : '—')}</td>
                 <td>${date}</td>
                 <td>
                     <button class="btn btn-xs btn-outline-primary" onclick="openDealModal(${d.id})"><i class="bi bi-pencil"></i></button>

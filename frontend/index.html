@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260920d">
+    <link rel="stylesheet" href="css/style.css?v=20260920e">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -998,7 +998,7 @@
                                 </div>
                             </div>
                             <div class="table-responsive">
-                                <table class="table">
+                                <table class="table jobs-table">
                                     <thead>
                                         <tr>
                                             <th>#</th>
@@ -2078,20 +2078,22 @@
                                     لغو انتخاب
                                 </button>
                             </div>
-                            <div class="table-responsive">
-                                <table class="table">
-                                    <thead><tr>
-                                        <th style="width:34px"><input type="checkbox" class="form-check-input" id="leads-check-all" onchange="toggleAllLeads(this.checked)" title="انتخاب همه"></th>
-                                        <th title="همان کد ملک لیست املاک">کد ملک</th><th>عنوان ملک</th><th>شهر</th>
-                                        <th title="قیمت کل — خط دوم: قیمت هر متر">قیمت</th>
-                                        <th style="min-width:118px" title="سند، پارکینگ، آسانسور، جهت">مشخصات</th>
-                                        <th>شماره تماس</th><th>وضعیت CRM</th><th>اطلاع‌رسانی</th>
-                                        <th title="تاریخ ثبت لید — خط دوم: تاریخ برداشت آگهی">تاریخ</th>
-                                        <th>عملیات</th>
-                                    </tr></thead>
-                                    <tbody id="crm-leads-table"></tbody>
-                                </table>
-                            </div>
+                            <!-- nine columns that fit a laptop: the city rides under the title,
+                                 «اطلاع‌رسانی» under the date, the specs hide below 1200px, and the
+                                 secondary actions sit in a menu -->
+                            <table class="table leads-table">
+                                <thead><tr>
+                                    <th style="width:34px"><input type="checkbox" class="form-check-input" id="leads-check-all" onchange="toggleAllLeads(this.checked)" title="انتخاب همه"></th>
+                                    <th title="همان کد ملک لیست املاک">کد ملک</th>
+                                    <th title="خط دوم: شهر و متراژ">عنوان ملک</th>
+                                    <th title="قیمت کل — خط دوم: قیمت هر متر">قیمت</th>
+                                    <th class="leads-spec" title="سند، پارکینگ، آسانسور، جهت">مشخصات</th>
+                                    <th>شماره تماس</th><th>وضعیت CRM</th>
+                                    <th title="تاریخ ثبت لید — خط دوم: تاریخ برداشت آگهی و اطلاع‌رسانی">تاریخ</th>
+                                    <th class="u-menu-th"><span class="visually-hidden">عملیات</span></th>
+                                </tr></thead>
+                                <tbody id="crm-leads-table"></tbody>
+                            </table>
                             <div class="card-body py-2">
                                 <nav id="leads-pagination"></nav>
                             </div>
@@ -3414,6 +3416,28 @@
                             </div>
                         </div>
                         <div id="bk-chats" class="d-none mb-2"></div>
+                        <!-- the server is in Iran and api.telegram.org is blocked there:
+                             without this, «پیدا کن» and the shipment wait forever -->
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-8">
+                                <label class="form-label small">پراکسی تلگرام <span class="text-warning">(لازم — سرور در ایران است)</span></label>
+                                <div class="d-flex gap-2">
+                                    <input type="text" id="bk-proxy" class="form-control form-control-sm"
+                                           dir="ltr" autocomplete="off" spellcheck="false"
+                                           placeholder="socks5://user:pass@host:1080  یا  http://host:port">
+                                    <button class="btn btn-sm btn-outline-primary text-nowrap" id="bk-proxy-test" onclick="bkProxyTest()">
+                                        <i class="bi bi-activity"></i> تست
+                                    </button>
+                                </div>
+                                <div class="form-text small" id="bk-proxy-hint">
+                                    یک پراکسی خارج از ایران (http یا socks5). تلگرام از سرورهای ایران مسدود است و
+                                    بدون پراکسی، ارسال نسخه و «پیدا کن» هیچ‌وقت جواب نمی‌گیرند.
+                                </div>
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <div class="small" id="bk-proxy-result"></div>
+                            </div>
+                        </div>
                         <div class="d-flex gap-2 flex-wrap align-items-center">
                             <button class="btn btn-sm btn-primary" onclick="bkSave()">
                                 <i class="bi bi-save"></i> ذخیره
@@ -4691,7 +4715,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260920d"></script>
+<script src="js/app.js?v=20260920e"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

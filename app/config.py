@@ -225,6 +225,9 @@ class Settings(BaseSettings):
     # CRN — Telegram notification
     telegram_bot_token: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", env="TELEGRAM_CHAT_ID")
+    # api.telegram.org is blocked from Iranian networks and the server is in
+    # one; every Bot API call goes through this when set (http/socks5 URL).
+    telegram_proxy: str = Field(default="", env="TELEGRAM_PROXY")
 
     # ── Public portal auth (visitor sign-up) ──────────────────────────────
     # OFF until the Iranian SMS panel is provisioned. While it is off the
