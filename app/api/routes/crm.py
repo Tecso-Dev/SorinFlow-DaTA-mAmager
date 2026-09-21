@@ -801,6 +801,90 @@ async def decide_match(match_id: int, data: MatchDecisionIn,
     return row.to_dict()
 
 
+# ── پیامک به مشتری — the listing, straight to the person it was matched for ──
+# The text is the customer-safe card «ارسال برای مشتری» shows (owner's name,
+# number and address stripped — build_share_card), with a greeting on top and
+# the panel's SMS signature underneath; the consultant reads it in a dialog and
+# may edit it before it goes. Sending counts as contact: the card leaves the
+# queue and the customer's timeline says what went out, to which number.
+
+SMS_SINGLE, SMS_PART = 70, 67   # UCS-2 segment sizes; Persian text is never GSM-7
+_BRAND_LINE = "املاک سورین"     # build_share_card's last line, dropped when a signature says it better
+
+
+def sms_segments(text: str) -> int:
+    n = len(text or "")
+    return 1 if n <= SMS_SINGLE else -(-n // SMS_PART)
+
+
+class MatchSmsIn(_BaseModel):
+    message: Optional[str] = _Field(None, max_length=1000)   # edited text; omit for the standard one
+
+
+async def _match_sms(row, db):
+    """(property, customer, number, text) for a match — or the reason it cannot be sent."""
+    from app.api.routes.filing import build_share_card
+    from app.api.routes.sms import normalize_mobile
+    from app.services import sms_service as _sms
+    prop = await db.get(Property, row.property_id)
+    cust = await db.get(Customer, row.customer_id)
+    if not prop or not cust:
+        raise HTTPException(status_code=404, detail="ملک یا مشتری این تطبیق دیگر وجود ندارد")
+    to = normalize_mobile(cust.mobile1 or "")
+    if not to:
+        raise HTTPException(status_code=400, detail="شمارهٔ موبایل مشتری معتبر نیست")
+    name = (cust.full_name or "").strip()
+    cheaper = any("قیمت کم شد" in (r or "") for r in (row.reasons or []))
+    lead = (f"سلام {name} عزیز،" if name else "سلام،") + "\n" + (
+        "قیمت ملکی که با درخواست شما هم‌خوانی دارد کم شده است:" if cheaper
+        else "ملکی مطابق درخواست شما پیدا شد:")
+    card = build_share_card(prop)["text"]
+    sig = ((await _sms._get_settings_rows(db, [_sms.KEY_SIGNATURE])).get(_sms.KEY_SIGNATURE) or "").strip()
+    if sig:
+        card = card.replace(f"\n{_BRAND_LINE}", "")
+    return prop, cust, to, f"{lead}\n{card}" + (f"\n{sig}" if sig else "")
+
+
+@router.get("/matches/{match_id}/sms")
+async def preview_match_sms(match_id: int, db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    """What would be sent, to whom, and how many segments it costs."""
+    row = (await db.execute(_matches_visible_to(
+        select(CustomerMatch).where(CustomerMatch.id == match_id), current_user))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="تطبیق یافت نشد")
+    prop, cust, to, text = await _match_sms(row, db)
+    return {"to": to, "customer": cust.full_name, "serial_no": prop.serial_no,
+            "text": text, "segments": sms_segments(text)}
+
+
+@router.post("/matches/{match_id}/sms")
+async def send_match_sms(match_id: int, data: MatchSmsIn,
+                         db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    from app.api.routes.sms import _log as _sms_log
+    row = (await db.execute(_matches_visible_to(
+        select(CustomerMatch).where(CustomerMatch.id == match_id), current_user))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="تطبیق یافت نشد")
+    prop, cust, to, text = await _match_sms(row, db)
+    if data.message and data.message.strip():
+        text = data.message.strip()
+    result = await send_sms(to, text, db=db)
+    actor = _agent_name(current_user)
+    await _sms_log(db, to, text, result, current_user.username, kind="match", campaign="تطبیق خودکار")
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail=result.get("response") or "خطای نامشخص")
+    row.status = "contacted"
+    row.decided_by = actor
+    row.decided_at = _now_utc()
+    _log_activity(db, "customer", row.customer_id, "match_sms",
+                  f"پیامک ملک {prop.serial_no} به {to} فرستاده شد", actor)
+    await db.commit()
+    return {"ok": True, "to": to, "message_id": result.get("messageid"), "cost": result.get("cost"),
+            "segments": sms_segments(text), "match": row.to_dict()}
+
+
 @router.post("/matches/run")
 async def run_matches_now(db: AsyncSession = Depends(get_db),
                           current_user: User = require_super_admin):
@@ -2117,8 +2201,11 @@ async def send_sms_route(data: dict, db: AsyncSession = Depends(get_db)):
 
     if not to_number or not message:
         raise HTTPException(status_code=400, detail="to_number and message are required")
+    from app.api.routes.sms import normalize_mobile
+    to_number = normalize_mobile(to_number) or to_number
 
-    result = await send_sms(to_number, message, provider)
+    # db: the key saved from the panel applies here too, not only the env one
+    result = await send_sms(to_number, message, provider, db=db)
 
     log = SmsLog(
         to_number=to_number,

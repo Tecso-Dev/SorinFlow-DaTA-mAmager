@@ -4786,7 +4786,9 @@ function _askOpen({ icon, title, body, note, tone, okLabel, cancelLabel, field }
                 ${field.label ? `<label for="ask-input">${esc(field.label)}</label>` : ''}
                 ${field.options ? `<select id="ask-input" dir="${esc(field.dir || 'auto')}">
                     ${field.options.map(([v, l]) => `<option value="${esc(v)}" ${v === field.value ? 'selected' : ''}>${esc(l)}</option>`).join('')}
-                  </select>` : `<input id="ask-input" type="${esc(field.type || 'text')}"
+                  </select>` : field.multiline ? `<textarea id="ask-input" rows="${esc(field.rows || 7)}"
+                       dir="${esc(field.dir || 'auto')}" placeholder="${esc(field.placeholder || '')}">${esc(field.value || '')}</textarea>`
+                  : `<input id="ask-input" type="${esc(field.type || 'text')}"
                        inputmode="${esc(field.inputmode || 'text')}"
                        dir="${esc(field.dir || 'auto')}"
                        placeholder="${esc(field.placeholder || '')}"
@@ -4823,7 +4825,9 @@ function _askOpen({ icon, title, body, note, tone, okLabel, cancelLabel, field }
         });
         overlay._onKey = e => {
             if (e.key === 'Escape') _askClose(overlay, resolve, cancelValue);
-            if (e.key === 'Enter' && field && document.activeElement === input) submit();
+            // a textarea keeps Enter for a new line; Ctrl/⌘+Enter sends
+            if (e.key === 'Enter' && field && document.activeElement === input
+                && (!field.multiline || e.ctrlKey || e.metaKey)) submit();
         };
         document.addEventListener('keydown', overlay._onKey);
 
@@ -8494,8 +8498,9 @@ function _matchQueueCard(m) {
         </div>
         <div class="cq-actions">
             <button class="btn btn-sm btn-success" onclick="mqDecide(${m.id}, 'contacted')"><i class="bi bi-check-lg"></i> تماس گرفتم</button>
+            <button class="btn btn-sm btn-primary" onclick="mqSms(${m.id})" ${c.mobile1 ? '' : 'disabled title="مشتری شماره ندارد"'}><i class="bi bi-chat-dots"></i> پیامک به مشتری</button>
             <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${p.id})"><i class="bi bi-eye"></i> جزئیات ملک</button>
-            <button class="btn btn-sm btn-outline-secondary" onclick="shareFile(${p.id})"><i class="bi bi-share"></i> ارسال برای مشتری</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="shareFile(${p.id})" title="واتساپ / تلگرام / کپی"><i class="bi bi-share"></i></button>
             <button class="btn btn-sm btn-outline-danger" onclick="mqDecide(${m.id}, 'dismissed')"><i class="bi bi-x-lg"></i> مناسب نیست</button>
         </div>
     </div>`;
@@ -8515,6 +8520,28 @@ async function mqDecide(id, status) {
         showToast('ثبت شد', status === 'contacted' ? 'در پروندهٔ مشتری نوشته شد' : '', 'success');
         setTimeout(loadMatches, 400);
     } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+/** «پیامک به مشتری»: the customer-safe card, to the customer's own number,
+ *  shown first so the consultant can read and edit what goes out. */
+async function mqSms(id) {
+    let pv;
+    try { pv = await apiCall(`/crm/matches/${id}/sms`); }
+    catch (e) { showToast('خطا', e.message, 'danger'); return; }
+    const text = await askText({
+        icon: 'bi-chat-dots', title: 'پیامک به مشتری', okLabel: 'ارسال پیامک',
+        body: `به <b dir="ltr">${esc(pv.to)}</b> (${esc(pv.customer || 'مشتری')}) فرستاده می‌شود.`,
+        field: { label: `متن پیامک — حدود ${formatNumber(pv.segments)} بخش`, multiline: true, value: pv.text,
+                 validate: v => v ? '' : 'متن پیامک خالی است' },
+    });
+    if (text === null) return;
+    try {
+        const r = await apiCall(`/crm/matches/${id}/sms`, { method: 'POST', body: JSON.stringify({ message: text }) });
+        const card = document.getElementById(`mq-${id}`);
+        if (card) { card.classList.add('cq-done'); setTimeout(() => card.remove(), 350); }
+        showToast('پیامک رفت', `به ${r.to} · ${formatNumber(r.segments)} بخش`, 'success');
+        setTimeout(loadMatches, 400);
+    } catch (e) { showToast('پیامک ارسال نشد', e.message, 'danger'); }
 }
 
 async function runMatchesNow() {

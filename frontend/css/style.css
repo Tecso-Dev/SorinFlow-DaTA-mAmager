@@ -3130,12 +3130,13 @@ html[data-theme="light"] .table thead th {
 
 .ask-field { position: relative; text-align: start; margin-bottom: 1rem }
 .ask-field label { display: block; font-size: .76rem; color: var(--text-muted); margin-bottom: .35rem }
-.ask-field input, .ask-field select {
+.ask-field input, .ask-field select, .ask-field textarea {
   width: 100%; padding: .7rem .9rem; border-radius: 14px;
   background: var(--input-bg); border: 1px solid rgba(255,255,255,.1);
   color: var(--text); font-size: .95rem; font-family: inherit;
 }
-.ask-field input:focus, .ask-field select:focus {
+.ask-field textarea { resize: vertical; min-height: 9.5rem; line-height: 1.7; font-size: .88rem }
+.ask-field input:focus, .ask-field select:focus, .ask-field textarea:focus {
   outline: none; border-color: rgba(129,140,248,.6);
   box-shadow: 0 0 0 3px rgba(99,102,241,.18); background: var(--input-bg-focus);
 }

@@ -61,6 +61,20 @@ class TestTheShape:
         for bad in ("prompt(", "confirm(", "alert("):
             assert bad not in blk.replace("askText(", "")
 
+    def test_the_card_can_text_the_customer(self):
+        """«پیامک به مشتری»: preview first, editable, then one POST; the older
+        share-modal path finally reads the panel-saved key too."""
+        fn = JS[JS.index("function _matchQueueCard"):JS.index("async function mqDecide")]
+        assert "mqSms(${m.id})" in fn
+        sms = JS[JS.index("async function mqSms"):JS.index("async function runMatchesNow")]
+        assert "apiCall(`/crm/matches/${id}/sms`)" in sms and "multiline: true" in sms
+        assert "method: 'POST', body: JSON.stringify({ message: text })" in sms
+        ask = JS[JS.index("function _askOpen"):JS.index("function askConfirm")]
+        assert "field.multiline" in ask and "<textarea" in ask and "e.ctrlKey || e.metaKey" in ask
+        src = (ROOT / "app/api/routes/crm.py").read_text(encoding="utf-8")
+        old = src[src.index('@router.post("/sms/send")'):src.index('@router.get("/sms/logs")')]
+        assert "send_sms(to_number, message, provider, db=db)" in old and "normalize_mobile" in old
+
     def test_the_run_button_is_for_super_admins(self):
         src = (ROOT / "app/api/routes/crm.py").read_text(encoding="utf-8")
         fn = src[src.index('@router.post("/matches/run")'):src.index('@router.post("/leads/{lead_id}/notify")')]
@@ -227,3 +241,109 @@ class TestTheScorerBugTheEngineFound:
         from app.services.match_service import score_for_customer
         unknown = score_for_customer(self._c(), self._p(None))
         assert "منطقهٔ دیگر" not in unknown["reasons"] and unknown["score"] > 55
+
+
+# ── «پیامک به مشتری» through the app ──────────────────────────────────────────
+
+def _seed_for_sms():
+    """One manager, two customers (one without a usable number), one listing
+    with an owner's number on it, and a match for each."""
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from app.models.user import User
+    from app.models.property import Property
+    from app.models.crm_models import Customer, CustomerMatch
+    from app.auth.jwt import get_password_hash
+
+    async def _go():
+        eng = create_async_engine(os.environ["DATABASE_URL"])
+        maker = async_sessionmaker(eng, expire_on_commit=False)
+        try:
+            async with maker() as s:
+                s.add(User(username="ms_boss", full_name="مدیر پیامک", role="super_admin", permissions=["crm"],
+                           hashed_password=get_password_hash("pw123456"), is_active=True))
+                c1 = Customer(full_name="سارا امیری", mobile1="۰۹۱۲۱۲۳۰۰۰۰", temperature="hot", consultant_name="مدیر پیامک",
+                              desired_city="ارومیه", desired_district="خیابان گلها", desired_type="apartment",
+                              deal_type="buy", budget_max=5_000_000_000)
+                c2 = Customer(full_name="بی‌شماره", mobile1="تلفن ندارد", consultant_name="مدیر پیامک",
+                              desired_city="ارومیه", desired_district="خیابان گلها", desired_type="apartment",
+                              deal_type="buy", budget_max=5_000_000_000)
+                p = Property(title="آپارتمان ۱۱۰ متری خیابان گلها، نوساز", tag_number="ms-1", divar_id="ms-1",
+                             url="https://divar.ir/v/ms-1", serial_no=990001, city_name="ارومیه", district="خیابان گلها",
+                             area=110, rooms=2, year_built=1403, property_type="آپارتمان", listing_type="buy",
+                             total_price=4_800_000_000, has_elevator=True, has_parking=True,
+                             phone_number="09149990000", seller_name="مالک محترم", is_active=True)
+                s.add_all([c1, c2, p])
+                await s.flush()
+                m1 = CustomerMatch(property_id=p.id, customer_id=c1.id, score=82, reasons=["قیمت کم شد", "داخل بودجه"],
+                                   consultant="مدیر پیامک", status="new")
+                m2 = CustomerMatch(property_id=p.id, customer_id=c2.id, score=70, reasons=["داخل بودجه"],
+                                   consultant="مدیر پیامک", status="new")
+                s.add_all([m1, m2])
+                await s.commit()
+                return {"ok": m1.id, "no_number": m2.id, "customer": c1.id}
+        finally:
+            await eng.dispose()
+    return asyncio.run(_go())
+
+
+class TestSmsToTheCustomer:
+
+    def test_preview_send_and_what_it_leaves_behind(self, client, monkeypatch):
+        ids = _seed_for_sms()
+        boss = _tok(client, "ms_boss")
+
+        # the preview: the customer's number normalised, the safe card, a greeting that
+        # knows this match came from a price cut — and nothing of the owner's
+        r = client.get(f"/api/crm/matches/{ids['ok']}/sms", headers=boss)
+        assert r.status_code == 200, r.text
+        pv = r.json()
+        assert pv["to"] == "09121230000" and pv["customer"] == "سارا امیری" and pv["serial_no"] == 990001
+        assert pv["text"].startswith("سلام سارا امیری عزیز،\nقیمت ملکی که با درخواست شما هم‌خوانی دارد کم شده است:")
+        assert "کد ملک: 990001" in pv["text"] and "متراژ 110 متر" in pv["text"] and "آسانسور" in pv["text"]
+        for secret in ("09149990000", "مالک محترم", "divar.ir"):
+            assert secret not in pv["text"]
+        assert pv["segments"] >= 2 and pv["text"].rstrip().endswith("املاک سورین")
+
+        # with a signature configured, it replaces the hard-coded brand line
+        assert client.put("/api/sms/settings", headers=boss, json={"signature": "املاک گلها — ۰۴۴۳۳۴۴۵۵۶۶"}).status_code == 200
+        txt = client.get(f"/api/crm/matches/{ids['ok']}/sms", headers=boss).json()["text"]
+        assert txt.rstrip().endswith("املاک گلها — ۰۴۴۳۳۴۴۵۵۶۶") and "املاک سورین" not in txt
+        client.put("/api/sms/settings", headers=boss, json={"signature": ""})
+
+        # the customer with no usable number cannot be texted
+        assert client.get(f"/api/crm/matches/{ids['no_number']}/sms", headers=boss).status_code == 400
+
+        # a refused send changes nothing
+        import app.api.routes.crm as crm
+        sent = []
+
+        async def refuse(to, text, provider="kavenegar", db=None):
+            return {"success": False, "provider": "kavenegar", "response": "اعتبار کافی نیست"}
+        monkeypatch.setattr(crm, "send_sms", refuse)
+        r = client.post(f"/api/crm/matches/{ids['ok']}/sms", headers=boss, json={"message": pv["text"]})
+        assert r.status_code == 502 and "اعتبار کافی نیست" in r.json()["detail"]
+        still = [m for m in client.get("/api/crm/matches?status=new&limit=200", headers=boss).json()["items"] if m["id"] == ids["ok"]]
+        assert still and still[0]["status"] == "new"
+
+        # the send: the edited text goes as edited, the match is contacted, the log and the
+        # timeline say so
+        async def accept(to, text, provider="kavenegar", db=None):
+            sent.append((to, text, db is not None))
+            return {"success": True, "provider": "kavenegar", "messageid": 4242, "cost": 3,
+                    "response": "{}"}
+        monkeypatch.setattr(crm, "send_sms", accept)
+        edited = pv["text"] + "\nبازدید فردا ساعت ۱۰ ممکن است."
+        r = client.post(f"/api/crm/matches/{ids['ok']}/sms", headers=boss, json={"message": edited})
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert out["ok"] and out["to"] == "09121230000" and out["message_id"] == 4242
+        assert out["match"]["status"] == "contacted" and out["match"]["decided_by"] == "مدیر پیامک"
+        assert sent == [("09121230000", edited, True)], "the panel-saved key needs the session"
+        assert not [m for m in client.get("/api/crm/matches?status=new&limit=200", headers=boss).json()["items"] if m["id"] == ids["ok"]]
+        logs = client.get("/api/sms/messages?limit=50", headers=boss).json()
+        rows = logs if isinstance(logs, list) else logs.get("items", [])
+        mine = [x for x in rows if x.get("to_number") == "09121230000" and x.get("kind") == "match"]
+        assert mine and mine[0]["campaign"] == "تطبیق خودکار" and mine[0]["status"] == "sent"
+        tl = client.get(f"/api/crm/activity/customer/{ids['customer']}", headers=boss).json()
+        acts = tl if isinstance(tl, list) else tl.get("items", [])
+        assert any(a["action"] == "match_sms" and "990001" in a["detail"] and "09121230000" in a["detail"] for a in acts)
