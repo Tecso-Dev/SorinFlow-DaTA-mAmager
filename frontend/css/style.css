@@ -3224,6 +3224,24 @@ html[data-theme="light"] .table thead th {
 }
 .fw-tip b { color: var(--text) }
 
+/* the morning digest row on the backup card */
+.bk-digest {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  margin-top: .9rem; padding: .7rem .9rem; border-radius: var(--r-sm);
+  background: rgba(99,102,241,.07); border: 1px solid rgba(99,102,241,.18);
+}
+.bk-digest-text { flex: 1 1 18rem; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .82rem; line-height: 1.7 }
+.bk-digest-text > i { color: var(--accent); font-size: 1rem }
+.bk-digest-text .text-muted { font-size: .74rem; width: 100% }
+/* a message shown as it will be sent — the dialog's block of text */
+.ask-pre {
+  display: block; text-align: start; white-space: pre-wrap; direction: rtl;
+  font-size: .82rem; line-height: 1.8; margin: .25rem 0 1rem;
+  padding: .75rem .9rem; border-radius: 14px;
+  background: var(--input-bg); border: 1px solid rgba(255,255,255,.08);
+  max-height: 46vh; overflow: auto;
+}
+
 /* the setup QR — scan instead of typing eight fields */
 .fw-qr {
   display: flex; flex-direction: column; align-items: center; gap: .7rem;

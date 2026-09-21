@@ -3473,9 +3473,49 @@ async function loadBackup() {
         document.getElementById('bk-token').disabled = s.source === 'env';
         chat.disabled = s.source === 'env';
         _bkRenderRoute(s);
+        _bkRenderDigest(s);
     } catch (e) {
         badge.textContent = 'نامشخص'; badge.className = 'badge bg-secondary';
     }
+}
+
+// ── the morning digest ──
+function _bkRenderDigest(s) {
+    const hour = document.getElementById('bk-digest-hour');
+    const last = document.getElementById('bk-digest-last');
+    if (!hour || !last) return;
+    if (s.digest_hour != null && s.digest_hour < 0) {
+        hour.textContent = '—';
+        last.textContent = 'خاموش است (DIGEST_HOUR=-1 روی سرور)';
+        return;
+    }
+    if (s.digest_hour != null) hour.textContent = formatNumber(s.digest_hour);
+    last.textContent = s.digest_last_sent
+        ? `آخرین ارسال: ${new Date(s.digest_last_sent + 'T00:00:00').toLocaleDateString('fa-IR')}`
+        : (s.configured ? 'هنوز فرستاده نشده — اولی بعد از همین ساعت می‌رود' : 'تا تلگرام تنظیم نشود، فرستاده نمی‌شود');
+}
+
+/** «پیش‌نمایش و ارسال الان»: the message as it would go now, then one extra send. */
+async function bkDigest() {
+    const btn = document.getElementById('bk-digest-btn');
+    btn.disabled = true;
+    let pv;
+    try { pv = await apiCall('/backup/digest'); }
+    catch (e) { showToast('خطا', e.message, 'danger'); btn.disabled = false; return; }
+    const go = await askConfirm({
+        icon: 'bi-brightness-high', title: 'خلاصهٔ صبحگاهی',
+        body: `<span class="ask-pre">${esc(pv.text)}</span>`,
+        note: pv.configured ? 'یک نسخهٔ اضافه همین حالا فرستاده می‌شود؛ خلاصهٔ روزانه سر ساعت خودش می‌رود.'
+                            : 'تلگرام تنظیم نشده است — فقط پیش‌نمایش.',
+        okLabel: pv.configured ? 'ارسال به تلگرام' : 'باشه', cancelLabel: 'بستن',
+    });
+    if (go && pv.configured) {
+        try {
+            const r = await apiCall('/backup/digest/send', { method: 'POST' });
+            showToast('فرستاده شد', `به ${formatNumber((r.delivered || []).length)} چت${r.error ? ' — ' + r.error : ''}`, r.error ? 'warning' : 'success');
+        } catch (e) { showToast('فرستاده نشد', e.message, 'danger'); }
+    }
+    btn.disabled = false;
 }
 
 // ── the way out to Telegram: manual proxy, the dashboard's pool, or a relay ──

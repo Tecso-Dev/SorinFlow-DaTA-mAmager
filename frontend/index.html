@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260921c">
+    <link rel="stylesheet" href="css/style.css?v=20260921d">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -3599,6 +3599,17 @@
                             </button>
                             <span class="small text-muted" id="bk-result"></span>
                         </div>
+                        <!-- the morning digest: same chats, one message a day -->
+                        <div class="bk-digest" id="bk-digest">
+                            <div class="bk-digest-text">
+                                <i class="bi bi-brightness-high"></i>
+                                <span><b>خلاصهٔ صبحگاهی</b> — هر روز ساعت <span id="bk-digest-hour">۸</span> به همین چت‌ها: آگهی‌های تازه، تطبیق‌ها، کاهش قیمت‌ها، صف تماس و وضعیت بکاپ.</span>
+                                <span class="text-muted" id="bk-digest-last"></span>
+                            </div>
+                            <button class="btn btn-sm btn-outline-primary text-nowrap" id="bk-digest-btn" onclick="bkDigest()">
+                                <i class="bi bi-eye"></i> پیش‌نمایش و ارسال الان
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <!-- اعضای تیم — one full-width table: who, role, access, contact, state,
@@ -4867,7 +4878,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260921c"></script>
+<script src="js/app.js?v=20260921d"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

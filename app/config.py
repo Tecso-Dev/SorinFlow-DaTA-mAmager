@@ -196,6 +196,9 @@ class Settings(BaseSettings):
     # New listings are scored against every customer's criteria as they arrive
     # (app/crm/match_engine.py); the matches wait on the call queue.
     match_engine: bool = Field(default=True, env="MATCH_ENGINE")
+    # The morning digest to the Telegram chat (app/crm/digest.py): the Tehran
+    # hour after which the day's message goes out; -1 turns it off.
+    digest_hour: int = Field(default=8, env="DIGEST_HOUR")
     logs_path: str = "/app/logs"
     
     # Divar URLs

@@ -154,8 +154,10 @@ class TestThroughTheApp:
         assert r.json()["drops"] == 1 and r.json()["matches"] >= 1, r.json()   # other suites' customers may fit too
 
         items = client.get("/api/crm/price-drops?status=new", headers=boss).json()["items"]
-        assert [i["property_id"] for i in items] == [ids["cut"]], "the 1% move and the rise are not cuts"
-        a = items[0]
+        # other suites (the digest's) leave alerts of their own in a shared database
+        got = {i["property_id"] for i in items} & set(ids.values())
+        assert got == {ids["cut"]}, "the 1% move and the rise are not cuts"
+        a = next(i for i in items if i["property_id"] == ids["cut"])
         assert (a["from_amount"], a["to_amount"], a["delta_pct"]) == (5_000_000_000, 4_400_000_000, -12) and a["matches_created"] >= 1
         assert a["property"]["title"].startswith("آپارتمان ۱۱۰")
 
@@ -166,5 +168,6 @@ class TestThroughTheApp:
 
         # a second pass is idle; «دیدم» takes it off the list
         assert client.post("/api/crm/price-drops/run", headers=boss).json()["drops"] == 0
+        before = client.get("/api/crm/price-drops/summary", headers=boss).json()["new"]
         assert client.post(f"/api/crm/price-drops/{a['id']}/decide", headers=boss, json={"status": "seen"}).json()["seen_by"] == "مدیر"
-        assert client.get("/api/crm/price-drops/summary", headers=boss).json()["new"] == 0
+        assert client.get("/api/crm/price-drops/summary", headers=boss).json()["new"] == before - 1

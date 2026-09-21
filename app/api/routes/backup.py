@@ -78,6 +78,9 @@ async def _route_for(payload, db) -> dict:
     return await bk.resolve_route(db)
 
 
+from app.crm import digest as _digest
+
+
 @router.get("/status")
 async def backup_status(db: AsyncSession = Depends(get_db), _: User = _super_admin):
     cfg = await bk.resolve_telegram(db)
@@ -109,6 +112,8 @@ async def backup_status(db: AsyncSession = Depends(get_db), _: User = _super_adm
         "snapshots": snaps[:5],
         "snapshot_count": len(snaps),
         "last_offsite": await bk.last_offsite(db),
+        "digest_hour": _digest.HOUR,
+        "digest_last_sent": await _digest.last_sent(db),
     }
 
 
@@ -215,6 +220,28 @@ async def probe_bot(payload: ProbeIn, db: AsyncSession = Depends(get_db),
         info["hint_fa"] = ("هنوز هیچ چتی به ربات پیام نداده. در تلگرام ربات را باز کنید، "
                            "Start را بزنید و یک پیام بفرستید، بعد دوباره «پیدا کن» را بزنید.")
     return info
+
+
+@router.get("/digest")
+async def digest_preview(db: AsyncSession = Depends(get_db), _: User = _super_admin):
+    """Today's message as it would go out now, and when the last one went."""
+    from app.crm import digest
+    built = await digest.build(db)
+    cfg = await bk.resolve_telegram(db)
+    return {"text": built["text"], "counts": built["counts"], "hour": digest.HOUR,
+            "last_sent": await digest.last_sent(db),
+            "configured": bool(cfg["token"] and bk.chat_ids(cfg["chat_id"]))}
+
+
+@router.post("/digest/send")
+async def digest_send_now(db: AsyncSession = Depends(get_db), user: User = _super_admin):
+    """An extra one, right now — the daily one still goes at its hour."""
+    from app.crm import digest
+    res = await digest.send(db, record=False)
+    logger.info(f"[digest] manual send by {user.username}: delivered={res.get('delivered')} error={res.get('error')!r}")
+    if not res["ok"]:
+        raise HTTPException(status_code=502, detail=res.get("error") or "ارسال نشد")
+    return res
 
 
 @router.post("/run")

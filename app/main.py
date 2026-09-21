@@ -216,6 +216,11 @@ async def lifespan(app: FastAPI):
     from app.crm.price_watch import watch_loop as _price_loop
     price_task = asyncio.create_task(_price_loop())
 
+    # One message a day to the same chat: what came in overnight, what fits
+    # whom, what got cheaper, how many calls wait, whether the backup arrived.
+    from app.crm.digest import digest_loop as _digest_loop
+    digest_task = asyncio.create_task(_digest_loop())
+
     # Google Cloud export. Returns immediately when disabled, which is the
     # shipped default — and when enabled on a host that cannot reach Google it
     # backs off rather than retrying every interval.
@@ -228,6 +233,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    digest_task.cancel()
     price_task.cancel()
     match_task.cancel()
     schedule_task.cancel()
