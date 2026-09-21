@@ -141,7 +141,7 @@ def _fa(n: int) -> str:
 
 async def _announce(db, alerts: List[PriceAlert]) -> None:
     try:
-        from app.services.backup_service import chat_ids, resolve_proxy, resolve_telegram, telegram_client
+        from app.services.backup_service import chat_ids, resolve_route, resolve_telegram, tg_request
         cfg = await resolve_telegram(db)
         chats = chat_ids(cfg["chat_id"])
         if not (cfg["token"] and chats):
@@ -161,15 +161,15 @@ async def _announce(db, alerts: List[PriceAlert]) -> None:
         domain = (getattr(settings, "domain", "") or "").strip() or "sorinflow.com"
         lines.append(f"https://{domain}/dashboard/#crm")
         sent_any = False
-        async with telegram_client(await resolve_proxy(db), timeout=15) as client:
-            for chat in chats:
-                resp = await client.post(f"https://api.telegram.org/bot{cfg['token']}/sendMessage",
-                                         json={"chat_id": chat, "text": "\n".join(lines),
-                                               "disable_web_page_preview": True})
-                if resp.status_code == 200:
-                    sent_any = True
-                else:
-                    logger.warning(f"[price] telegram refused the announcement for {chat}: {resp.status_code} {resp.text[:120]}")
+        route = await resolve_route(db)
+        for chat in chats:
+            resp, _ = await tg_request(cfg["token"], "sendMessage", route, timeout=15,
+                                       json={"chat_id": chat, "text": "\n".join(lines),
+                                             "disable_web_page_preview": True})
+            if resp.status_code == 200:
+                sent_any = True
+            else:
+                logger.warning(f"[price] telegram refused the announcement for {chat}: {resp.status_code} {resp.text[:120]}")
         if sent_any:
             now = datetime.now(timezone.utc)
             for a in alerts:

@@ -97,7 +97,7 @@ async def _announce(db, rows: List[CustomerMatch]) -> None:
     """One Telegram message per pass, to the chat the backup goes to. Losing
     the message must not lose the matches, so every failure is a log line."""
     try:
-        from app.services.backup_service import chat_ids, resolve_proxy, resolve_telegram, telegram_client
+        from app.services.backup_service import chat_ids, resolve_route, resolve_telegram, tg_request
         cfg = await resolve_telegram(db)
         chats = chat_ids(cfg["chat_id"])
         if not (cfg["token"] and chats):
@@ -119,17 +119,16 @@ async def _announce(db, rows: List[CustomerMatch]) -> None:
             lines.append(f"… و {len(rows) - 15} مورد دیگر")
         domain = (getattr(settings, "domain", "") or "").strip() or "sorinflow.com"
         lines.append(f"https://{domain}/dashboard/#crm")
-        proxy = await resolve_proxy(db)
+        route = await resolve_route(db)
         sent_any = False
-        async with telegram_client(proxy, timeout=15) as client:
-            for chat in chats:
-                resp = await client.post(f"https://api.telegram.org/bot{cfg['token']}/sendMessage",
-                                         json={"chat_id": chat, "text": "\n".join(lines),
-                                               "disable_web_page_preview": True})
-                if resp.status_code == 200:
-                    sent_any = True
-                else:
-                    logger.warning(f"[match] telegram refused the announcement for {chat}: {resp.status_code} {resp.text[:120]}")
+        for chat in chats:
+            resp, _ = await tg_request(cfg["token"], "sendMessage", route, timeout=15,
+                                       json={"chat_id": chat, "text": "\n".join(lines),
+                                             "disable_web_page_preview": True})
+            if resp.status_code == 200:
+                sent_any = True
+            else:
+                logger.warning(f"[match] telegram refused the announcement for {chat}: {resp.status_code} {resp.text[:120]}")
         if sent_any:
             now = datetime.now(timezone.utc)
             for r in rows:

@@ -3480,6 +3480,19 @@ html[data-theme="light"] .table thead th {
 }
 [data-theme="light"] .pd-pct { color: #c2410c; }
 
+/* ── the way out to Telegram (backup card) ─────────────────── */
+.bk-route-tabs { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .5rem; }
+.bk-route-tab {
+  display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; font-size: .78rem;
+  padding: .3rem .7rem; border-radius: 999px; border: 1px solid var(--border); background: var(--surface2); color: var(--text-dim);
+}
+.bk-route-tab:has(input:checked) { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.bk-route-tab input { margin: 0; }
+.bk-pool-list { display: flex; flex-direction: column; gap: .2rem; max-height: 180px; overflow-y: auto; padding: .4rem .6rem; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--input-bg); }
+.bk-pool-list label { display: flex; align-items: center; gap: .5rem; font-size: .76rem; margin: 0; cursor: pointer; }
+.bk-pool-list .flag { font-size: .66rem; color: var(--text-muted); }
+.bk-code { font-size: .68rem; line-height: 1.5; text-align: left; direction: ltr; background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: .6rem .8rem; margin: .4rem 0; white-space: pre; overflow-x: auto; color: var(--text-dim); }
+
 /* ── PWA install hint (sidebar footer, phones only) ─────────── */
 .pwa-hint {
   position: relative; margin-bottom: .55rem; padding: .55rem .7rem;

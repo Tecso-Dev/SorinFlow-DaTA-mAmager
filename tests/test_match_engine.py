@@ -46,7 +46,7 @@ class TestTheShape:
     def test_the_announcement_uses_the_backups_bot_and_proxy(self):
         src = (ROOT / "app/crm/match_engine.py").read_text(encoding="utf-8")
         fn = src[src.index("async def _announce"):src.index("async def tick")]
-        assert "resolve_telegram(db)" in fn and "resolve_proxy(db)" in fn and "telegram_client(proxy" in fn
+        assert "resolve_telegram(db)" in fn and "resolve_route(db)" in fn and "tg_request(cfg[\"token\"], \"sendMessage\", route" in fn
         assert "except Exception" in fn, "losing the message must not lose the matches"
 
     def test_the_panel_puts_the_fits_on_the_call_queue(self):

@@ -3472,37 +3472,121 @@ async function loadBackup() {
         if (s.chat_id && !chat.value) chat.value = s.chat_id;
         document.getElementById('bk-token').disabled = s.source === 'env';
         chat.disabled = s.source === 'env';
-        const ph = document.getElementById('bk-proxy-hint');
-        const px = document.getElementById('bk-proxy');
-        if (ph && px) {
-            if (s.proxy_masked) {
-                ph.innerHTML = `ذخیره‌شده: <span dir="ltr">${esc(s.proxy_masked)}</span>${s.proxy_source === 'env' ? ' (از محیط سرور)' : ''}
-                    — برای عوض کردن، آدرس تازه را بنویسید و ذخیره کنید؛ <a href="#" onclick="event.preventDefault(); bkClearProxy()">حذف پراکسی</a>`;
-                px.placeholder = 'بدون تغییر';
-            } else {
-                ph.innerHTML = 'یک پراکسی خارج از ایران (http یا socks5). تلگرام از سرورهای ایران مسدود است و بدون پراکسی، ارسال نسخه و «پیدا کن» هیچ‌وقت جواب نمی‌گیرند.';
-            }
-            px.disabled = s.proxy_source === 'env';
-            document.getElementById('bk-proxy-test').disabled = false;
-        }
+        _bkRenderRoute(s);
     } catch (e) {
         badge.textContent = 'نامشخص'; badge.className = 'badge bg-secondary';
     }
 }
 
-/** getMe through the proxy being typed (or the saved one): the bot's name
- *  and the round trip, or the reason it did not answer. */
+// ── the way out to Telegram: manual proxy, the dashboard's pool, or a relay ──
+let _bkPool = [];            // the dashboard's proxies, for the pool pane
+let _bkStatus = null;
+
+function _bkMode() {
+    return document.querySelector('input[name=bk-mode]:checked')?.value || 'manual';
+}
+
+function _bkRenderRoute(s) {
+    _bkStatus = s;
+    const mode = s.proxy_mode || 'manual';
+    const r = document.querySelector(`input[name=bk-mode][value=${mode}]`);
+    if (r) r.checked = true;
+    const px = document.getElementById('bk-proxy'), ph = document.getElementById('bk-proxy-hint');
+    if (px && ph) {
+        if (s.proxy_masked) {
+            ph.innerHTML = `ذخیره‌شده: <span dir="ltr">${esc(s.proxy_masked)}</span>${s.proxy_source === 'env' ? ' (از محیط سرور)' : ''}
+                — برای عوض کردن، آدرس تازه را بنویسید و ذخیره کنید؛ <a href="#" onclick="event.preventDefault(); bkClearProxy()">حذف پراکسی</a>`;
+            px.placeholder = 'بدون تغییر';
+        } else {
+            ph.textContent = 'یک پراکسی خارج از ایران (http یا socks5).';
+        }
+    }
+    const rl = document.getElementById('bk-relay');
+    if (rl && s.relay && !rl.value) rl.value = s.relay;
+    const rk = document.getElementById('bk-relay-key');
+    if (rk) rk.placeholder = s.relay_key_set ? 'کلید ذخیره شده — خالی یعنی بدون تغییر' : 'کلید رله (اختیاری)';
+    const now = document.getElementById('bk-route-now');
+    if (now) now.textContent = s.route_label ? `الان: ${s.route_label}` : 'هنوز راهی تنظیم نشده';
+    document.querySelectorAll('input[name=bk-mode]').forEach(i => { i.disabled = s.proxy_source === 'env'; });
+    bkModeChanged(true);
+    if (mode === 'pool' || _bkPool.length === 0) bkLoadPool(s.proxy_pool || '*');
+}
+
+function bkModeChanged(keep) {
+    const mode = _bkMode();
+    ['manual', 'pool', 'relay'].forEach(m => document.getElementById('bk-pane-' + m)?.classList.toggle('d-none', m !== mode));
+    if (mode === 'pool' && !_bkPool.length) bkLoadPool(_bkStatus?.proxy_pool || '*');
+    if (!keep) { const out = document.getElementById('bk-proxy-result'); if (out) out.textContent = ''; }
+}
+
+/** The dashboard's proxy list, as checkboxes; the saved selection ticked. */
+async function bkLoadPool(spec) {
+    const box = document.getElementById('bk-pool-list');
+    if (!box) return;
+    try {
+        const d = await apiCall('/proxies?active_only=true');
+        _bkPool = d.items || [];
+        const chosen = new Set((spec || '*') === '*' ? _bkPool.map(p => String(p.id)) : String(spec).split(/[\s,،;]+/).filter(Boolean));
+        const all = (spec || '*') === '*';
+        const allBox = document.getElementById('bk-pool-all');
+        if (allBox) allBox.checked = all;
+        box.innerHTML = _bkPool.length ? _bkPool.map(p => `
+            <label>
+              <input type="checkbox" class="form-check-input m-0 bk-pool-item" value="${p.id}" ${chosen.has(String(p.id)) ? 'checked' : ''} ${all ? 'disabled' : ''}
+                     onchange="document.getElementById('bk-pool-all').checked=false">
+              <span dir="ltr">${esc(p.protocol)}://${esc(p.address)}:${esc(String(p.port))}</span>
+              <span class="flag">${p.exit_country ? esc(p.exit_country) + (p.exit_country === 'IR' ? ' — به تلگرام نمی‌رسد' : '') : '—'}</span>
+              ${p.is_working === false ? '<span class="badge bg-warning text-dark">در تست دیوار ناموفق</span>' : ''}
+            </label>`).join('')
+            : '<span class="text-muted small">پراکسی فعالی در فهرست نیست — در بخش «پراکسی‌ها» اضافه کنید.</span>';
+    } catch (e) {
+        box.innerHTML = `<span class="text-danger small">${esc(e.message || 'فهرست خوانده نشد')}</span>`;
+    }
+}
+
+function bkPoolAll(on) {
+    document.querySelectorAll('.bk-pool-item').forEach(i => { i.disabled = on; if (on) i.checked = true; });
+}
+
+function _bkPoolSpec() {
+    if (document.getElementById('bk-pool-all')?.checked) return '*';
+    return [...document.querySelectorAll('.bk-pool-item:checked')].map(i => i.value).join(',');
+}
+
+/** What the form says right now, for a test or a save. */
+function _bkRouteBody() {
+    const mode = _bkMode();
+    const body = { proxy_mode: mode };
+    if (mode === 'manual') { const v = document.getElementById('bk-proxy').value.trim(); if (v) body.proxy = v; }
+    if (mode === 'pool') body.proxy_pool = _bkPoolSpec();
+    if (mode === 'relay') {
+        body.relay = document.getElementById('bk-relay').value.trim();
+        const k = document.getElementById('bk-relay-key').value.trim();
+        if (k) body.relay_key = k;
+    }
+    return body;
+}
+
+/** getMe the way the form says: the bot's name and the round trip, or the
+ *  reason it did not answer — per proxy when the pool is being tested. */
 async function bkProxyTest() {
     const out = document.getElementById('bk-proxy-result');
     const btn = document.getElementById('bk-proxy-test');
-    const proxy = document.getElementById('bk-proxy').value.trim();
     const tok = document.getElementById('bk-token').value.trim();
+    const res = document.getElementById('bk-pool-results');
     btn.disabled = true; out.className = 'small text-muted'; out.textContent = 'در حال تست…';
+    if (res) res.innerHTML = '';
     try {
-        const r = await apiCall('/backup/proxy-test', { method: 'POST',
-            body: JSON.stringify({ proxy: proxy || null, bot_token: tok || null }) });
+        const body = _bkRouteBody();
+        if (body.proxy_mode === 'manual' && !body.proxy && !_bkStatus?.proxy_masked) throw new Error('آدرس پراکسی را بنویسید');
+        if (body.proxy_mode === 'pool' && !body.proxy_pool) throw new Error('حداقل یک پراکسی را تیک بزنید');
+        if (body.proxy_mode === 'relay' && !body.relay) throw new Error('آدرس رله را بنویسید');
+        // manual with nothing typed tests the saved one
+        if (body.proxy_mode === 'manual' && !body.proxy) delete body.proxy_mode;
+        const r = await apiCall('/backup/proxy-test', { method: 'POST', body: JSON.stringify({ ...body, bot_token: tok || null }) });
         out.className = 'small text-success';
-        out.innerHTML = `✓ ربات <b dir="ltr">@${esc(r.bot)}</b> در ${formatNumber(r.ms)} ms جواب داد${r.proxy ? ` <span class="text-muted" dir="ltr">(${esc(r.proxy)})</span>` : ' <span class="text-warning">— بدون پراکسی</span>'}`;
+        out.innerHTML = `✓ ربات <b dir="ltr">@${esc(r.bot)}</b> در ${formatNumber(r.ms)} ms جواب داد <span class="text-muted">(${esc(r.proxy || r.via || '')})</span>`;
+        if (res && r.results) res.innerHTML = r.results.map(x => `<div dir="ltr" class="${x.ok ? 'text-success' : 'text-danger'}">${x.ok ? '✓' : '✗'} ${esc(x.proxy)} ${x.ok ? formatNumber(x.ms) + ' ms' : esc(x.error || '')}</div>`).join('');
     } catch (e) {
         out.className = 'small text-danger'; out.textContent = e.message;
     }
@@ -3552,14 +3636,14 @@ function bkPickChat(id) {
 async function bkSave() {
     const tok = document.getElementById('bk-token').value.trim();
     const chat = document.getElementById('bk-chat').value.trim();
-    const proxy = document.getElementById('bk-proxy')?.value.trim() || '';
-    const body = { chat_id: chat };
+    const body = { chat_id: chat, ..._bkRouteBody() };
     if (tok) body.bot_token = tok;      // an empty field means «leave the saved one»
-    if (proxy) body.proxy = proxy;      // same here — «حذف پراکسی» is the way to clear it
+    // manual with nothing typed keeps the saved URL — «حذف پراکسی» is the way to clear it
     try {
         await apiCall('/backup/settings', { method: 'PUT', body: JSON.stringify(body) });
         document.getElementById('bk-token').value = '';
-        if (proxy) document.getElementById('bk-proxy').value = '';
+        if (body.proxy) document.getElementById('bk-proxy').value = '';
+        if (body.relay_key) document.getElementById('bk-relay-key').value = '';
         showToast('ذخیره شد', 'حالا «همین حالا بکاپ بگیر و بفرست» را بزنید تا ببینید می‌رسد', 'success');
         loadBackup();
     } catch (e) { showToast('خطا', e.message, 'danger'); }

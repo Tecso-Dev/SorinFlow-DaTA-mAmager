@@ -252,9 +252,9 @@ class TestTheProxy:
                     200, json={"ok": True, "result": {"username": "b", "id": 1} if "getMe" in str(req.url) else []}))
                 super().__init__(*a, **kw)
         monkeypatch.setattr(bk.httpx, "AsyncClient", Fake)
-        asyncio.run(bk.telegram_probe("1:x", "socks5://p:1080"))
+        asyncio.run(bk.telegram_probe("1:x", "socks5://p:1080"))     # getMe + getUpdates
         asyncio.run(bk.telegram_ping("1:x", "http://q:3128"))
-        assert seen == ["socks5://p:1080", "http://q:3128"]
+        assert seen == ["socks5://p:1080", "socks5://p:1080", "http://q:3128"]
 
     def test_a_shipment_without_a_proxy_that_fails_says_why(self, store, monkeypatch, tmp_path):
         monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
@@ -271,12 +271,12 @@ class TestTheProxy:
         assert "proxy: Optional[str] = Field(None, max_length=300)" in src
         assert "secret_box.encrypt(proxy)" in src, "stored encrypted, like the token"
         assert '@router.post("/proxy-test")' in src
-        assert '"proxy_masked": _mask_proxy(proxy)' in src
-        assert re.sub(r"://[^@/]+@", "://***@", "socks5://u:p@h:1") == "socks5://***@h:1"
+        assert '"route_label": bk.describe_route(route)' in src
+        assert bk.mask_url("socks5://u:p@h:1") == "socks5://***@h:1"
 
     def test_the_crm_notifier_uses_the_same_proxy(self):
         src = Path("app/crm/notification.py").read_text(encoding="utf-8")
-        assert "telegram_client(await resolve_proxy(), timeout=10)" in src
+        assert 'tg_request(token, "sendMessage", await resolve_route(), timeout=10' in src
         assert "httpx.AsyncClient(" not in src[src.index("async def send_telegram"):src.index("def _sync_send_email")]
 
     def test_the_panel_has_the_field_and_socks_is_installable(self):
@@ -284,7 +284,7 @@ class TestTheProxy:
         js = Path("frontend/js/app.js").read_text(encoding="utf-8")
         assert 'id="bk-proxy"' in html and 'onclick="bkProxyTest()"' in html
         assert "async function bkProxyTest" in js and "bkClearProxy" in js
-        assert "if (proxy) body.proxy = proxy;" in js
+        assert "const body = { chat_id: chat, ..._bkRouteBody() };" in js
         assert "socksio" in Path("requirements.txt").read_text(encoding="utf-8")
 
 
@@ -324,3 +324,88 @@ class TestSeveralChats:
         assert '"chat_ids": bk.chat_ids(cfg["chat_id"])' in src
         js = Path("frontend/js/app.js").read_text(encoding="utf-8")
         assert "function bkPickChat" in js and "have.join(', ')" in js
+
+
+class TestTheThreeWaysOut:
+    """«از پراکسی‌های داشبورد هم بشود انتخاب کرد، بالانس هم بشود» and «رلهٔ
+    Cloudflare را هم به عنوان راه جایگزین اضافه کن»: one route, three modes."""
+
+    def _rows(self, **kw):
+        return {k: v for k, v in kw.items()}
+
+    def test_the_manual_route_is_the_typed_url(self, store, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
+        monkeypatch.setattr(bk.settings, "telegram_api_base", "", raising=False)
+        store.rows[bk.KEY_PROXY] = secret_box.encrypt("http://u:p@h:9990")
+        r = asyncio.run(bk.resolve_route(store))
+        assert r["mode"] == "manual" and r["proxies"] == ["http://u:p@h:9990"] and r["api_base"] == bk.TELEGRAM_API
+        assert bk.describe_route(r) == "http://***@h:9990"
+
+    def test_the_relay_route_goes_direct_to_the_worker_with_its_key(self, store, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
+        monkeypatch.setattr(bk.settings, "telegram_api_base", "", raising=False)
+        store.rows[bk.KEY_PROXY_MODE] = "relay"
+        store.rows[bk.KEY_RELAY] = "https://tg.sorinflow.example"
+        store.rows[bk.KEY_RELAY_KEY] = secret_box.encrypt("k3y")
+        r = asyncio.run(bk.resolve_route(store))
+        assert r == {"mode": "relay", "proxies": [], "api_base": "https://tg.sorinflow.example", "relay_key": "k3y"}
+        assert bk.valid_relay("https://tg.sorinflow.example") and not bk.valid_relay("http://x") and not bk.valid_relay("https://x/path")
+
+    def test_the_pool_rotates_and_fails_over(self, store, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
+        monkeypatch.setattr(bk.settings, "telegram_api_base", "", raising=False)
+        store.rows[bk.KEY_PROXY_MODE] = "pool"
+        store.rows[bk.KEY_PROXY_POOL] = "*"
+
+        async def pool_urls(db, spec):
+            return ["http://a:1", "http://b:2", "http://c:3"]
+        monkeypatch.setattr(bk, "_pool_urls", pool_urls)
+        first = asyncio.run(bk.resolve_route(store))["proxies"]
+        second = asyncio.run(bk.resolve_route(store))["proxies"]
+        assert set(first) == {"http://a:1", "http://b:2", "http://c:3"} and first != second, "each call starts one further along"
+        assert second[0] == first[1]
+
+        # a proxy that does not answer is skipped for the next one; Telegram's answer counts whatever it is
+        tried = []
+        real = httpx.AsyncClient
+
+        class Fake(real):
+            def __init__(self, *a, **kw):
+                self._p = kw.pop("proxy", None)
+                tried.append(self._p)
+                def handler(req):
+                    if self._p == "http://a:1":
+                        raise httpx.ConnectTimeout("dead")
+                    return httpx.Response(200, json={"ok": True, "result": {"username": "b"}})
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(*a, **kw)
+        monkeypatch.setattr(bk.httpx, "AsyncClient", Fake)
+        resp, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("pool", ["http://a:1", "http://b:2"])))
+        assert resp.status_code == 200 and used == "http://b:2" and tried == ["http://a:1", "http://b:2"]
+
+    def test_the_relay_key_travels_as_a_header(self, monkeypatch):
+        seen = {}
+        real = httpx.AsyncClient
+
+        class Fake(real):
+            def __init__(self, *a, **kw):
+                kw.pop("proxy", None)
+                def handler(req):
+                    seen["url"] = str(req.url); seen["key"] = req.headers.get("X-Relay-Key")
+                    return httpx.Response(200, json={"ok": True, "result": {"username": "b"}})
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(*a, **kw)
+        monkeypatch.setattr(bk.httpx, "AsyncClient", Fake)
+        r = asyncio.run(bk.telegram_ping("1:x", route=bk._route("relay", [], "https://tg.example", "k3y")))
+        assert seen["url"] == "https://tg.example/bot1:x/getMe" and seen["key"] == "k3y" and r["via"] == "رله https://tg.example"
+
+    def test_the_panel_offers_the_three_and_the_worker_code(self):
+        html = Path("frontend/index.html").read_text(encoding="utf-8")
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        for v in ("manual", "pool", "relay"):
+            assert f'name="bk-mode" value="{v}"' in html
+        assert 'id="bk-pool-list"' in html and 'id="bk-relay"' in html and 'id="bk-relay-code"' in html
+        assert "https://api.telegram.org" in html[html.index('id="bk-relay-code"'):html.index('id="bk-relay-code"') + 900]
+        assert "apiCall('/proxies?active_only=true')" in js and "function _bkRouteBody" in js
+        src = Path("app/api/routes/backup.py").read_text(encoding="utf-8")
+        assert 'if route["mode"] == "pool":' in src and '"results": results' in src, "the pool is tested one proxy at a time"

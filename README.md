@@ -996,7 +996,7 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 **7. Bound `GET /api/stats/property-trends`.** ✅ **Closed** 2026-09-19 — `days` is bounded 1–365.
 
-**8. Offsite backup — BLOCKED.** ✅ **Closed** 2026-09-18 — the panel takes the bot token (encrypted) and finds the chat; the last shipment shows on the card. 2026-09-20: api.telegram.org is blocked from the Iranian server, so the card also takes a proxy (`TELEGRAM_PROXY` or the encrypted panel value, http/socks5) and every Bot API call — the shipment, «پیدا کن», the CRM notifier — goes through it.
+**8. Offsite backup — BLOCKED.** ✅ **Closed** 2026-09-18 — the panel takes the bot token (encrypted) and finds the chat; the last shipment shows on the card. 2026-09-20: api.telegram.org is blocked from the Iranian server, so the card takes a way out — a typed proxy (`TELEGRAM_PROXY` or the encrypted panel value), the dashboard's proxy list rotated with failover, or a Cloudflare Worker relay (`TELEGRAM_API_BASE`, optional `TELEGRAM_RELAY_KEY`) — and every Bot API call (the shipment, «پیدا کن», the CRM notifier, the engines) goes through `backup_service.tg_request`. Several chat ids, comma-separated.
 
 ### Next — weeks
 

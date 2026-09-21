@@ -231,6 +231,10 @@ class Settings(BaseSettings):
     # api.telegram.org is blocked from Iranian networks and the server is in
     # one; every Bot API call goes through this when set (http/socks5 URL).
     telegram_proxy: str = Field(default="", env="TELEGRAM_PROXY")
+    # or a relay in front of api.telegram.org (a Cloudflare Worker), reached
+    # directly — Cloudflare answers from Iran — with an optional shared key
+    telegram_api_base: str = Field(default="", env="TELEGRAM_API_BASE")
+    telegram_relay_key: str = Field(default="", env="TELEGRAM_RELAY_KEY")
 
     # ── Public portal auth (visitor sign-up) ──────────────────────────────
     # OFF until the Iranian SMS panel is provisioned. While it is off the

@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260921a">
+    <link rel="stylesheet" href="css/style.css?v=20260921b">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -3525,26 +3525,69 @@
                             </div>
                         </div>
                         <div id="bk-chats" class="d-none mb-2"></div>
-                        <!-- the server is in Iran and api.telegram.org is blocked there:
-                             without this, «پیدا کن» and the shipment wait forever -->
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-8">
-                                <label class="form-label small">پراکسی تلگرام <span class="text-warning">(لازم — سرور در ایران است)</span></label>
+                        <!-- the server is in Iran and api.telegram.org is blocked there: three ways out,
+                             one chosen — a typed proxy, the dashboard's proxy list (rotated), or a relay -->
+                        <div class="bk-route mb-2">
+                            <label class="form-label small">اتصال به تلگرام <span class="text-warning">(لازم — سرور در ایران است)</span></label>
+                            <div class="bk-route-tabs">
+                                <label class="bk-route-tab"><input type="radio" name="bk-mode" value="manual" onchange="bkModeChanged()"> پراکسی دستی</label>
+                                <label class="bk-route-tab"><input type="radio" name="bk-mode" value="pool" onchange="bkModeChanged()"> پراکسی‌های داشبورد (چرخشی)</label>
+                                <label class="bk-route-tab"><input type="radio" name="bk-mode" value="relay" onchange="bkModeChanged()"> رلهٔ Cloudflare</label>
+                            </div>
+                            <div class="bk-route-pane" id="bk-pane-manual">
                                 <div class="d-flex gap-2">
                                     <input type="text" id="bk-proxy" class="form-control form-control-sm"
                                            dir="ltr" autocomplete="off" spellcheck="false"
                                            placeholder="socks5://user:pass@host:1080  یا  http://host:port">
-                                    <button class="btn btn-sm btn-outline-primary text-nowrap" id="bk-proxy-test" onclick="bkProxyTest()">
-                                        <i class="bi bi-activity"></i> تست
-                                    </button>
                                 </div>
                                 <div class="form-text small" id="bk-proxy-hint">
-                                    یک پراکسی خارج از ایران (http یا socks5). تلگرام از سرورهای ایران مسدود است و
-                                    بدون پراکسی، ارسال نسخه و «پیدا کن» هیچ‌وقت جواب نمی‌گیرند.
+                                    یک پراکسی خارج از ایران (http یا socks5).
                                 </div>
                             </div>
-                            <div class="col-md-4 d-flex align-items-end">
-                                <div class="small" id="bk-proxy-result"></div>
+                            <div class="bk-route-pane d-none" id="bk-pane-pool">
+                                <div class="form-text small mb-1">از فهرست بخش «پراکسی‌ها». هر تماس از پراکسی بعدی می‌رود و اگر یکی جواب ندهد، بعدی امتحان می‌شود. فقط پراکسی‌های <b>خارج از ایران</b> به تلگرام می‌رسند.</div>
+                                <label class="d-flex align-items-center gap-2 small mb-1">
+                                    <input type="checkbox" class="form-check-input m-0" id="bk-pool-all" onchange="bkPoolAll(this.checked)"> همهٔ پراکسی‌های فعال
+                                </label>
+                                <div id="bk-pool-list" class="bk-pool-list"><span class="text-muted small">در حال خواندن فهرست…</span></div>
+                                <div id="bk-pool-results" class="small mt-1"></div>
+                            </div>
+                            <div class="bk-route-pane d-none" id="bk-pane-relay">
+                                <div class="row g-2">
+                                    <div class="col-md-8">
+                                        <input type="text" id="bk-relay" class="form-control form-control-sm" dir="ltr" autocomplete="off"
+                                               placeholder="https://tg.sorinflow.com">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <input type="password" id="bk-relay-key" class="form-control form-control-sm" dir="ltr" autocomplete="new-password"
+                                               placeholder="کلید رله (اختیاری)">
+                                    </div>
+                                </div>
+                                <div class="form-text small" id="bk-relay-hint">
+                                    یک Worker در حساب Cloudflare که درخواست‌ها را به api.telegram.org می‌رساند؛ سرور مستقیم به Cloudflare وصل می‌شود و پراکسی لازم ندارد.
+                                    آدرس workers.dev از ایران گاهی بسته است — یک زیردامنهٔ خودتان (مثل tg.sorinflow.com) را به Worker وصل کنید.
+                                    <a href="#" onclick="event.preventDefault(); document.getElementById('bk-relay-code').classList.toggle('d-none')">کد Worker</a>
+                                </div>
+                                <pre id="bk-relay-code" class="bk-code d-none" dir="ltr">export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (!url.pathname.startsWith('/bot')) return new Response('not found', { status: 404 });
+    if (env.RELAY_KEY && request.headers.get('X-Relay-Key') !== env.RELAY_KEY)
+      return new Response('forbidden', { status: 403 });
+    const upstream = 'https://api.telegram.org' + url.pathname + url.search;
+    const headers = new Headers(request.headers);
+    headers.delete('X-Relay-Key'); headers.delete('host');
+    return fetch(upstream, { method: request.method, headers, body: request.method === 'GET' ? undefined : request.body });
+  }
+};</pre>
+                                <div class="form-text small">Workers &amp; Pages ← Create ← این کد ← Deploy؛ در Settings ← Variables اگر خواستید <code>RELAY_KEY</code> بگذارید و همان را اینجا بنویسید؛ یک Custom Domain اضافه کنید و آدرسش را بالا بگذارید.</div>
+                            </div>
+                            <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                <button class="btn btn-sm btn-outline-primary text-nowrap" id="bk-proxy-test" onclick="bkProxyTest()">
+                                    <i class="bi bi-activity"></i> تست این راه
+                                </button>
+                                <span class="small" id="bk-proxy-result"></span>
+                                <span class="small text-muted ms-auto" id="bk-route-now"></span>
                             </div>
                         </div>
                         <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -4824,7 +4867,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260921a"></script>
+<script src="js/app.js?v=20260921b"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

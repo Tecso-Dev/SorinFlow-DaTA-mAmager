@@ -36,39 +36,74 @@ _TOKEN_RE = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,}$")
 class BackupSettingsIn(BaseModel):
     bot_token: Optional[str] = Field(None, max_length=120)
     chat_id: Optional[str] = Field(None, max_length=200)     # one id, or several separated by commas
-    # api.telegram.org is blocked from Iran; the shipment goes through this
-    proxy: Optional[str] = Field(None, max_length=300)
+    # api.telegram.org is blocked from Iran; the way out, chosen on the panel
+    proxy_mode: Optional[str] = Field(None, pattern="^(manual|pool|relay)$")
+    proxy: Optional[str] = Field(None, max_length=300)       # manual: one URL
+    proxy_pool: Optional[str] = Field(None, max_length=400)  # pool: "*" or ids
+    relay: Optional[str] = Field(None, max_length=300)       # relay: the worker's base URL
+    relay_key: Optional[str] = Field(None, max_length=200)   # relay: its shared key, if any
 
 
 class ProbeIn(BaseModel):
     bot_token: Optional[str] = Field(None, max_length=120)
+    proxy_mode: Optional[str] = Field(None, pattern="^(manual|pool|relay)$")
     proxy: Optional[str] = Field(None, max_length=300)
+    proxy_pool: Optional[str] = Field(None, max_length=400)
+    relay: Optional[str] = Field(None, max_length=300)
+    relay_key: Optional[str] = Field(None, max_length=200)
 
 
-async def _proxy_for(payload_proxy: Optional[str], db) -> str:
-    """The proxy being typed wins over the saved one, so it can be tried
+async def _route_for(payload, db) -> dict:
+    """The route being typed wins over the saved one, so it can be tried
     before it is saved."""
-    typed = (payload_proxy or "").strip()
-    if typed:
-        if not bk.valid_proxy(typed):
-            raise HTTPException(400, "آدرس پراکسی شکل درستی ندارد (مثل socks5://user:pass@host:1080)")
-        return typed
-    return await bk.resolve_proxy(db)
+    mode = payload.proxy_mode
+    if mode == "manual" or (mode is None and (payload.proxy or "").strip()):
+        typed = (payload.proxy or "").strip()
+        if typed:
+            if not bk.valid_proxy(typed):
+                raise HTTPException(400, "آدرس پراکسی شکل درستی ندارد (مثل socks5://user:pass@host:1080)")
+            return bk._route("manual", [typed])
+        if mode == "manual":
+            return bk._route("manual", [])
+    if mode == "relay":
+        base = (payload.relay or "").strip()
+        if not bk.valid_relay(base):
+            raise HTTPException(400, "آدرس رله باید https و بدون مسیر باشد (مثل https://tg.example.com)")
+        return bk._route("relay", [], base, (payload.relay_key or "").strip())
+    if mode == "pool":
+        urls = await bk._pool_urls(db, (payload.proxy_pool or "*").strip())
+        if not urls:
+            raise HTTPException(400, "هیچ پراکسی فعالی در فهرست داشبورد انتخاب نشده است")
+        return bk._route("pool", urls)
+    return await bk.resolve_route(db)
 
 
 @router.get("/status")
 async def backup_status(db: AsyncSession = Depends(get_db), _: User = _super_admin):
     cfg = await bk.resolve_telegram(db)
     snaps = bk.local_snapshots()
-    proxy = await bk.resolve_proxy(db)
+    route = await bk.resolve_route(db)
+    saved = {}
+    try:
+        saved = await secret_box.get_many(db, (bk.KEY_PROXY_MODE, bk.KEY_PROXY_POOL, bk.KEY_RELAY, bk.KEY_RELAY_KEY, bk.KEY_PROXY))
+    except Exception:
+        pass
+    env_route = bool((settings.telegram_proxy or "").strip() or (getattr(settings, "telegram_api_base", "") or "").strip())
     return {
         "configured": bool(cfg["token"] and bk.chat_ids(cfg["chat_id"])),
         "chat_ids": bk.chat_ids(cfg["chat_id"]),
         "source": cfg["source"],
         "token_masked": secret_box.mask(cfg["token"]),
         "chat_id": cfg["chat_id"],
-        "proxy_masked": _mask_proxy(proxy),
-        "proxy_source": ("env" if (settings.telegram_proxy or "").strip() else "panel") if proxy else None,
+        # the way out: what is in effect, and what is saved for each mode
+        "proxy_mode": route["mode"],
+        "route_label": bk.describe_route(route),
+        "route_configured": bool(route["proxies"] or route["mode"] == "relay"),
+        "proxy_masked": bk.mask_url(secret_box.decrypt(saved[bk.KEY_PROXY])) if saved.get(bk.KEY_PROXY) else "",
+        "proxy_pool": (saved.get(bk.KEY_PROXY_POOL) or "*"),
+        "relay": saved.get(bk.KEY_RELAY) or "",
+        "relay_key_set": bool(saved.get(bk.KEY_RELAY_KEY)),
+        "proxy_source": "env" if env_route else ("panel" if (route["proxies"] or route["mode"] == "relay") else None),
         "schedule_fa": "هر شب ۰۳:۳۰ به وقت تهران",
         "keep_local": bk.KEEP_LOCAL,
         "snapshots": snaps[:5],
@@ -106,14 +141,23 @@ async def put_backup_settings(payload: BackupSettingsIn,
         # encrypted like the token: the URL usually carries the proxy's password
         await secret_box.put(db, bk.KEY_PROXY, secret_box.encrypt(proxy) if proxy else None, actor)
         logger.info(f"[backup] telegram proxy {'updated' if proxy else 'cleared'} by {actor}")
+    if payload.proxy_pool is not None:
+        spec = payload.proxy_pool.strip()
+        if spec and spec != "*" and not re.fullmatch(r"[\d\s,،;]+", spec):
+            raise HTTPException(400, "فهرست پراکسی‌ها باید شناسه‌های عددی باشد یا *")
+        await secret_box.put(db, bk.KEY_PROXY_POOL, spec or None, actor)
+    if payload.relay is not None:
+        base = payload.relay.strip().rstrip("/")
+        if base and not bk.valid_relay(base):
+            raise HTTPException(400, "آدرس رله باید https و بدون مسیر باشد (مثل https://tg.example.com)")
+        await secret_box.put(db, bk.KEY_RELAY, base or None, actor)
+    if payload.relay_key is not None:
+        key = payload.relay_key.strip()
+        await secret_box.put(db, bk.KEY_RELAY_KEY, secret_box.encrypt(key) if key else None, actor)
+    if payload.proxy_mode is not None:
+        await secret_box.put(db, bk.KEY_PROXY_MODE, payload.proxy_mode, actor)
+        logger.info(f"[backup] telegram route set to {payload.proxy_mode} by {actor}")
     return await backup_status(db, user)
-
-
-def _mask_proxy(url: str) -> str:
-    """scheme://host:port with the credentials blanked."""
-    if not url:
-        return ""
-    return re.sub(r"://[^@/]+@", "://***@", url)
 
 
 @router.post("/proxy-test")
@@ -123,16 +167,30 @@ async def proxy_test(payload: ProbeIn, db: AsyncSession = Depends(get_db),
     tok = (payload.bot_token or "").strip() or (await bk.resolve_telegram(db))["token"]
     if not tok:
         raise HTTPException(400, "ابتدا توکن ربات را وارد کنید")
-    proxy = await _proxy_for(payload.proxy, db)
+    route = await _route_for(payload, db)
+    # the pool is tested one proxy at a time: the point is to see which ones work
+    if route["mode"] == "pool":
+        results = []
+        for url in route["proxies"]:
+            one = bk._route("manual", [url])
+            try:
+                r = await bk.telegram_ping(tok, route=one)
+                results.append({"proxy": bk.mask_url(url), "ok": True, "ms": r["ms"], "bot": r["bot"]})
+            except Exception as e:
+                results.append({"proxy": bk.mask_url(url), "ok": False, "error": type(e).__name__ if not isinstance(e, ValueError) else str(e)})
+        ok = [r for r in results if r["ok"]]
+        if not ok:
+            raise HTTPException(503, "هیچ‌کدام از پراکسی‌های انتخاب‌شده به تلگرام نرسید")
+        return {"bot": ok[0]["bot"], "ms": ok[0]["ms"], "proxy": bk.describe_route(route), "results": results}
     try:
-        info = await bk.telegram_ping(tok, proxy)
+        info = await bk.telegram_ping(tok, route=route)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
-        raise HTTPException(503, ("از طریق پراکسی به تلگرام نرسید" if proxy else
-                                  "بدون پراکسی به تلگرام نرسید — از این سرور تلگرام مسدود است")
-                            + f" ({type(e).__name__})")
-    info["proxy"] = _mask_proxy(proxy)
+        blocked = not (route["proxies"] or route["mode"] == "relay")
+        raise HTTPException(503, ("بدون پراکسی به تلگرام نرسید — از این سرور تلگرام مسدود است" if blocked else
+                                  f"از این راه به تلگرام نرسید ({bk.describe_route(route)})") + f" ({type(e).__name__})")
+    info["proxy"] = bk.describe_route(route)
     return info
 
 
@@ -144,15 +202,15 @@ async def probe_bot(payload: ProbeIn, db: AsyncSession = Depends(get_db),
     tok = (payload.bot_token or "").strip() or (await bk.resolve_telegram(db))["token"]
     if not tok:
         raise HTTPException(400, "ابتدا توکن ربات را وارد کنید")
-    proxy = await _proxy_for(payload.proxy, db)
+    route = await _route_for(payload, db)
     try:
-        info = await bk.telegram_probe(tok, proxy)
+        info = await bk.telegram_probe(tok, route=route)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
-        raise HTTPException(503, ("از طریق پراکسی به تلگرام نرسید" if proxy else
-                                  "بدون پراکسی به تلگرام نرسید — از این سرور تلگرام مسدود است؛ پراکسی را تنظیم کنید")
-                            + f" ({type(e).__name__})")
+        blocked = not (route["proxies"] or route["mode"] == "relay")
+        raise HTTPException(503, ("بدون پراکسی به تلگرام نرسید — از این سرور تلگرام مسدود است؛ پراکسی را تنظیم کنید" if blocked else
+                                  f"از این راه به تلگرام نرسید ({bk.describe_route(route)})") + f" ({type(e).__name__})")
     if not info["chats"]:
         info["hint_fa"] = ("هنوز هیچ چتی به ربات پیام نداده. در تلگرام ربات را باز کنید، "
                            "Start را بزنید و یک پیام بفرستید، بعد دوباره «پیدا کن» را بزنید.")

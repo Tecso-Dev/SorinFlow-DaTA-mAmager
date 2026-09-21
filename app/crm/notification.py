@@ -58,18 +58,16 @@ async def send_telegram(prop: Property, lead: Lead) -> bool:
         return False
 
     message = _build_message(prop, lead)
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
 
     try:
-        # the same proxy the backup uses: Telegram is blocked from this server
-        from app.services.backup_service import resolve_proxy, telegram_client
-        async with telegram_client(await resolve_proxy(), timeout=10) as client:
-            resp = await client.post(url, json={
-                "chat_id": chat_id,
-                "text": message,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            })
+        # the same way out the backup uses: Telegram is blocked from this server
+        from app.services.backup_service import resolve_route, tg_request
+        resp, _ = await tg_request(token, "sendMessage", await resolve_route(), timeout=10, json={
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        })
         if resp.status_code == 200:
             logger.info(f"Telegram notification sent for lead #{lead.id}")
             return True

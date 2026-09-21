@@ -8,6 +8,7 @@ with scripts/restore_backup.py.
 """
 import asyncio
 import gzip
+import itertools
 import json
 import re
 import time
@@ -31,6 +32,10 @@ BACKUP_DIR = Path("data/backups")
 KEY_TOKEN = "backup_telegram_token"     # encrypted
 KEY_CHAT = "backup_telegram_chat"
 KEY_PROXY = "backup_telegram_proxy"     # encrypted — a proxy URL carries its password
+KEY_PROXY_MODE = "backup_telegram_proxy_mode"   # manual | pool | relay
+KEY_PROXY_POOL = "backup_telegram_proxy_pool"   # "*" or proxy ids from the dashboard's list
+KEY_RELAY = "backup_telegram_relay"             # a Cloudflare Worker in front of api.telegram.org
+KEY_RELAY_KEY = "backup_telegram_relay_key"     # encrypted — the worker's shared key, if any
 # What happened the last time a file was shipped: shown on the panel so a
 # broken offsite copy is a red line on a screen, not a warning in a log.
 KEY_LAST = "backup_last_offsite"
@@ -93,6 +98,8 @@ async def resolve_telegram(db=None) -> dict:
 
 
 PROXY_SCHEMES = ("http", "https", "socks5", "socks5h", "socks4")
+TELEGRAM_API = "https://api.telegram.org"
+_round_robin = itertools.count()
 
 
 def valid_proxy(url: str) -> bool:
@@ -101,19 +108,92 @@ def valid_proxy(url: str) -> bool:
     return bool(m) and m.group("scheme") in PROXY_SCHEMES
 
 
-async def resolve_proxy(db=None) -> str:
-    """The proxy every Telegram call goes through — environment first, then
-    the panel. Empty means a direct connection, which from this server is a
-    connection that never answers: api.telegram.org is blocked in Iran."""
-    proxy = (settings.telegram_proxy or "").strip()
-    if proxy or db is None:
-        return proxy
+def valid_relay(url: str) -> bool:
+    """https://tg.example.com or https://x.workers.dev — a base, no path."""
+    return bool(re.match(r"^https://[a-z0-9.-]+(?::\d{1,5})?/?$", url.strip(), re.I))
+
+
+def mask_url(url: str) -> str:
+    return re.sub(r"://[^@/]+@", "://***@", url or "")
+
+
+# ── how the server reaches Telegram ──────────────────────────────────────────
+# api.telegram.org is blocked from Iranian networks and the server is in one.
+# Three ways out, chosen on the panel:
+#   manual — one proxy URL, typed;
+#   pool   — the dashboard's proxy list (all active ones, or a chosen few),
+#            rotated so the load is spread and the next one tried when one
+#            does not answer;
+#   relay  — a Cloudflare Worker that forwards to api.telegram.org, reached
+#            directly (Cloudflare answers from Iran), optionally with a key.
+# The environment wins over the panel, as everywhere else.
+
+async def _pool_urls(db, spec: str) -> list:
+    """The URLs of the dashboard proxies the pool names, active ones only."""
+    from app.models.proxy import Proxy
+    from sqlalchemy import select as _select
+    q = _select(Proxy).where(Proxy.is_active == True)   # noqa: E712
+    ids = [int(x) for x in re.split(r"[\s,،;]+", spec or "") if x.isdigit()]
+    if spec.strip() != "*" and ids:
+        q = q.where(Proxy.id.in_(ids))
+    elif spec.strip() != "*":
+        return []
+    rows = (await db.execute(q.order_by(Proxy.id.asc()))).scalars().all()
+    return [r.url for r in rows if valid_proxy(r.url)]
+
+
+def _route(mode: str = "manual", proxies=None, api_base: str = "", relay_key: str = "") -> dict:
+    return {"mode": mode, "proxies": list(proxies or []),
+            "api_base": (api_base or TELEGRAM_API).rstrip("/"), "relay_key": relay_key or ""}
+
+
+async def resolve_route(db=None) -> dict:
+    """The way out, resolved: environment first, then the panel."""
+    env_relay = (getattr(settings, "telegram_api_base", "") or "").strip()
+    env_proxy = (settings.telegram_proxy or "").strip()
+    if env_relay:
+        return _route("relay", [], env_relay, (getattr(settings, "telegram_relay_key", "") or "").strip())
+    if env_proxy:
+        return _route("manual", [env_proxy])
+    if db is None:
+        return _route("manual", [])
     try:
-        raw = (await secret_box.get_many(db, (KEY_PROXY,))).get(KEY_PROXY)
-        return secret_box.decrypt(raw).strip() if raw else ""
+        v = await secret_box.get_many(db, (KEY_PROXY, KEY_PROXY_MODE, KEY_PROXY_POOL, KEY_RELAY, KEY_RELAY_KEY))
     except Exception as e:
-        logger.warning(f"[backup] saved telegram proxy unreadable: {e}")
-        return ""
+        logger.warning(f"[backup] saved telegram route unreadable: {e}")
+        return _route("manual", [])
+    mode = (v.get(KEY_PROXY_MODE) or "manual").strip()
+    if mode == "relay":
+        base = (v.get(KEY_RELAY) or "").strip()
+        key = secret_box.decrypt(v[KEY_RELAY_KEY]).strip() if v.get(KEY_RELAY_KEY) else ""
+        return _route("relay", [], base, key) if base else _route("manual", [])
+    if mode == "pool":
+        urls = await _pool_urls(db, v.get(KEY_PROXY_POOL) or "*")
+        if urls:
+            # balanced: every call starts one proxy further along the list,
+            # and falls through to the next when one does not answer
+            k = next(_round_robin) % len(urls)
+            urls = urls[k:] + urls[:k]
+        return _route("pool", urls)
+    raw = v.get(KEY_PROXY)
+    return _route("manual", [secret_box.decrypt(raw).strip()] if raw else [])
+
+
+async def resolve_proxy(db=None) -> str:
+    """The first proxy of the route, or '' — for the panel and for callers that
+    want one address. The engines and the shipment use the whole route."""
+    r = await resolve_route(db)
+    return r["proxies"][0] if r["proxies"] else ""
+
+
+def describe_route(route: dict) -> str:
+    """One line for the panel, credentials blanked."""
+    if route["mode"] == "relay":
+        return f"رله: {route['api_base']}"
+    if route["mode"] == "pool":
+        n = len(route["proxies"])
+        return f"{n} پراکسی از فهرست داشبورد (چرخشی)" if n else "فهرست داشبورد — هیچ پراکسی فعالی نیست"
+    return mask_url(route["proxies"][0]) if route["proxies"] else ""
 
 
 def telegram_client(proxy: str = "", timeout: float = 20) -> httpx.AsyncClient:
@@ -121,15 +201,47 @@ def telegram_client(proxy: str = "", timeout: float = 20) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout, proxy=proxy or None)
 
 
-async def telegram_ping(token: str, proxy: str) -> dict:
-    """getMe through the proxy: the bot's name and how long the round trip took."""
+def _as_route(proxies, route: Optional[dict]) -> dict:
+    if route:
+        return route
+    if isinstance(proxies, str):
+        return _route("manual", [proxies] if proxies else [])
+    return _route("manual", list(proxies or []))
+
+
+async def tg_request(token: str, method: str, route: Optional[dict] = None, *, json=None,
+                     data=None, files=None, params=None, timeout: float = 20):
+    """One Bot API call through the route: each proxy in turn until one
+    answers (an HTTP answer of any status counts — it is Telegram speaking),
+    direct when there are none. Returns (response, the proxy that carried it)."""
+    route = route or _route("manual", [])
+    url = f"{route['api_base']}/bot{token}/{method}"
+    headers = {"X-Relay-Key": route["relay_key"]} if route.get("relay_key") else None
+    last = None
+    for proxy in (route["proxies"] or [None]):
+        try:
+            async with telegram_client(proxy or "", timeout=timeout) as client:
+                if json is not None or data is not None or files is not None:
+                    resp = await client.post(url, json=json, data=data, files=files, headers=headers)
+                else:
+                    resp = await client.get(url, params=params, headers=headers)
+            return resp, proxy
+        except (httpx.TransportError, OSError) as e:
+            last = e
+            logger.warning(f"[telegram] {method} via {mask_url(proxy) if proxy else 'direct'} failed: {type(e).__name__}")
+    raise last if last else RuntimeError("no route to telegram")
+
+
+async def telegram_ping(token: str, proxies="", route: Optional[dict] = None) -> dict:
+    """getMe through the route: the bot's name, the round trip, and which way."""
     started = time.monotonic()
-    async with telegram_client(proxy, timeout=20) as client:
-        me = await client.get(f"https://api.telegram.org/bot{token}/getMe")
+    me, used = await tg_request(token, "getMe", _as_route(proxies, route), timeout=20)
     body = me.json() if me.headers.get("content-type", "").startswith("application/json") else {}
     if me.status_code != 200 or not body.get("ok"):
         raise ValueError(body.get("description") or "توکن ربات پذیرفته نشد")
-    return {"bot": body["result"].get("username", ""), "ms": int((time.monotonic() - started) * 1000)}
+    r = _as_route(proxies, route)
+    via = mask_url(used) if used else (f"رله {r['api_base']}" if r["mode"] == "relay" else "مستقیم")
+    return {"bot": body["result"].get("username", ""), "ms": int((time.monotonic() - started) * 1000), "via": via}
 
 
 def chat_ids(value: Optional[str]) -> list:
@@ -178,7 +290,8 @@ async def send_to_telegram(path: Path, db=None) -> bool:
     if not token or not chats:
         logger.warning("[backup] TELEGRAM_BOT_TOKEN/CHAT_ID not set — offsite copy skipped")
         return False
-    proxy = await resolve_proxy(db)
+    route = await resolve_route(db)
+    proxy = bool(route["proxies"]) or route["mode"] == "relay"     # some way out is configured
 
     size_kb = path.stat().st_size // 1024
     sealed = seal(path)
@@ -189,33 +302,30 @@ async def send_to_telegram(path: Path, db=None) -> bool:
         f"🔐 رمزشده با SECRET_KEY سرور\n"
         f"بازگردانی: python scripts/restore_backup.py <file>"
     )
-    url = f"https://api.telegram.org/bot{token}/sendDocument"
     delivered, failures = [], []
     unreachable = False        # never got an answer, as opposed to a refusal
     try:
-        async with telegram_client(proxy, timeout=180) as client:
-            for chat in chats:
+        blob = sealed.read_bytes()      # bytes, so a retry on the next proxy can resend it
+        for chat in chats:
+            try:
+                resp, _used = await tg_request(
+                    token, "sendDocument", route, timeout=180,
+                    data={"chat_id": chat, "caption": caption},
+                    files={"document": (sealed.name, blob, "application/octet-stream")})
+                body = {}
                 try:
-                    with open(sealed, "rb") as f:
-                        resp = await client.post(
-                            url,
-                            data={"chat_id": chat, "caption": caption},
-                            files={"document": (sealed.name, f, "application/octet-stream")},
-                        )
-                    body = {}
-                    try:
-                        body = resp.json()
-                    except Exception:
-                        pass
-                    if resp.status_code == 200 and body.get("ok") is True:
-                        delivered.append(chat)
-                    else:
-                        failures.append(f"{chat}: {body.get('description') or 'HTTP ' + str(resp.status_code)}")
-                        logger.error(f"[backup] telegram upload to {chat} failed: {resp.status_code} {resp.text[:200]}")
-                except Exception as e:
-                    unreachable = True
-                    failures.append(f"{chat}: {type(e).__name__}")
-                    logger.error(f"[backup] telegram upload to {chat} error ({'via proxy' if proxy else 'direct'}): {e}")
+                    body = resp.json()
+                except Exception:
+                    pass
+                if resp.status_code == 200 and body.get("ok") is True:
+                    delivered.append(chat)
+                else:
+                    failures.append(f"{chat}: {body.get('description') or 'HTTP ' + str(resp.status_code)}")
+                    logger.error(f"[backup] telegram upload to {chat} failed: {resp.status_code} {resp.text[:200]}")
+            except Exception as e:
+                unreachable = True
+                failures.append(f"{chat}: {type(e).__name__}")
+                logger.error(f"[backup] telegram upload to {chat} error ({describe_route(route) or 'direct'}): {e}")
     finally:
         sealed.unlink(missing_ok=True)
     ok = bool(delivered)
@@ -249,17 +359,16 @@ def local_snapshots() -> list:
     return out
 
 
-async def telegram_probe(token: str, proxy: str = "") -> dict:
+async def telegram_probe(token: str, proxies="", route: Optional[dict] = None) -> dict:
     """Who the bot is, and which chats have written to it — so the panel can
     fill in the chat id instead of somebody reading JSON off a curl."""
-    async with telegram_client(proxy, timeout=20) as client:
-        me = await client.get(f"https://api.telegram.org/bot{token}/getMe")
-        mb = me.json() if me.headers.get("content-type", "").startswith("application/json") else {}
-        if me.status_code != 200 or not mb.get("ok"):
-            raise ValueError(mb.get("description") or "توکن ربات پذیرفته نشد")
-        upd = await client.get(f"https://api.telegram.org/bot{token}/getUpdates",
-                               params={"limit": 100})
-        ub = upd.json() if upd.status_code == 200 else {}
+    r = _as_route(proxies, route)
+    me, _ = await tg_request(token, "getMe", r, timeout=20)
+    mb = me.json() if me.headers.get("content-type", "").startswith("application/json") else {}
+    if me.status_code != 200 or not mb.get("ok"):
+        raise ValueError(mb.get("description") or "توکن ربات پذیرفته نشد")
+    upd, _ = await tg_request(token, "getUpdates", r, params={"limit": 100}, timeout=20)
+    ub = upd.json() if upd.status_code == 200 else {}
     chats, seen = [], set()
     for u in ub.get("result") or []:
         msg = u.get("message") or u.get("channel_post") or u.get("my_chat_member") or {}
