@@ -1018,7 +1018,7 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 **16. Small correctness debt, one pass.** ✅ **Closed** 2026-09-19 — the duplicate `_maintenance_allows`, `migrations/`, the hash router's missing sections and the models package export are done; `scraping_logs` now has a writer (`job_log.py`). Still open from this item: the dead staff-registration form and the portal's decorative «remember me».
 
-**17. Kavenegar SMS — BLOCKED.** `AUTH_SMS_PROVIDER=kavenegar` is set in production with no working key, so every verification code travels by email and `phone_verified` is false for every portal user. The SMS marketing audience therefore reads zero by construction — which is the honest count, not a bug. **Blocked on:** Sobhan completing Kavenegar's identity verification (احراز هویت); the provider currently returns 430/501 meaning only the account holder's own number can be messaged (`app/services/sms_service.py:95-102`). *Effort: small once unblocked. Owner: Sobhan.*
+**17. Kavenegar SMS.** ✅ **Closed** — checked on the server on 2026-09-21: the panel holds a working key (Master account, ~1,004,000 toman of credit), a sender line and the approved `sorinflow-login` template, so verification codes go by SMS with email as the fallback. The README carried this item as blocked for two days after it was no longer true.
 
 **18. Leaked Divar sessions — BLOCKED.** The August history purge removed our copies; nothing invalidated the tokens on Divar's side, and a leaked token stays valid until Divar expires it. **Blocked on:** whoever owns each Divar account signing in and terminating other sessions from Divar's own settings. *Effort: small. Owner: Sobhan.*
 
