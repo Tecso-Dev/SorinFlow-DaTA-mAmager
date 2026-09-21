@@ -2,7 +2,7 @@
 SorinFlow CRM — database models
 Contact, Deal, Note, Task, Reminder, SmsLog, Customer
 """
-from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Text, ForeignKey, DateTime, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Text, ForeignKey, DateTime, JSON, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -213,6 +213,9 @@ class SmsLog(Base):
     sent_by = Column(String(200))
     campaign = Column(String(120), index=True)
     kind = Column(String(20), default="manual")   # manual|broadcast|otp|reminder
+
+    # The panel's default view: newest-first within one campaign.
+    __table_args__ = (Index("ix_crm_sms_logs_campaign_sent", "campaign", sent_at.desc()),)
 
     contact = relationship("Contact", back_populates="sms_logs")
 

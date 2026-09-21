@@ -19,7 +19,7 @@ class Cookie(Base):
     # Nullable only so the column can be added to a live table; the backfill
     # beside the migration gives every existing row an owner, and nothing
     # creates one without.
-    owner_user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_cookies_owner", ondelete="SET NULL"), index=True)
     cookies = Column(JSON, nullable=False)  # Store all cookies as JSON
     token = Column(Text)  # JWT token if extracted
     is_valid = Column(Boolean, default=True)

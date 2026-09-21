@@ -72,8 +72,12 @@ the registry unless they pass**.
 - New dashboard routes belong behind a permission in
   `app/api/routes/__init__.py`. A route mounted without one is reachable by any
   signed-in account, including a public portal visitor.
-- Migrations run at boot against a live database. They must be additive and
-  idempotent — a pod restart re-runs every one of them.
+- Schema changes are Alembic revisions (`alembic revision --autogenerate -m
+  "..."` against a local Postgres, then read what it wrote). The app applies
+  them at boot under a 5-second lock timeout, so keep each one small and
+  additive; `alembic check` runs in CI and fails on any model that drifts
+  from the schema. The older hand-written steps in `app/database.py` only
+  bring pre-baseline databases up — do not add to them.
 
 ## Commits
 

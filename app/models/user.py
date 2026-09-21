@@ -2,7 +2,7 @@
 SorinFlow — Dashboard User Model
 Roles: root | super_admin | admin | visitor  (see app/auth/permissions.py)
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, Text, Index, text
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -38,7 +38,12 @@ class User(Base):
     # purpose: one is who you are here, the other is which Divar account you
     # scrape with, and conflating them would let a staff member's scraper
     # account double as a login identity.
-    phone = Column(String(20), unique=True, nullable=True, index=True)
+    phone = Column(String(20), nullable=True)
+    # Partial: staff rows without a portal phone must not collide on NULL, and
+    # the WHERE keeps the index small. Same index _migrate_auth_v2 creates.
+    __table_args__ = (Index("ix_users_phone_unique", "phone", unique=True,
+                            postgresql_where=text("phone IS NOT NULL"),
+                            sqlite_where=text("phone IS NOT NULL")),)
     phone_verified = Column(Boolean, default=False, nullable=False)
     # Set only by a code that arrived at the address. Kept apart from
     # phone_verified on purpose: while there is no SMS provider every code

@@ -2,7 +2,7 @@
 SorinFlow Divar Scraper - Database Connection
 """
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 import redis.asyncio as redis
@@ -95,8 +95,12 @@ async def init_db():
                             crm_models, app_setting, portal, email_log,
                             sms_log, forwarder, scrape_schedule)
 
+    # Whether this database existed before this boot decides what Alembic is
+    # told below: a fresh one IS the models (stamp head); an established one
+    # is brought to the baseline by the steps below, then upgraded.
     async with engine.begin() as conn:
         await _guard(conn)
+        fresh = not await conn.run_sync(lambda c: inspect(c).has_table("users"))
         await conn.run_sync(Base.metadata.create_all)
 
     # Order still matters where one migration depends on another's columns;
@@ -147,6 +151,16 @@ async def init_db():
         await _guard(conn)
         await _migrate_auth_v2(conn)
 
+    # From here on, schema changes are Alembic revisions (migrations/versions):
+    # the steps above bring an old database to the baseline, this applies
+    # everything after it. Same rule as the steps: a failure is logged and
+    # the pod still comes up, because the columns a route needs are checked
+    # by _verify_auth_v2 below, not assumed.
+    try:
+        await _alembic_sync(fresh)
+    except Exception as e:
+        print(f"alembic skipped: {e}")
+
     # A clean transaction for the check, so it reads the real schema rather
     # than inheriting the wreckage of a failed migration and mis-reporting why.
     async with engine.begin() as conn:
@@ -161,6 +175,48 @@ async def init_db():
             await seed()
         except Exception as e:
             print(f"{seed.__name__} skipped: {e}")
+
+
+async def _alembic_sync(fresh: bool) -> None:
+    """Stamp or upgrade, on the app's own guarded connection.
+
+    fresh database  → create_all just built the models' schema = head: stamp.
+    no version yet  → an established database from before Alembic: stamp the
+                      baseline the boot-time steps have brought it to, then
+                      upgrade to head.
+    versioned       → upgrade to head (a no-op when nothing is newer).
+    """
+    from pathlib import Path
+    from alembic import command
+    from alembic.config import Config
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+    if not ini.exists():
+        print("alembic skipped: alembic.ini not found")
+        return
+    cfg = Config(str(ini))
+    cfg.set_main_option("script_location", str(ini.parent / "migrations"))
+    head = ScriptDirectory.from_config(cfg).get_current_head()
+
+    def _run(sync_conn):
+        cfg.attributes["connection"] = sync_conn
+        current = MigrationContext.configure(sync_conn).get_current_revision()
+        if fresh:
+            command.stamp(cfg, "head")
+            print(f"alembic: fresh database stamped {head}")
+        elif current is None:
+            command.stamp(cfg, "0001")
+            command.upgrade(cfg, "head")
+            print(f"alembic: pre-alembic database stamped baseline, upgraded to {head}")
+        elif current != head:
+            command.upgrade(cfg, "head")
+            print(f"alembic: upgraded {current} → {head}")
+
+    async with engine.begin() as conn:
+        await _guard(conn)
+        await conn.run_sync(_run)
 
 
 async def _guard(conn):
