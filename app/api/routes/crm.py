@@ -797,6 +797,8 @@ async def decide_match(match_id: int, data: MatchDecisionIn,
         _log_activity(db, "customer", row.customer_id, "match_call",
                       f"تماس دربارهٔ ملک {prop.serial_no if prop else row.property_id}"
                       + (f" — {data.note.strip()}" if data.note and data.note.strip() else ""), actor)
+        from app.crm import portal_bridge
+        await portal_bridge.note_contact(db, row.customer_id)   # a portal request, if that is who they are
     await db.commit()
     return row.to_dict()
 
@@ -880,6 +882,8 @@ async def send_match_sms(match_id: int, data: MatchSmsIn,
     row.decided_at = _now_utc()
     _log_activity(db, "customer", row.customer_id, "match_sms",
                   f"پیامک ملک {prop.serial_no} به {to} فرستاده شد", actor)
+    from app.crm import portal_bridge
+    await portal_bridge.note_contact(db, row.customer_id)
     await db.commit()
     return {"ok": True, "to": to, "message_id": result.get("messageid"), "cost": result.get("cost"),
             "segments": sms_segments(text), "match": row.to_dict()}

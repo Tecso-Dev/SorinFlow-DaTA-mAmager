@@ -55,6 +55,10 @@ class PropertyRequest(Base):
     admin_note = Column(Text)
     matched_property_id = Column(Integer, nullable=True)
     handled_by = Column(String(100))
+    # The CRM customer this request became (app/crm/portal_bridge.py), so the
+    # matching engine sees it. Cleared, not cascaded, if the customer goes.
+    customer_id = Column(Integer, ForeignKey("crm_customers.id", ondelete="SET NULL", name="fk_portal_requests_customer"),
+                         nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -84,6 +88,7 @@ class PropertyRequest(Base):
             "status": self.status,
             "admin_note": self.admin_note,
             "matched_property_id": self.matched_property_id,
+            "customer_id": self.customer_id,
             "handled_by": self.handled_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

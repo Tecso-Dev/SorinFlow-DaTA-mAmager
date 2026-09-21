@@ -7070,7 +7070,7 @@ const CUSTOMER_TEMP_LABELS = {
     warm: { label: '🌤 گرم',  cls: 'bg-warning' },
     cold: { label: '❄️ سرد', cls: 'bg-info' },
 };
-const CUSTOMER_SOURCE_LABELS = { in_person: 'حضوری', divar: 'دیوار', referral: 'معرف' };
+const CUSTOMER_SOURCE_LABELS = { in_person: 'حضوری', divar: 'دیوار', referral: 'معرف', portal: 'پرتال' };
 const SHOWING_STEP_LABELS = { meeting: 'نشست', archive: 'بایگانی', second_visit: 'بازدید دوم' };
 let _customerEditId = null;
 
@@ -10341,14 +10341,18 @@ async function loadPortalRequests() {
                     <a class="small text-muted" dir="ltr" href="tel:${esc(r.contact_phone || '')}">${esc(r.contact_phone || '')}</a></td>
                 <td>${want}${r.description ? `<div class="small text-muted">${esc(r.description.slice(0, 90))}</div>` : ''}</td>
                 <td class="small">${esc(budget)}</td>
-                <td><span class="badge ${st.cls}">${esc(st.label)}</span></td>
+                <td><span class="badge ${st.cls}">${esc(st.label)}</span>
+                    ${r.customer_id ? `<div class="small text-muted mt-1"><i class="bi bi-bullseye"></i> در موتور تطبیق</div>` : ''}</td>
                 <td class="small">${esc((r.created_at || '').slice(0, 10))}</td>
                 <td>
-                  <select class="form-select form-select-sm" style="width:auto"
-                          onchange="updatePortalRequest(${r.id}, this.value)">
-                    ${Object.entries(PORTAL_STATUS).map(([k, v]) =>
-                        `<option value="${esc(k)}" ${k === r.status ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}
-                  </select>
+                  <div class="d-flex gap-1 align-items-center flex-wrap">
+                    <select class="form-select form-select-sm" style="width:auto"
+                            onchange="updatePortalRequest(${r.id}, this.value)">
+                      ${Object.entries(PORTAL_STATUS).map(([k, v]) =>
+                          `<option value="${esc(k)}" ${k === r.status ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}
+                    </select>
+                    ${r.customer_id ? `<button class="btn btn-sm btn-outline-primary text-nowrap" onclick="showMatchesForCustomer(${r.customer_id})" title="ملک‌هایی که با این درخواست می‌خوانند"><i class="bi bi-house-check"></i> ملک‌های مناسب</button>` : ''}
+                  </div>
                 </td></tr>`;
         }).join('');
     } catch (e) {

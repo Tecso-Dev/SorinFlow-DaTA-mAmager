@@ -113,6 +113,10 @@ async def create_request(data: PropertyRequestCreate,
         status="new",
     )
     db.add(req)
+    await db.flush()
+    # ...and straight into the matching engine, as a customer of the office
+    from app.crm import portal_bridge
+    await portal_bridge.customer_for(db, req, current_user)
     await db.commit()
     await db.refresh(req)
 
@@ -143,6 +147,12 @@ async def delete_my_request(request_id: int,
         PropertyRequest.user_id == current_user.id))).scalar_one_or_none()
     if not req:
         raise HTTPException(status_code=404, detail="درخواست یافت نشد")
+    # a withdrawn need takes its customer (and that customer's matches) with it
+    if req.customer_id:
+        from app.models.crm_models import Customer
+        cust = await db.get(Customer, req.customer_id)
+        if cust is not None and cust.source == "portal":
+            await db.delete(cust)
     await db.delete(req)
     await db.commit()
     return {"success": True}

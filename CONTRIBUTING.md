@@ -75,8 +75,11 @@ the registry unless they pass**.
 - Schema changes are Alembic revisions (`alembic revision --autogenerate -m
   "..."` against a local Postgres, then read what it wrote). The app applies
   them at boot under a 5-second lock timeout, so keep each one small and
-  additive; `alembic check` runs in CI and fails on any model that drifts
-  from the schema. The older hand-written steps in `app/database.py` only
+  additive, and guard it against the change already being there (inspect the
+  catalog first — `migrations/versions/0002_*` is the pattern): a database
+  whose tables `create_all` built from newer models is stamped at the baseline
+  and replays every revision. `alembic check` runs in CI and fails on any
+  model that drifts from the schema. The older hand-written steps in `app/database.py` only
   bring pre-baseline databases up — do not add to them.
 
 ## Commits

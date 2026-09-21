@@ -48,6 +48,8 @@ async def _cursor(db) -> int:
 
 async def run_once(db, *, notify: bool = True, limit: int = BATCH) -> Dict:
     """One pass over the listings that arrived since the last one."""
+    from app.crm import portal_bridge
+    await portal_bridge.sync_open(db)       # portal requests the engine has not met yet
     since = await _cursor(db)
     props = (await db.execute(
         select(Property).where(Property.id > since, Property.is_active == True)   # noqa: E712
@@ -75,6 +77,8 @@ async def run_once(db, *, notify: bool = True, limit: int = BATCH) -> Dict:
                                     reasons=c.get("reasons") or [], consultant=c.get("consultant_name") or None)
                 db.add(row)
                 created.append(row)
+    # a portal request behind a matched customer is «مورد پیدا شد» from now on
+    await portal_bridge.note_matches(db, [(r.customer_id, r.property_id) for r in created])
     # the cursor moves whether or not anything matched: a listing is judged once
     await secret_box.put(db, KEY_CURSOR, str(props[-1].id), "match_engine")
     await db.commit()
