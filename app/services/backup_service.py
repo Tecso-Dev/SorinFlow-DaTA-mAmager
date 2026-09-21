@@ -13,6 +13,7 @@ import re
 import time
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from typing import Optional
 
 import httpx
 from loguru import logger
@@ -131,6 +132,14 @@ async def telegram_ping(token: str, proxy: str) -> dict:
     return {"bot": body["result"].get("username", ""), "ms": int((time.monotonic() - started) * 1000)}
 
 
+def chat_ids(value: Optional[str]) -> list:
+    """The chats a message goes to: «542901635» or «542901635, 133142359».
+    One setting, several recipients — the owner and a colleague, or a group
+    and a person — each addressed on its own so one dead id costs nobody else
+    their copy."""
+    return [c for c in re.split(r"[\s,،;]+", str(value or "")) if re.fullmatch(r"-?\d{1,20}", c)]
+
+
 async def _remember_offsite(db, outcome: dict) -> None:
     """Keep the last outcome where the panel can read it. Never raises."""
     try:
@@ -160,10 +169,13 @@ def unseal(path: Path) -> bytes:
 
 
 async def send_to_telegram(path: Path, db=None) -> bool:
-    """Ship the backup file to the configured Telegram chat (offsite copy)."""
+    """Ship the backup file to the configured Telegram chats (offsite copy).
+
+    Sent to every configured chat; the shipment counts as delivered when at
+    least one of them has it, and the outcome names the ones that did not."""
     cfg = await resolve_telegram(db)
-    token, chat_id = cfg["token"], cfg["chat_id"]
-    if not token or not chat_id:
+    token, chats = cfg["token"], chat_ids(cfg["chat_id"])
+    if not token or not chats:
         logger.warning("[backup] TELEGRAM_BOT_TOKEN/CHAT_ID not set — offsite copy skipped")
         return False
     proxy = await resolve_proxy(db)
@@ -178,35 +190,43 @@ async def send_to_telegram(path: Path, db=None) -> bool:
         f"بازگردانی: python scripts/restore_backup.py <file>"
     )
     url = f"https://api.telegram.org/bot{token}/sendDocument"
+    delivered, failures = [], []
+    unreachable = False        # never got an answer, as opposed to a refusal
     try:
         async with telegram_client(proxy, timeout=180) as client:
-            with open(sealed, "rb") as f:
-                resp = await client.post(
-                    url,
-                    data={"chat_id": chat_id, "caption": caption},
-                    files={"document": (sealed.name, f, "application/octet-stream")},
-                )
-        body = {}
-        try:
-            body = resp.json()
-        except Exception:
-            pass
-        ok = resp.status_code == 200 and body.get("ok") is True
-        error = "" if ok else (body.get("description") or f"HTTP {resp.status_code}")
-        if not ok:
-            logger.error(f"[backup] telegram upload failed: {resp.status_code} {resp.text[:200]}")
-    except Exception as e:
-        ok, error = False, f"{type(e).__name__}: {e}"
-        if not proxy:
-            # the usual reason on this server, said where the panel shows it
-            error = "تلگرام از ایران در دسترس نیست — پراکسی تلگرام را تنظیم کنید"
-        logger.error(f"[backup] telegram upload error ({'via proxy' if proxy else 'direct'}): {e}")
+            for chat in chats:
+                try:
+                    with open(sealed, "rb") as f:
+                        resp = await client.post(
+                            url,
+                            data={"chat_id": chat, "caption": caption},
+                            files={"document": (sealed.name, f, "application/octet-stream")},
+                        )
+                    body = {}
+                    try:
+                        body = resp.json()
+                    except Exception:
+                        pass
+                    if resp.status_code == 200 and body.get("ok") is True:
+                        delivered.append(chat)
+                    else:
+                        failures.append(f"{chat}: {body.get('description') or 'HTTP ' + str(resp.status_code)}")
+                        logger.error(f"[backup] telegram upload to {chat} failed: {resp.status_code} {resp.text[:200]}")
+                except Exception as e:
+                    unreachable = True
+                    failures.append(f"{chat}: {type(e).__name__}")
+                    logger.error(f"[backup] telegram upload to {chat} error ({'via proxy' if proxy else 'direct'}): {e}")
     finally:
         sealed.unlink(missing_ok=True)
+    ok = bool(delivered)
+    error = "؛ ".join(failures)
+    if not delivered and unreachable and not proxy:
+        # the usual reason on this server, said where the panel shows it
+        error = "تلگرام از ایران در دسترس نیست — پراکسی تلگرام را تنظیم کنید"
     if db is not None:
         await _remember_offsite(db, {"at": datetime.now().isoformat(timespec="seconds"),
                                      "ok": ok, "file": path.name, "size_kb": size_kb,
-                                     "error": error[:200]})
+                                     "delivered": delivered, "error": error[:200]})
     return ok
 
 

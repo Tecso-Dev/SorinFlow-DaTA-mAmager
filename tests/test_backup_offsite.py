@@ -286,3 +286,41 @@ class TestTheProxy:
         assert "async function bkProxyTest" in js and "bkClearProxy" in js
         assert "if (proxy) body.proxy = proxy;" in js
         assert "socksio" in Path("requirements.txt").read_text(encoding="utf-8")
+
+
+class TestSeveralChats:
+    """«این چت‌آیدی را هم اضافه کن»: one setting, several recipients, each
+    addressed on its own — a dead id costs nobody else their copy."""
+
+    def test_the_setting_is_a_list(self):
+        assert bk.chat_ids("542901635, 133142359") == ["542901635", "133142359"]
+        assert bk.chat_ids("542901635،-1001234567890") == ["542901635", "-1001234567890"]
+        assert bk.chat_ids(" ") == [] and bk.chat_ids("abc, 12") == ["12"]
+
+    def test_each_chat_gets_the_file_and_a_dead_one_does_not_sink_the_shipment(self, store, monkeypatch, tmp_path):
+        store.rows[bk.KEY_TOKEN] = secret_box.encrypt("123456:abc")
+        store.rows[bk.KEY_CHAT] = "542901635, 133142359"
+        monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
+        seen = []
+
+        def handler(req):
+            body = req.read()
+            chat = "542901635" if b"542901635" in body else "133142359"
+            seen.append(chat)
+            if chat == "133142359":
+                return httpx.Response(400, json={"ok": False, "description": "Bad Request: chat not found"})
+            return httpx.Response(200, json={"ok": True, "result": {}})
+        _telegram(monkeypatch, handler)
+        f = tmp_path / "sorinflow-backup-x.json.gz"
+        f.write_bytes(b"x" * 10)
+        assert asyncio.run(bk.send_to_telegram(f, store)) is True
+        assert seen == ["542901635", "133142359"]
+        last = json.loads(store.rows[bk.KEY_LAST])
+        assert last["ok"] is True and last["delivered"] == ["542901635"] and "chat not found" in last["error"]
+
+    def test_the_route_saves_the_list_and_refuses_junk(self):
+        src = Path("app/api/routes/backup.py").read_text(encoding="utf-8")
+        assert 'await secret_box.put(db, bk.KEY_CHAT, ", ".join(ids) or None, actor)' in src
+        assert '"chat_ids": bk.chat_ids(cfg["chat_id"])' in src
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert "function bkPickChat" in js and "have.join(', ')" in js

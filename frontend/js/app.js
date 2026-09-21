@@ -3457,7 +3457,9 @@ async function loadBackup() {
         } else if (!lo.at) {
             off.innerHTML = '<span class="text-muted">تنظیم شده؛ اولین ارسال امشب — یا همین حالا دکمه را بزنید</span>';
         } else if (lo.ok) {
-            off.innerHTML = `<span class="text-success">✓ ${_bkWhen(lo.at)}</span> <span class="text-muted">· ${esc(lo.file || '')}</span>`;
+            const to = (lo.delivered || []).length ? ` · به ${formatNumber((lo.delivered || []).length)} چت` : '';
+            const partial = lo.error ? ` <span class="text-warning">— نرسید: ${esc(lo.error)}</span>` : '';
+            off.innerHTML = `<span class="text-success">✓ ${_bkWhen(lo.at)}</span> <span class="text-muted">· ${esc(lo.file || '')}${to}</span>${partial}`;
         } else {
             off.innerHTML = `<span class="text-danger">✗ ${_bkWhen(lo.at)} — ${esc(lo.error || 'ارسال نشد')}</span>`;
         }
@@ -3531,11 +3533,20 @@ async function bkProbe() {
             return;
         }
         box.innerHTML = `<div class="small text-muted mb-1">ربات <b dir="ltr">@${esc(r.bot)}</b> — یکی را انتخاب کنید:</div>` +
-            r.chats.map(c => `<button class="btn btn-sm btn-outline-secondary me-1 mb-1" onclick="document.getElementById('bk-chat').value='${esc(c.id)}';document.getElementById('bk-chats').classList.add('d-none')">
-                ${esc(c.name || c.id)} <span class="text-muted" dir="ltr">${esc(c.id)}</span></button>`).join('');
+            r.chats.map(c => `<button class="btn btn-sm btn-outline-secondary me-1 mb-1" onclick="bkPickChat('${esc(c.id)}')">
+                ${esc(c.name || c.id)} <span class="text-muted" dir="ltr">${esc(c.id)}</span></button>`).join('') +
+            '<div class="small text-muted mt-1">هر کدام را بزنید به فهرست اضافه می‌شود؛ بعد «ذخیره».</div>';
     } catch (e) {
         box.innerHTML = `<span class="small text-danger">${esc(e.message)}</span>`;
     }
+}
+
+/** A picked chat joins the list rather than replacing it. */
+function bkPickChat(id) {
+    const el = document.getElementById('bk-chat');
+    const have = el.value.split(/[\s,،;]+/).filter(Boolean);
+    if (!have.includes(id)) have.push(id);
+    el.value = have.join(', ');
 }
 
 async function bkSave() {

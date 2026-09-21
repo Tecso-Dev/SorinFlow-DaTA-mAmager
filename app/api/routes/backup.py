@@ -35,7 +35,7 @@ _TOKEN_RE = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,}$")
 
 class BackupSettingsIn(BaseModel):
     bot_token: Optional[str] = Field(None, max_length=120)
-    chat_id: Optional[str] = Field(None, max_length=40)
+    chat_id: Optional[str] = Field(None, max_length=200)     # one id, or several separated by commas
     # api.telegram.org is blocked from Iran; the shipment goes through this
     proxy: Optional[str] = Field(None, max_length=300)
 
@@ -62,7 +62,8 @@ async def backup_status(db: AsyncSession = Depends(get_db), _: User = _super_adm
     snaps = bk.local_snapshots()
     proxy = await bk.resolve_proxy(db)
     return {
-        "configured": bool(cfg["token"] and cfg["chat_id"]),
+        "configured": bool(cfg["token"] and bk.chat_ids(cfg["chat_id"])),
+        "chat_ids": bk.chat_ids(cfg["chat_id"]),
         "source": cfg["source"],
         "token_masked": secret_box.mask(cfg["token"]),
         "chat_id": cfg["chat_id"],
@@ -93,10 +94,11 @@ async def put_backup_settings(payload: BackupSettingsIn,
             await secret_box.put(db, bk.KEY_TOKEN, None, actor)
             logger.info(f"[backup] telegram token cleared by {actor}")
     if payload.chat_id is not None:
-        cid = payload.chat_id.strip()
-        if cid and not re.fullmatch(r"-?\d{3,20}", cid):
-            raise HTTPException(400, "شناسهٔ چت باید عدد باشد (چت‌های گروهی با منفی شروع می‌شوند)")
-        await secret_box.put(db, bk.KEY_CHAT, cid or None, actor)
+        raw = payload.chat_id.strip()
+        ids = bk.chat_ids(raw)
+        if raw and (not ids or len(ids) != len([p for p in re.split(r"[\s,،;]+", raw) if p])):
+            raise HTTPException(400, "شناسهٔ چت باید عدد باشد (چت‌های گروهی با منفی شروع می‌شوند)؛ چند شناسه را با ویرگول جدا کنید")
+        await secret_box.put(db, bk.KEY_CHAT, ", ".join(ids) or None, actor)
     if payload.proxy is not None:
         proxy = payload.proxy.strip()
         if proxy and not bk.valid_proxy(proxy):
