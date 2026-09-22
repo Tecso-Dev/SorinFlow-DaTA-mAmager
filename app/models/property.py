@@ -176,6 +176,16 @@ class Property(Base):
     created_by = Column(String(200), index=True)               # who filed it
     tags = Column(String(500))                                 # برچسب، comma-separated
 
+    # ── AI (app/ai/embeddings.py) ──
+    # The listing's text as a vector, for semantic search and duplicate
+    # detection. JSON on the row because the scale is thousands, not
+    # millions; pgvector is the later step. ai_duplicate_of points at the
+    # OLDER listing this one seems to repeat — a flag, never a merge.
+    ai_embedding = Column(JSON)                                 # [float, …]
+    ai_embedded_at = Column(DateTime(timezone=True))
+    ai_embed_version = Column(Integer)                          # embeddings.EMBED_VERSION when written
+    ai_duplicate_of = Column(Integer, nullable=True, index=True)
+
     # Status
     is_active = Column(Boolean, default=True)
     
@@ -240,6 +250,9 @@ class Property(Base):
             "is_draft": bool(self.is_draft),
             "created_by": self.created_by,
             "tags": self.tags,
+            # AI — the vector itself is big and stays off the wire
+            "ai_embedded_at": self.ai_embedded_at.isoformat() if self.ai_embedded_at else None,
+            "ai_duplicate_of": self.ai_duplicate_of,
             "posted_at": self.posted_at.isoformat() if self.posted_at else None,
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
