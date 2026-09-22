@@ -1572,6 +1572,15 @@ class DivarScraper:
         flat = " ".join(text.replace("-", " ").replace("_", " ").split())
         return any(" ".join(p.replace("-", " ").split()) in flat for p in patterns)
 
+    # What an ad's own words look like when it is real estate. Used twice: as
+    # a hint on the URL, and as the verdict on Divar's breadcrumb.
+    REAL_ESTATE_URL_KEYWORDS = [
+        'خرید', 'اجاره', 'اجارهٔ', 'رهن', 'فروش', 'مسکن', 'ملک', 'املاک',
+        'آپارتمان', 'اپارتمان', 'خانه', 'ساختمان', 'زمین', 'کلنگی',
+        'ویلا', 'سوئیت', 'واحد', 'مغازه', 'دفتر', 'انبار', 'باغ', 'حیاط',
+        'buy', 'rent', 'residential', 'apartment', 'villa',
+    ]
+
     async def scrape_property_detail(
         self, url: str, target_category: Optional[str] = None,
         source_title: Optional[str] = None,
@@ -1605,6 +1614,7 @@ class DivarScraper:
 
             # ── Category-specific URL check (tight) ──────────────────────────
             category_unconfirmed = False
+            kind_unconfirmed = False
             patterns = self.CATEGORY_URL_PATTERNS.get(target_category or "", ())
             # When a target category is known, we require the redirected URL to
             # contain at least one of the expected substrings for that category.
@@ -1653,17 +1663,26 @@ class DivarScraper:
                     )
                     category_unconfirmed = True
             else:
-                # Fallback broad check when no category is known
-                REAL_ESTATE_URL_KEYWORDS = [
-                    'خرید', 'اجاره', 'رهن', 'فروش', 'مسکن', 'ملک',
-                    'آپارتمان', 'اپارتمان', 'خانه', 'ساختمان',
-                    'ویلا', 'سوئیت', 'واحد', 'مغازه',
-                    'buy', 'rent', 'residential', 'apartment', 'villa',
-                ]
-                if not any(kw in decoded_url for kw in REAL_ESTATE_URL_KEYWORDS):
-                    logger.info(f"Skipping non-real-estate listing (URL: {decoded_url})")
-                    self._last_detail_error = "ملک نبود"
-                    return None
+                # Fallback broad check when no category is known — «اسکرپ تکی»
+                # and «بازاسکرپ», where the caller names the URL and there is
+                # no search category to match against.
+                #
+                # This used to drop on the URL alone, and the URL is the ad's
+                # own title: «حیاط راه جدا قرنطینه» names no property word, so
+                # a listing Divar itself files under «اجاره ویلا» — one already
+                # in our own database, with a deposit and a rent — came back
+                # «ملک نبود» on every single scrape and every re-scrape of the
+                # rows whose number we still owe. The known-category branch
+                # above learned this already: an absence is not a denial.
+                #
+                # So carry the doubt to the breadcrumb, the same way, and let
+                # the two answers that really know decide — Divar's own
+                # category, and the fact that we have this listing already.
+                if not any(kw in decoded_url for kw in self.REAL_ESTATE_URL_KEYWORDS):
+                    logger.info(
+                        f"No property word in the URL ({decoded_url}) — deferring to "
+                        f"Divar's breadcrumb instead of dropping")
+                    kind_unconfirmed = True
 
             await asyncio.sleep(0.6)
             # Wait for property specs to be rendered by React (fires as soon as
@@ -1848,6 +1867,23 @@ class DivarScraper:
             # look for in a title. Placed before the contact reveal on purpose:
             # a reveal costs the account an SMS and a listing about to be
             # dropped must not spend one.
+            if kind_unconfirmed:
+                # Divar's breadcrumb is the answer the URL could not give. It
+                # names a property category («اجاره ویلا», «اجاره مغازه») for
+                # anything we want; a car or a phone says something else. No
+                # breadcrumb at all keeps the listing: the caller pasted this
+                # URL on purpose, and the price fields below still have a say.
+                leaf = f"{property_data.get('category_name') or ''} {property_data.get('property_type') or ''}".strip()
+                if leaf and not any(kw in leaf for kw in self.REAL_ESTATE_URL_KEYWORDS):
+                    logger.info(f"Divar's breadcrumb says {leaf!r} — not real estate, skipping")
+                    self._last_detail_error = "ملک نبود"
+                    return None
+                logger.info(
+                    f"Breadcrumb {leaf!r} confirms real estate for "
+                    f"{property_data.get('divar_id')}" if leaf else
+                    f"No breadcrumb for {property_data.get('divar_id')} — keeping it; "
+                    f"the caller named this URL")
+
             if category_unconfirmed:
                 leaf = property_data.get("category_name") or ""
                 if leaf and not self._category_matches(leaf, patterns):

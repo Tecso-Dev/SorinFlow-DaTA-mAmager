@@ -181,3 +181,41 @@ def test_normal_images_still_download(tmp_path):
     paths = asyncio.run(s.download_images(["http://x/a.png", "http://x/b.png"], "ad4"))
     assert paths == ["/images/ad4/img_1.jpg", "/images/ad4/img_2.jpg"]
     assert (tmp_path / "ad4" / "img_1.jpg").exists()
+
+
+# ── a single URL is the caller's instruction, not a guess ────────────────────
+
+class TestTheAdsOwnTitleIsNotTheVerdict:
+    """«حیاط راه جدا قرنطینه» — a rental Divar itself files under «اجاره ویلا»,
+    already in our own database with a deposit and a rent — came back «ملک
+    نبود» on every single scrape and every re-scrape, because the fallback
+    check read the ad's own title out of the URL and found no property word in
+    it. Ads written by people often name no type; Divar's breadcrumb does."""
+
+    def _src(self):
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        return inspect.getsource(DivarScraper.scrape_property_detail)
+
+    def test_a_url_without_a_property_word_defers_instead_of_dropping(self):
+        src = self._src()
+        fallback = src[src.index("Fallback broad check"):src.index("await asyncio.sleep(0.6)")]
+        assert "kind_unconfirmed = True" in fallback
+        assert "return None" not in fallback, "the URL alone may no longer drop a listing"
+
+    def test_the_breadcrumb_is_what_decides(self):
+        src = self._src()
+        verdict = src[src.index("if kind_unconfirmed:"):src.index("if category_unconfirmed:")]
+        assert "category_name" in verdict and "property_type" in verdict
+        assert 'self._last_detail_error = "ملک نبود"' in verdict, "a car is still dropped"
+        assert "keeping it" in verdict, "no breadcrumb keeps the listing the caller asked for"
+
+    def test_the_vocabulary_covers_what_divar_actually_says(self):
+        from app.scraper.divar_scraper import DivarScraper
+        words = DivarScraper.REAL_ESTATE_URL_KEYWORDS
+        # every breadcrumb this database has seen must be recognised
+        for leaf in ("اجاره ویلا", "اجاره دفتر کار", "اجارهٔ خانه و ویلا", "اجاره مغازه",
+                     "خرید آپارتمان", "فروش زمین", "خانه و ویلا"):
+            assert any(w in leaf for w in words), leaf
+        for other in ("سواری", "موبایل و تبلت", "استخدام و کاریابی", "لوازم خانگی"):
+            assert not any(w in other for w in words), other
