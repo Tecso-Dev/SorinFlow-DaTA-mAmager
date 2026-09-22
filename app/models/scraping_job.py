@@ -30,8 +30,11 @@ class ScrapingJob(Base):
     updated_items = Column(Integer, default=0)
     failed_items = Column(Integer, default=0)
     
-    # Divar session used for this job
+    # The Divar account the run is on: the one named at start, else the one
+    # the scraper picked, updated when rotation moves it. accounts_used keeps
+    # every account the run touched, in order, so a rotated run can say so.
     divar_phone = Column(String(20), nullable=True)
+    accounts_used = Column(JSON)
 
     # Error handling
     error_message = Column(Text)
@@ -84,6 +87,9 @@ class ScrapingJob(Base):
             "progress": self.progress,
             "divar_count": self.divar_count,
             "resumed_from": str(self.resumed_from) if self.resumed_from else None,
+            "divar_phone": self.divar_phone,
+            "accounts_used": self.accounts_used or [],
+            "owner_user_id": (self.config or {}).get("owner_user_id"),
             # A completed run is not offered: it already walked its whole pool,
             # so «continue» would be a rerun wearing the wrong label. Failed
             # and cancelled runs stopped short, and those are what it is for.

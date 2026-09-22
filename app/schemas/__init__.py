@@ -165,7 +165,10 @@ class ScrapingJobResponse(BaseModel):
     category_id: Optional[int] = None
     city_name: Optional[str] = None
     category_name: Optional[str] = None
-    divar_phone: Optional[str] = None
+    divar_phone: Optional[str] = None       # the account the run is / was on
+    accounts_used: List[str] = []           # every account it touched, in order
+    owner_user_id: Optional[int] = None     # who started it
+    owner_name: Optional[str] = None
     status: str
     total_pages: int = 0
     scraped_pages: int = 0

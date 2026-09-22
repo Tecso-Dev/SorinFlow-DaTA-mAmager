@@ -616,6 +616,10 @@ async def get_scraping_jobs(
     # id → name lookups so the UI can show/filter by city & category
     city_map = {c.id: c.name for c in (await db.execute(select(City))).scalars().all()}
     cat_map = {c.id: c.name for c in (await db.execute(select(Category))).scalars().all()}
+    # who started each run — the launch puts the owner on the config
+    owner_ids = {(j.config or {}).get("owner_user_id") for j in jobs} - {None}
+    owners = {u.id: (u.full_name or u.username) for u in (await db.execute(
+        select(User).where(User.id.in_(owner_ids)))).scalars().all()} if owner_ids else {}
 
     return ScrapingJobList(
         items=[ScrapingJobResponse(
@@ -641,6 +645,10 @@ async def get_scraping_jobs(
             divar_count=j.divar_count,
             resumed_from=str(j.resumed_from) if j.resumed_from else None,
             can_resume=bool(j.config) and j.status in ("failed", "cancelled"),
+            divar_phone=j.divar_phone,
+            accounts_used=j.accounts_used or [],
+            owner_user_id=(j.config or {}).get("owner_user_id"),
+            owner_name=owners.get((j.config or {}).get("owner_user_id")),
             started_at=j.started_at,
             completed_at=j.completed_at,
             created_at=j.created_at

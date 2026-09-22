@@ -187,4 +187,4 @@ class TestTheCountsHaveTheirOwnColumn:
         assert '<bdi title="کل">${job.total_items}</bdi>' in APP_JS
 
     def test_the_empty_row_spans_the_new_column_too(self):
-        assert 'colspan="9" class="text-center text-muted py-4">هیچ تسکی وجود ندارد' in APP_JS
+        assert 'colspan="10" class="text-center text-muted py-4">هیچ تسکی وجود ندارد' in APP_JS

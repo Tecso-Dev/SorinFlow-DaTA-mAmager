@@ -3029,6 +3029,20 @@ class DivarScraper:
         from app import metrics as _mx
         _mx.scrape_challenges.inc()
 
+    def _note_account(self, job) -> None:
+        """The account the run is on right now, on the row: divar_phone is the
+        current one, accounts_used every one so far — so the panel can say
+        which number did the scraping, and that a rotated run used several."""
+        phone = self.active_phone
+        if not job or not phone:
+            return
+        used = list(job.accounts_used or [])
+        if phone not in used:
+            used.append(phone)
+            job.accounts_used = used
+        if job.divar_phone != phone:
+            job.divar_phone = phone
+
     async def maybe_rotate_account(self) -> bool:
         """Switch Divar account once this one has revealed `cookie_rotate_every`
         phone numbers, or as soon as Divar challenges it.
@@ -3645,6 +3659,7 @@ class DivarScraper:
                 return job
             job.status = "running"
             job.started_at = datetime.now()
+            self._note_account(job)
             from app.services import job_log
             self._job_id_str = str(job.job_id)
             # The browser has just restored a session and Divar handed back a
@@ -4165,6 +4180,7 @@ class DivarScraper:
                             # Divar was never asked for anything on its behalf.
                             # The counter moves where the reveal happens.
                             await self.maybe_rotate_account()
+                            self._note_account(job)
                             # Nothing may hold a transaction across a sleep —
                             # see the note at the other delay below.
                             await self.db_session.commit()
@@ -4360,6 +4376,7 @@ class DivarScraper:
 
                     # spread the load across saved Divar accounts
                     await self.maybe_rotate_account()
+                    self._note_account(job)     # flushed with the next progress write
 
                     # Nothing may hold a transaction across a sleep.
                     #

@@ -4098,7 +4098,7 @@ function _renderJobsTable(items) {
     if (!tbody) return;
     tbody.innerHTML = '';
     if (items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4">هیچ تسکی وجود ندارد</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">هیچ تسکی وجود ندارد</td></tr>`;
         return;
     }
     const JOB_STATUS_FA = {
@@ -4113,6 +4113,13 @@ function _renderJobsTable(items) {
             <td><code class="job-id" title="${esc(job.job_id)}">${job.job_id.substring(0, 6)}</code></td>
             <td>${job.category_name ? `<span class="badge bg-primary">${esc(job.category_name)}</span>` : '—'}</td>
             <td>${esc(job.city_name) || '—'}</td>
+            <!-- who started it, and the Divar account the run is on; a rotated
+                 run names every account it went through in the tooltip -->
+            <td class="job-who">
+                <div>${esc(job.owner_name || '—')}</div>
+                ${job.divar_phone ? `<div class="job-acct" dir="ltr" title="${esc((job.accounts_used || []).length > 1 ? 'حساب‌ها به ترتیب: ' + job.accounts_used.join('، ') : 'حساب دیوار این اجرا')}">${esc(job.divar_phone)}${(job.accounts_used || []).length > 1 ? ` <span class="job-acct-more">+${formatNumber(job.accounts_used.length - 1)}</span>` : ''}</div>`
+                                 : `<div class="job-acct text-muted">${job.status === 'pending' ? 'خودکار' : '—'}</div>`}
+            </td>
             <td>
                 <span class="badge ${statusClass}">${statusLabel}</span>
                 ${job.resumed_from ? `<div class="text-muted" style="font-size:.66rem" title="این اجرا ادامهٔ اجرای قبلی است">

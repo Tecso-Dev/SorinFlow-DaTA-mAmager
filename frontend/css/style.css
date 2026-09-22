@@ -2618,10 +2618,12 @@ body.filing-dragging .ftree-node, body.filing-dragging .folder-chip { outline: 1
   .jobs-table .job-actions { white-space: normal; max-width: 70px; }
   .jobs-table .job-actions .btn { margin-bottom: .2rem; }
   .jobs-table .job-when { font-size: .66rem; }
+  .jobs-table .job-progress { min-width: 52px; }   /* room for «کاربر / حساب» without a scrollbar */
 }
 @media (min-width: 901px) and (max-width: 1199px) {
-  /* the start time is in the job's own log; the column goes before the counts do */
-  .jobs-table > thead > tr > th:nth-child(8), .jobs-table > tbody > tr > td:nth-child(8) { display: none; }
+  /* the start time is in the job's own log; the column goes before the counts do
+     (9th since «کاربر / حساب» took the 4th slot) */
+  .jobs-table > thead > tr > th:nth-child(9), .jobs-table > tbody > tr > td:nth-child(9) { display: none; }
 }
 @media (min-width: 901px) and (max-width: 1023px) {
   /* a 1366 laptop at 150%: the two-thirds card is too narrow for any table —
@@ -3223,6 +3225,11 @@ html[data-theme="light"] .table thead th {
   font-size: .8rem; line-height: 1.9; color: var(--text-dim); margin-top: .4rem;
 }
 .fw-tip b { color: var(--text) }
+
+/* the jobs table: who started the run, on which account */
+.job-who { font-size: .76rem; line-height: 1.45; max-width: 6rem }
+.job-who .job-acct { font-size: .66rem; color: var(--text-muted); text-align: start; unicode-bidi: isolate; white-space: nowrap; letter-spacing: -.01em }
+.job-who .job-acct-more { color: var(--accent2); font-weight: 600 }
 
 /* the morning digest row on the backup card */
 .bk-digest {
