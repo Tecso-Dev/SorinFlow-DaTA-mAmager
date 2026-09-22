@@ -15,8 +15,10 @@ import sys
 import asyncio
 
 import pytest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./_test_profile.db")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/9")
 os.environ.setdefault("SECRET_KEY", "0123456789abcdef0123456789abcdef")
@@ -367,6 +369,23 @@ class TestSessionsAreNotShared:
         # but nothing may be done to it
         assert client.post("/api/auth/refresh?phone_number=09121110001", headers=_auth(tok)).status_code == 403
         assert client.post("/api/auth/logout?phone_number=09121110001", headers=_auth(tok)).status_code == 403
+        # and the panel asks for what root may USE — which is none of these
+        mine = client.get("/api/auth/cookies?mine=1", headers=_auth(tok)).json()
+        assert mine["can_reassign"] is False and mine["cookies"] == []
+        health = client.get("/api/monitoring/cookies", headers=_auth(tok)).json()
+        assert all(i["phone_number"] != "09121110001" for i in health["items"])
+        assert client.post("/api/monitoring/cookies/check?phone=09121110001", headers=_auth(tok)).status_code == 404
+
+    def test_the_panel_never_reads_the_pool(self):
+        """Every panel reader of the session list — the header pill, the
+        status box, the saved list, the scraper picker, the rotation count —
+        acts on «my» sessions, so it asks for exactly those. root was shown a
+        colleague's number as «شمارهٔ فعال» because these read the pool."""
+        js = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
+        assert "apiCall('/auth/cookies')" not in js
+        fn = js[js.index("async function _getActiveSession"):js.index("async function checkCookieStatus")]
+        assert "apiCall('/auth/cookies?mine=1')" in fn
+        assert "_digits(_currentUser?.divar_phone)" in fn, "the profile's default number comes first"
 
     def test_the_owner_sees_their_own(self, client):
         tok = _token(client, "pf_sess_owner")
@@ -474,7 +493,7 @@ class TestManyDivarNumbersPerPerson:
         from pathlib import Path
         js = Path("frontend/js/app.js").read_text(encoding="utf-8")
         fn = js[js.index("async function pfLoadDivarAccounts"):js.index("async function pfSetPrimaryDivar")]
-        assert "filter(c => c.owner_user_id === _pfMe?.id)" in fn, "an admin's list carries everybody's rows"
+        assert "apiCall('/auth/cookies?mine=1')" in fn, "an admin's unscoped list carries everybody's rows"
         assert "پیش‌فرض" in fn
         assert "pfDeleteDivar(${esc(c.id)})" in fn
 

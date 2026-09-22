@@ -42,7 +42,9 @@ class TestWhoSeesEverything:
 class TestTheListIsNarrowed:
     def test_it_goes_through_the_shared_narrowing(self):
         src = inspect.getsource(auth_routes.list_cookies)
-        assert "_own_sessions_only(select(Cookie), current_user)" in src
+        # what the caller may SEE by default; what they may USE when the panel asks
+        assert "scope = _usable_by if mine else _own_sessions_only" in src
+        assert "scope(select(Cookie), current_user)" in src
 
     def test_an_anonymous_caller_gets_nothing_rather_than_everything(self):
         """These rows are live Divar credentials."""
@@ -59,7 +61,7 @@ class TestTheListIsNarrowed:
     def test_owner_names_are_only_resolved_for_an_admin(self):
         """Nobody else is shown a list that could hold somebody else's row."""
         src = inspect.getsource(auth_routes.list_cookies)
-        assert "if _sees_every_session(current_user):" in src
+        assert "if _sees_every_session(current_user) and not mine:" in src
 
 
 class TestClaimingAndRefusing:

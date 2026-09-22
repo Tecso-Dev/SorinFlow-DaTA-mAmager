@@ -22,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import metrics as mx
 from app.config import get_settings
 from app.database import get_db, get_redis
+from app.auth.dependencies import get_current_user
+from app.models.user import User
 from app.models.property import Property
 from app.models.lead import Lead
 from app.models.scraping_job import ScrapingJob
@@ -524,16 +526,22 @@ def _cookie_state(row, now: datetime) -> tuple:
 
 
 @router.get("/cookies")
-async def cookie_health(db: AsyncSession = Depends(get_db)):
-    """Every stored Divar account and the state of its session.
+async def cookie_health(db: AsyncSession = Depends(get_db),
+                        current_user: User = Depends(get_current_user)):
+    """This person's Divar accounts and the state of each session.
 
     Cheap: database only, safe to poll. The real check is a separate button,
     because it costs an outbound request to someone else's server.
+
+    Scoped like everything else that acts on a session: sessions are personal
+    (the scraper refuses to run on a colleague's number), so the table shows
+    the caller's own — root's included, and only root's — not the pool.
     """
     from app.models.cookie import Cookie
+    from app.api.routes.auth import _usable_by
 
     rows = (await db.execute(
-        select(Cookie).order_by(Cookie.updated_at.desc().nullslast())
+        _usable_by(select(Cookie), current_user).order_by(Cookie.updated_at.desc().nullslast())
     )).scalars().all()
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -602,7 +610,8 @@ async def cookie_health(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/cookies/check")
-async def cookie_check(phone: str, db: AsyncSession = Depends(get_db)):
+async def cookie_check(phone: str, db: AsyncSession = Depends(get_db),
+                       current_user: User = Depends(get_current_user)):
     """Ask Divar whether this account's session still works.
 
     `phone` is a lookup key into our own table, never a host or a URL — the
@@ -613,10 +622,12 @@ async def cookie_check(phone: str, db: AsyncSession = Depends(get_db)):
     one that drifted would be whichever nobody was watching.
     """
     from app.models.cookie import Cookie
+    from app.api.routes.auth import _usable_by
     from app.services import divar_session
 
+    # own sessions only — 404, not 403, so a colleague's number is not confirmed
     row = (await db.execute(
-        select(Cookie).where(Cookie.phone_number == phone)
+        _usable_by(select(Cookie).where(Cookie.phone_number == phone), current_user)
         .order_by(Cookie.updated_at.desc().nullslast()).limit(1)
     )).scalar_one_or_none()
     if not row:

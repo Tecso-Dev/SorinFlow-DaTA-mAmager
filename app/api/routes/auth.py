@@ -341,22 +341,31 @@ def _own_sessions_only(query, user):
 
 @router.get("/cookies")
 async def list_cookies(
+    mine: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """The Divar sessions this user may use — theirs, or all of them for an
-    admin who has to be able to reassign one."""
-    result = await db.execute(_own_sessions_only(select(Cookie), current_user))
+    """The Divar sessions this user may see — theirs, or all of them for an
+    admin who has to be able to reassign one.
+
+    `mine=1` is what the panel asks for: the sessions this person may USE,
+    whatever their role. Without it, root's header pill, status box, saved
+    list and scraper picker were handed the whole pool and presented a
+    colleague's number as «شمارهٔ فعال» — while the run itself would have
+    refused that number. Sessions are personal; the display is now too.
+    """
+    scope = _usable_by if mine else _own_sessions_only
+    result = await db.execute(scope(select(Cookie), current_user))
     cookies = result.scalars().all()
     owners = {}
-    if _sees_every_session(current_user):
+    if _sees_every_session(current_user) and not mine:
         ids = {c.owner_user_id for c in cookies if c.owner_user_id}
         if ids:
             owners = {u.id: (u.full_name or u.username) for u in (await db.execute(
                 select(User).where(User.id.in_(ids)))).scalars().all()}
 
     return {
-        "can_reassign": _sees_every_session(current_user),
+        "can_reassign": _sees_every_session(current_user) and not mine,
         "cookies": [
             {
                 "id": c.id,

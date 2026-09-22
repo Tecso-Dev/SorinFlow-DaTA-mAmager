@@ -938,9 +938,8 @@ async function pfLoadDivarAccounts() {
         return;
     }
     try {
-        const d = await apiCall('/auth/cookies');
-        // an admin is handed everybody's list for reassignment; here only mine
-        const mine = (d.cookies || []).filter(c => c.owner_user_id === _pfMe?.id);
+        const d = await apiCall('/auth/cookies?mine=1');
+        const mine = d.cookies || [];
         if (count) count.textContent = formatNumber(mine.length);
         if (!mine.length) {
             box.innerHTML = '<div class="pf-note">هنوز با هیچ شماره‌ای وارد دیوار نشده‌اید. «افزودن شماره» را بزنید.</div>';
@@ -2880,7 +2879,7 @@ async function loadScraperAccounts() {
     if (!sel) return;
     const chosen = sel.value;
     try {
-        const d = await apiCall('/auth/cookies');
+        const d = await apiCall('/auth/cookies?mine=1');
         const rows = (d.cookies || []).slice().sort(
             (a, b) => (a.reveals || 0) - (b.reveals || 0));
         sel.innerHTML = '<option value="">خودکار — کم‌مصرف‌ترین</option>'
@@ -3354,7 +3353,7 @@ let _validDivarSessions = null;
 
 async function refreshDivarSessionCount() {
     try {
-        const r = await apiCall('/auth/cookies');
+        const r = await apiCall('/auth/cookies?mine=1');
         _validDivarSessions = (r.cookies || []).filter(c => c.is_valid).length;
     } catch (e) {
         _validDivarSessions = null;
@@ -3923,11 +3922,18 @@ function goToAuthSection() {
 // ==================== Authentication ====================
 
 async function _getActiveSession() {
-    // Returns the most recently updated valid session, or null
+    // My valid session — the default number from the profile if it is one,
+    // else the most recently added. Never a colleague's: `mine=1` narrows the
+    // list to what this person may use, whatever their role, which is the
+    // rule the run itself enforces. root used to be shown the whole pool here
+    // and read another user's number as «شمارهٔ فعال».
     try {
-        const data = await apiCall('/auth/cookies');
+        const data = await apiCall('/auth/cookies?mine=1');
         const valid = (data.cookies || []).filter(c => c.is_valid);
         if (!valid.length) return null;
+        const primary = _digits(_currentUser?.divar_phone);
+        const mine = primary && valid.find(c => _digits(c.phone_number) === primary);
+        if (mine) return mine;
         // sort by id descending (most recently added) as a proxy for recency
         valid.sort((a, b) => b.id - a.id);
         return valid[0];
@@ -3963,7 +3969,7 @@ async function checkCookieStatus() {
             // check if there are any (expired) cookies
             let hasCookies = false;
             try {
-                const data = await apiCall('/auth/cookies');
+                const data = await apiCall('/auth/cookies?mine=1');
                 hasCookies = (data.cookies || []).length > 0;
             } catch (e) {}
             cookieStatus = { is_valid: false, has_cookies: hasCookies };
@@ -3997,7 +4003,7 @@ async function checkAuthStatus() {
             // check if any (expired) cookies exist
             let hasCookies = false;
             try {
-                const data = await apiCall('/auth/cookies');
+                const data = await apiCall('/auth/cookies?mine=1');
                 hasCookies = (data.cookies || []).length > 0;
             } catch (e) {}
 
@@ -4301,7 +4307,7 @@ async function _showIdentityWall(items) {
 
 async function _identityCleared(phone) {
     try {
-        const d = await apiCall('/auth/cookies');
+        const d = await apiCall('/auth/cookies?mine=1');
         const c = (d.cookies || []).find(x => (x.phone_number || '').replace(/\D/g, '') === String(phone).replace(/\D/g, ''));
         if (!c) { showToast('خطا', 'نشست این شماره پیدا نشد', 'warning'); return; }
         await apiCall(`/auth/cookies/${c.id}/identity-cleared`, { method: 'POST' });
@@ -4701,7 +4707,7 @@ async function importCookies() {
 
 async function loadCookies() {
     try {
-        const data = await apiCall('/auth/cookies');
+        const data = await apiCall('/auth/cookies?mine=1');
         
         const container = document.getElementById('cookies-list');
         

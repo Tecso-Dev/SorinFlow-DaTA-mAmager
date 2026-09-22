@@ -95,7 +95,7 @@ class TestTheRotationWarning:
 
 class TestItCannotOfferSomebodyElsesNumber:
     def test_it_reads_the_owner_scoped_listing(self):
-        assert "apiCall('/auth/cookies')" in block("async function loadScraperAccounts()")
+        assert "apiCall('/auth/cookies?mine=1')" in block("async function loadScraperAccounts()")
 
 
 class TestThePanelWillBeReloaded:
