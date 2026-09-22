@@ -238,12 +238,15 @@ def _extract_json(content: str) -> Any:
 async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
                schema: Optional[Type] = None, json_mode: bool = False,
                max_tokens: int = 400, temperature: float = 0.2,
-               timeout: float = TIMEOUT, cap: bool = True) -> Dict[str, Any]:
+               timeout: float = TIMEOUT, cap: bool = True,
+               model_override: Optional[str] = None) -> Dict[str, Any]:
     """One completion for `job`, as `agent`. Returns
     {"content", "data", "model", "usage", "cost_usd", "cost_toman", "ms"} —
     `data` is the parsed JSON (validated against `schema`, a pydantic model,
     when given). Raises LLMError (or a subclass) for anything the caller
-    cannot use. `cap=False` skips the daily cap — for the panel's own test."""
+    cannot use. `cap=False` skips the daily cap — for the panel's own test.
+    `model_override` is for a bake-off only: the same door, the same ledger,
+    another model than the one configured for the job."""
     if job not in JOBS:
         raise ValueError(f"unknown job {job!r}")
     from app.database import async_session_maker
@@ -258,7 +261,7 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
     finally:
         if own:
             await session.close()
-    model = cfg["models"].get(job) or cfg["models"]["write"]
+    model = model_override or cfg["models"].get(job) or cfg["models"]["write"]
     if not model:
         raise NotConfigured(f"مدلی برای کار «{job}» تعیین نشده است")
 

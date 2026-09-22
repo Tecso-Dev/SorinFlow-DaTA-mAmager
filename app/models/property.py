@@ -185,6 +185,12 @@ class Property(Base):
     ai_embedded_at = Column(DateTime(timezone=True))
     ai_embed_version = Column(Integer)                          # embeddings.EMBED_VERSION when written
     ai_duplicate_of = Column(Integer, nullable=True, index=True)
+    # ── AI (app/ai/listing_reader.py) ──
+    # What the listing's own text says that the fields do not: kind, floor,
+    # document, condition, the deal flags, a confidence per field, and the
+    # prompt version that read it. NULL until the reader has been through.
+    ai_facts = Column(JSON)
+    ai_read_at = Column(DateTime(timezone=True))
 
     # Status
     is_active = Column(Boolean, default=True)
@@ -253,6 +259,8 @@ class Property(Base):
             # AI — the vector itself is big and stays off the wire
             "ai_embedded_at": self.ai_embedded_at.isoformat() if self.ai_embedded_at else None,
             "ai_duplicate_of": self.ai_duplicate_of,
+            "ai_facts": self.ai_facts,
+            "ai_read_at": self.ai_read_at.isoformat() if self.ai_read_at else None,
             "posted_at": self.posted_at.isoformat() if self.posted_at else None,
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
