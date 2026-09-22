@@ -124,4 +124,53 @@ class TestTheQueryAndThePanel:
         assert "m.same_district" in fn and "مناطق دیگر" in fn
         assert "price_gap_pct" in js and "گران‌تر" in js and "ارزان‌تر" in js
         crm = Path("app/api/routes/crm.py").read_text(encoding="utf-8")
-        assert crm.count('"district": prop.district, "city_name": prop.city_name') == 3
+        assert crm.count('"source": _match_source(prop)}') == 3
+        src = crm[crm.index("def _match_source"):crm.index('@router.get("/match/lead/{lead_id}")')]
+        assert '"comparable": _comparable(prop)' in src and '"deposit": prop.deposit' in src
+
+
+class TestARentalIsAShapeAsWellAsATotal:
+    """The lead was 150M down and 40M a month; the modal offered 1.5B down
+    and nothing a month as «9% گران‌تر» — and then scored it 9% with «اختلاف
+    قیمت» and «خارج از محدوده», because the scorer compared deposits while
+    the tier compared totals. One figure now, and the deposit's own shape
+    beside it."""
+
+    def test_the_score_and_the_gap_agree_on_the_figure(self):
+        target = P(1, "بلوار سعدی", 150_000_000, rent_price=40_000_000, area=300)     # total 1.35B
+        full = P(2, "بلوار سعدی", 1_350_000_000, rent_price=None, area=300)           # the same total, all deposit
+        s = m.score_similarity(target, full)
+        assert "قیمت نزدیک" in s["reasons"] and "خارج از محدوده قیمت" not in s["reasons"]
+
+    def test_the_same_total_in_another_shape_ranks_below_the_same_shape(self):
+        target = P(1, "بلوار سعدی", 150_000_000, rent_price=40_000_000, area=300)
+        same_shape = P(2, "بلوار سعدی", 170_000_000, rent_price=38_000_000, area=300)   # 1.31B
+        full = P(3, "بلوار سعدی", 1_350_000_000, rent_price=None, area=300)             # 1.35B, all deposit
+        out = m.rank_similar(target, [full, same_shape], limit=10)
+        assert [r["id"] for r in out] == [2, 3]
+        far = next(r for r in out if r["id"] == 3)
+        assert "ودیعه خیلی متفاوت — تبدیل لازم" in far["reasons"]
+        assert far["score"] < next(r for r in out if r["id"] == 2)["score"]
+
+    def test_the_brief_carries_both_halves_and_the_figure_compared_on(self):
+        target = P(1, "بلوار سعدی", 150_000_000, rent_price=40_000_000)
+        cand = P(2, "بلوار سعدی", 200_000_000, rent_price=35_000_000)
+        b = m.rank_similar(target, [cand], limit=1)[0]
+        assert (b["deposit"], b["rent_price"], b["comparable"]) == (200_000_000, 35_000_000, 1_250_000_000)
+        sale = P(3, "بلوار سعدی", 4_000_000_000, listing_type="buy")
+        b = m.rank_similar(sale, [P(4, "بلوار سعدی", 4_100_000_000, listing_type="buy")], limit=1)[0]
+        assert b["deposit"] is None and b["rent_price"] is None and b["comparable"] == 4_100_000_000
+
+    def test_the_card_shows_both_halves(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("function _matchMoney"):js.index("function _matchCard")]
+        assert "ودیعه" in fn and "اجاره" in fn and "رهن کامل" in fn and "m.comparable" in fn
+        modal = js[js.index("async function _openMatchModal"):js.index("function showSimilarForLead")]
+        assert "s0.comparable" in modal and "اختلاف قیمت‌ها روی رهن کامل حساب می‌شود" in modal
+
+    def test_a_modal_opened_from_a_modal_comes_out_on_top(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        blk = js[js.index("// ═══ Stacked modals"):js.index("// ═══ Stacked modals") + 1500]
+        assert "show.bs.modal" in blk and "1055 + 10 * open" in blk
+        assert "shown.bs.modal" in blk and ".modal-backdrop" in blk
+        assert "hidden.bs.modal" in blk and "classList.add('modal-open')" in blk

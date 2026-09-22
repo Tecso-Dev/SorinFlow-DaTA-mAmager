@@ -3226,6 +3226,12 @@ html[data-theme="light"] .table thead th {
 }
 .fw-tip b { color: var(--text) }
 
+/* a rental on a match card: both halves, and the figure compared on */
+.match-side .match-rent { font-size: .82rem; font-weight: 700; color: var(--accent2); line-height: 1.5; white-space: nowrap }
+.match-side .match-rent-l { font-size: .66rem; font-weight: 500; color: var(--text-muted); margin-inline-end: .25rem }
+.match-side .match-conv { font-size: .66rem; color: var(--text-muted); margin-top: .15rem; white-space: nowrap }
+.match-source-money { color: var(--text) }
+
 /* the jobs table: who started the run, on which account */
 .job-who { font-size: .76rem; line-height: 1.45; max-width: 6rem }
 .job-who .job-acct { font-size: .66rem; color: var(--text-muted); text-align: start; unicode-bidi: isolate; white-space: nowrap; letter-spacing: -.01em }

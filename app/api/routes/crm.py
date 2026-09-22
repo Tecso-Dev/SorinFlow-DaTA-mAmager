@@ -1242,8 +1242,19 @@ async def match_similar_properties(
         raise HTTPException(status_code=404, detail="Property not found")
     items = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
     return {"items": items, "total": len(items),
-            "source": {"id": prop.id, "title": prop.title, "serial_no": prop.serial_no,
-                       "district": prop.district, "city_name": prop.city_name}}
+            "source": _match_source(prop)}
+
+
+def _match_source(prop) -> dict:
+    """The listing the matches are measured against — with its money, so the
+    modal can say what «9% گران‌تر» is 9% of."""
+    from app.services.match_service import _comparable, _price_of
+    return {"id": prop.id, "title": prop.title, "serial_no": prop.serial_no,
+            "district": prop.district, "city_name": prop.city_name,
+            "listing_type": prop.listing_type, "price": _price_of(prop),
+            "deposit": prop.deposit if prop.listing_type == "rent" else None,
+            "rent_price": prop.rent_price if prop.listing_type == "rent" else None,
+            "comparable": _comparable(prop)}
 
 
 @router.get("/match/lead/{lead_id}")
@@ -1263,8 +1274,7 @@ async def match_similar_for_lead(
         raise HTTPException(status_code=404, detail="Linked property not found")
     items = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
     return {"items": items, "total": len(items),
-            "source": {"id": prop.id, "title": prop.title, "serial_no": prop.serial_no,
-                       "district": prop.district, "city_name": prop.city_name}}
+            "source": _match_source(prop)}
 
 
 @router.get("/match/customer/{customer_id}")
@@ -2714,8 +2724,7 @@ async def match_customers_for_property(
         raise HTTPException(status_code=404, detail="ملک یافت نشد")
     items = await customers_for_property(db, prop, limit=limit)
     return {"items": items, "total": len(items),
-            "source": {"id": prop.id, "title": prop.title, "serial_no": prop.serial_no,
-                       "district": prop.district, "city_name": prop.city_name}}
+            "source": _match_source(prop)}
 
 
 @router.get("/insights")

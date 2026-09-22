@@ -25,6 +25,8 @@ settings = get_settings()
 # ── tunables ────────────────────────────────────────────────────────────
 PRICE_TOLERANCE = 0.20   # closeness curve: 0 at ±20%
 AREA_TOLERANCE = 0.35    # ±35%
+DEPOSIT_TOLERANCE = 0.50 # rentals: the deposit's own closeness, 0 at ±50%
+DEPOSIT_SHAPE_MAX = 3    # …and beyond 3× apart the deal is a different shape, whatever the total
 CANDIDATE_POOL = 300     # rows scored before trimming to the top N (customer matches)
 
 # «مشابه» for a listing means the same neighbourhood at about the same price.
@@ -140,7 +142,11 @@ def score_similarity(target: Property, cand: Property) -> Dict[str, Any]:
     """Weighted similarity of `cand` to `target`. Returns score 0..100 + reasons."""
     parts: List[tuple] = []   # (weight, value 0..1, reason)
 
-    tp, cp = _price_of(target), _price_of(cand)
+    # The same figure the fence and the gap are measured on: the total for a
+    # sale, deposit + 30 × rent for a rental. This used to be the deposit
+    # alone, so a 150M/40M listing scored a 1.5B full-deposit one as «اختلاف
+    # قیمت» and «خارج از محدوده» while the tier said it was 9% apart.
+    tp, cp = _comparable(target), _comparable(cand)
     price_close = _closeness(tp, cp, PRICE_TOLERANCE)
     if price_close is not None:
         parts.append((30, price_close, "قیمت نزدیک" if price_close > .5 else "اختلاف قیمت"))
@@ -152,6 +158,19 @@ def score_similarity(target: Property, cand: Property) -> Dict[str, Any]:
         if gap > PRICE_TOLERANCE:
             # fade out smoothly; ~2x the price lands near a third of the score
             price_penalty = max(0.15, 1 - (gap - PRICE_TOLERANCE) * 1.6)
+
+    # A rental is a shape as well as a total: a person who put 150M down and
+    # pays rent does not have 1.5B to put down, however the totals compare —
+    # and conversion («تبدیل») is negotiable within limits, not from anything
+    # to anything. Same total, different shape: close, not the same.
+    shape_penalty = 1.0
+    if target.listing_type == "rent" and cand.listing_type == "rent":
+        td, cd = target.deposit or 0, cand.deposit or 0
+        if td and cd:
+            shape = _closeness(td, cd, DEPOSIT_TOLERANCE)
+            parts.append((15, shape, "ودیعه نزدیک" if shape > .5 else "ودیعهٔ متفاوت"))
+            if max(td, cd) / min(td, cd) > DEPOSIT_SHAPE_MAX:
+                shape_penalty = 0.6
 
     area_close = _closeness(target.area, cand.area, AREA_TOLERANCE)
     if area_close is not None:
@@ -191,10 +210,12 @@ def score_similarity(target: Property, cand: Property) -> Dict[str, Any]:
         parts.append((5, len(have) / len(wanted), "امکانات: " + "، ".join(have) if have else "بدون امکانات مشترک"))
 
     total_w = sum(w for w, _v, _r in parts) or 1
-    score = sum(w * v for w, v, _r in parts) / total_w * 100 * price_penalty * family_penalty
+    score = sum(w * v for w, v, _r in parts) / total_w * 100 * price_penalty * family_penalty * shape_penalty
     reasons = [r for w, v, r in parts if v > 0.5]
     if price_penalty < 0.9:
         reasons.append("خارج از محدوده قیمت")
+    if shape_penalty < 1:
+        reasons.append("ودیعه خیلی متفاوت — تبدیل لازم")
     if family_penalty < 1:
         reasons.append("نوع ملک متفاوت است")
     return {"score": round(score), "reasons": reasons}
@@ -402,6 +423,10 @@ def _brief(p: Property, score: int, reasons: List[str]) -> Dict[str, Any]:
         "rooms": p.rooms,
         "listing_type": p.listing_type,
         "price": _price_of(p),
+        # for a rental both halves, and the one figure everything is compared on
+        "deposit": p.deposit if p.listing_type == "rent" else None,
+        "rent_price": p.rent_price if p.listing_type == "rent" else None,
+        "comparable": _comparable(p),
         "thumbnail_url": p.thumbnail_url,
         "url": p.url,
         "phone_number": p.phone_number,
@@ -448,10 +473,16 @@ def rank_similar(prop: Property, cands, limit: int = 12) -> List[Dict[str, Any]]
             same = (_text_overlap(tkey, ckey) or 0) >= 0.5
         close = gap is not None and gap <= PRICE_BAND
         tier = (1 if same and close else 2 if same else 3 if close else 4)
+        # within a tier, a rental of the same shape (deposit within 3×) comes
+        # before one that needs converting — the total may match to the
+        # toman and still be a deal this person cannot do
+        far_shape = bool(prop.listing_type == "rent" and c.listing_type == "rent"
+                         and (prop.deposit or 0) and (c.deposit or 0)
+                         and max(prop.deposit, c.deposit) / min(prop.deposit, c.deposit) > DEPOSIT_SHAPE_MAX)
         s = score_similarity(prop, c)
-        rows.append({"tier": tier, "same_district": same, "gap": gap,
+        rows.append({"tier": tier, "same_district": same, "gap": gap, "far_shape": far_shape,
                      "score": s["score"], "reasons": s["reasons"], "cand": c})
-    rows.sort(key=lambda r: (r["tier"], r["gap"] if r["gap"] is not None else 1.0, -r["score"]))
+    rows.sort(key=lambda r: (r["tier"], r["far_shape"], r["gap"] if r["gap"] is not None else 1.0, -r["score"]))
     tight = [r for r in rows if r["tier"] in (1, 3)]
     chosen = rows if len(tight) < MIN_CLOSE else tight
     out = []

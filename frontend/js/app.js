@@ -181,6 +181,30 @@ function refreshChartTheme() {
 
 document.addEventListener('DOMContentLoaded', () => applyTheme(currentTheme()));
 
+// ═══ Stacked modals ═══════════════════════════════════════════════════
+//
+// Bootstrap gives every modal the same z-index, so a modal opened from
+// inside another one — «ملک‌های مشابه» from the lead's details — painted
+// BEHIND it whenever it came earlier in the document. Each newly shown modal
+// goes above the ones already open, its backdrop just under it; and closing
+// the inner one keeps the page locked while the outer one is still up.
+document.addEventListener('show.bs.modal', e => {
+    const open = document.querySelectorAll('.modal.show').length;
+    if (!open) { e.target.style.zIndex = ''; return; }
+    e.target.style.zIndex = String(1055 + 10 * open);
+});
+document.addEventListener('shown.bs.modal', e => {
+    const z = parseInt(e.target.style.zIndex, 10);
+    if (!z) return;
+    const backdrops = document.querySelectorAll('.modal-backdrop');
+    const last = backdrops[backdrops.length - 1];
+    if (last) last.style.zIndex = String(z - 5);
+});
+document.addEventListener('hidden.bs.modal', e => {
+    e.target.style.zIndex = '';
+    if (document.querySelector('.modal.show')) document.body.classList.add('modal-open');
+});
+
 // ═══ Login / Logout ═══════════════════════════════════════════
 async function doLogin() {
     const uEl = document.getElementById('login-username');
@@ -6569,10 +6593,23 @@ function _matchGroups(items, source) {
     return html;
 }
 
+/** The money on a match card. A rental is two numbers — the deposit alone
+ *  read as «۱٫۵ میلیارد» next to a 150M base, when the base was 150M plus
+ *  40M a month — so both halves are shown, and under them the one figure
+ *  the comparison is made on. */
+function _matchMoney(m) {
+    if (m.listing_type !== 'rent') return m.price ? formatPrice(m.price) : '—';
+    const dep = m.deposit ? formatPrice(m.deposit) : '—';
+    const rent = m.rent_price ? formatPrice(m.rent_price) : 'بدون اجاره';
+    const total = m.comparable ? `<div class="match-conv" title="ودیعه + ۳۰ × اجارهٔ ماهانه — عددی که مقایسه روی آن انجام می‌شود">رهن کامل ≈ ${formatPrice(m.comparable)}</div>` : '';
+    return `<div class="match-rent"><span class="match-rent-l">ودیعه</span> ${dep}</div>
+            <div class="match-rent"><span class="match-rent-l">اجاره</span> ${rent}</div>${total}`;
+}
+
 function _matchCard(m) {
     // the reverse direction returns people, not listings
     if (m.full_name !== undefined) return _customerMatchCard(m);
-    const price = m.price ? formatPrice(m.price) : '—';
+    const price = _matchMoney(m);
     const reasons = (m.reasons || []).slice(0, 3)
         .map(r => `<span class="match-tag">${esc(r)}</span>`).join('');
     const ai = m.ai_reason ? `<div class="match-ai"><i class="bi bi-stars"></i> ${esc(m.ai_reason)}</div>` : '';
@@ -6593,7 +6630,7 @@ function _matchCard(m) {
         </div>
         <div class="match-side">
             <div class="match-price">${price}</div>
-            ${m.price_gap_pct != null ? `<div class="match-gap ${m.price_gap_pct <= 15 ? 'near' : 'far'}">${m.price_gap_pct === 0 ? 'همین قیمت' : `${formatNumber(m.price_gap_pct)}٪ ${m.price_direction === 'higher' ? 'گران‌تر' : 'ارزان‌تر'}`}</div>` : ''}
+            ${m.price_gap_pct != null ? `<div class="match-gap ${m.price_gap_pct <= 15 ? 'near' : 'far'}" title="${m.listing_type === 'rent' ? 'نسبت به مبنا، روی رهن کامل (ودیعه + ۳۰ × اجاره)' : 'نسبت به قیمت مبنا'}">${m.price_gap_pct === 0 ? 'همین قیمت' : `${formatNumber(m.price_gap_pct)}٪ ${m.price_direction === 'higher' ? 'گران‌تر' : 'ارزان‌تر'}`}</div>` : ''}
             <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${m.id})">
                 <i class="bi bi-eye"></i> جزئیات
             </button>
@@ -6639,8 +6676,13 @@ async function _openMatchModal(title, url, emptyMsg) {
             return;
         }
         const src = data.source?.title || data.source?.name || '';
+        const s0 = data.source || {};
+        const money = s0.listing_type === 'rent'
+            ? (s0.deposit || s0.rent_price ? `ودیعه ${s0.deposit ? formatPrice(s0.deposit) : '—'} · اجاره ${s0.rent_price ? formatPrice(s0.rent_price) : 'ندارد'}${s0.comparable ? ` — رهن کامل ≈ ${formatPrice(s0.comparable)}` : ''}` : '')
+            : (s0.price ? `قیمت ${formatPrice(s0.price)}` : '');
         document.getElementById('match-modal-body').innerHTML = `
             ${src ? `<div class="match-source">مبنای تطابق: <b>${esc(src)}</b> — ${formatNumber(items.length)} مورد یافت شد
+                ${money ? `<div class="small mt-1 match-source-money">${money}${s0.listing_type === 'rent' ? ' <span class="text-muted">· اختلاف قیمت‌ها روی رهن کامل حساب می‌شود</span>' : ''}</div>` : ''}
                 ${criteria ? `<div class="small mt-1">${criteria}</div>` : ''}</div>` : ''}
             ${_matchGroups(items, data.source)}`;
     } catch (e) {
