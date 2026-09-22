@@ -261,6 +261,9 @@ async def status(db) -> Dict[str, Any]:
 async def tick() -> Dict[str, Any]:
     async with async_session_maker() as db:
         try:
+            # the agent's own switch, beside the global one (llm.agent_enabled)
+            if not await llm.agent_enabled(db, "vision"):
+                return {"skipped": "disabled"}
             return await run_once(db)
         except Exception as e:
             logger.warning(f"[photo] tick failed: {type(e).__name__}: {e}")

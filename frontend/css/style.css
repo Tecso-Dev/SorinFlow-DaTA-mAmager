@@ -3308,6 +3308,34 @@ html[data-theme="light"] .table thead th {
 .ai-sem-search { width: 270px; flex: 0 0 auto }
 .ai-sem-search .form-control { font-size: .78rem }
 
+/* the AI screen: one card per agent, its state and its cost */
+#ai-agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: .75rem }
+.ai-card {
+  display: grid; gap: .5rem; padding: .85rem .95rem; border-radius: var(--r-sm);
+  background: var(--surface-2, rgba(255,255,255,.03)); border: 1px solid rgba(255,255,255,.07);
+}
+.ai-card.is-off { opacity: .6 }
+.ai-card-head { display: flex; align-items: center; gap: .5rem; font-size: .88rem }
+.ai-card-head .badge { font-size: .64rem; font-weight: 600 }
+.ai-dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--text-muted); opacity: .45; flex: 0 0 auto }
+.ai-dot.on { background: #34d399; opacity: 1; box-shadow: 0 0 0 3px rgba(52,211,153,.15) }
+.ai-card-desc { font-size: .78rem; color: var(--text-muted); line-height: 1.8 }
+.ai-card-where { display: flex; flex-wrap: wrap; gap: .3rem }
+.ai-card-where .pill { font-size: .68rem; padding: .1rem .5rem }
+.ai-card-state { font-size: .75rem; color: var(--accent2); font-variant-numeric: tabular-nums }
+.ai-card-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+  font-size: .72rem; color: var(--text-muted); font-variant-numeric: tabular-nums;
+  border-top: 1px dashed rgba(255,255,255,.08); padding-top: .5rem;
+}
+.ai-card-foot .btn { font-size: .7rem; padding: .1rem .5rem }
+.ai-cap-bar { height: 3px; border-radius: 2px; background: rgba(255,255,255,.1); margin-top: .35rem; overflow: hidden }
+.ai-cap-bar span { display: block; height: 100%; background: var(--accent2); border-radius: 2px }
+.ai-cap-bar span.is-full { background: #f59e0b }
+#ai-log-table { font-size: .76rem; font-variant-numeric: tabular-nums }
+#ai-log-table th { font-size: .7rem; white-space: nowrap }
+tr.ai-log-bad td { background: rgba(239,68,68,.06) }
+
 /* «سورین»'s questions, in the dialog (js: aiAssistantLog) */
 .ai-q { padding: .55rem 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .8rem; line-height: 1.7 }
 .ai-q:last-child { border-bottom: 0 }

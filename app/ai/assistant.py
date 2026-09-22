@@ -80,11 +80,15 @@ async def allowed_chats(db) -> List[str]:
 
 
 async def enabled(db) -> bool:
+    """Its own switch on the AI screen, and the global one under it. The old
+    key is kept so a switch thrown before the screen existed still holds."""
     try:
         rows = await secret_box.get_many(db, (KEY_ENABLED,))
     except Exception:
         return True
-    return (rows.get(KEY_ENABLED) or "true").lower() != "false"
+    if (rows.get(KEY_ENABLED) or "true").lower() == "false":
+        return False
+    return await llm.agent_enabled(db, "assistant")
 
 
 async def seen_chats(db) -> List[Dict[str, str]]:

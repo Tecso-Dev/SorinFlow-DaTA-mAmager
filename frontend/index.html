@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260922f">
+    <link rel="stylesheet" href="css/style.css?v=20260922g">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -426,6 +426,10 @@
             <a class="nav-item-link" onclick="showSection('portal')" id="nav-link-portal">
                 <span class="nav-icon"><i class="bi bi-inbox"></i></span>
                 درخواست‌های مشتریان
+            </a>
+            <a class="nav-item-link" onclick="showSection('ai')" id="nav-link-ai">
+                <span class="nav-icon"><i class="bi bi-stars"></i></span>
+                هوش مصنوعی
             </a>
             <a class="nav-item-link" onclick="showSection('monitoring')" id="nav-link-monitoring">
                 <span class="nav-icon"><i class="bi bi-activity"></i></span>
@@ -2579,6 +2583,181 @@
                 </div>
             </div>
 
+            <!-- ═══ هوش مصنوعی ═══ Every agent in one screen: what it is, where it is
+                 used, how far it has come, what it costs, and everything it did. -->
+            <div id="section-ai" class="section-content" style="display:none;">
+                <div class="row g-3 mb-3" id="ai-tiles">
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-purple">
+                            <div class="stat-label">اتصال</div>
+                            <div class="stat-value" id="ai-t-conn" style="font-size:1rem">—</div>
+                            <div class="stat-sub" id="ai-t-conn-sub"></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-cyan">
+                            <div class="stat-label">هزینهٔ امروز</div>
+                            <div class="stat-value" id="ai-t-today">—</div>
+                            <div class="stat-sub" id="ai-t-cap"></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-green">
+                            <div class="stat-label">این ماه</div>
+                            <div class="stat-value" id="ai-t-month">—</div>
+                            <div class="stat-sub" id="ai-t-month-sub"></div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card s-orange">
+                            <div class="stat-label">توکن رایگان لیارا (امروز)</div>
+                            <div class="stat-value" id="ai-t-quota" style="font-size:1rem">—</div>
+                            <div class="stat-sub" id="ai-t-quota-sub"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <i class="bi bi-cpu"></i> ایجنت‌ها
+                        <span class="text-muted small">هر کدام جدا خاموش/روشن می‌شود؛ خاموش‌کردن ایجنت بقیه را متوقف نمی‌کند.</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadAiScreen()" title="تازه‌سازی">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="card-body" id="ai-agents-grid"></div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-journal-text"></i> لاگ فراخوانی‌ها
+                        <select id="ai-log-agent" class="form-select form-select-sm" style="width:180px" onchange="loadAiLog()">
+                            <option value="">همهٔ ایجنت‌ها</option>
+                        </select>
+                        <div class="form-check form-switch m-0">
+                            <input class="form-check-input" type="checkbox" id="ai-log-failed" onchange="loadAiLog()">
+                            <label class="form-check-label small" for="ai-log-failed">فقط خطاها</label>
+                        </div>
+                        <span class="small text-muted ms-auto" id="ai-log-note"></span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0 align-middle" id="ai-log-table">
+                            <thead><tr>
+                                <th>زمان</th><th>ایجنت</th><th>کار</th><th>مدل</th>
+                                <th>توکن</th><th>تومان</th><th>مدت</th><th>نتیجه</th>
+                            </tr></thead>
+                            <tbody id="ai-log-rows"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <i class="bi bi-chat-square-text"></i> سؤال‌های دستیار
+                        <button class="btn btn-sm btn-outline-primary ms-auto" onclick="aiAssistantAsk()">
+                            <i class="bi bi-chat-dots"></i> بپرس
+                        </button>
+                    </div>
+                    <div class="card-body" id="ai-chats"></div>
+                </div>
+
+                <!-- تنظیمات: the connection, the model of each job, the cap, the office notes -->
+                <div class="card mb-3" id="ai-card">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <i class="bi bi-stars"></i> هوش مصنوعی
+                        <span id="ai-badge" class="badge bg-secondary">در حال بررسی...</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadAi()" title="تازه‌سازی">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-2">
+                            کلید و آدرس سرویس در GitHub نگهداری می‌شوند و با هر دپلوی به سرور می‌رسند —
+                            اینجا فقط وضعیت‌شان دیده می‌شود، نه مقدارشان. مدل هر کار، سقف هزینهٔ روزانه و
+                            تذکرات دفتر از همین‌جا تنظیم می‌شوند. اگر سرویس قطع باشد، پنل مثل همیشه کار می‌کند.
+                        </p>
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-4">
+                                <div class="bk-stat">
+                                    <div class="bk-lbl"><i class="bi bi-plug"></i> اتصال</div>
+                                    <div class="bk-val" id="ai-conn">—</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="bk-stat">
+                                    <div class="bk-lbl"><i class="bi bi-cash-coin"></i> هزینهٔ امروز</div>
+                                    <div class="bk-val" id="ai-today">—</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="bk-stat">
+                                    <div class="bk-lbl"><i class="bi bi-calendar3"></i> این ماه</div>
+                                    <div class="bk-val" id="ai-month">—</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ai-agents" id="ai-agents"></div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-6">
+                                <label class="form-label small" for="ai-model-write">مدل نوشتن فارسی — توضیح‌ها و پیام‌ها</label>
+                                <input type="text" id="ai-model-write" class="form-control form-control-sm" dir="ltr" placeholder="openai/gpt-4.1-mini">
+                                <div class="form-text small" id="ai-model-write-hint"></div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small" for="ai-model-read">مدل خواندن — متن آگهی و نیاز مشتری</label>
+                                <input type="text" id="ai-model-read" class="form-control form-control-sm" dir="ltr" placeholder="z-ai/glm-5.3-flash">
+                                <div class="form-text small" id="ai-model-read-hint"></div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small" for="ai-model-vision">مدل تصویر</label>
+                                <input type="text" id="ai-model-vision" class="form-control form-control-sm" dir="ltr" placeholder="z-ai/glm-5.3-flash">
+                                <div class="form-text small" id="ai-model-vision-hint"></div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small" for="ai-model-embed">مدل جستجوی معنایی (Embedding)</label>
+                                <input type="text" id="ai-model-embed" class="form-control form-control-sm" dir="ltr" placeholder="openai/text-embedding-3-small">
+                                <div class="form-text small" id="ai-model-embed-hint"></div>
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-4">
+                                <label class="form-label small" for="ai-cap">سقف هزینهٔ روزانه (دلار)</label>
+                                <input type="number" id="ai-cap" class="form-control form-control-sm" dir="ltr" min="0" max="100" step="0.5" placeholder="۲">
+                                <div class="form-text small">با پرشدن سقف، ایجنت‌های پس‌زمینه تا فردا صبر می‌کنند.</div>
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label small" for="ai-notes">تذکرات دفتر — به متن‌هایی که مشتری می‌خواند اضافه می‌شود</label>
+                                <textarea id="ai-notes" class="form-control form-control-sm" rows="2" placeholder="مثلاً: همیشه بنویس بازدید با هماهنگی قبلی."></textarea>
+                            </div>
+                        </div>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="ai-enabled">
+                            <label class="form-check-label small" for="ai-enabled">هوش مصنوعی روشن باشد</label>
+                        </div>
+                        <!-- «سورین» in Telegram: the backup's bot answers the backup's chats from the database -->
+                        <div class="bk-digest mb-3" id="ai-assistant">
+                            <div class="bk-digest-text">
+                                <i class="bi bi-chat-square-text"></i>
+                                <span><b>دستیار دفتر «سورین»</b> — در تلگرام، به همان چت‌های بکاپ، از دیتابیس دفتر جواب می‌دهد (آگهی‌ها، صف تماس، مشتری‌ها، خلاصهٔ امروز). فقط می‌خواند و شماره‌ای نمی‌دهد.</span>
+                                <span class="text-muted" id="ai-assistant-last"></span>
+                            </div>
+                            <div class="form-check form-switch m-0">
+                                <input class="form-check-input" type="checkbox" id="ai-assistant-enabled" onchange="aiAssistantToggle(this.checked)">
+                                <label class="form-check-label small" for="ai-assistant-enabled">روشن</label>
+                            </div>
+                            <button class="btn btn-sm btn-outline-primary text-nowrap" onclick="aiAssistantAsk()"><i class="bi bi-chat-dots"></i> بپرس</button>
+                            <button class="btn btn-sm btn-outline-secondary text-nowrap" onclick="aiAssistantLog()"><i class="bi bi-list-ul"></i> سؤال‌ها</button>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap align-items-center">
+                            <button class="btn btn-sm btn-primary" onclick="aiSave()"><i class="bi bi-save"></i> ذخیره</button>
+                            <button class="btn btn-sm btn-outline-primary" id="ai-test" onclick="aiTest()"><i class="bi bi-lightning-charge"></i> تست اتصال</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="aiUsage()"><i class="bi bi-list-ul"></i> آخرین مصرف‌ها</button>
+                            <span class="small" id="ai-result"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div id="section-monitoring" class="section-content" style="display:none;">
                 <!-- Health tiles. Values arrive from /api/monitoring/overview and are
                      written with textContent, never innerHTML — everything here comes
@@ -3488,101 +3667,6 @@
                         </div>
                         <div id="maintenance-eta" class="d-none small mt-2" style="color:var(--brand,#4f8cff)"></div>
                         <div id="maintenance-bypass" class="d-none mt-3"></div>
-                    </div>
-                </div>
-                <!-- هوش مصنوعی: what is connected, which model does which job, what it cost -->
-                <div class="card mb-3" id="ai-card">
-                    <div class="card-header d-flex align-items-center gap-2">
-                        <i class="bi bi-stars"></i> هوش مصنوعی
-                        <span id="ai-badge" class="badge bg-secondary">در حال بررسی...</span>
-                        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadAi()" title="تازه‌سازی">
-                            <i class="bi bi-arrow-clockwise"></i>
-                        </button>
-                    </div>
-                    <div class="card-body">
-                        <p class="text-muted small mb-2">
-                            کلید و آدرس سرویس در GitHub نگهداری می‌شوند و با هر دپلوی به سرور می‌رسند —
-                            اینجا فقط وضعیت‌شان دیده می‌شود، نه مقدارشان. مدل هر کار، سقف هزینهٔ روزانه و
-                            تذکرات دفتر از همین‌جا تنظیم می‌شوند. اگر سرویس قطع باشد، پنل مثل همیشه کار می‌کند.
-                        </p>
-                        <div class="row g-2 mb-3">
-                            <div class="col-md-4">
-                                <div class="bk-stat">
-                                    <div class="bk-lbl"><i class="bi bi-plug"></i> اتصال</div>
-                                    <div class="bk-val" id="ai-conn">—</div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="bk-stat">
-                                    <div class="bk-lbl"><i class="bi bi-cash-coin"></i> هزینهٔ امروز</div>
-                                    <div class="bk-val" id="ai-today">—</div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="bk-stat">
-                                    <div class="bk-lbl"><i class="bi bi-calendar3"></i> این ماه</div>
-                                    <div class="bk-val" id="ai-month">—</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="ai-agents" id="ai-agents"></div>
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-6">
-                                <label class="form-label small" for="ai-model-write">مدل نوشتن فارسی — توضیح‌ها و پیام‌ها</label>
-                                <input type="text" id="ai-model-write" class="form-control form-control-sm" dir="ltr" placeholder="openai/gpt-4.1-mini">
-                                <div class="form-text small" id="ai-model-write-hint"></div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label small" for="ai-model-read">مدل خواندن — متن آگهی و نیاز مشتری</label>
-                                <input type="text" id="ai-model-read" class="form-control form-control-sm" dir="ltr" placeholder="z-ai/glm-5.3-flash">
-                                <div class="form-text small" id="ai-model-read-hint"></div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label small" for="ai-model-vision">مدل تصویر</label>
-                                <input type="text" id="ai-model-vision" class="form-control form-control-sm" dir="ltr" placeholder="z-ai/glm-5.3-flash">
-                                <div class="form-text small" id="ai-model-vision-hint"></div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label small" for="ai-model-embed">مدل جستجوی معنایی (Embedding)</label>
-                                <input type="text" id="ai-model-embed" class="form-control form-control-sm" dir="ltr" placeholder="openai/text-embedding-3-small">
-                                <div class="form-text small" id="ai-model-embed-hint"></div>
-                            </div>
-                        </div>
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-4">
-                                <label class="form-label small" for="ai-cap">سقف هزینهٔ روزانه (دلار)</label>
-                                <input type="number" id="ai-cap" class="form-control form-control-sm" dir="ltr" min="0" max="100" step="0.5" placeholder="۲">
-                                <div class="form-text small">با پرشدن سقف، ایجنت‌های پس‌زمینه تا فردا صبر می‌کنند.</div>
-                            </div>
-                            <div class="col-md-8">
-                                <label class="form-label small" for="ai-notes">تذکرات دفتر — به متن‌هایی که مشتری می‌خواند اضافه می‌شود</label>
-                                <textarea id="ai-notes" class="form-control form-control-sm" rows="2" placeholder="مثلاً: همیشه بنویس بازدید با هماهنگی قبلی."></textarea>
-                            </div>
-                        </div>
-                        <div class="form-check form-switch mb-2">
-                            <input class="form-check-input" type="checkbox" id="ai-enabled">
-                            <label class="form-check-label small" for="ai-enabled">هوش مصنوعی روشن باشد</label>
-                        </div>
-                        <!-- «سورین» in Telegram: the backup's bot answers the backup's chats from the database -->
-                        <div class="bk-digest mb-3" id="ai-assistant">
-                            <div class="bk-digest-text">
-                                <i class="bi bi-chat-square-text"></i>
-                                <span><b>دستیار دفتر «سورین»</b> — در تلگرام، به همان چت‌های بکاپ، از دیتابیس دفتر جواب می‌دهد (آگهی‌ها، صف تماس، مشتری‌ها، خلاصهٔ امروز). فقط می‌خواند و شماره‌ای نمی‌دهد.</span>
-                                <span class="text-muted" id="ai-assistant-last"></span>
-                            </div>
-                            <div class="form-check form-switch m-0">
-                                <input class="form-check-input" type="checkbox" id="ai-assistant-enabled" onchange="aiAssistantToggle(this.checked)">
-                                <label class="form-check-label small" for="ai-assistant-enabled">روشن</label>
-                            </div>
-                            <button class="btn btn-sm btn-outline-primary text-nowrap" onclick="aiAssistantAsk()"><i class="bi bi-chat-dots"></i> بپرس</button>
-                            <button class="btn btn-sm btn-outline-secondary text-nowrap" onclick="aiAssistantLog()"><i class="bi bi-list-ul"></i> سؤال‌ها</button>
-                        </div>
-                        <div class="d-flex gap-2 flex-wrap align-items-center">
-                            <button class="btn btn-sm btn-primary" onclick="aiSave()"><i class="bi bi-save"></i> ذخیره</button>
-                            <button class="btn btn-sm btn-outline-primary" id="ai-test" onclick="aiTest()"><i class="bi bi-lightning-charge"></i> تست اتصال</button>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="aiUsage()"><i class="bi bi-list-ul"></i> آخرین مصرف‌ها</button>
-                            <span class="small" id="ai-result"></span>
-                        </div>
                     </div>
                 </div>
                 <!-- بکاپ: the nightly snapshot and its copy off the server -->
@@ -5005,12 +5089,12 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260922f"></script>
+<script src="js/app.js?v=20260922g"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
-<script src="js/ai/reader.js?v=20260922f"></script>
-<script src="js/ai/embed.js?v=20260922f"></script>
-<script src="js/ai/photo.js?v=20260922f"></script>
-<script src="js/ai/need.js?v=20260922f"></script>
+<script src="js/ai/reader.js?v=20260922g"></script>
+<script src="js/ai/embed.js?v=20260922g"></script>
+<script src="js/ai/photo.js?v=20260922g"></script>
+<script src="js/ai/need.js?v=20260922g"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

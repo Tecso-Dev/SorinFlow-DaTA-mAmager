@@ -47,9 +47,10 @@ Read this before changing anything. Where this section and the rest of the READM
 | API | 14 routers mounted at `/api` (`app/api/routes/__init__.py:14-50`) | 189 application endpoints; CRM alone is 65 |
 | Non-router routes | 12 defined in `app/main.py` | `/`, `/portal`, `/health`, `/api/maintenance`, `/api/public/stats`, the `/dashboard` and `/images` mounts |
 | Data model | 20 tables across 8 modules under `app/models/` | created by `Base.metadata.create_all`, then patched |
-| Frontend | three separate HTML documents, no build step | `index.html` (staff panel, 11 sections in one file), `portal.html` (visitor, zero CDN), `landing.html` |
-| Services | 17 modules under `app/services/` | backups, SMS, email, verification, maintenance, matching, Excel, GCP |
-| Background | 11 loops + one boot-time cleanup, started in lifespan (`app/main.py`) | reminders, backups, lease expiry, session verifier, proxy refresh, forwarder watch, APK mirror, scrape schedules, match engine, price watch, morning digest, GCP exporter |
+| Frontend | three separate HTML documents, no build step | `index.html` (staff panel, 12 sections in one file; `js/app.js` plus one file per AI agent under `js/ai/`), `portal.html` (visitor, zero CDN), `landing.html` |
+| Services | 18 modules under `app/services/` | backups, SMS, email, verification, maintenance, matching, Excel, GCP, **`llm.py`** (the one door to the model gateway) |
+| AI agents | 6 under `app/ai/` | the explainer (in `match_service`), listing reader, need parser, embeddings, photo tagger, the Telegram assistant |
+| Background | 15 loops + one boot-time cleanup, started in lifespan (`app/main.py`) | reminders, backups, lease expiry, session verifier, proxy refresh, forwarder watch, APK mirror, scrape schedules, match engine, price watch, morning digest, listing reader, embeddings, photo tagger, the assistant's Telegram poll, GCP exporter |
 
 **Auth is two systems, not one.** Four roles (`root`, `super_admin`, `admin`, `visitor`) in `app/auth/permissions.py:17-32`. `root` and `super_admin` bypass permission checks; `admin` is filtered through an 11-key permission list stored as JSON on the user row; `visitor` is refused by `_staff_check` before the list is read. The gate that matters is `Depends(require_permission(k))` applied at the **router** level, so a handler that looks unguarded usually is not — check `app/api/routes/__init__.py` first. `visitor` accounts hold perfectly valid JWTs, so "authenticated" stopped meaning "belongs in the panel" the day the portal shipped.
 
@@ -300,6 +301,40 @@ sequenceDiagram
 | **Add a background task** | `app/main.py` lifespan (`:147-180`) | Create the task **and** cancel it in the shutdown block. Insert it outside the `@asynccontextmanager` / `async def lifespan` pair — putting a helper between the decorator and the function detaches the decorator and the app fails to start. |
 | **Change what the maintenance page lets through** | `app/services/maintenance.py:186-199` (`OPEN_PREFIXES`) and `app/main.py:297-334` (`_maintenance_allows`) | `_maintenance_allows` is currently **defined twice**, byte-identical, at `main.py:258` and `:297`. The second wins; edit that one. |
 
+### 4b. The AI agents
+
+Six agents, one door. Everything they do goes through `app/services/llm.py`:
+the connection (Liara's OpenAI-compatible gateway, key and base URL from the
+environment, GitHub-managed), a model per job (`write` / `read` / `vision` /
+`embed`, environment defaults overridable per job from the panel), `mask_pii`
+on every string that leaves, JSON mode with a pydantic schema and one retry, a
+ledger row per call carrying Liara's own cost, and a daily cap in dollars that
+stops the background agents until Tehran midnight. A reasoning model (`z-ai/`,
+`deepseek/`, `moonshotai/`) gets a 1500-token floor and a 90-second timeout,
+because its thinking comes out of the same budget as its answer.
+
+| Agent | When | Reads / writes | Where it shows in the panel |
+|---|---|---|---|
+| **توضیح‌دهندهٔ پیشنهاد** (`match_service._llm_rerank`) | when a match list is opened | writes one Persian line per candidate; the ranking stays local | «ملک‌های مشابه», «ملک‌های مناسب», the match queue |
+| **خوانندهٔ آگهی** (`app/ai/listing_reader.py`) | background, every 120 s, 50 listings | `properties.ai_facts` — kind, floor, document, condition, amenities, the real district, «قابل تبدیل» / معاوضه / تخلیه / «مناسبِ…», red flags, a confidence per field | «برداشت هوش مصنوعی» on the property modal; `effective()` feeds matching and «ملک‌های مشابه» |
+| **خوانندهٔ نیاز مشتری** (`app/ai/need_parser.py`) | on demand | proposes the intake form's fields; writes nothing without a person | «پر کردن از متن» on the customer form; a portal request's description refines its customer |
+| **جستجوی معنایی و تکراری‌یاب** (`app/ai/embeddings.py`) | background, every 180 s, 200 listings | `properties.ai_embedding` (JSON, numpy at this scale — pgvector later) and `ai_duplicate_of` | «جستجوی معنایی» on the leads page, «شباهت متن» in the score, the «احتمالاً تکراری» badge, the assistant's search tool |
+| **برچسب‌زن عکس** (`app/ai/photo_tagger.py`) | background, every 300 s, 30 listings | `properties.ai_photo_tags` from the first three photos at 512 px | the property modal's photo box, the «هوش تصویری» page |
+| **دستیار دفتر «سورین»** (`app/ai/assistant.py`) | when somebody asks | six read-only tools; every question in `ai_chats` | Telegram (the backup's chats) and «بپرس» on the AI screen |
+
+Rules that hold for all six: none of them sits on a request path that matters
+(the model being down costs a sentence, never a page); every one is gated on
+`MATCH_ENGINE` and on its own switch; none sends a phone number to a third
+party; and a pass that only fails backs off ten ticks rather than paying for
+the same failures again in two minutes.
+
+The **هوش مصنوعی** screen (root/super_admin) is where all of it is managed:
+the connection and the per-job models, the daily cap and the office's standing
+notes, a card per agent with what it does, where it is used, how far its pass
+has come and what it cost today and this month, a switch and a «اجرای یک دور»
+button each, the filtered call log with its failures, Liara's own free-token
+quota, and the assistant's questions.
+
 ### 5. Module boundary rules
 
 Enforced by convention today, not by a linter. The arrows below are the ones that actually exist in the tree.
@@ -536,7 +571,9 @@ All application routes are mounted below `/api`.
 | `/api/monitoring` | Service health, resource use, live logs, Divar connectivity probe, session verification, and `client-errors` (what broke in users' browsers). Also gates `/api/gcp` |
 | `/api/sms` | Kavenegar panel: settings, audiences, broadcast, delivery status, logs |
 | `/api/email` | SMTP panel: settings, templates, previews, audiences, broadcast, export |
-| `/api/backup` | Nightly snapshot status, Telegram offsite settings, chat discovery, run-now (root/super_admin) |
+| `/api/backup` | Nightly snapshot status, Telegram offsite settings, chat discovery, run-now, the morning digest's preview and extra send (root/super_admin) |
+| `/api/ai` | The AI screen (root/super_admin): `overview` draws it in one request, `settings` and `test` for the connection, `agents/{key}` switches one agent, `log` is the filtered ledger, `usage` the last calls |
+| `/api/ai/reader`, `/api/ai/embed`, `/api/ai/photo`, `/api/ai/assistant` | Each agent's own status, one pass now, and re-doing a single listing; `ai/embed`'s search / similar / duplicates and `ai/need/parse` sit behind the CRM key instead, because consultants use them |
 | `/api/scraper/schedules` | Saved scrapes that fire daily at a Tehran hour, as their owner — list, create, edit, delete, run-now |
 | `/api/crm/calls/*` | The call queue: `calls/today` (leads due now, mine or unassigned), `leads/{id}/call` (one outcome per dial), `calls/summary` |
 | `/api/portal` | Visitor requests and upgrade tickets, plus the staff screens that triage them |

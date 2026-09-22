@@ -1138,7 +1138,7 @@ function copyTotpSecret() {
 }
 
 // ═══ Hash router: #/login, #/dashboard, #/properties, ... ═══════
-const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'insights', 'auth', 'forwarder', 'proxies', 'portal', 'monitoring', 'sms', 'email', 'users', 'profile'];
+const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'insights', 'auth', 'forwarder', 'proxies', 'portal', 'monitoring', 'ai', 'sms', 'email', 'users', 'profile'];
 let _currentSection = null;
 let _intendedRoute = null;   // deep link requested before login
 let _suppressHashNav = false;
@@ -1225,7 +1225,7 @@ const NAV_PERMISSION = {
     'nav-link-email':      'email',
 };
 // Sections that are not permission-gated but role-gated.
-const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'] };
+const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'], 'nav-link-ai': ['root', 'super_admin'] };
 
 const SECTION_PERMISSION = {
     dashboard: 'stats', properties: 'properties', scraper: 'scraper',
@@ -1332,6 +1332,7 @@ const SECTION_META = {
     proxies:    { title: 'مدیریت پراکسی‌ها',     subtitle: 'افزودن، تست و مدیریت پراکسی‌ها' },
     portal:     { title: 'درخواست‌های مشتریان',  subtitle: 'ملک‌هایی که بازدیدکنندگان سایت دنبالش هستند' },
     monitoring: { title: 'پایش سامانه',          subtitle: 'سلامت سرویس‌ها، منابع و لاگ زندهٔ سامانه' },
+    ai:         { title: 'هوش مصنوعی',           subtitle: 'ایجنت‌ها، مصرف، لاگ فراخوانی‌ها و تنظیمات مدل' },
     email:      { title: 'ایمیل',                subtitle: 'تنظیمات SMTP، قالب‌های سایت و گزارش ارسال' },
     sms:        { title: 'پیامک',                subtitle: 'تنظیمات کاوه‌نگار، ارسال تکی و گروهی، و گزارش تحویل' },
     users:      { title: 'مدیریت کاربران',       subtitle: 'حساب‌ها، دسترسی‌ها و درخواست‌های ارتقا' },
@@ -1423,10 +1424,13 @@ function showSection(sectionName) {
         case 'insights':   insTab(_insTab); break;
         case 'portal':     loadPortalRequests(); break;
         case 'monitoring': loadMonitoring(); loadClientErrors(); break;
+        case 'ai':         if (['root', 'super_admin'].includes(_currentUser?.role)) {
+                               loadAiScreen(); loadAi(); loadAiLog(); loadAiChats();
+                           } break;
         case 'sms':        loadSms(); break;
         case 'email':      _applyCrmRoleVisibility(); loadEmail(); break;
         case 'users':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
-                               loadUsers(); loadMaintenance(); loadBackup(); loadAi(); initPermsUI(); loadTickets();
+                               loadUsers(); loadMaintenance(); loadBackup(); initPermsUI(); loadTickets();
                            } break;
     }
 }
@@ -3573,6 +3577,176 @@ async function aiTest() {
     btn.disabled = false;
 }
 
+// ── the AI screen: every agent, its state, its cost, its log ──
+const AI_KIND_FA = { loop: 'پس‌زمینه', on_demand: 'هنگام استفاده', telegram: 'تلگرام' };
+const AI_JOB_FA = { write: 'نوشتن فارسی', read: 'خواندن', vision: 'تصویر', embed: 'جستجوی معنایی' };
+
+function _aiTokens(n) {
+    if (!n && n !== 0) return '—';
+    return n >= 1000 ? `${formatNumber(Math.round(n / 1000))} هزار` : formatNumber(n);
+}
+
+/** What an agent's own status endpoint said, as one readable line. */
+function _aiAgentState(a) {
+    const st = a.state || {};
+    if (st.error) return '<span class="text-warning">وضعیت در دسترس نیست</span>';
+    const bits = [];
+    if (a.key === 'reader') {
+        bits.push(`خوانده: ${formatNumber(st.read || 0)}`);
+        if (st.behind != null) bits.push(`در نوبت: ${formatNumber(st.behind)}`);
+        if (st.prompt_version != null) bits.push(`پرامپت نسخهٔ ${formatNumber(st.prompt_version)}`);
+    } else if (a.key === 'embed') {
+        bits.push(`بردار: ${formatNumber(st.embedded || 0)}`);
+        if (st.behind != null) bits.push(`در نوبت: ${formatNumber(st.behind)}`);
+        bits.push(`تکراری: ${formatNumber(st.duplicates || 0)}`);
+    } else if (a.key === 'vision') {
+        bits.push(`برچسب‌خورده: ${formatNumber(st.tagged || 0)}`);
+        if (st.skipped) bits.push(`بدون عکس: ${formatNumber(st.skipped)}`);
+        if (st.behind != null) bits.push(`در نوبت: ${formatNumber(st.behind)}`);
+    } else if (a.key === 'assistant') {
+        bits.push(`${formatNumber((st.allowed_chats || []).length)} چت مجاز`);
+        bits.push(`امروز ${formatNumber(st.questions_today || 0)} سؤال`);
+        if (!st.telegram_configured) bits.push('<span class="text-warning">تلگرام تنظیم نشده</span>');
+    } else {
+        bits.push('بدون صف — هر بار که لازم شود اجرا می‌شود');
+    }
+    return bits.join(' · ');
+}
+
+function _aiAgentCard(a) {
+    const st = a.state || {};
+    const runnable = a.kind === 'loop';
+    const err = (a.today.failed || 0);
+    return `
+    <div class="ai-card ${a.enabled ? '' : 'is-off'}">
+        <div class="ai-card-head">
+            <span class="ai-dot ${a.enabled ? 'on' : ''}"></span>
+            <div>
+                <b>${esc(a.name)}</b>
+                <span class="badge bg-secondary-subtle text-secondary-emphasis">${esc(AI_KIND_FA[a.kind] || a.kind)}</span>
+                <span class="badge bg-primary-subtle text-primary-emphasis" title="کاری که این ایجنت از مدل می‌خواهد">${esc(AI_JOB_FA[a.job] || a.job)}</span>
+            </div>
+            <div class="form-check form-switch m-0 ms-auto">
+                <input class="form-check-input" type="checkbox" id="ai-sw-${esc(a.key)}" ${a.enabled ? 'checked' : ''}
+                       onchange="aiAgentToggle('${esc(a.key)}', this.checked)">
+            </div>
+        </div>
+        <div class="ai-card-desc">${esc(a.desc)}</div>
+        <div class="ai-card-where">${(a.where || []).map(w => `<span class="pill">${esc(w)}</span>`).join('')}</div>
+        <div class="ai-card-state">${_aiAgentState(a)}</div>
+        <div class="ai-card-foot">
+            <span title="مدل این کار" dir="ltr">${esc(a.model || '—')}</span>
+            <span>امروز: ${formatNumber(a.today.calls || 0)} فراخوانی · ${formatNumber(a.today.cost_toman || 0)} تومان${err ? ` · <span class="text-danger">${formatNumber(err)} خطا</span>` : ''}</span>
+            <span class="text-muted">ماه: ${formatNumber(a.month.calls || 0)} · ${formatNumber(a.month.cost_toman || 0)} تومان</span>
+            ${runnable ? `<button class="btn btn-sm btn-outline-primary ms-auto" onclick="aiRunAgent('${esc(a.key)}', this)">
+                <i class="bi bi-play-fill"></i> اجرای یک دور</button>` : ''}
+        </div>
+    </div>`;
+}
+
+async function loadAiScreen() {
+    const grid = document.getElementById('ai-agents-grid');
+    if (!grid) return;
+    try {
+        const s = await apiCall('/ai/overview');
+        const u = s.usage || { today: {}, month: {} };
+        const conn = document.getElementById('ai-t-conn');
+        conn.textContent = s.configured ? (s.enabled ? 'وصل است' : 'خاموش') : 'تنظیم نشده';
+        conn.className = 'stat-value ' + (s.configured && s.enabled ? 'text-success' : 'text-warning');
+        conn.style.fontSize = '1rem';
+        document.getElementById('ai-t-conn-sub').textContent = s.workspace ? `پروژهٔ ${s.workspace}` : 'کلید در GitHub تنظیم نشده';
+        document.getElementById('ai-t-today').textContent = `${formatNumber(u.today.cost_toman || 0)} تومان`;
+        const capPct = s.cap_usd ? Math.min(100, Math.round((u.today.cost_usd || 0) / s.cap_usd * 100)) : 0;
+        document.getElementById('ai-t-cap').innerHTML =
+            `${formatNumber(u.today.calls || 0)} فراخوانی · ${formatNumber(capPct)}٪ سقف روزانه` +
+            `<div class="ai-cap-bar"><span style="width:${capPct}%" class="${s.cap_reached ? 'is-full' : ''}"></span></div>`;
+        document.getElementById('ai-t-month').textContent = `${formatNumber(u.month.cost_toman || 0)} تومان`;
+        document.getElementById('ai-t-month-sub').textContent =
+            `${formatNumber(u.month.calls || 0)} فراخوانی · ${_aiTokens(u.month.tokens)} توکن` + (s.liara ? ` · لیارا: ${formatNumber(s.liara.cost_toman)} تومان` : '');
+        const q = s.quota && s.quota.daily;
+        document.getElementById('ai-t-quota').textContent = q
+            ? `${_aiTokens(q.remainingPromptFreeTokens)} ورودی`
+            : (s.quota === null ? 'توکن لیارا تنظیم نشده' : '—');
+        document.getElementById('ai-t-quota-sub').textContent = q
+            ? `${_aiTokens(q.remainingCompletionFreeTokens)} خروجی باقی مانده${s.quota.plan ? ` · پلن ${s.quota.plan}` : ''}`
+            : '';
+
+        grid.innerHTML = (s.agents || []).map(_aiAgentCard).join('');
+        const sel = document.getElementById('ai-log-agent');
+        if (sel && sel.options.length <= 1) {
+            sel.innerHTML = '<option value="">همهٔ ایجنت‌ها</option>' +
+                (s.agents || []).map(a => `<option value="${esc(a.key)}">${esc(a.name)}</option>`).join('');
+        }
+    } catch (e) {
+        grid.innerHTML = `<div class="text-danger small">${esc(e.message || 'خطا')}</div>`;
+    }
+}
+
+async function aiAgentToggle(key, on) {
+    try {
+        await apiCall(`/ai/agents/${encodeURIComponent(key)}`, { method: 'PUT', body: JSON.stringify({ enabled: !!on }) });
+        showToast(on ? 'روشن شد' : 'خاموش شد', '', 'success');
+        loadAiScreen();
+    } catch (e) { showToast('خطا', e.message, 'danger'); loadAiScreen(); }
+}
+
+/** «اجرای یک دور» — one pass now, for an agent that otherwise waits for its tick. */
+async function aiRunAgent(key, btn) {
+    const url = { reader: '/ai/reader/run', embed: '/ai/embed/run', vision: '/ai/photo/run' }[key];
+    if (!url) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await apiCall(url, { method: 'POST' });
+        const done = r.read ?? r.embedded ?? r.tagged ?? 0;
+        showToast('اجرا شد', `${formatNumber(r.scanned || 0)} بررسی، ${formatNumber(done)} انجام${r.failed ? `، ${formatNumber(r.failed)} خطا` : ''}${r.stopped ? ` — متوقف: ${r.stopped}` : ''}`, r.failed ? 'warning' : 'success');
+        loadAiScreen(); loadAiLog();
+    } catch (e) { showToast('اجرا نشد', e.message, 'danger'); }
+    if (btn) btn.disabled = false;
+}
+
+async function loadAiLog() {
+    const body = document.getElementById('ai-log-rows');
+    if (!body) return;
+    const agent = document.getElementById('ai-log-agent')?.value || '';
+    const failed = document.getElementById('ai-log-failed')?.checked;
+    try {
+        const d = await apiCall(`/ai/log?limit=60${agent ? '&agent=' + encodeURIComponent(agent) : ''}${failed ? '&failed_only=true' : ''}`);
+        const items = d.items || [];
+        document.getElementById('ai-log-note').textContent = `${formatNumber(items.length)} فراخوانی اخیر`;
+        body.innerHTML = items.length ? items.map(i => `
+            <tr class="${i.ok ? '' : 'ai-log-bad'}">
+                <td class="small text-muted" dir="ltr">${esc((i.created_at || '').slice(5, 16).replace('T', ' '))}</td>
+                <td>${esc(i.agent)}</td>
+                <td class="small">${esc(AI_JOB_FA[i.job] || i.job)}</td>
+                <td class="small text-muted" dir="ltr">${esc(i.model || '—')}</td>
+                <td>${formatNumber((i.prompt_tokens || 0) + (i.completion_tokens || 0))}</td>
+                <td>${formatNumber(Math.round(i.cost_toman || 0))}</td>
+                <td>${formatNumber(i.ms || 0)}</td>
+                <td>${i.ok ? '<span class="text-success">✓</span>' : `<span class="text-danger" title="${esc(i.error || '')}">✗ ${esc((i.error || '').slice(0, 40))}</span>`}</td>
+            </tr>`).join('') : '<tr><td colspan="8" class="text-center text-muted py-3">چیزی ثبت نشده</td></tr>';
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="8" class="text-danger text-center py-3">${esc(e.message)}</td></tr>`;
+    }
+}
+
+async function loadAiChats() {
+    const box = document.getElementById('ai-chats');
+    if (!box) return;
+    try {
+        const d = await apiCall('/ai/assistant/log?limit=20');
+        const items = d.items || [];
+        box.innerHTML = items.length ? items.map(i => `
+            <div class="ai-q">
+                <div class="ai-q-head"><b>${esc(i.who || '—')}</b>
+                    <span class="text-muted">${esc((i.created_at || '').slice(5, 16).replace('T', ' '))}${i.chat_id ? '' : ' · از پنل'}${(i.tools || []).length ? ' · ' + esc(i.tools.join('، ')) : ''}</span></div>
+                <div class="ai-q-q">${esc(i.question)}</div>
+                <div class="ai-q-a ${i.ok ? '' : 'text-danger'}">${esc(i.answer || '')}</div>
+            </div>`).join('') : '<div class="text-muted small">هنوز کسی چیزی نپرسیده — در تلگرام به ربات پیام بدهید یا «بپرس» را بزنید.</div>';
+    } catch (e) {
+        box.innerHTML = `<div class="text-danger small">${esc(e.message || 'خطا')}</div>`;
+    }
+}
+
 // ── «سورین», the Telegram assistant ──
 async function _aiAssistantStatus() {
     try {
@@ -3609,6 +3783,7 @@ async function aiAssistantAsk() {
         body: `<span class="ask-pre">${esc(r.text)}</span>`,
         note: `${formatNumber(r.ms)} میلی‌ثانیه${(r.tools || []).length ? ' · ابزارها: ' + esc(r.tools.join('، ')) : ''}` });
     _aiAssistantStatus();
+    if (document.getElementById('ai-chats')) { loadAiChats(); loadAiLog(); loadAiScreen(); }
 }
 
 async function aiAssistantLog() {

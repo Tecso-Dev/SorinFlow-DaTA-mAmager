@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import _role_dep
@@ -69,6 +69,138 @@ async def ai_status(db: AsyncSession = Depends(get_db), _: User = _super_admin):
              "desc": "در تلگرام از دیتابیس دفتر جواب می‌دهد — به همان چت‌های بکاپ؛ فقط خواندن، بدون شماره", "live": True},
         ],
     }
+
+
+AGENT_CARDS = [
+    {"key": "explainer", "name": "توضیح‌دهندهٔ پیشنهاد", "job": "write", "kind": "on_demand",
+     "desc": "کنار هر ملک در «ملک‌های مشابه» و «ملک‌های مناسب» یک جملهٔ فارسی می‌نویسد که چرا مناسب است یا نیست.",
+     "where": ["CRM ← ملک‌های مشابه", "CRM ← ملک‌های مناسب", "صف تطبیق"]},
+    {"key": "reader", "name": "خوانندهٔ آگهی", "job": "read", "kind": "loop", "status_url": "/ai/reader/status",
+     "desc": "متن هر آگهی تازه را می‌خواند: نوع واقعی ملک، طبقه، سند، وضعیت، «قابل تبدیل»، «معاوضه»، «مناسبِ…» و ایرادها.",
+     "where": ["جزئیات ملک ← برداشت هوش مصنوعی", "موتور تطبیق", "ملک‌های مشابه (نوع واقعی و قابل تبدیل)"]},
+    {"key": "need", "name": "خوانندهٔ نیاز مشتری", "job": "read", "kind": "on_demand",
+     "desc": "حرف آزاد مشتری را به معیارهای فرم تبدیل می‌کند؛ فقط فیلدهای خالی را پر می‌کند و چیزی را ذخیره نمی‌کند.",
+     "where": ["فرم مشتری ← پر کردن از متن", "درخواست‌های پرتال (هنگام ساخت مشتری)"]},
+    {"key": "embed", "name": "جستجوی معنایی و تکراری‌یاب", "job": "embed", "kind": "loop", "status_url": "/ai/embed/status",
+     "desc": "متن هر آگهی را به بردار تبدیل می‌کند: جستجو با جملهٔ آزاد، «شباهت متن» در امتیاز، و تشخیص آگهی تکراری.",
+     "where": ["لیدها ← جستجوی معنایی", "ملک‌های مناسب (کاندیدهای شباهت متن)", "نشان «احتمالاً تکراری»", "ابزار دستیار"]},
+    {"key": "vision", "name": "برچسب‌زن عکس", "job": "vision", "kind": "loop", "status_url": "/ai/photo/status",
+     "desc": "سه عکس اول هر آگهی را می‌بیند: بازسازی‌شده، مبله، اتاق‌ها، نقشه به‌جای عکس، لوگوی مشاور، کیفیت.",
+     "where": ["جزئیات ملک ← برچسب‌های عکس", "هوش تصویری ← برچسب‌های هوش تصویری"]},
+    {"key": "assistant", "name": "دستیار دفتر «سورین»", "job": "write", "kind": "telegram", "status_url": "/ai/assistant/status",
+     "desc": "در تلگرام از دیتابیس دفتر جواب می‌دهد — شش ابزار فقط‌خواندنی، بدون شمارهٔ کسی.",
+     "where": ["تلگرام (چت‌های بکاپ)", "همین صفحه ← بپرس"]},
+]
+
+
+@router.get("/overview")
+async def ai_overview(db: AsyncSession = Depends(get_db), _: User = _super_admin):
+    """Everything the AI screen draws, in one request: the connection, the
+    money (ours and Liara's), and every agent with its own state."""
+    from app.ai import assistant as _assistant
+    cfg = await llm.config(db)
+    usage = await llm.usage_summary(db)
+    switches = await llm.agents_enabled(db)
+    spent = usage["today"]["cost_usd"]
+
+    per_agent = {a["agent"]: a for a in usage["by_agent"]}
+    today_agent = await _usage_by_agent_today(db)
+    agents = []
+    for card in AGENT_CARDS:
+        key = card["key"]
+        state: dict = {}
+        try:
+            if key == "reader":
+                from app.ai.listing_reader import status as _st
+                state = await _st(db)
+            elif key == "embed":
+                state = await _embed_state(db)
+            elif key == "vision":
+                from app.ai.photo_tagger import status as _st
+                state = await _st(db)
+            elif key == "assistant":
+                state = await _assistant.status(db)
+        except Exception as e:
+            logger.warning(f"[ai] state for {key} unavailable: {type(e).__name__}: {e}")
+            state = {"error": type(e).__name__}
+        agents.append({**card, "enabled": switches.get(key, True),
+                       "model": cfg["models"].get(card["job"]),
+                       "state": state,
+                       "month": per_agent.get(key, {"calls": 0, "cost_usd": 0.0, "cost_toman": 0, "failed": 0}),
+                       "today": today_agent.get(key, {"calls": 0, "cost_toman": 0, "failed": 0})})
+    return {
+        **cfg,
+        "key_set": bool((llm.settings.llm_api_key or "").strip()),
+        "base_url_set": bool((llm.settings.llm_base_url or "").strip()),
+        "env_models": llm.env_models(),
+        "usage": usage, "spent_today_usd": spent, "cap_reached": spent >= cfg["cap_usd"],
+        "liara": await llm.liara_activity(), "quota": await llm.liara_quota(),
+        "agents": agents,
+    }
+
+
+async def _embed_state(db) -> dict:
+    """The finder's own numbers, without going through its route's dependencies."""
+    from sqlalchemy import and_
+    from app.ai import embeddings as emb
+    from app.models.property import Property
+    cursor = await emb._cursor(db) if hasattr(emb, "_cursor") else 0
+
+    async def count(*where):
+        return int((await db.execute(select(func.count(Property.id)).where(and_(*where)))).scalar_one())
+    return {
+        "cursor": cursor, "version": emb.EMBED_VERSION,
+        "embedded": await count(Property.ai_embedding.isnot(None)),
+        "behind": await count(Property.id > cursor, Property.is_active == True, Property.title.isnot(None)),   # noqa: E712
+        "duplicates": await count(Property.ai_duplicate_of.isnot(None)),
+        "interval_seconds": emb.TICK_SECONDS,
+    }
+
+
+async def _usage_by_agent_today(db) -> dict:
+    from sqlalchemy import case
+    from app.models.ai_usage import AiUsage
+    day = llm._day_start_utc()
+    rows = (await db.execute(
+        select(AiUsage.agent, func.count(AiUsage.id), func.coalesce(func.sum(AiUsage.cost_toman), 0.0),
+               func.coalesce(func.sum(case((AiUsage.ok.is_(False), 1), else_=0)), 0))
+        .where(AiUsage.created_at >= day).group_by(AiUsage.agent))).all()
+    return {a: {"calls": int(c), "cost_toman": round(float(t)), "failed": int(f or 0)} for a, c, t, f in rows}
+
+
+class AgentSwitchIn(BaseModel):
+    enabled: bool
+
+
+@router.put("/agents/{key}")
+async def ai_agent_switch(key: str, payload: AgentSwitchIn,
+                          db: AsyncSession = Depends(get_db), user: User = _super_admin):
+    """One agent on or off, without touching the others."""
+    if key not in llm.AGENTS:
+        raise HTTPException(status_code=404, detail="چنین ایجنتی وجود ندارد")
+    await secret_box.put(db, llm.agent_key(key), "true" if payload.enabled else "false", user.username)
+    if key == "assistant":
+        # the assistant's own older key, so one switch means one thing
+        from app.ai import assistant as _assistant
+        await secret_box.put(db, _assistant.KEY_ENABLED, "true" if payload.enabled else "false", user.username)
+    logger.info(f"[ai] agent {key} switched {'on' if payload.enabled else 'off'} by {user.username}")
+    return {"key": key, "enabled": payload.enabled}
+
+
+@router.get("/log")
+async def ai_log(agent: Optional[str] = Query(None), failed_only: bool = False,
+                 limit: int = Query(50, ge=1, le=300),
+                 db: AsyncSession = Depends(get_db), _: User = _super_admin):
+    """The ledger, filtered — every call the agents made, newest first."""
+    from app.models.ai_usage import AiUsage
+    q = select(AiUsage).order_by(AiUsage.created_at.desc())
+    if agent:
+        q = q.where(AiUsage.agent == agent)
+    if failed_only:
+        q = q.where(AiUsage.ok.is_(False))
+    rows = (await db.execute(q.limit(limit))).scalars().all()
+    return {"items": [r.to_dict() for r in rows],
+            "agents": sorted({a["agent"] for a in (await llm.usage_summary(db))["by_agent"]})}
 
 
 @router.put("/settings")

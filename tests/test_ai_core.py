@@ -233,7 +233,9 @@ class TestThePanel:
 
     def test_the_card_shows_state_never_the_key(self):
         assert 'id="ai-card"' in HTML and 'id="ai-badge"' in HTML
-        card = HTML[HTML.index('id="ai-card"'):HTML.index('id="backup-card"')]
+        # the card lives on the AI screen now, not on the users page
+        assert HTML.index('id="section-ai"') < HTML.index('id="ai-card"') < HTML.index('id="section-monitoring"')
+        card = HTML[HTML.index('id="ai-card"'):HTML.index('id="section-monitoring"')]
         assert "کلید و آدرس سرویس در GitHub" in card
         for job in ("write", "read", "vision", "embed"):
             assert f'id="ai-model-{job}"' in card
@@ -241,8 +243,9 @@ class TestThePanel:
         assert 'onclick="aiTest()"' in card and 'onclick="aiSave()"' in card and 'onclick="aiUsage()"' in card
         assert 'id="ai-key"' not in card and "type=\"password\"" not in card, "the key is not editable here"
 
-    def test_it_loads_with_the_users_section(self):
-        assert "loadBackup(); loadAi();" in JS
+    def test_it_loads_with_its_own_section(self):
+        assert "loadAiScreen(); loadAi(); loadAiLog(); loadAiChats();" in JS
+        assert "'nav-link-ai': ['root', 'super_admin']" in JS, "the screen is the two top roles'"
         fn = JS[JS.index("async function loadAi"):JS.index("async function aiSave")]
         assert "apiCall('/ai/status')" in fn and "cap_reached" in fn
         for bad in ("prompt(", "confirm(", "alert("):
@@ -291,3 +294,59 @@ class TestReasoningModels:
         out = asyncio.run(llm.chat("read", [{"role": "user", "content": "x"}], agent="t", db=object(), json_mode=True))
         assert out["data"] == {"kind": "shop"} and seen == [1500, 4500]
         assert [r for r in configured["ledger"] if not r["ok"]], "the empty answer is on the ledger as a failure"
+
+
+class TestTheAiScreen:
+    """«مدیریت این ایجنت‌ها و مانیتورینگ و لاگ آن‌ها» — one screen with every
+    agent, where it is used, how far it has come, what it cost, and every call
+    it made. Root and super_admin only, like the users page."""
+
+    def test_the_section_and_its_nav_are_role_gated(self):
+        assert 'id="section-ai"' in HTML and 'id="nav-link-ai"' in HTML and "showSection('ai')" in HTML
+        assert "'nav-link-ai': ['root', 'super_admin']" in JS
+        assert "'monitoring', 'ai', 'sms'" in JS, "the hash route exists"
+
+    def test_every_agent_is_named_with_where_it_is_used(self):
+        src = (ROOT / "app/api/routes/ai.py").read_text(encoding="utf-8")
+        cards = src[src.index("AGENT_CARDS = ["):src.index('@router.get("/overview")')]
+        for key in ("explainer", "reader", "need", "embed", "vision", "assistant"):
+            assert f'"key": "{key}"' in cards, key
+        assert cards.count('"where":') == 6, "each card says where in the panel it is used"
+        assert "CRM ← ملک‌های مشابه" in cards and "فرم مشتری ← پر کردن از متن" in cards
+        assert "تلگرام (چت‌های بکاپ)" in cards and "هوش تصویری" in cards
+
+    def test_one_request_draws_the_screen(self):
+        src = (ROOT / "app/api/routes/ai.py").read_text(encoding="utf-8")
+        fn = src[src.index('@router.get("/overview")'):src.index("async def _embed_state")]
+        for piece in ('"agents"', '"quota"', '"liara"', '"usage"', "agents_enabled", "_usage_by_agent_today"):
+            assert piece in fn, piece
+        assert "loadAiScreen" in JS and "apiCall('/ai/overview')" in JS
+
+    def test_an_agent_can_be_stopped_without_stopping_the_rest(self):
+        assert "async def agent_enabled(" in (ROOT / "app/services/llm.py").read_text(encoding="utf-8")
+        for f, key in (("app/ai/listing_reader.py", "reader"), ("app/ai/embeddings.py", "embed"),
+                       ("app/ai/photo_tagger.py", "vision")):
+            src = (ROOT / f).read_text(encoding="utf-8")
+            assert f'llm.agent_enabled(db, "{key}")' in src, f
+        src = (ROOT / "app/api/routes/ai.py").read_text(encoding="utf-8")
+        assert '@router.put("/agents/{key}")' in src and "llm.AGENTS" in src
+        assert 'onchange="aiAgentToggle(' in JS and "apiCall(`/ai/agents/" in JS
+
+    def test_the_log_is_filterable_and_the_failures_are_visible(self):
+        src = (ROOT / "app/api/routes/ai.py").read_text(encoding="utf-8")
+        fn = src[src.index('@router.get("/log")'):src.index('@router.put("/settings")')]
+        assert "failed_only" in fn and "AiUsage.ok.is_(False)" in fn and "AiUsage.agent == agent" in fn
+        assert 'id="ai-log-agent"' in HTML and 'id="ai-log-failed"' in HTML and 'id="ai-log-rows"' in HTML
+        assert "ai-log-bad" in JS and "loadAiLog" in JS
+
+    def test_a_background_agent_can_be_run_by_hand(self):
+        fn = JS[JS.index("async function aiRunAgent"):JS.index("async function loadAiLog")]
+        for url in ("/ai/reader/run", "/ai/embed/run", "/ai/photo/run"):
+            assert url in fn, url
+        assert "r.read ?? r.embedded ?? r.tagged" in fn
+
+    def test_liaras_own_free_quota_is_shown(self):
+        src = (ROOT / "app/services/llm.py").read_text(encoding="utf-8")
+        fn = src[src.index("async def liara_quota"):src.index("async def liara_activity")]
+        assert "free-tokens" in fn and "workspaces/" in fn and "liara_api_token" in fn
+        assert 'id="ai-t-quota"' in HTML and "remainingPromptFreeTokens" in JS

@@ -44,6 +44,15 @@ KEY_MODELS = {job: f"ai_model_{job}" for job in JOBS}
 KEY_CAP = "ai_daily_cap_usd"
 KEY_NOTES = "ai_office_notes"       # appended to every «write» prompt — the office's own rules
 KEY_ENABLED = "ai_enabled"
+# One switch per agent, so a noisy one can be stopped without stopping the
+# rest. Absent = on: an agent added later runs without a settings row.
+AGENTS = ("explainer", "reader", "need", "embed", "vision", "assistant")
+
+
+def agent_key(agent: str) -> str:
+    return f"ai_agent_{agent}"
+
+
 DEFAULT_CAP_USD = 2.0
 TIMEOUT = 40.0
 # reasoning models (Liara's GLM family): the floor and the ceiling of the
@@ -153,6 +162,25 @@ def _day_start_utc(now: Optional[datetime] = None) -> datetime:
     return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
 
+async def agent_enabled(db, agent: str) -> bool:
+    """Is this agent switched on? Its own switch, then the global one."""
+    try:
+        rows = await secret_box.get_many(db, (agent_key(agent), KEY_ENABLED))
+    except Exception:
+        return True
+    if (rows.get(KEY_ENABLED) or "true").lower() == "false":
+        return False
+    return (rows.get(agent_key(agent)) or "true").lower() != "false"
+
+
+async def agents_enabled(db) -> Dict[str, bool]:
+    try:
+        rows = await secret_box.get_many(db, tuple(agent_key(a) for a in AGENTS))
+    except Exception:
+        rows = {}
+    return {a: (rows.get(agent_key(a)) or "true").lower() != "false" for a in AGENTS}
+
+
 async def spent_today(db) -> float:
     from app.models.ai_usage import AiUsage
     return float((await db.execute(
@@ -224,13 +252,15 @@ def _url(path: str) -> str:
     return f"{(settings.llm_base_url or '').strip().rstrip('/')}/{path.lstrip('/')}"
 
 
-async def _gate(db, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+async def _gate(db, cfg: Optional[Dict[str, Any]] = None, agent: str = "") -> Dict[str, Any]:
     """Configured, switched on, and under the cap — or the reason it is not."""
     if not configured():
         raise NotConfigured("هوش مصنوعی تنظیم نشده است (LLM_API_KEY / LLM_BASE_URL)")
     cfg = cfg or await config(db)
     if not cfg["enabled"]:
         raise Disabled("هوش مصنوعی از پنل خاموش است")
+    if agent and not await agent_enabled(db, agent):
+        raise Disabled(f"این ایجنت از پنل خاموش است ({agent})")
     spent = await spent_today(db)
     if spent >= cfg["cap_usd"]:
         raise BudgetExceeded(f"سقف روزانه پر شد ({spent:.2f} از {cfg['cap_usd']:.2f} دلار)")
@@ -286,7 +316,7 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
     try:
         cfg = await config(session)
         if cap:
-            await _gate(session, cfg)
+            await _gate(session, cfg, agent=agent)
         elif not configured():
             raise NotConfigured("هوش مصنوعی تنظیم نشده است (LLM_API_KEY / LLM_BASE_URL)")
     finally:
@@ -384,7 +414,7 @@ async def embed(texts: List[str], *, agent: str, db=None, timeout: float = TIMEO
     own = db is None
     session = async_session_maker() if own else db
     try:
-        cfg = await _gate(session)
+        cfg = await _gate(session, agent=agent)
     finally:
         if own:
             await session.close()
@@ -419,6 +449,29 @@ async def test_connection(db) -> Dict[str, Any]:
 
 
 # ── Liara's own view, when the account token is there ────────────────────────
+
+async def liara_quota() -> Optional[Dict[str, Any]]:
+    """Liara's own free-token allowance for this workspace, daily and monthly —
+    the quota the office is spending before the plan's paid tokens start."""
+    tok = (getattr(settings, "liara_api_token", "") or "").strip()
+    ws = workspace_id()
+    if not (tok and ws):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(f"https://ai.liara.ir/v1/workspaces/{ws}/free-tokens",
+                                 headers={"Authorization": f"Bearer {tok}"})
+            w = await client.get(f"https://ai.liara.ir/v1/workspaces/{ws}",
+                                 headers={"Authorization": f"Bearer {tok}"})
+        if r.status_code != 200:
+            return None
+        body = r.json() or {}
+        plan = ((w.json() or {}).get("workspace") or {}).get("plan") if w.status_code == 200 else None
+    except Exception as e:
+        logger.warning(f"[ai] liara quota unavailable: {type(e).__name__}: {e}")
+        return None
+    return {"plan": plan, "daily": body.get("daily") or {}, "monthly": body.get("monthly") or {}}
+
 
 async def liara_activity(days: int = 30) -> Optional[Dict[str, Any]]:
     """Tokens, cost and calls per model as Liara counted them, for the last
