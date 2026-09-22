@@ -128,10 +128,15 @@ spec:
             # Which model does which job (app/config.py; read by the AI agents).
             # LLM_MODEL above is the one that writes Persian for people to read;
             # these read, look and embed. Plain settings, not secrets.
+            # GLM 5.3 Flash was the plan for reading and looking (a fifth of the
+            # price on paper); on Liara its reasoning is mandatory, so every
+            # answer pays for a thought first — 4–13 s and 115 toman against
+            # gpt-4.1-mini's 1.5 s and ~60. The bake-off can still name it
+            # from the card; the default is the one that answers.
             - name: LLM_MODEL_READ
-              value: "z-ai/glm-5.3-flash"
+              value: "openai/gpt-4.1-mini"
             - name: LLM_MODEL_VISION
-              value: "z-ai/glm-5.3-flash"
+              value: "openai/gpt-4.1-mini"
             - name: LLM_MODEL_EMBED
               value: "openai/text-embedding-3-small"
             # Liara's account token — read-only use: the account's credit and

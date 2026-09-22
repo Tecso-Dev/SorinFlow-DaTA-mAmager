@@ -230,8 +230,8 @@ class Settings(BaseSettings):
     # One key, several jobs: LLM_MODEL writes Persian for people to read; these
     # read listings and needs, look at photos, and embed text (the AI agents,
     # app/ai/). Liara names models provider/model.
-    llm_model_read: str = Field(default="z-ai/glm-5.3-flash", env="LLM_MODEL_READ")
-    llm_model_vision: str = Field(default="z-ai/glm-5.3-flash", env="LLM_MODEL_VISION")
+    llm_model_read: str = Field(default="openai/gpt-4.1-mini", env="LLM_MODEL_READ")
+    llm_model_vision: str = Field(default="openai/gpt-4.1-mini", env="LLM_MODEL_VISION")
     llm_model_embed: str = Field(default="openai/text-embedding-3-small", env="LLM_MODEL_EMBED")
     # Liara's account token, for the credit and usage lines on the AI card —
     # GET only. Empty = those lines say «تنظیم نشده».

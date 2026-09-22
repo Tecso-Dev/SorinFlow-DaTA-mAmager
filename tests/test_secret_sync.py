@@ -45,7 +45,7 @@ class TestTheSyncStep:
         manifest = (ROOT / "k8s/04-backend.yaml").read_text(encoding="utf-8")
         for name in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LIARA_API_TOKEN"):
             assert f"key: {name}, optional: true" in manifest
-        for name, default in (("LLM_MODEL_READ", "z-ai/glm-5.3-flash"), ("LLM_MODEL_VISION", "z-ai/glm-5.3-flash"),
+        for name, default in (("LLM_MODEL_READ", "openai/gpt-4.1-mini"), ("LLM_MODEL_VISION", "openai/gpt-4.1-mini"),
                               ("LLM_MODEL_EMBED", "openai/text-embedding-3-small")):
             assert f'- name: {name}\n              value: "{default}"' in manifest
         cfg = (ROOT / "app/config.py").read_text(encoding="utf-8")
