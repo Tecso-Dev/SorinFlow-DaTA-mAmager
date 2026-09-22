@@ -191,6 +191,14 @@ class Property(Base):
     # prompt version that read it. NULL until the reader has been through.
     ai_facts = Column(JSON)
     ai_read_at = Column(DateTime(timezone=True))
+    # ── AI (app/ai/photo_tagger.py) ──
+    # What the vision model saw in the first photos — condition, furnished,
+    # rooms, a floor plan or an ad card, a watermark, a 1–5 impression — with
+    # the prompt version and the model, so a re-run can tell old answers
+    # apart. NULL ai_photos_at = never looked at; the tagger's pass runs on
+    # that, not on the tags.
+    ai_photo_tags = Column(JSON)
+    ai_photos_at = Column(DateTime(timezone=True))
 
     # Status
     is_active = Column(Boolean, default=True)
@@ -264,6 +272,8 @@ class Property(Base):
             "posted_at": self.posted_at.isoformat() if self.posted_at else None,
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "ai_photo_tags": self.ai_photo_tags,
+            "ai_photos_at": self.ai_photos_at.isoformat() if self.ai_photos_at else None,
         }
         # Only one of these groups should be set based on listing_type
         if self.listing_type == "buy":
