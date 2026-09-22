@@ -24,7 +24,7 @@ class TestTheSyncStep:
 
     def test_the_llm_trio_is_managed_there(self):
         step = _step("Sync secrets from GitHub")
-        for name in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
+        for name in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LIARA_API_TOKEN"):
             assert f"{name}: ${{{{ secrets.{name} }}}}" in step
             assert name in re.search(r'LIST="([^"]+)"', step).group(1).split()
 
@@ -43,8 +43,14 @@ class TestTheSyncStep:
 
     def test_the_pod_actually_reads_them(self):
         manifest = (ROOT / "k8s/04-backend.yaml").read_text(encoding="utf-8")
-        for name in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
+        for name in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LIARA_API_TOKEN"):
             assert f"key: {name}, optional: true" in manifest
+        for name, default in (("LLM_MODEL_READ", "z-ai/glm-5.3-flash"), ("LLM_MODEL_VISION", "z-ai/glm-5.3-flash"),
+                              ("LLM_MODEL_EMBED", "openai/text-embedding-3-small")):
+            assert f'- name: {name}\n              value: "{default}"' in manifest
+        cfg = (ROOT / "app/config.py").read_text(encoding="utf-8")
+        for f in ("llm_model_read", "llm_model_vision", "llm_model_embed", "liara_api_token"):
+            assert f"{f}: str = Field(" in cfg
         env = (ROOT / ".env.example").read_text(encoding="utf-8")
         assert "LLM_API_KEY=\n" in env and "LLM_BASE_URL=\n" in env and "LLM_MODEL=\n" in env
         docs = (ROOT / "SECRETS.md").read_text(encoding="utf-8")

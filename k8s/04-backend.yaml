@@ -118,6 +118,21 @@ spec:
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: LLM_BASE_URL, optional: true } }
             - name: LLM_MODEL
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: LLM_MODEL, optional: true } }
+            # Which model does which job (app/config.py; read by the AI agents).
+            # LLM_MODEL above is the one that writes Persian for people to read;
+            # these read, look and embed. Plain settings, not secrets.
+            - name: LLM_MODEL_READ
+              value: "z-ai/glm-5.3-flash"
+            - name: LLM_MODEL_VISION
+              value: "z-ai/glm-5.3-flash"
+            - name: LLM_MODEL_EMBED
+              value: "openai/text-embedding-3-small"
+            # Liara's account token — read-only use: the account's credit and
+            # the AI project's usage on the panel's AI card. It can do far more
+            # than that (it is the console's own power), so it is short-lived
+            # and rotated, never shown, and never used for anything but GETs.
+            - name: LIARA_API_TOKEN
+              valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: LIARA_API_TOKEN, optional: true } }
             # ── proxies ──
             # Default false in config.py. Without this entry the switch could
             # not be thrown from the cluster: a proxy was configured and tested

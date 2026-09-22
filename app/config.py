@@ -227,6 +227,15 @@ class Settings(BaseSettings):
     llm_api_key: str = Field(default="", env="LLM_API_KEY")
     llm_base_url: str = Field(default="https://api.openai.com/v1", env="LLM_BASE_URL")
     llm_model: str = Field(default="gpt-4o-mini", env="LLM_MODEL")
+    # One key, several jobs: LLM_MODEL writes Persian for people to read; these
+    # read listings and needs, look at photos, and embed text (the AI agents,
+    # app/ai/). Liara names models provider/model.
+    llm_model_read: str = Field(default="z-ai/glm-5.3-flash", env="LLM_MODEL_READ")
+    llm_model_vision: str = Field(default="z-ai/glm-5.3-flash", env="LLM_MODEL_VISION")
+    llm_model_embed: str = Field(default="openai/text-embedding-3-small", env="LLM_MODEL_EMBED")
+    # Liara's account token, for the credit and usage lines on the AI card —
+    # GET only. Empty = those lines say «تنظیم نشده».
+    liara_api_token: str = Field(default="", env="LIARA_API_TOKEN")
 
     # CRN — Telegram notification
     telegram_bot_token: str = Field(default="", env="TELEGRAM_BOT_TOKEN")

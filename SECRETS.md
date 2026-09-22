@@ -174,7 +174,7 @@ as a repository secret (GitHub → Settings → Secrets and variables → Action
 Repository secrets) is copied into `sorinflow-secrets` on each deploy, before
 the new pod is created — so the value is live on that same deploy.
 
-Today the list is the LLM trio: `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`.
+Today the list is the LLM trio — `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` — and `LIARA_API_TOKEN` (the account token, read-only use for credit and usage; short expiry, rotated).
 
 Rules the step keeps:
 

@@ -208,9 +208,10 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LIARA_API_TOKEN: ${{ secrets.LIARA_API_TOKEN }}
         run: |
           set -euo pipefail
-          LIST="LLM_API_KEY LLM_BASE_URL LLM_MODEL"
+          LIST="LLM_API_KEY LLM_BASE_URL LLM_MODEL LIARA_API_TOKEN"
           patch="{}"
           for name in $LIST; do
             val="${!name:-}"
