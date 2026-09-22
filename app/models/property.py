@@ -176,6 +176,13 @@ class Property(Base):
     created_by = Column(String(200), index=True)               # who filed it
     tags = Column(String(500))                                 # برچسب، comma-separated
 
+    # ── AI (app/ai/listing_reader.py) ──
+    # What the listing's own text says that the fields do not: kind, floor,
+    # document, condition, the deal flags, a confidence per field, and the
+    # prompt version that read it. NULL until the reader has been through.
+    ai_facts = Column(JSON)
+    ai_read_at = Column(DateTime(timezone=True))
+
     # Status
     is_active = Column(Boolean, default=True)
     
@@ -240,6 +247,8 @@ class Property(Base):
             "is_draft": bool(self.is_draft),
             "created_by": self.created_by,
             "tags": self.tags,
+            "ai_facts": self.ai_facts,
+            "ai_read_at": self.ai_read_at.isoformat() if self.ai_read_at else None,
             "posted_at": self.posted_at.isoformat() if self.posted_at else None,
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
