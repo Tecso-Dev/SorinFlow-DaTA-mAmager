@@ -106,7 +106,7 @@ spec:
               valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: SUPER_ADMIN_PASSWORD, optional: true } }
             # ── LLM (optional) ──
             # Any OpenAI-compatible endpoint. Liara's AI gateway is one:
-            #   LLM_BASE_URL = https://ai.liara.ir/api/v1/<project-id>
+            #   LLM_BASE_URL = https://ai.liara.ir/api/<project-id>/v1
             #   LLM_MODEL    = provider/model, e.g. openai/gpt-4.1-mini
             # Read by app/config.py and used by match_service._llm_rerank.
             # These three were missing here, so the key could be set in the
