@@ -158,14 +158,31 @@ async def _embed_state(db) -> dict:
 
 
 async def _usage_by_agent_today(db) -> dict:
+    """Today per agent — and, for each, when it last failed and how many calls
+    it has got right since. A count of failures alone reads as «broken now»
+    when it may be a model that was replaced hours ago."""
     from sqlalchemy import case
     from app.models.ai_usage import AiUsage
     day = llm._day_start_utc()
     rows = (await db.execute(
         select(AiUsage.agent, func.count(AiUsage.id), func.coalesce(func.sum(AiUsage.cost_toman), 0.0),
-               func.coalesce(func.sum(case((AiUsage.ok.is_(False), 1), else_=0)), 0))
+               func.coalesce(func.sum(case((AiUsage.ok.is_(False), 1), else_=0)), 0),
+               func.max(case((AiUsage.ok.is_(False), AiUsage.created_at))))
         .where(AiUsage.created_at >= day).group_by(AiUsage.agent))).all()
-    return {a: {"calls": int(c), "cost_toman": round(float(t)), "failed": int(f or 0)} for a, c, t, f in rows}
+    out = {}
+    for agent, calls, toman, failed, last_bad in rows:
+        entry = {"calls": int(calls), "cost_toman": round(float(toman)), "failed": int(failed or 0),
+                 "last_error_at": last_bad.isoformat() if last_bad else None, "ok_since_error": 0,
+                 "last_error": None}
+        if last_bad is not None:
+            entry["ok_since_error"] = int((await db.execute(
+                select(func.count(AiUsage.id)).where(AiUsage.agent == agent, AiUsage.ok.is_(True),
+                                                     AiUsage.created_at > last_bad))).scalar_one())
+            entry["last_error"] = (await db.execute(
+                select(AiUsage.error).where(AiUsage.agent == agent, AiUsage.ok.is_(False),
+                                            AiUsage.created_at == last_bad).limit(1))).scalar_one_or_none()
+        out[agent] = entry
+    return out
 
 
 class AgentSwitchIn(BaseModel):

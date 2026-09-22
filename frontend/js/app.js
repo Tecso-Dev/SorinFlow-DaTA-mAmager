@@ -3636,7 +3636,14 @@ function _aiAgentCard(a) {
         <div class="ai-card-state">${_aiAgentState(a)}</div>
         <div class="ai-card-foot">
             <span title="مدل این کار" dir="ltr">${esc(a.model || '—')}</span>
-            <span>امروز: ${formatNumber(a.today.calls || 0)} فراخوانی · ${formatNumber(a.today.cost_toman || 0)} تومان${err ? ` · <span class="text-danger">${formatNumber(err)} خطا</span>` : ''}</span>
+            <span>امروز: ${formatNumber(a.today.calls || 0)} فراخوانی · ${formatNumber(a.today.cost_toman || 0)} تومان</span>
+            ${err ? `<button class="ai-err ${(a.today.ok_since_error || 0) >= 5 ? 'is-stale' : ''}"
+                onclick="aiShowErrors('${esc(a.key)}')"
+                title="${esc(a.today.last_error || '')}">
+                ${formatNumber(err)} خطا${(a.today.ok_since_error || 0) >= 5
+                    ? ` · از آن به بعد ${formatNumber(a.today.ok_since_error)} موفق`
+                    : ''}${a.today.last_error_at ? ` · آخری ${esc(a.today.last_error_at.slice(11, 16))}` : ''}
+            </button>` : ''}
             <span class="text-muted">ماه: ${formatNumber(a.month.calls || 0)} · ${formatNumber(a.month.cost_toman || 0)} تومان</span>
             ${runnable ? `<button class="btn btn-sm btn-outline-primary ms-auto" onclick="aiRunAgent('${esc(a.key)}', this)">
                 <i class="bi bi-play-fill"></i> اجرای یک دور</button>` : ''}
@@ -3702,6 +3709,16 @@ async function aiRunAgent(key, btn) {
         loadAiScreen(); loadAiLog();
     } catch (e) { showToast('اجرا نشد', e.message, 'danger'); }
     if (btn) btn.disabled = false;
+}
+
+/** The error chip: the log, filtered to this agent's failures, in view. */
+function aiShowErrors(key) {
+    const sel = document.getElementById('ai-log-agent');
+    const only = document.getElementById('ai-log-failed');
+    if (sel) sel.value = key;
+    if (only) only.checked = true;
+    loadAiLog();
+    document.getElementById('ai-log-table')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 async function loadAiLog() {

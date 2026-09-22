@@ -3329,6 +3329,14 @@ html[data-theme="light"] .table thead th {
   border-top: 1px dashed rgba(255,255,255,.08); padding-top: .5rem;
 }
 .ai-card-foot .btn { font-size: .7rem; padding: .1rem .5rem }
+/* the failures, as a way in rather than a scare: stale ones (the agent has
+   answered fine since) are muted, and the chip opens the filtered log */
+.ai-err {
+  font: inherit; font-size: .7rem; padding: .1rem .5rem; border-radius: 999px; cursor: pointer;
+  color: #fca5a5; background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.35);
+}
+.ai-err:hover { background: rgba(239,68,68,.22) }
+.ai-err.is-stale { color: var(--text-muted); background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.12) }
 .ai-cap-bar { height: 3px; border-radius: 2px; background: rgba(255,255,255,.1); margin-top: .35rem; overflow: hidden }
 .ai-cap-bar span { display: block; height: 100%; background: var(--accent2); border-radius: 2px }
 .ai-cap-bar span.is-full { background: #f59e0b }

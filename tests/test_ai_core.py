@@ -350,3 +350,17 @@ class TestTheAiScreen:
         fn = src[src.index("async def liara_quota"):src.index("async def liara_activity")]
         assert "free-tokens" in fn and "workspaces/" in fn and "liara_api_token" in fn
         assert 'id="ai-t-quota"' in HTML and "remainingPromptFreeTokens" in JS
+
+    def test_a_failure_count_says_whether_it_is_still_failing(self):
+        """36 of the 40 failures on the first live day came from a model that
+        was replaced the same afternoon. A bare «۲۴ خطا» on the card reads as
+        «broken now»; it has to say what happened after them."""
+        src = (ROOT / "app/api/routes/ai.py").read_text(encoding="utf-8")
+        fn = src[src.index("async def _usage_by_agent_today"):src.index("class AgentSwitchIn")]
+        for piece in ("last_error_at", "ok_since_error", "last_error", "AiUsage.created_at > last_bad"):
+            assert piece in fn, piece
+        card = JS[JS.index("function _aiAgentCard"):JS.index("async function loadAiScreen")]
+        assert "ok_since_error" in card and "is-stale" in card and "aiShowErrors(" in card
+        fn2 = JS[JS.index("function aiShowErrors"):JS.index("async function loadAiLog")]
+        assert "ai-log-failed" in fn2 and "ai-log-agent" in fn2 and "loadAiLog()" in fn2
+        assert ".ai-err.is-stale" in (ROOT / "frontend/css/style.css").read_text(encoding="utf-8")
