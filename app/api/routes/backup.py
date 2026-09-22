@@ -210,6 +210,11 @@ async def probe_bot(payload: ProbeIn, db: AsyncSession = Depends(get_db),
     route = await _route_for(payload, db)
     try:
         info = await bk.telegram_probe(tok, route=route)
+        # the assistant's long poll consumes updates before this can read
+        # them; the chats it saw are remembered for exactly this list
+        from app.ai import assistant as _assistant
+        have = {c["id"] for c in info["chats"]}
+        info["chats"] += [c for c in await _assistant.seen_chats(db) if c["id"] not in have]
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:

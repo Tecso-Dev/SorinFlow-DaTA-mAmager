@@ -249,14 +249,18 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
                schema: Optional[Type] = None, json_mode: bool = False,
                max_tokens: int = 400, temperature: float = 0.2,
                timeout: float = TIMEOUT, cap: bool = True,
-               model_override: Optional[str] = None) -> Dict[str, Any]:
+               model_override: Optional[str] = None,
+               tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """One completion for `job`, as `agent`. Returns
-    {"content", "data", "model", "usage", "cost_usd", "cost_toman", "ms"} —
-    `data` is the parsed JSON (validated against `schema`, a pydantic model,
-    when given). Raises LLMError (or a subclass) for anything the caller
-    cannot use. `cap=False` skips the daily cap — for the panel's own test.
-    `model_override` is for a bake-off only: the same door, the same ledger,
-    another model than the one configured for the job."""
+    {"content", "data", "model", "usage", "cost_usd", "cost_toman", "ms",
+     "message", "tool_calls"} — `data` is the parsed JSON (validated against
+    `schema`, a pydantic model, when given); with `tools` (OpenAI function
+    specs) the model may answer with `tool_calls` instead of content, and
+    `message` is its raw turn to append to the conversation. Raises LLMError
+    (or a subclass) for anything the caller cannot use. `cap=False` skips the
+    daily cap — for the panel's own test. `model_override` is for a bake-off
+    only: the same door, the same ledger, another model than the one
+    configured for the job."""
     if job not in JOBS:
         raise ValueError(f"unknown job {job!r}")
     from app.database import async_session_maker
@@ -283,6 +287,8 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
                             "temperature": temperature, "max_tokens": max_tokens}
     if json_mode or schema is not None:
         body["response_format"] = {"type": "json_object"}
+    if tools:
+        body["tools"] = tools
     if _reasons(model):
         # A reasoning model thinks inside the same budget it answers from.
         # On Liara, GLM's reasoning cannot be switched off («Reasoning is
@@ -310,8 +316,10 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
             data = resp.json()
             usage = data.get("usage") or {}
             choice = (data.get("choices") or [{}])[0]
-            content = (choice.get("message") or {}).get("content") or ""
-            if not content.strip() and choice.get("finish_reason") == "length" and attempt == 1:
+            message = choice.get("message") or {}
+            content = message.get("content") or ""
+            tool_calls = message.get("tool_calls") or []
+            if not content.strip() and not tool_calls and choice.get("finish_reason") == "length" and attempt == 1:
                 # the budget went to thinking and nothing was left for the
                 # answer — once more with room for both
                 last_error = "empty answer: the token budget went to reasoning"
@@ -320,8 +328,9 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
                 continue
             out: Dict[str, Any] = {"content": content, "data": None, "model": data.get("model") or model,
                                    "usage": usage, "cost_usd": float(usage.get("cost") or 0.0),
-                                   "cost_toman": float(usage.get("total_cost_toman") or 0.0), "ms": ms}
-            if json_mode or schema is not None:
+                                   "cost_toman": float(usage.get("total_cost_toman") or 0.0), "ms": ms,
+                                   "message": message, "tool_calls": tool_calls}
+            if (json_mode or schema is not None) and not tool_calls:
                 try:
                     parsed = _extract_json(content)
                     if schema is not None:

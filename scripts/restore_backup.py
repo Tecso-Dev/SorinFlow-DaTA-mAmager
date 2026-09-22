@@ -32,7 +32,7 @@ from sqlalchemy import DateTime, text  # noqa: E402
 from app.database import Base, engine, async_session_maker  # noqa: E402
 from app.models import (property, cookie, scraping_job, lead, user,  # noqa: F401,E402
                         crm_models, app_setting, portal, email_log,
-                        sms_log, forwarder, proxy, scrape_schedule, ai_usage)
+                        sms_log, forwarder, proxy, scrape_schedule, ai_usage, ai_chat)
 
 
 def _parse_row(table, row: dict) -> dict:

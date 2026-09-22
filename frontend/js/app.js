@@ -3530,6 +3530,7 @@ async function loadAi() {
         if (notes && !notes.dataset.touched) notes.value = s.notes || '';
         const en = document.getElementById('ai-enabled');
         if (en) en.checked = !!s.enabled;
+        _aiAssistantStatus();
     } catch (e) {
         badge.textContent = 'نامشخص'; badge.className = 'badge bg-secondary';
     }
@@ -3570,6 +3571,58 @@ async function aiTest() {
         loadAi();
     } catch (e) { out.textContent = e.message; out.className = 'small text-danger'; }
     btn.disabled = false;
+}
+
+// ── «سورین», the Telegram assistant ──
+async function _aiAssistantStatus() {
+    try {
+        const s = await apiCall('/ai/assistant/status');
+        const sw = document.getElementById('ai-assistant-enabled');
+        if (sw) sw.checked = !!s.enabled;
+        const last = document.getElementById('ai-assistant-last');
+        if (last) {
+            last.textContent = !s.telegram_configured ? 'تا تلگرام (کارت بکاپ) تنظیم نشود، جواب نمی‌دهد'
+                : !s.configured ? 'تا هوش مصنوعی وصل نشود، جواب نمی‌دهد'
+                : `${formatNumber(s.allowed_chats.length)} چت مجاز · امروز ${formatNumber(s.questions_today)} سؤال${s.last ? ' · آخری: «' + (s.last.question || '').slice(0, 40) + '»' : ''}`;
+        }
+    } catch (_) {}
+}
+
+async function aiAssistantToggle(on) {
+    try {
+        await apiCall('/ai/assistant/settings', { method: 'PUT', body: JSON.stringify({ enabled: !!on }) });
+        showToast(on ? 'روشن شد' : 'خاموش شد', on ? 'سورین به چت‌های مجاز جواب می‌دهد' : 'سورین دیگر جواب نمی‌دهد', 'success');
+        _aiAssistantStatus();
+    } catch (e) { showToast('خطا', e.message, 'danger'); _aiAssistantStatus(); }
+}
+
+/** «بپرس»: the same assistant, from the panel — for a question without opening Telegram. */
+async function aiAssistantAsk() {
+    const q = await askText({ icon: 'bi-chat-dots', title: 'از سورین بپرسید', okLabel: 'بپرس',
+        body: 'همان جوابی که در تلگرام می‌دهد؛ اینجا ثبت می‌شود که از پنل پرسیده شده.',
+        field: { label: 'سؤال', placeholder: 'مثلاً: امروز چند آگهی تازه اومد؟', validate: v => v ? '' : 'سؤال خالی است' } });
+    if (q === null) return;
+    let r;
+    try { r = await apiCall('/ai/assistant/ask', { method: 'POST', body: JSON.stringify({ text: q }) }); }
+    catch (e) { showToast('جواب نگرفتم', e.message, 'danger'); return; }
+    await askInfo({ icon: 'bi-chat-square-text', title: 'سورین', okLabel: 'بستن',
+        body: `<span class="ask-pre">${esc(r.text)}</span>`,
+        note: `${formatNumber(r.ms)} میلی‌ثانیه${(r.tools || []).length ? ' · ابزارها: ' + esc(r.tools.join('، ')) : ''}` });
+    _aiAssistantStatus();
+}
+
+async function aiAssistantLog() {
+    let d;
+    try { d = await apiCall('/ai/assistant/log?limit=30'); }
+    catch (e) { showToast('خطا', e.message, 'danger'); return; }
+    const rows = (d.items || []).map(i => `
+        <div class="ai-q">
+            <div class="ai-q-head"><b>${esc(i.who || '—')}</b> <span class="text-muted">${esc((i.created_at || '').slice(5, 16).replace('T', ' '))}${i.chat_id ? '' : ' · از پنل'}</span></div>
+            <div class="ai-q-q">${esc(i.question)}</div>
+            <div class="ai-q-a ${i.ok ? '' : 'text-danger'}">${esc(i.answer || '')}</div>
+        </div>`).join('');
+    await askInfo({ icon: 'bi-list-ul', title: 'سؤال‌های سورین', okLabel: 'بستن',
+        body: `<div class="ai-usage-wrap">${rows || '<div class="text-muted">هنوز کسی چیزی نپرسیده</div>'}</div>` });
 }
 
 /** «آخرین مصرف‌ها» — what each call cost, newest first. */

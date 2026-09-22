@@ -3308,6 +3308,13 @@ html[data-theme="light"] .table thead th {
 .ai-sem-search { width: 270px; flex: 0 0 auto }
 .ai-sem-search .form-control { font-size: .78rem }
 
+/* «سورین»'s questions, in the dialog (js: aiAssistantLog) */
+.ai-q { padding: .55rem 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: .8rem; line-height: 1.7 }
+.ai-q:last-child { border-bottom: 0 }
+.ai-q-head { font-size: .74rem }
+.ai-q-q { color: var(--accent2) }
+.ai-q-a { white-space: pre-wrap; color: var(--text) }
+
 /* the morning digest row on the backup card */
 .bk-digest {
   display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;

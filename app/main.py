@@ -231,6 +231,10 @@ async def lifespan(app: FastAPI):
     embed_task = asyncio.create_task(_embed_loop())
     from app.ai.photo_tagger import photo_loop as _photo_loop
     photo_task = asyncio.create_task(_photo_loop())
+    # «سورین»: the office asks its own database in Telegram — the backup's
+    # bot, the backup's route, the backup's chats; read-only tools.
+    from app.ai.assistant import assistant_loop as _assistant_loop
+    assistant_task = asyncio.create_task(_assistant_loop())
 
     # Google Cloud export. Returns immediately when disabled, which is the
     # shipped default — and when enabled on a host that cannot reach Google it
@@ -244,6 +248,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    assistant_task.cancel()
     photo_task.cancel()
     embed_task.cancel()
     reader_task.cancel()
