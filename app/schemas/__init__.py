@@ -79,6 +79,11 @@ class PropertyResponse(PropertyBase):
     agency_suspected: Optional[bool] = None      # as the ad's own words read
     agency_evidence: Optional[str] = None        # the phrase that said so
     contact_channel: Optional[str] = None        # phone | chat_only | unavailable
+    # AI (app/ai/): what the listing's text says, and the older listing this
+    # one seems to repeat — the vector and the photo tags stay off the wire
+    ai_facts: Optional[dict] = None
+    ai_read_at: Optional[datetime] = None
+    ai_duplicate_of: Optional[int] = None
     scraped_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     
@@ -331,6 +336,7 @@ class LeadResponse(BaseModel):
     contact_channel: Optional[str] = None        # فقط چت؟
     agency_suspected: Optional[bool] = None      # آگهی مشاور املاک؟
     agency_evidence: Optional[str] = None        # عبارتی که این را گفت
+    ai_duplicate_of: Optional[int] = None        # همان ملک، آگهی دوم (app/ai/embeddings.py)
     # Full snapshot of the linked property (same data the املاک modal shows).
     # NOT named `property` — that collides with Lead.property (a SQLAlchemy
     # relationship), which from_attributes would try to coerce into a dict.

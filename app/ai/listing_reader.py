@@ -502,7 +502,8 @@ def effective(prop) -> Dict[str, Any]:
         so amenities that live only in the text still count.
     """
     from app.services.match_service import property_family   # lazy: match_service imports this module
-    f = prop.ai_facts or {}
+    # getattr: the tests' stubs and rows from before the column have none
+    f = getattr(prop, "ai_facts", None) or {}
     conf = f.get("confidence") or {}
     scraped = property_family(prop)
     fact = f.get("kind") if f.get("kind") in FAMILIES else None

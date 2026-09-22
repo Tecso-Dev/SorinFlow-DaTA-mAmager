@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.property import Property
+from app.ai.listing_reader import effective
 
 settings = get_settings()
 
@@ -36,6 +37,7 @@ CANDIDATE_POOL = 300     # rows scored before trimming to the top N (customer ma
 PRICE_BAND = 0.15
 PRICE_BAND_WIDE = 0.35
 SIMILAR_POOL = 1500      # same city + same deal type, inside the wide band
+SEMANTIC_EXTRA = 30      # candidates the customer's own words add to the pool (app/ai/embeddings.py)
 MIN_CLOSE = 3            # below this many tight matches the wide band is shown too
 
 # The parts of a district string that say nothing about WHICH district:
@@ -141,6 +143,9 @@ def _text_overlap(a: Optional[str], b: Optional[str]) -> Optional[float]:
 def score_similarity(target: Property, cand: Property) -> Dict[str, Any]:
     """Weighted similarity of `cand` to `target`. Returns score 0..100 + reasons."""
     parts: List[tuple] = []   # (weight, value 0..1, reason)
+    # the listing as the reader completed it: the scraped column when set, the
+    # fact from the ad's own text where the scraper left a gap
+    te, ce = effective(target), effective(cand)
 
     # The same figure the fence and the gap are measured on: the total for a
     # sale, deposit + 30 × rent for a rental. This used to be the deposit
@@ -169,7 +174,8 @@ def score_similarity(target: Property, cand: Property) -> Dict[str, Any]:
         if td and cd:
             shape = _closeness(td, cd, DEPOSIT_TOLERANCE)
             parts.append((15, shape, "ودیعه نزدیک" if shape > .5 else "ودیعهٔ متفاوت"))
-            if max(td, cd) / min(td, cd) > DEPOSIT_SHAPE_MAX:
+            # «قابل تبدیل» in either ad: the owner said the shape is negotiable
+            if max(td, cd) / min(td, cd) > DEPOSIT_SHAPE_MAX and not (te["convertible"] or ce["convertible"]):
                 shape_penalty = 0.6
 
     area_close = _closeness(target.area, cand.area, AREA_TOLERANCE)
@@ -193,7 +199,7 @@ def score_similarity(target: Property, cand: Property) -> Dict[str, Any]:
     # a substitute for an apartment, so a mismatch collapses the score instead
     # of costing it ten points.
     family_penalty = 1.0
-    tf, cf = property_family(target), property_family(cand)
+    tf, cf = te["kind"], ce["kind"]
     if tf and cf:
         if tf == cf:
             parts.append((10, 1.0, "همان نوع ملک"))
@@ -204,10 +210,19 @@ def score_similarity(target: Property, cand: Property) -> Dict[str, Any]:
     # amenities the target has, that the candidate also has
     amen = [("has_elevator", "آسانسور"), ("has_parking", "پارکینگ"),
             ("has_storage", "انباری"), ("has_balcony", "بالکن")]
-    wanted = [(f, fa) for f, fa in amen if getattr(target, f, False)]
+    wanted = [(f, fa) for f, fa in amen if te.get(f)]
     if wanted:
-        have = [fa for f, fa in wanted if getattr(cand, f, False)]
+        have = [fa for f, fa in wanted if ce.get(f)]
         parts.append((5, len(have) / len(wanted), "امکانات: " + "، ".join(have) if have else "بدون امکانات مشترک"))
+
+    # «متن مشابه»: how alike the two ads read, when both carry a vector
+    # (app/ai/embeddings.py). Wording, not numbers — a nudge, never a gate.
+    # Raw cosine of two real ads sits around 0.5–0.7 and a near rewrite above
+    # 0.9, so 0.5..1 is rescaled to 0..1.
+    from app.ai.embeddings import text_similarity
+    txt = text_similarity(target, cand)
+    if txt is not None:
+        parts.append((10, max(0.0, min(1.0, (txt - 0.5) / 0.5)), "متن مشابه"))
 
     total_w = sum(w for w, _v, _r in parts) or 1
     score = sum(w * v for w, v, _r in parts) / total_w * 100 * price_penalty * family_penalty * shape_penalty
@@ -261,7 +276,7 @@ def customer_wants(customer, cand: Property, intent: Optional[Dict[str, Any]] = 
         return False
     if intent.get("city") and cand.city_name and cand.city_name != intent["city"]:
         return False
-    fam = property_family(cand)
+    fam = effective(cand)["kind"]
     if intent["family"]:
         # An explicitly chosen type is binding even when the ad is unreadable:
         # the agent said what they want, so do not fall back to guessing.
@@ -416,6 +431,9 @@ def _brief(p: Property, score: int, reasons: List[str]) -> Dict[str, Any]:
         "deposit": p.deposit if p.listing_type == "rent" else None,
         "rent_price": p.rent_price if p.listing_type == "rent" else None,
         "comparable": _comparable(p),
+        # the reader's one line and its warnings, for the card
+        "ai_summary": (getattr(p, "ai_facts", None) or {}).get("summary"),
+        "red_flags": (getattr(p, "ai_facts", None) or {}).get("red_flags") or [],
         "thumbnail_url": p.thumbnail_url,
         "url": p.url,
         "phone_number": p.phone_number,
@@ -444,12 +462,12 @@ def rank_similar(prop: Property, cands, limit: int = 12) -> List[Dict[str, Any]]
     """
     tp = _comparable(prop)
     tkey = district_key(prop.district) or district_key(prop.neighborhood)
-    target_family = property_family(prop)
+    target_family = effective(prop)["kind"]
     rows = []
     for c in cands:
         if c.id == prop.id:
             continue
-        if target_family and property_family(c) not in (None, target_family):
+        if target_family and effective(c)["kind"] not in (None, target_family):
             continue
         cp = _comparable(c)
         # relative to THIS listing's price: 150 against 100 is 50% off, not 33%
@@ -543,11 +561,39 @@ async def matches_for_customer(db: AsyncSession, customer, limit: int = 12,
     cands = (await db.execute(
         q.order_by(Property.id.desc()).limit(CANDIDATE_POOL * 2))).scalars().all()
 
+    # The customer's own words → the listings that read closest, on top of
+    # the pool; still gated below, so nothing enters that the exact filters
+    # would have refused. Gated on use_llm so the engine's offline pass and
+    # «use_llm=false» stay free. The gateway masks the text; the name is
+    # never sent.
+    sem: Dict[int, float] = {}
+    if use_llm:
+        need = " ".join(filter(None, (customer.desired_specs, customer.desired_district,
+                                      getattr(customer, "notes", None)))).strip()
+        if need:
+            from app.ai import embeddings as _emb
+            from app.services import llm as _llm
+            try:
+                sem = dict(await _emb.semantic_candidates(
+                    db, need, city=city, listing_type=intent["listing_type"], limit=SEMANTIC_EXTRA))
+            except _llm.LLMError as e:
+                logger.info(f"[match] semantic candidates skipped: {e}")
+            except Exception as e:
+                logger.warning(f"[match] semantic candidates failed: {type(e).__name__}: {e}")
+            have = {c.id for c in cands}
+            missing = [pid for pid in sem if pid not in have]
+            if missing:
+                cands = list(cands) + (await db.execute(
+                    select(Property).where(Property.id.in_(missing), Property.is_active == True)   # noqa: E712
+                )).scalars().all()
+
     scored = []
     for c in cands:
         if not customer_wants(customer, c, intent):
             continue
         s = score_for_customer(customer, c)
+        if c.id in sem:
+            s["reasons"].append("شباهت متن")
         if s["score"] > 0:
             scored.append((s["score"], s["reasons"], c))
     scored.sort(key=lambda t: t[0], reverse=True)

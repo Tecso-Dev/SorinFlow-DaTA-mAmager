@@ -3252,6 +3252,62 @@ html[data-theme="light"] .table thead th {
 .ai-usage-wrap { max-height: 46vh; overflow: auto; text-align: start; font-size: .8rem }
 .ai-usage-wrap table { font-variant-numeric: tabular-nums }
 
+/* برداشت هوش مصنوعی — the reader's chips in the property modal (js/ai/reader.js) */
+.ai-facts { margin-bottom: 1rem; padding: .8rem .9rem; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface2) }
+.ai-facts-head { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: .5rem }
+.ai-facts-title { font-size: .86rem; font-weight: 700; color: var(--accent2) }
+.ai-facts-reread { font-size: .72rem; padding: .15rem .6rem; border-radius: var(--r-sm) }
+.ai-facts-summary { font-size: .84rem; color: var(--text-dim); line-height: 1.8; margin: 0 0 .55rem }
+.ai-facts-chips { display: flex; flex-wrap: wrap; gap: .35rem }
+.ai-facts-empty { font-size: .78rem; color: var(--text-muted) }
+.ai-facts-meta { font-size: .68rem; color: var(--text-muted); margin-top: .5rem; direction: ltr; text-align: end }
+.ai-chip { display: inline-flex; align-items: center; gap: .3rem; padding: .18rem .6rem; border-radius: 20px; font-size: .74rem; background: var(--surface3); border: 1px solid var(--border); color: var(--text-dim); cursor: default }
+.ai-chip-l { color: var(--text-muted); font-size: .68rem }
+.ai-chip.is-amenity { border-color: rgba(6,182,212,.35); color: var(--accent2) }
+.ai-chip.is-off { opacity: .6 }
+.ai-chip.is-deal { background: rgba(99,102,241,.16); border-color: rgba(99,102,241,.5); color: #c7d2fe; font-weight: 600 }
+.ai-chip.is-use { border-color: rgba(16,185,129,.35); color: var(--accent3) }
+.ai-chip.is-warn { background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.5); color: var(--warning) }
+/* «احتمالاً تکراری» — the embeddings' duplicate flag (frontend/js/ai/embed.js) */
+.ai-dup-badge {
+  display: inline-flex; align-items: center; gap: .3rem;
+  font-size: .68rem; font-weight: 600; padding: .12rem .5rem;
+  border-radius: var(--r-sm); color: var(--accent2);
+  background: rgba(6,182,212,.1); border: 1px solid rgba(6,182,212,.3);
+  vertical-align: middle; white-space: nowrap;
+}
+.ai-dup-badge a { color: var(--text-muted); text-decoration: underline dotted; }
+.ai-dup-badge a:hover { color: var(--accent2); }
+/* برچسب‌زن عکس (frontend/js/ai/photo.js): the chips in the modal, the card on هوش تصویری */
+.ai-photo { margin: .75rem 0 1rem; padding: .7rem .9rem; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--surface-2, rgba(255,255,255,.03)) }
+.ai-photo:empty { display: none }
+.ai-photo-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .5rem }
+.ai-photo-title { font-size: .82rem; font-weight: 700; color: var(--text) }
+.ai-photo-title i { color: var(--accent2) }
+.ai-photo-chips { display: flex; flex-wrap: wrap; gap: .35rem }
+.ai-photo-chip { display: inline-flex; align-items: center; padding: .18rem .6rem; border-radius: 20px; font-size: .74rem; color: var(--text); background: rgba(99,102,241,.14); border: 1px solid rgba(99,102,241,.35) }
+.ai-photo-empty, .ai-photo-meta { font-size: .74rem; color: var(--text-muted) }
+.ai-photo-chips + .ai-photo-meta { display: block; margin-top: .45rem }
+.ai-photo-meter { display: inline-flex; gap: .2rem }
+.ai-photo-meter i { width: .5rem; height: .5rem; border-radius: 50%; background: var(--text-muted); opacity: .3 }
+.ai-photo-meter i.on { background: var(--accent2); opacity: 1 }
+.ai-photo-btn { margin-inline-start: auto; font: inherit; font-size: .74rem; padding: .25rem .7rem; border-radius: var(--r-sm); border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer }
+.ai-photo-btn:hover { background: var(--accent); color: #fff }
+.ai-photo-btn:disabled { opacity: .5; cursor: default }
+.ai-photo-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; margin-bottom: .6rem; text-align: center }
+.ai-photo-stats b { display: block; font-size: 1.15rem; color: var(--accent2); font-variant-numeric: tabular-nums }
+.ai-photo-stats span { font-size: .72rem; color: var(--text-muted) }
+/* a field the need parser just filled — an accent outline for 2 s (frontend/js/ai/need.js) */
+.ai-filled {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px var(--accent-glow) !important;
+}
+
+/* «جستجوی معنایی» beside the leads' filters (js/ai/embed.js) */
+.ai-sem-search { width: 270px; flex: 0 0 auto }
+.ai-sem-search .form-control { font-size: .78rem }
+
 /* the morning digest row on the backup card */
 .bk-digest {
   display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;

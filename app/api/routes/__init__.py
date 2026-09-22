@@ -4,7 +4,8 @@ SorinFlow Divar Scraper - API Routes
 from fastapi import APIRouter, Depends
 from app.api.routes import (
     properties, scraper, auth, stats, proxies, crm, users, filing,
-    public_auth, portal, gcp, monitoring, sms, email, forwarder, backup, ai
+    public_auth, portal, gcp, monitoring, sms, email, forwarder, backup, ai,
+    ai_reader, ai_embed, ai_photo, ai_need
 )
 from app.auth.dependencies import require_permission, get_staff_user
 
@@ -59,3 +60,11 @@ router.include_router(email.router, prefix="/email", tags=["Email"], dependencie
 router.include_router(backup.router, prefix="/backup", tags=["Backup"])
 # Same: the AI card spends money and switches the agents off.
 router.include_router(ai.router, prefix="/ai", tags=["AI"])
+# The agents' own controls (a pass spends money): root and super_admin, checked inside.
+router.include_router(ai_reader.router, prefix="/ai/reader", tags=["AI"])
+router.include_router(ai_embed.router, prefix="/ai/embed", tags=["AI"])
+router.include_router(ai_photo.router, prefix="/ai/photo", tags=["AI"])
+# What a consultant uses: «جستجوی معنایی», similar-by-text, a duplicate's
+# explanation, and «پر کردن از متن» on the customer form — behind the CRM key.
+router.include_router(ai_embed.crm_router, prefix="/ai/embed", tags=["AI"], dependencies=_perm("crm"))
+router.include_router(ai_need.router, prefix="/ai/need", tags=["AI"], dependencies=_perm("crm"))

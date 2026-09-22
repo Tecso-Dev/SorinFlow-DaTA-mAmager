@@ -53,9 +53,17 @@ def _called_in_html(html: str) -> set:
     return out - _JS_KEYWORDS
 
 
+def _ai_js() -> str:
+    """The agents' panel pieces (frontend/js/ai/*.js), loaded after app.js and
+    called from index.html like any other function."""
+    import glob
+    return "\n".join(open(f, encoding="utf-8").read()
+                     for f in sorted(glob.glob(os.path.join(BASE, "frontend", "js", "ai", "*.js"))))
+
+
 def test_every_onclick_in_index_has_a_function():
     html = open(INDEX, encoding="utf-8").read()
-    defined = _defined(open(APP_JS, encoding="utf-8").read())
+    defined = _defined(open(APP_JS, encoding="utf-8").read()) | _defined(_ai_js())
     missing = sorted(_called_in_html(html) - defined - EXTERNAL)
     assert not missing, f"index.html calls undefined function(s): {missing}"
 

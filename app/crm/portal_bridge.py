@@ -76,6 +76,15 @@ async def customer_for(db, req: PropertyRequest, user=None) -> Customer:
     fields = criteria_of(req, user)
     cust = await db.get(Customer, req.customer_id) if req.customer_id else None
     if cust is None:
+        # What the description says and the form did not — districts, red
+        # lines, a budget typed in words — into the keys still empty, once,
+        # when the customer is born. enrich_request swallows LLMError (a model
+        # that is off, capped or wrong never blocks a request) and returns None.
+        from app.ai import need_parser
+        try:
+            fields.update(await need_parser.enrich_request(db, req) or {})
+        except Exception as e:
+            logger.warning(f"[portal] the description was not read: {type(e).__name__}: {e}")
         cust = Customer(**fields)
         db.add(cust)
         await db.flush()

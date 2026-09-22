@@ -2001,8 +2001,10 @@ async function viewProperty(id) {
                         </p>
                     </div>
                 ` : '<div class="alert alert-secondary text-center mb-3"><i class="bi bi-image"></i> بدون تصویر</div>'}
+                <!-- what the vision model saw in the first photos (js/ai/photo.js); empty stays hidden -->
+                <div class="ai-photo" id="ai-photo-${property.id}"></div>
                 
-                <h5 class="mb-3">${esc(property.title)}</h5>
+                <h5 class="mb-3">${esc(property.title)} ${typeof aiDuplicateBadge === 'function' ? aiDuplicateBadge(property) : ''}</h5>
                 
                 <!-- Basic Info -->
                 <div class="card mb-3">
@@ -2159,6 +2161,9 @@ async function viewProperty(id) {
                     </div>
                 </div>` : ''}
 
+                <!-- برداشت هوش مصنوعی: what the reader found in the ad's own text (js/ai/reader.js) -->
+                <div id="ai-facts" class="ai-facts" data-id="${property.id}" data-read-at="${property.ai_read_at || ''}"></div>
+
                 <!-- Location -->
                 <div class="card mb-3">
                     <div class="card-header bg-warning text-dark">
@@ -2263,6 +2268,12 @@ async function viewProperty(id) {
             </div>
         `;
         
+        // the AI pieces draw into their own boxes after the template is in place
+        if (typeof aiRenderFacts === 'function') aiRenderFacts(document.getElementById('ai-facts'), property.ai_facts);
+        if (typeof aiLoadPhotoTags === 'function' && ['root', 'super_admin'].includes(_currentUser?.role)) {
+            aiLoadPhotoTags(property.id, document.getElementById(`ai-photo-${property.id}`));
+        }
+
         const modalElement = new bootstrap.Modal(document.getElementById('propertyModal'));
         modalElement.show();
         
@@ -3468,7 +3479,8 @@ let _aiStatus = null;
 
 function _aiMoney(usd, toman) {
     const t = toman ? `${formatNumber(Math.round(toman))} تومان` : '۰ تومان';
-    return `${t} <span class="text-muted" dir="ltr">($${(usd || 0).toFixed(3)})</span>`;
+    const d = usd || 0;
+    return `${t} <span class="text-muted" dir="ltr">($${d >= 0.01 ? d.toFixed(2) : d.toFixed(4)})</span>`;
 }
 
 async function loadAi() {
@@ -6428,7 +6440,7 @@ async function loadLeads() {
                         ? `<span class="serial-badge" title="کد ملک — همان کدی که در لیست املاک است">${formatSerial(lead.serial_no)}</span>`
                         : '<span class="text-muted" title="ملک این لید حذف شده است">—</span>'}</td>
                 <td class="leads-title" title="${esc(lead.property_title)}">
-                    <div class="leads-title-text">${esc((lead.property_title || '---').substring(0, 35))}... ${agencyBadge(lead)}</div>
+                    <div class="leads-title-text">${esc((lead.property_title || '---').substring(0, 35))}... ${agencyBadge(lead)} ${typeof aiDuplicateBadge === 'function' ? aiDuplicateBadge(lead) : ''}</div>
                     ${where ? `<small class="lead-subline">${esc(where)}</small>` : ''}
                 </td>
                 <td class="leads-price">
@@ -6846,7 +6858,7 @@ async function viewLead(id) {
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="text-muted small">عنوان ملک</label>
-                    <div class="fw-bold">${esc(lead.property_title) || '---'} ${agencyBadge(lead)}</div>
+                    <div class="fw-bold">${esc(lead.property_title) || '---'} ${agencyBadge(lead)} ${typeof aiDuplicateBadge === 'function' ? aiDuplicateBadge(lead.property_detail || lead) : ''}</div>
                 </div>
                 <div class="col-md-6">
                     <label class="text-muted small">لینک</label>
@@ -12744,6 +12756,7 @@ async function loadVisual() {
     _visUnder(v.under || []);
     _visDupes(dup);
     _visPhotos(ph);
+    if (typeof aiLoadPhotoStatus === 'function') aiLoadPhotoStatus(document.getElementById('ai-photo-status'));
 }
 
 function _visUnder(rows) {

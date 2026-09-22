@@ -27,6 +27,8 @@ _super_admin = Depends(_role_dep("root", "super_admin"))
 
 
 class AiSettingsIn(BaseModel):
+    model_config = {"protected_namespaces": ()}   # model_write etc. are not pydantic's "model_"
+
     enabled: Optional[bool] = None
     daily_cap_usd: Optional[float] = Field(None, ge=0, le=100)
     notes: Optional[str] = Field(None, max_length=600)
@@ -56,11 +58,13 @@ async def ai_status(db: AsyncSession = Depends(get_db), _: User = _super_admin):
             {"key": "explainer", "name": "توضیح‌دهندهٔ پیشنهاد", "job": "write",
              "desc": "یک جملهٔ فارسی کنار هر ملک در «ملک‌های مشابه» و «ملک‌های مناسب»", "live": True},
             {"key": "reader", "name": "خوانندهٔ آگهی", "job": "read",
-             "desc": "مشخصاتی که فقط در متن آگهی آمده — فاز بعد", "live": False},
+             "desc": "مشخصاتی که فقط در متن آگهی آمده: نوع واقعی، طبقه، سند، قابل تبدیل، مناسبِ…", "live": True},
             {"key": "need", "name": "خوانندهٔ نیاز مشتری", "job": "read",
-             "desc": "متن آزاد مشتری به معیار — فاز بعد", "live": False},
-            {"key": "embed", "name": "جستجوی معنایی", "job": "embed",
-             "desc": "ملک‌های نزدیک به یک نیاز، و آگهی‌های تکراری — فاز بعد", "live": False},
+             "desc": "«پر کردن از متن» در فرم مشتری، و توضیح درخواست‌های پرتال", "live": True},
+            {"key": "embed", "name": "جستجوی معنایی و تکراری‌یاب", "job": "embed",
+             "desc": "ملک‌های نزدیک به یک نیاز، «شباهت متن» در ملک‌های مشابه، و آگهی‌های تکراری", "live": True},
+            {"key": "vision", "name": "برچسب‌زن عکس", "job": "vision",
+             "desc": "بازسازی‌شده، مبله، نقشه به‌جای عکس، لوگوی مشاور — روی سه عکس اول هر آگهی", "live": True},
         ],
     }
 

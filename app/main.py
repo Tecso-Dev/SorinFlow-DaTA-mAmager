@@ -221,6 +221,17 @@ async def lifespan(app: FastAPI):
     from app.crm.digest import digest_loop as _digest_loop
     digest_task = asyncio.create_task(_digest_loop())
 
+    # The AI agents (app/ai/), each a background pass over the listings that
+    # arrived since its last one, all through app/services/llm.py and all
+    # gated on MATCH_ENGINE like the engine: what the ad's text says, the
+    # text as a vector (semantic search, duplicates), what the photos show.
+    from app.ai.listing_reader import reader_loop as _reader_loop
+    reader_task = asyncio.create_task(_reader_loop())
+    from app.ai.embeddings import embed_loop as _embed_loop
+    embed_task = asyncio.create_task(_embed_loop())
+    from app.ai.photo_tagger import photo_loop as _photo_loop
+    photo_task = asyncio.create_task(_photo_loop())
+
     # Google Cloud export. Returns immediately when disabled, which is the
     # shipped default — and when enabled on a host that cannot reach Google it
     # backs off rather than retrying every interval.
@@ -233,6 +244,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    photo_task.cancel()
+    embed_task.cancel()
+    reader_task.cancel()
     digest_task.cancel()
     price_task.cancel()
     match_task.cancel()

@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260922d">
+    <link rel="stylesheet" href="css/style.css?v=20260922e">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -1998,6 +1998,16 @@
                                     </button>
                                     <input type="text" id="crm-filter-search" class="form-control form-control-sm" style="width:190px;"
                                            placeholder="جستجو: خیابان، عنوان، شماره...">
+                                    <!-- «جستجوی معنایی» (app/ai/embeddings.py): a need in words → the listings that read closest -->
+                                    <div class="input-group input-group-sm ai-sem-search">
+                                        <input type="text" id="crm-ai-search" class="form-control form-control-sm"
+                                               placeholder="به زبان خودتان: خانهٔ حیاط‌دار برای کافه…"
+                                               onkeydown="if(event.key==='Enter'){event.preventDefault();aiOpenSemanticSearch(this.value)}">
+                                        <button class="btn btn-outline-primary" type="button" title="جستجوی معنایی"
+                                                onclick="aiOpenSemanticSearch(document.getElementById('crm-ai-search').value)">
+                                            <i class="bi bi-stars"></i>
+                                        </button>
+                                    </div>
                                     <select id="crm-filter-category" class="form-select form-select-sm" style="width:170px;">
                                         <option value="">همه دسته‌بندی‌ها</option>
                                     </select>
@@ -2439,13 +2449,19 @@
                         </div></div>
                     </div>
 
+                    <!-- the photo tagger (app/ai/photo_tagger.py): what the vision model saw in the first photos -->
+                    <div class="card mb-3">
+                        <div class="card-header"><i class="bi bi-stars"></i> برچسب‌های هوش تصویری</div>
+                        <div class="card-body" id="ai-photo-status"></div>
+                    </div>
+
                     <div class="card">
                         <div class="card-header"><i class="bi bi-info-circle"></i> این صفحه چه چیزی را نمی‌سنجد</div>
                         <div class="card-body small text-muted" style="line-height:2">
                             تشخیص سبک آشپزخانه، نوع کف‌پوش، متریال و برند از روی عکس، تولید پلان،
-                            و ویرایش تصویر (غروب مجازی، مبلمان مجازی) به یک مدل بینایی نیاز دارند
-                            که روی این سرور اجرا نمی‌شود.
-                            آنچه بالا می‌بینید از پیکسل‌ها و قیمت‌های واقعی اندازه‌گیری شده، نه تخمین زده شده.
+                            و ویرایش تصویر (غروب مجازی، مبلمان مجازی) هنوز انجام نمی‌شود.
+                            «برچسب‌های هوش تصویری» بالا از یک مدل بینایی روی سه عکس اول هر آگهی می‌آید؛
+                            بقیهٔ این صفحه از پیکسل‌ها و قیمت‌های واقعی اندازه‌گیری شده، نه تخمین زده شده.
                         </div>
                     </div>
                 </div>
@@ -4042,6 +4058,19 @@
                                     بدون آن‌ها سیستم باید از روی متن حدس بزند.
                                 </div>
                             </div>
+                            <!-- the need parser (app/ai/need_parser.py): what the customer said, in their words,
+                                 fills the empty fields below; nothing is saved until «ذخیره مشتری» -->
+                            <div class="col-12">
+                                <label class="form-label" for="cust-ai-text"><i class="bi bi-stars"></i> حرف مشتری (متن آزاد)</label>
+                                <div class="d-flex gap-2 align-items-start">
+                                    <textarea id="cust-ai-text" class="form-control" rows="2" maxlength="2000"
+                                              placeholder="مثلاً: یه واحد ۱۰۰ متری نوساز طرف گلها تا ۵ میلیارد، طبقهٔ اول نباشه، پارکینگ حتماً"></textarea>
+                                    <button type="button" class="btn btn-outline-success text-nowrap" id="cust-ai-btn" onclick="aiFillCustomerFromText()">
+                                        <i class="bi bi-magic"></i> پر کردن از متن
+                                    </button>
+                                </div>
+                                <div class="form-text small">فقط فیلدهای خالی پر می‌شوند؛ چیزی ذخیره نمی‌شود تا خودتان «ذخیره مشتری» را بزنید.</div>
+                            </div>
                             <div class="col-md-4">
                                 <label class="form-label">نوع معامله</label>
                                 <select id="cust-deal-type" class="form-select">
@@ -4962,7 +4991,12 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260922d"></script>
+<script src="js/app.js?v=20260922e"></script>
+<!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
+<script src="js/ai/reader.js?v=20260922e"></script>
+<script src="js/ai/embed.js?v=20260922e"></script>
+<script src="js/ai/photo.js?v=20260922e"></script>
+<script src="js/ai/need.js?v=20260922e"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

@@ -183,7 +183,8 @@ async def usage_summary(db) -> Dict[str, Any]:
                    func.coalesce(func.sum(AiUsage.cost_toman), 0.0),
                    func.coalesce(func.sum(AiUsage.prompt_tokens + AiUsage.completion_tokens), 0))
             .where(AiUsage.created_at >= since))).one()
-        return {"calls": int(row[0]), "cost_usd": round(float(row[1]), 4),
+        # six decimals: a handful of tiny calls is $0.000013, not $0.0
+        return {"calls": int(row[0]), "cost_usd": round(float(row[1]), 6),
                 "cost_toman": round(float(row[2])), "tokens": int(row[3])}
 
     from sqlalchemy import Integer, case
@@ -197,7 +198,7 @@ async def usage_summary(db) -> Dict[str, Any]:
     return {
         "today": await _sum(day),
         "month": await _sum(month),
-        "by_agent": [{"agent": a, "calls": int(c), "cost_usd": round(float(u), 4),
+        "by_agent": [{"agent": a, "calls": int(c), "cost_usd": round(float(u), 6),
                       "cost_toman": round(float(t)), "failed": int(f or 0)} for a, c, u, t, f in per],
         "last": last.to_dict() if last else None,
     }
