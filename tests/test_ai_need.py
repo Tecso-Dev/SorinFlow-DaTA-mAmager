@@ -176,7 +176,8 @@ class TestTheAnswerBecomesACustomer:
         assert out["model"] == "test/model" and out["prompt_version"] == need.PROMPT_VERSION
         assert out["criteria"]["confidence"] == {"budget_max": 0.95, "districts": 0.9}
         body = seen[0]
-        assert body["temperature"] == 0 and body["max_tokens"] == 350
+        # the read job runs on a reasoning model: the core raises the budget to its floor
+        assert body["temperature"] == 0 and body["max_tokens"] == 1500
         assert body["response_format"] == {"type": "json_object"} and body["model"] == "z-ai/glm-5.3-flash"
         assert body["messages"][-1]["content"].endswith("پارکینگ حتماً")
         row = configured["ledger"][-1]

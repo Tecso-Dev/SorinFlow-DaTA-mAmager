@@ -254,3 +254,40 @@ class TestThePanel:
         assert src.count("_super_admin") >= 5, "status, settings, test and usage"
         mounted = (ROOT / "app/api/routes/__init__.py").read_text(encoding="utf-8")
         assert 'router.include_router(ai.router, prefix="/ai"' in mounted
+
+
+class TestReasoningModels:
+    """Liara's GLM thinks inside the same token budget it answers from and its
+    reasoning cannot be switched off — with a 300-token budget every answer
+    came back empty and the reader burned a pass on «malformed answer»."""
+
+    def test_a_thinking_model_gets_a_floor_and_a_shorter_thought(self, configured, monkeypatch):
+        import json
+        seen = []
+
+        def handler(req):
+            seen.append(json.loads(req.read()))
+            return _answer('{"ok": true}')
+        _gateway(monkeypatch, handler)
+        asyncio.run(llm.chat("read", [{"role": "user", "content": "x"}], agent="t", db=object(), json_mode=True, max_tokens=300))
+        body = seen[-1]
+        assert body["model"] == "z-ai/glm-5.3-flash"
+        assert body["max_tokens"] == llm.REASONING_MIN_TOKENS and body["thinking"] == {"type": "disabled"}
+        asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object(), max_tokens=300))
+        assert seen[-1]["max_tokens"] == 300 and "thinking" not in seen[-1], "a plain model keeps what it was given"
+
+    def test_an_empty_answer_cut_by_length_is_retried_with_more_room(self, configured, monkeypatch):
+        import json
+        seen = []
+
+        def handler(req):
+            body = json.loads(req.read()); seen.append(body["max_tokens"])
+            if len(seen) == 1:
+                return httpx.Response(200, json={"model": "z-ai/glm-5.3-flash",
+                                                 "choices": [{"finish_reason": "length", "message": {"content": "", "reasoning_content": "…"}}],
+                                                 "usage": {"prompt_tokens": 50, "completion_tokens": 1500, "cost": 0.0003}})
+            return _answer('{"kind": "shop"}')
+        _gateway(monkeypatch, handler)
+        out = asyncio.run(llm.chat("read", [{"role": "user", "content": "x"}], agent="t", db=object(), json_mode=True))
+        assert out["data"] == {"kind": "shop"} and seen == [1500, 4500]
+        assert [r for r in configured["ledger"] if not r["ok"]], "the empty answer is on the ledger as a failure"

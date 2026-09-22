@@ -188,7 +188,8 @@ class TestTaggingOne:
         assert row == tags, "on the row, not only in memory"
         body = seen[0]
         assert body["model"] == "z-ai/glm-5.3-flash", "the vision job's model"
-        assert body["temperature"] == 0 and body["max_tokens"] == 300
+        # the vision job runs on a reasoning model: the core raises the budget to its floor
+        assert body["temperature"] == 0 and body["max_tokens"] == 1500
         assert body["response_format"] == {"type": "json_object"}
         assert sum(1 for part in body["messages"][1]["content"] if part["type"] == "image_url") == 2
         assert configured["ledger"][-1]["agent"] == "vision" and configured["ledger"][-1]["job"] == "vision"

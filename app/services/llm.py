@@ -46,6 +46,15 @@ KEY_NOTES = "ai_office_notes"       # appended to every «write» prompt — the
 KEY_ENABLED = "ai_enabled"
 DEFAULT_CAP_USD = 2.0
 TIMEOUT = 40.0
+# reasoning models (Liara's GLM family): the floor and the ceiling of the
+# budget they get, because their thinking comes out of the same max_tokens
+REASONING_MIN_TOKENS = 1500
+REASONING_MAX_TOKENS = 6000
+REASONING_PREFIXES = ("z-ai/", "deepseek/", "moonshotai/")
+
+
+def _reasons(model: str) -> bool:
+    return (model or "").lower().startswith(REASONING_PREFIXES)
 # Fixed +03:30 — the production image has no tz database (see call_queue.TEHRAN).
 TEHRAN = timezone(timedelta(hours=3, minutes=30), "Asia/Tehran")
 
@@ -274,7 +283,18 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
                             "temperature": temperature, "max_tokens": max_tokens}
     if json_mode or schema is not None:
         body["response_format"] = {"type": "json_object"}
+    if _reasons(model):
+        # A reasoning model thinks inside the same budget it answers from.
+        # On Liara, GLM's reasoning cannot be switched off («Reasoning is
+        # mandatory for this endpoint»); `thinking: disabled` only shortens
+        # it. With a 300-token budget every answer came back empty — the
+        # whole budget went to thought — so the floor is high enough for
+        # both, and a first empty answer is retried with three times more.
+        body["thinking"] = {"type": "disabled"}
+        body["max_tokens"] = max(max_tokens, REASONING_MIN_TOKENS)
 
+    if _reasons(model):
+        timeout = max(timeout, 90.0)
     last_error = ""
     for attempt in (1, 2):
         t0 = time.monotonic()
@@ -289,7 +309,15 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
                 raise LLMError(last_error)
             data = resp.json()
             usage = data.get("usage") or {}
-            content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+            choice = (data.get("choices") or [{}])[0]
+            content = (choice.get("message") or {}).get("content") or ""
+            if not content.strip() and choice.get("finish_reason") == "length" and attempt == 1:
+                # the budget went to thinking and nothing was left for the
+                # answer — once more with room for both
+                last_error = "empty answer: the token budget went to reasoning"
+                await _record(agent, job, model, usage, ms, False, last_error)
+                body["max_tokens"] = min(int(body["max_tokens"]) * 3, REASONING_MAX_TOKENS)
+                continue
             out: Dict[str, Any] = {"content": content, "data": None, "model": data.get("model") or model,
                                    "usage": usage, "cost_usd": float(usage.get("cost") or 0.0),
                                    "cost_toman": float(usage.get("total_cost_toman") or 0.0), "ms": ms}

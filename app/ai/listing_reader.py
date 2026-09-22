@@ -471,8 +471,12 @@ async def reader_loop() -> None:
     await asyncio.sleep(START_DELAY)
     logger.info(f"[reader] armed — every {TICK_SECONDS} s, {BATCH} listings a pass, prompt v{PROMPT_VERSION}")
     while True:
-        await tick()
-        await asyncio.sleep(TICK_SECONDS)
+        r = await tick() or {}
+        # a pass where every listing failed is a prompt or a model problem,
+        # not a listing problem: paying for the same failures again in two
+        # minutes helps nobody — wait ten ticks, then look again
+        backoff = (r.get("failed") or 0) and not (r.get("read") or 0)
+        await asyncio.sleep(TICK_SECONDS * (10 if backoff else 1))
 
 
 # ── the merge rule ───────────────────────────────────────────────────────────
