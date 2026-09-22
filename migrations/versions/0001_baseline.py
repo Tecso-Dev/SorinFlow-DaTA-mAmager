@@ -29,7 +29,7 @@ def upgrade() -> None:
     from app.database import Base
     from app.models import (property, cookie, scraping_job, lead, user,   # noqa: F401
                             crm_models, app_setting, portal, email_log,
-                            sms_log, forwarder, scrape_schedule)
+                            sms_log, forwarder, scrape_schedule, ai_usage)
     Base.metadata.create_all(bind=op.get_bind())
 
 

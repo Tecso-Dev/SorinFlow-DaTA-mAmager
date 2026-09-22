@@ -3237,6 +3237,21 @@ html[data-theme="light"] .table thead th {
 .job-who .job-acct { font-size: .66rem; color: var(--text-muted); text-align: start; unicode-bidi: isolate; white-space: nowrap; letter-spacing: -.01em }
 .job-who .job-acct-more { color: var(--accent2); font-weight: 600 }
 
+/* the AI card: which agent is live, and what each call cost */
+.ai-agents { display: grid; gap: .4rem; margin-bottom: 1rem }
+.ai-agent {
+  display: grid; grid-template-columns: .6rem 1fr auto; align-items: center; gap: .65rem;
+  padding: .55rem .8rem; border-radius: var(--r-sm);
+  background: var(--surface-2, rgba(255,255,255,.03)); border: 1px solid rgba(255,255,255,.06);
+  font-size: .82rem;
+}
+.ai-agent-dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--text-muted); opacity: .5 }
+.ai-agent.is-live .ai-agent-dot { background: #34d399; opacity: 1; box-shadow: 0 0 0 3px rgba(52,211,153,.15) }
+.ai-agent-state { font-size: .72rem; color: var(--text-muted); white-space: nowrap }
+.ai-agent.is-live .ai-agent-state { color: #34d399 }
+.ai-usage-wrap { max-height: 46vh; overflow: auto; text-align: start; font-size: .8rem }
+.ai-usage-wrap table { font-variant-numeric: tabular-nums }
+
 /* the morning digest row on the backup card */
 .bk-digest {
   display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;

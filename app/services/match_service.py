@@ -363,16 +363,18 @@ async def _llm_rerank(prompt_items: List[Dict[str, Any]], context: str) -> Dict[
     """Ask the configured LLM for a Persian reason per candidate.
 
     Returns {property_id: reason}. Any failure returns {} so callers keep the
-    local ranking untouched.
+    local ranking untouched — the ranking is ours, the sentence is the
+    model's, and a missing sentence costs nothing.
+
+    Goes through app/services/llm.py like every other agent: the same key,
+    the same per-job model, the same daily cap, one row in the ledger.
     """
-    key = getattr(settings, "llm_api_key", "") or ""
-    if not key or not prompt_items:
+    from app.services import llm as _llm
+    if not prompt_items or not _llm.configured():
         return {}
 
-    base = getattr(settings, "llm_base_url", "https://api.openai.com/v1")
-    model = getattr(settings, "llm_model", "gpt-4o-mini")
     listing_lines = "\n".join(
-        f"- id={i['id']} | {i['title']} | {i['area'] or '?'}m² | {i['rooms'] if i['rooms'] is not None else '?'}خواب"
+        f"- id={i['id']} | {_llm.mask_pii(i['title'])} | {i['area'] or '?'}m² | {i['rooms'] if i['rooms'] is not None else '?'}خواب"
         f" | {i['price'] or '?'} تومان | {i['district'] or i['city'] or '-'}"
         f" | امتیاز تطابق: {i.get('score', '?')}٪"
         for i in prompt_items
@@ -389,23 +391,10 @@ async def _llm_rerank(prompt_items: List[Dict[str, Any]], context: str) -> Dict[
         'فقط JSON برگردان به شکل: {"results":[{"id":123,"reason":"..."}]}'
     )
     try:
-        async with httpx.AsyncClient(timeout=25) as client:
-            resp = await client.post(
-                f"{base.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.2,
-                    "response_format": {"type": "json_object"},
-                },
-            )
-        if resp.status_code != 200:
-            logger.warning(f"[match] LLM returned {resp.status_code}: {resp.text[:160]}")
-            return {}
-        import json as _json
-        content = resp.json()["choices"][0]["message"]["content"]
-        data = _json.loads(content)
+        out = await _llm.chat("write", [{"role": "user", "content": prompt}],
+                              agent="explainer", json_mode=True,
+                              max_tokens=60 * max(1, len(prompt_items)), timeout=25)
+        data = out.get("data") or {}
         return {int(r["id"]): str(r.get("reason", ""))[:120] for r in data.get("results", []) if r.get("id")}
     except Exception as e:
         logger.warning(f"[match] LLM re-rank skipped: {e}")
@@ -520,7 +509,8 @@ async def similar_to_property(db: AsyncSession, prop: Property, limit: int = 12,
     results = rank_similar(prop, cands, limit)
 
     if use_llm and results:
-        ctx = (f"ملکی مشابه این: {prop.title} — {prop.area or '?'} متر، "
+        from app.services import llm as _llm
+        ctx = (f"ملکی مشابه این: {_llm.mask_pii(prop.title)} — {prop.area or '?'} متر، "
                f"{prop.rooms if prop.rooms is not None else '?'} خواب، "
                f"{_price_of(prop) or '?'} تومان، منطقه {prop.district or prop.city_name or '-'}")
         reasons = await _llm_rerank(
@@ -565,9 +555,12 @@ async def matches_for_customer(db: AsyncSession, customer, limit: int = 12,
     results = [_brief(c, sc, rs) for sc, rs, c in top]
 
     if use_llm and results:
+        # the customer's own words go to a third party masked — their name is
+        # never sent at all, only what they are looking for
+        from app.services import llm as _llm
         ctx = (f"مشتری با بودجه {customer.budget_max or '?'} تومان، منطقه درخواستی "
-               f"{customer.desired_district or '-'}، مشخصات {customer.desired_specs or '-'}"
-               + (f"، نمی‌خواهد: {customer.red_lines}" if customer.red_lines else ""))
+               f"{_llm.mask_pii(customer.desired_district) or '-'}، مشخصات {_llm.mask_pii(customer.desired_specs) or '-'}"
+               + (f"، نمی‌خواهد: {_llm.mask_pii(customer.red_lines)}" if customer.red_lines else ""))
         reasons = await _llm_rerank(
             [{"id": r["id"], "title": r["title"], "area": r["area"], "rooms": r["rooms"],
               "price": r["price"], "district": r["district"], "city": r["city_name"],

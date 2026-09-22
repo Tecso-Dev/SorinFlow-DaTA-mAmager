@@ -1426,7 +1426,7 @@ function showSection(sectionName) {
         case 'sms':        loadSms(); break;
         case 'email':      _applyCrmRoleVisibility(); loadEmail(); break;
         case 'users':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
-                               loadUsers(); loadMaintenance(); loadBackup(); initPermsUI(); loadTickets();
+                               loadUsers(); loadMaintenance(); loadBackup(); loadAi(); initPermsUI(); loadTickets();
                            } break;
     }
 }
@@ -3455,6 +3455,134 @@ function renderMaintenanceState(r) {
             eta.classList.add('d-none');
         }
     }
+}
+
+// ═══ هوش مصنوعی — what is connected, what it costs ═════════════════════
+//
+// The key and the base URL are not editable here: they live in GitHub and
+// reach the pod as environment variables, so the card shows their state and
+// never their value. What IS editable is which model does which job, the
+// daily cap, and the office's standing instructions for text people read.
+const AI_JOBS = [['write', 'نوشتن فارسی'], ['read', 'خواندن'], ['vision', 'تصویر'], ['embed', 'جستجوی معنایی']];
+let _aiStatus = null;
+
+function _aiMoney(usd, toman) {
+    const t = toman ? `${formatNumber(Math.round(toman))} تومان` : '۰ تومان';
+    return `${t} <span class="text-muted" dir="ltr">($${(usd || 0).toFixed(3)})</span>`;
+}
+
+async function loadAi() {
+    const badge = document.getElementById('ai-badge');
+    if (!badge) return;
+    try {
+        const s = await apiCall('/ai/status');
+        _aiStatus = s;
+        const ok = s.configured && s.enabled;
+        badge.textContent = !s.configured ? 'تنظیم نشده' : (!s.enabled ? 'خاموش' : (s.cap_reached ? 'سقف امروز پر شد' : 'فعال'));
+        badge.className = 'badge ' + (!s.configured ? 'bg-secondary' : (!s.enabled ? 'bg-secondary' : (s.cap_reached ? 'bg-warning text-dark' : 'bg-success')));
+
+        document.getElementById('ai-conn').innerHTML = s.configured
+            ? `<span class="text-success">✓ وصل است</span> <span class="text-muted small">· پروژهٔ ${esc(s.workspace || '—')}</span>`
+            : '<span class="text-warning">کلید یا آدرس سرویس در GitHub تنظیم نشده</span>';
+        const u = s.usage || { today: {}, month: {} };
+        document.getElementById('ai-today').innerHTML =
+            `${_aiMoney(u.today.cost_usd, u.today.cost_toman)} <span class="text-muted small">· ${formatNumber(u.today.calls || 0)} درخواست · سقف $${(s.cap_usd || 0).toFixed(2)}</span>`;
+        document.getElementById('ai-month').innerHTML =
+            `${_aiMoney(u.month.cost_usd, u.month.cost_toman)} <span class="text-muted small">· ${formatNumber(u.month.calls || 0)} درخواست${s.liara ? ` · لیارا: ${formatNumber(s.liara.cost_toman)} تومان` : ''}</span>`;
+
+        const box = document.getElementById('ai-agents');
+        if (box) {
+            box.innerHTML = (s.agents || []).map(a => `
+                <div class="ai-agent ${a.live ? 'is-live' : ''}">
+                    <span class="ai-agent-dot"></span>
+                    <div>
+                        <b>${esc(a.name)}</b>
+                        <span class="badge bg-secondary-subtle text-secondary-emphasis">${esc((AI_JOBS.find(j => j[0] === a.job) || [])[1] || a.job)}</span>
+                        <div class="text-muted small">${esc(a.desc)}</div>
+                    </div>
+                    <span class="ai-agent-state">${a.live ? 'فعال' : 'به‌زودی'}</span>
+                </div>`).join('');
+        }
+        for (const [job] of AI_JOBS) {
+            const input = document.getElementById(`ai-model-${job}`);
+            const hint = document.getElementById(`ai-model-${job}-hint`);
+            if (input && !input.dataset.touched) input.value = (s.model_sources || {})[job] === 'panel' ? (s.models || {})[job] || '' : '';
+            if (input) input.placeholder = (s.env_models || {})[job] || '';
+            if (hint) hint.textContent = (s.model_sources || {})[job] === 'panel'
+                ? `از پنل: ${(s.models || {})[job]} — خالی کنید تا به ${((s.env_models || {})[job] || '—')} برگردد`
+                : `از سرور: ${(s.env_models || {})[job] || 'تنظیم نشده'}`;
+        }
+        const cap = document.getElementById('ai-cap');
+        if (cap && !cap.dataset.touched) cap.value = s.cap_usd ?? '';
+        const notes = document.getElementById('ai-notes');
+        if (notes && !notes.dataset.touched) notes.value = s.notes || '';
+        const en = document.getElementById('ai-enabled');
+        if (en) en.checked = !!s.enabled;
+    } catch (e) {
+        badge.textContent = 'نامشخص'; badge.className = 'badge bg-secondary';
+    }
+}
+
+['ai-cap', 'ai-notes', 'ai-model-write', 'ai-model-read', 'ai-model-vision', 'ai-model-embed'].forEach(id => {
+    document.addEventListener('input', e => { if (e.target && e.target.id === id) e.target.dataset.touched = '1'; });
+});
+
+async function aiSave() {
+    const out = document.getElementById('ai-result');
+    const val = id => (document.getElementById(id)?.value ?? '').trim();
+    const body = {
+        enabled: document.getElementById('ai-enabled')?.checked,
+        notes: val('ai-notes'),
+        model_write: val('ai-model-write'), model_read: val('ai-model-read'),
+        model_vision: val('ai-model-vision'), model_embed: val('ai-model-embed'),
+    };
+    const cap = val('ai-cap');
+    if (cap !== '') body.daily_cap_usd = Number(_digitsOnly(cap));
+    try {
+        await apiCall('/ai/settings', { method: 'PUT', body: JSON.stringify(body) });
+        ['ai-cap', 'ai-notes', 'ai-model-write', 'ai-model-read', 'ai-model-vision', 'ai-model-embed']
+            .forEach(id => { const el = document.getElementById(id); if (el) delete el.dataset.touched; });
+        out.textContent = 'ذخیره شد'; out.className = 'small text-success';
+        loadAi();
+    } catch (e) { out.textContent = e.message; out.className = 'small text-danger'; }
+}
+
+async function aiTest() {
+    const btn = document.getElementById('ai-test');
+    const out = document.getElementById('ai-result');
+    btn.disabled = true; out.textContent = 'در حال تست…'; out.className = 'small text-muted';
+    try {
+        const r = await apiCall('/ai/test', { method: 'POST' });
+        out.innerHTML = `✓ ${esc(r.model)} در ${formatNumber(r.ms)} میلی‌ثانیه پاسخ داد — «${esc(r.reply)}»`;
+        out.className = 'small text-success';
+        loadAi();
+    } catch (e) { out.textContent = e.message; out.className = 'small text-danger'; }
+    btn.disabled = false;
+}
+
+/** «آخرین مصرف‌ها» — what each call cost, newest first. */
+async function aiUsage() {
+    let d;
+    try { d = await apiCall('/ai/usage?limit=30'); }
+    catch (e) { showToast('خطا', e.message, 'danger'); return; }
+    const rows = (d.items || []).map(i => `
+        <tr>
+            <td>${esc(i.agent)}</td>
+            <td class="text-muted" dir="ltr">${esc(i.model || '—')}</td>
+            <td>${formatNumber((i.prompt_tokens || 0) + (i.completion_tokens || 0))}</td>
+            <td>${formatNumber(Math.round(i.cost_toman || 0))}</td>
+            <td>${formatNumber(i.ms || 0)}</td>
+            <td>${i.ok ? '<span class="text-success">✓</span>' : `<span class="text-danger" title="${esc(i.error || '')}">✗</span>`}</td>
+            <td class="small text-muted">${esc((i.created_at || '').slice(11, 16))}</td>
+        </tr>`).join('');
+    const by = (d.summary?.by_agent || []).map(a =>
+        `<span class="pill">${esc(a.agent)}: ${formatNumber(Math.round(a.cost_toman))} تومان${a.failed ? ` · ${formatNumber(a.failed)} خطا` : ''}</span>`).join(' ');
+    await askInfo({
+        icon: 'bi-list-ul', title: 'آخرین مصرف‌های هوش مصنوعی', okLabel: 'بستن',
+        body: `<div class="ai-usage-wrap"><div class="mb-2">${by || 'هنوز مصرفی ثبت نشده'}</div>
+            <table class="table table-sm mb-0"><thead><tr><th>ایجنت</th><th>مدل</th><th>توکن</th><th>تومان</th><th>ms</th><th></th><th>ساعت</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="7" class="text-center text-muted">—</td></tr>'}</tbody></table></div>`,
+    });
 }
 
 // ═══ Backup — the nightly snapshot and its copy off the server ═════
