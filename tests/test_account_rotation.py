@@ -272,3 +272,46 @@ class TestAnExplicitZeroPinsTheAccount:
         assert "if override == 0:" in src
         # and the forced path below it is intact
         assert "if not forced:" in src
+
+
+# ── a pool of one says so, in the run's own log ──────────────────────────────
+
+def test_a_pool_of_one_tells_the_run_why_nothing_rotated(monkeypatch):
+    """«چرخش هر ۱۰ شماره‌گیری» was asked for, Divar challenged after 406
+    reveals, and nothing rotated — because the run's pool is the caller's own
+    accounts and there was only one. The run's log said nothing, so the only
+    visible consequence was listings whose number «گرفته نشد». Now it says it
+    once, with the account and what it has spent."""
+    from types import SimpleNamespace
+    from app.services import job_log
+
+    events = []
+
+    async def fake_record(job_id, stage, message, *, level="info", **details):
+        events.append((stage, message, level))
+    monkeypatch.setattr(job_log, "record", fake_record)
+
+    s = make_scraper(["0911"], every=10)
+    s.current_job = SimpleNamespace(job_id="job-1")
+
+    async def _reveals():
+        return 406
+    s._account_reveals = _reveals
+
+    for _ in range(30):
+        s._reveals_since_rotation += 1
+        assert asyncio.run(s.maybe_rotate_account()) is False
+    assert s.active_phone == "0911"
+
+    assert len(events) == 1, "said once, not on every listing"
+    stage, message, level = events[0]
+    assert stage == job_log.CHALLENGE and level == "warning"
+    assert "0911" in message and "406" in message and "چرخش" in message
+
+
+def test_a_pool_of_one_without_a_job_still_does_not_crash():
+    """The same path runs in the rotation tests and in any internally started
+    scrape, where there is no job row to write an event against."""
+    s = make_scraper(["0911"], every=10)
+    s._reveals_since_rotation = 50
+    assert asyncio.run(s.maybe_rotate_account()) is False

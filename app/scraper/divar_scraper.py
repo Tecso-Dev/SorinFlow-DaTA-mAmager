@@ -3120,6 +3120,33 @@ class DivarScraper:
             # Only one account exists — there is nothing to rotate to, and that
             # will not change by asking again on the next listing. Clear the
             # counters so this does not re-run the pool query every time.
+            #
+            # Say it in the run's own log, once. «چرخش هر ۱۰ شماره‌گیری» was
+            # asked for and silently did not happen, and the only visible
+            # consequence was listings whose number «گرفته نشد» — the cause
+            # named nowhere. The pool is the caller's own accounts, so a
+            # colleague's number does not count (that is the ownership rule,
+            # not a bug): what the operator needs to hear is «add a second
+            # number of your own, or the same one keeps spending».
+            if not getattr(self, "_warned_no_rotation", False):
+                self._warned_no_rotation = True
+                try:
+                    spent = max(await self._account_reveals(), self._reveals_since_rotation)
+                except Exception:
+                    spent = self._reveals_since_rotation
+                logger.warning(
+                    f"[rotate] nothing to rotate to — {self.active_phone} is the only "
+                    f"account in this run's pool ({spent} reveals)")
+                if getattr(self, "current_job", None):
+                    try:
+                        from app.services import job_log
+                        await job_log.record(
+                            self.current_job.job_id, job_log.CHALLENGE,
+                            f"چرخش شماره انجام نشد: {self.active_phone} تنها حساب دیوار این اجراست "
+                            f"({spent} شماره‌گیری). برای چرخش، یک حساب دیوار دیگر به نام خودتان اضافه کنید.",
+                            level="warning")
+                    except Exception as e:
+                        logger.warning(f"[rotate] could not record the no-rotation note: {e}")
             self._reveals_since_rotation = 0
             self._force_rotate = False
             return False
