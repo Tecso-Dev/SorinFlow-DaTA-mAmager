@@ -55,3 +55,20 @@ class TestTheSyncStep:
         assert "LLM_API_KEY=\n" in env and "LLM_BASE_URL=\n" in env and "LLM_MODEL=\n" in env
         docs = (ROOT / "SECRETS.md").read_text(encoding="utf-8")
         assert "## 2d. Managing a secret from GitHub" in docs
+
+
+class TestAChangedKeyReachesTheRunningPod:
+    """A pod reads the Secret at start. A re-run that only changed a key left
+    the pod on the old value (the image was the same, so apply changed
+    nothing) — the key was «synced» and the app still said 401."""
+
+    def test_the_fingerprint_is_rendered_into_the_pod_template(self):
+        manifest = (ROOT / "k8s/04-backend.yaml").read_text(encoding="utf-8")
+        tpl = manifest[manifest.index("  template:"):manifest.index("    spec:")]
+        assert 'sorinflow.com/synced-secrets: "unsynced"' in tpl, "the placeholder lives on the pod template"
+        sync = _step("Sync secrets from GitHub")
+        assert 'hash="$(printf' in sync and "sha256sum | cut -c1-16" in sync and 'SECRETS_HASH=$hash' in sync
+        assert 'SECRETS_HASH=unsynced' in sync, "no managed key → a stable placeholder, not a restart"
+        apply = _step("Apply manifests")
+        assert 'sorinflow\\.com/synced-secrets: ' in apply and '${SECRETS_HASH:-unsynced}' in apply
+        assert "Could not render the secrets fingerprint" in apply

@@ -42,6 +42,13 @@ spec:
     metadata:
       labels:
         app: backend
+      annotations:
+        # A fingerprint of the GitHub-managed secret values, rendered by the
+        # deploy (the «Sync secrets from GitHub» step). A pod reads the Secret
+        # once, at start; a re-run that only changed a key used to leave the
+        # running pod on the old value. Changing this line changes the pod
+        # template, so the pod is recreated and reads the new one.
+        sorinflow.com/synced-secrets: "unsynced"
     spec:
       # Image is imported directly into the node's containerd by CI over SSH,
       # so the kubelet must not try to pull it from the registry.

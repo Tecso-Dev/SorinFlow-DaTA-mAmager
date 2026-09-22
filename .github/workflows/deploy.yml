@@ -224,9 +224,15 @@ jobs:
           done
           if [ "$patch" = "{}" ]; then
             echo "Nothing to sync."
+            echo "SECRETS_HASH=unsynced" >> "$GITHUB_ENV"
           else
             kubectl patch secret sorinflow-secrets -n sorinflow \
               -p "$(jq -cn --argjson p "$patch" '{stringData: $p}')" >/dev/null
+            # A fingerprint of the values, for the pod template (see the
+            # annotation in 04-backend.yaml): same values, same pod; a changed
+            # value, a recreated pod that reads it. Not reversible.
+            hash="$(printf '%s' "$patch" | sha256sum | cut -c1-16)"
+            echo "SECRETS_HASH=$hash" >> "$GITHUB_ENV"
           fi
 
       - name: Apply manifests
@@ -255,7 +261,8 @@ jobs:
           IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
 
           RENDERED="$(mktemp)"
-          sed -E "s|^([[:space:]]*image: )ghcr\.io/tecso-dev/sorinflow-data-manager:.*|\1${IMAGE}|" \
+          sed -E -e "s|^([[:space:]]*image: )ghcr\.io/tecso-dev/sorinflow-data-manager:.*|\1${IMAGE}|" \
+                 -e "s|^([[:space:]]*sorinflow\.com/synced-secrets: ).*|\1\"${SECRETS_HASH:-unsynced}\"|" \
             k8s/04-backend.yaml > "$RENDERED"
 
           # If that image line is ever renamed the sed silently matches nothing
@@ -265,6 +272,11 @@ jobs:
             echo "::error::Could not render the image into k8s/04-backend.yaml."
             echo "Its image line no longer matches the expected pattern; applying"
             echo "the manifest unchanged would reset the deployment to :latest."
+            exit 1
+          }
+          grep -qF "sorinflow.com/synced-secrets: \"${SECRETS_HASH:-unsynced}\"" "$RENDERED" || {
+            echo "::error::Could not render the secrets fingerprint into k8s/04-backend.yaml."
+            echo "A changed key would then not restart the pod that reads it."
             exit 1
           }
 
