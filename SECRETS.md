@@ -165,6 +165,38 @@ not lock anyone out of the mailbox.
 
 ---
 
+## 2d. Managing a secret from GitHub instead of the server
+
+For keys that change now and then and that more than one person may need to
+set, the server's `kubectl patch` is one step too many. The deploy workflow
+has a **Sync secrets from GitHub** step: every name in its `LIST` that is set
+as a repository secret (GitHub → Settings → Secrets and variables → Actions →
+Repository secrets) is copied into `sorinflow-secrets` on each deploy, before
+the new pod is created — so the value is live on that same deploy.
+
+Today the list is the LLM trio: `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`.
+
+Rules the step keeps:
+
+- a GitHub secret that is **not set** leaves the cluster value alone — it
+  never blanks a key that was patched by hand;
+- values only travel to kubectl; the log names which keys were synced and
+  never shows a value;
+- to change a value, change the GitHub secret and push (or re-run the last
+  deploy); to remove one from the cluster, patch it out on the server as in
+  §2 — deleting the GitHub secret alone does nothing to the cluster.
+
+To put another key under GitHub's management: add it to `LIST` and to the
+`env:` of that step in `.github/workflows/deploy.yml`, and make sure
+`k8s/04-backend.yaml` wires it into the pod (§2, step 4).
+
+Do not paste a key into a chat, an issue or a commit to get it there: create
+it as a repository secret yourself (`gh secret set LLM_API_KEY` from your own
+terminal also works). A key that was ever pasted somewhere it should not have
+been is rotated, not reused (§5).
+
+---
+
 ## 3. Reading what is currently set
 
 ```bash

@@ -194,6 +194,40 @@ jobs:
           echo "failing to reach ghcr.io. The running pod is untouched."
           exit 1
 
+      # Secrets that are managed in GitHub (Settings → Secrets and variables →
+      # Actions) are copied into the cluster Secret on every deploy, before the
+      # manifests create the new pod that reads them. A GitHub secret that is
+      # not set leaves the cluster value alone — a missing entry must never
+      # blank a key that was patched by hand on the server. Values are only
+      # ever passed to kubectl; nothing here prints one (GitHub masks them in
+      # the log anyway). To manage another key this way, add its name to LIST
+      # — and, if it is new, wire it in k8s/04-backend.yaml (SECRETS.md §2).
+      - name: Sync secrets from GitHub
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: |
+          set -euo pipefail
+          LIST="LLM_API_KEY LLM_BASE_URL LLM_MODEL"
+          patch="{}"
+          for name in $LIST; do
+            val="${!name:-}"
+            if [ -z "$val" ]; then
+              echo "$name: not set in GitHub — cluster value left as is"
+              continue
+            fi
+            patch="$(jq -cn --argjson p "$patch" --arg k "$name" --arg v "$val" '$p + {($k): $v}')"
+            echo "$name: synced"
+          done
+          if [ "$patch" = "{}" ]; then
+            echo "Nothing to sync."
+          else
+            kubectl patch secret sorinflow-secrets -n sorinflow \
+              -p "$(jq -cn --argjson p "$patch" '{stringData: $p}')" >/dev/null
+          fi
+
       - name: Apply manifests
         env:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
