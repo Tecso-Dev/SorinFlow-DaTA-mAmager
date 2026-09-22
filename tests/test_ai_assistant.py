@@ -38,9 +38,10 @@ def _gateway(monkeypatch, handler):
 
 
 def _turn(content=None, tool_calls=None):
-    msg = {"role": "assistant", "content": content}
+    # as Liara answers: the nulls it adds are what broke the second round
+    msg = {"role": "assistant", "content": content, "refusal": None, "reasoning": None}
     if tool_calls:
-        msg["tool_calls"] = tool_calls
+        msg["tool_calls"] = [{**c, "index": 0} for c in tool_calls]
     return httpx.Response(200, json={"model": "test/model", "choices": [{"finish_reason": "tool_calls" if tool_calls else "stop", "message": msg}],
                                      "usage": {"prompt_tokens": 20, "completion_tokens": 10, "cost": 0.0002, "total_cost_toman": 60}})
 
@@ -102,6 +103,10 @@ class TestTheConversation:
             if len(seen) == 1:
                 assert body["tools"] and body["messages"][0]["role"] == "system" and assistant.NAME in body["messages"][0]["content"]
                 return _turn(tool_calls=[{"id": "c1", "type": "function", "function": {"name": "queue_status", "arguments": "{}"}}])
+            turn = body["messages"][-2]
+            assert turn["role"] == "assistant" and turn["tool_calls"][0]["id"] == "c1"
+            assert "refusal" not in turn and "reasoning" not in turn and "index" not in turn["tool_calls"][0], \
+                "the gateway refuses its own nulls when they are echoed back"
             tool_msg = body["messages"][-1]
             assert tool_msg["role"] == "tool" and tool_msg["tool_call_id"] == "c1" and '"calls_due": 18' in tool_msg["content"]
             return _turn(content="۱۸ تماس در صف است و ۳ تطبیق منتظر.")

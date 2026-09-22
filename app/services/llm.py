@@ -237,6 +237,23 @@ async def _gate(db, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return cfg
 
 
+# The keys a gateway will accept back in `messages`. Liara answers a tool call
+# with `refusal: null` and `reasoning: null` beside the call, then refuses the
+# next request with «messages[2].refusal must be a string» when they are echoed
+# — so a turn is trimmed to what it means before it goes back.
+_TURN_KEYS = ("role", "content", "tool_calls", "name", "tool_call_id")
+
+
+def _clean_turn(message: Dict[str, Any]) -> Dict[str, Any]:
+    out = {k: v for k, v in message.items() if k in _TURN_KEYS and v is not None}
+    out.setdefault("role", "assistant")
+    if out.get("tool_calls"):
+        # `index` is a streaming artefact; some gateways reject it on the way back
+        out["tool_calls"] = [{k: v for k, v in c.items() if k in ("id", "type", "function")}
+                             for c in out["tool_calls"]]
+    return out
+
+
 def _extract_json(content: str) -> Any:
     """The model's JSON, even when it wrapped it in a code fence."""
     text = (content or "").strip()
@@ -316,7 +333,7 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
             data = resp.json()
             usage = data.get("usage") or {}
             choice = (data.get("choices") or [{}])[0]
-            message = choice.get("message") or {}
+            message = _clean_turn(choice.get("message") or {})
             content = message.get("content") or ""
             tool_calls = message.get("tool_calls") or []
             if not content.strip() and not tool_calls and choice.get("finish_reason") == "length" and attempt == 1:
