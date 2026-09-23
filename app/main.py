@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from app.auth.dependencies import require_super_admin as _require_super_admin
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 import hmac
 import time
@@ -590,6 +591,19 @@ async def metrics_middleware(request: Request, call_next):
     finally:
         mx.http_latency.labels(route).observe(time.perf_counter() - started)
         mx.http_requests.labels(route, request.method, status).inc()
+
+
+# ─── compression ─────────────────────────────────────────────────────────────
+# Registered last, so it is outermost and compresses whatever the layers below
+# produce. The panel was being served raw: 665 KB of app.js, 359 KB of markup
+# and 170 KB of stylesheet, about 1.9 MB before anything appeared on screen —
+# over a domestic Iranian line that is the wait people were complaining about.
+# Text compresses five- to sixfold, so the same panel arrives in roughly 400 KB
+# without a single line of it changing.
+#
+# Only bodies over a kilobyte: below that the header costs more than the saving.
+# Images and fonts are already compressed formats and gzip leaves them alone.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 # Include API routes

@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260923a">
+    <link rel="stylesheet" href="css/style.css?v=20260923b">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -373,6 +373,24 @@
     <!-- Mobile sidebar overlay -->
     <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
+    <!-- ── Command palette: every screen and every action, by typing ── -->
+    <div class="palette-backdrop" id="palette" hidden onclick="if(event.target===this)closePalette()">
+        <div class="palette" role="dialog" aria-modal="true" aria-label="جستجو و رفتن">
+            <div class="palette-input">
+                <i class="bi bi-search"></i>
+                <input id="palette-q" type="text" autocomplete="off" spellcheck="false"
+                       placeholder="اسم صفحه یا کاری که می‌خواهید…" oninput="paletteFilter()">
+                <kbd>Esc</kbd>
+            </div>
+            <div class="palette-list" id="palette-list"></div>
+            <div class="palette-foot">
+                <span><kbd>↑</kbd><kbd>↓</kbd> انتخاب</span>
+                <span><kbd>Enter</kbd> برو</span>
+                <span><kbd>Ctrl</kbd>+<kbd>K</kbd> باز و بسته</span>
+            </div>
+        </div>
+    </div>
+
     <!-- ── Sidebar ─────────────────────────────── -->
     <aside id="sidebar">
         <div class="sidebar-glow"></div>
@@ -386,67 +404,103 @@
         </div>
 
         <nav class="sidebar-nav">
-            <div class="sidebar-section-label">منو اصلی</div>
+            <button class="nav-search" onclick="openPalette()" title="جستجو و رفتن (Ctrl+K)">
+                <i class="bi bi-search"></i>
+                <span>جستجو یا رفتن به…</span>
+                <kbd>Ctrl K</kbd>
+            </button>
 
-            <a class="nav-item-link active" onclick="showSection('dashboard')" id="nav-link-dashboard">
-                <span class="nav-icon"><i class="bi bi-speedometer2"></i></span>
-                داشبورد
-            </a>
-            <a class="nav-item-link" onclick="showSection('properties')" id="nav-link-properties">
-                <span class="nav-icon"><i class="bi bi-house-door"></i></span>
-                لیست املاک
-            </a>
-            <a class="nav-item-link" onclick="showSection('scraper')" id="nav-link-scraper">
-                <span class="nav-icon"><i class="bi bi-robot"></i></span>
-                اسکرپر
-            </a>
-            <a class="nav-item-link" onclick="showSection('crm')" id="nav-link-crm">
-                <span class="nav-icon"><i class="bi bi-people"></i></span>
-                CRM — لیدها
-            </a>
-            <a class="nav-item-link" onclick="showSection('insights')" id="nav-link-insights">
-                <span class="nav-icon"><i class="bi bi-graph-up-arrow"></i></span>
-                هوش تصویری
-            </a>
+            <div class="nav-group" data-group="daily">
+                <button class="nav-group-head" onclick="toggleNavGroup('daily')" aria-expanded="true">
+                    <span class="ngh-label">کار روزانه</span>
+                    <i class="bi bi-chevron-down ngh-caret"></i>
+                </button>
+                <div class="nav-group-body">
+                <a class="nav-item-link active" onclick="showSection('dashboard')" id="nav-link-dashboard">
+                    <span class="nav-icon"><i class="bi bi-speedometer2"></i></span>
+                    داشبورد
+                </a>
+                <a class="nav-item-link" onclick="showSection('properties')" id="nav-link-properties">
+                    <span class="nav-icon"><i class="bi bi-house-door"></i></span>
+                    لیست املاک
+                </a>
+                <a class="nav-item-link" onclick="showSection('crm')" id="nav-link-crm">
+                    <span class="nav-icon"><i class="bi bi-people"></i></span>
+                    CRM — لیدها
+                </a>
+                <a class="nav-item-link" onclick="showSection('portal')" id="nav-link-portal">
+                    <span class="nav-icon"><i class="bi bi-inbox"></i></span>
+                    درخواست‌های مشتریان
+                </a>
+                </div>
+            </div>
 
-            <div class="sidebar-section-label">تنظیمات</div>
+            <div class="nav-group" data-group="scrape">
+                <button class="nav-group-head" onclick="toggleNavGroup('scrape')" aria-expanded="true">
+                    <span class="ngh-label">اسکرپ و داده</span>
+                    <i class="bi bi-chevron-down ngh-caret"></i>
+                </button>
+                <div class="nav-group-body">
+                <a class="nav-item-link" onclick="showSection('scraper')" id="nav-link-scraper">
+                    <span class="nav-icon"><i class="bi bi-robot"></i></span>
+                    اسکرپر
+                </a>
+                <a class="nav-item-link" onclick="showSection('auth')" id="nav-link-auth">
+                    <span class="nav-icon"><i class="bi bi-key"></i></span>
+                    احراز هویت دیوار
+                </a>
+                <a class="nav-item-link" onclick="showSection('proxies')" id="nav-link-proxies">
+                    <span class="nav-icon"><i class="bi bi-shield-check"></i></span>
+                    پراکسی‌ها
+                </a>
+                <a class="nav-item-link" onclick="showSection('insights')" id="nav-link-insights">
+                    <span class="nav-icon"><i class="bi bi-graph-up-arrow"></i></span>
+                    هوش تصویری
+                </a>
+                </div>
+            </div>
 
-            <a class="nav-item-link" onclick="showSection('auth')" id="nav-link-auth">
-                <span class="nav-icon"><i class="bi bi-key"></i></span>
-                احراز هویت دیوار
-            </a>
-            <a class="nav-item-link" onclick="showSection('forwarder')" id="nav-link-forwarder">
-                <span class="nav-icon"><i class="bi bi-phone-vibrate"></i></span>
-                فرستندهٔ پیامک
-            </a>
-            <a class="nav-item-link" onclick="showSection('proxies')" id="nav-link-proxies">
-                <span class="nav-icon"><i class="bi bi-shield-check"></i></span>
-                پراکسی‌ها
-            </a>
-            <a class="nav-item-link" onclick="showSection('portal')" id="nav-link-portal">
-                <span class="nav-icon"><i class="bi bi-inbox"></i></span>
-                درخواست‌های مشتریان
-            </a>
-            <a class="nav-item-link" onclick="showSection('ai')" id="nav-link-ai">
-                <span class="nav-icon"><i class="bi bi-stars"></i></span>
-                هوش مصنوعی
-            </a>
-            <a class="nav-item-link" onclick="showSection('monitoring')" id="nav-link-monitoring">
-                <span class="nav-icon"><i class="bi bi-activity"></i></span>
-                پایش سامانه
-            </a>
-            <a class="nav-item-link" onclick="showSection('sms')" id="nav-link-sms">
-                <span class="nav-icon"><i class="bi bi-chat-left-text"></i></span>
-                پیامک
-            </a>
-            <a class="nav-item-link" onclick="showSection('email')" id="nav-link-email">
-                <span class="nav-icon"><i class="bi bi-envelope-at"></i></span>
-                ایمیل
-            </a>
-            <a class="nav-item-link d-none" onclick="showSection('users')" id="nav-users">
-                <span class="nav-icon"><i class="bi bi-person-gear"></i></span>
-                کاربران
-            </a>
+            <div class="nav-group" data-group="comms">
+                <button class="nav-group-head" onclick="toggleNavGroup('comms')" aria-expanded="true">
+                    <span class="ngh-label">ارتباطات</span>
+                    <i class="bi bi-chevron-down ngh-caret"></i>
+                </button>
+                <div class="nav-group-body">
+                <a class="nav-item-link" onclick="showSection('sms')" id="nav-link-sms">
+                    <span class="nav-icon"><i class="bi bi-chat-left-text"></i></span>
+                    پیامک
+                </a>
+                <a class="nav-item-link" onclick="showSection('email')" id="nav-link-email">
+                    <span class="nav-icon"><i class="bi bi-envelope-at"></i></span>
+                    ایمیل
+                </a>
+                <a class="nav-item-link" onclick="showSection('forwarder')" id="nav-link-forwarder">
+                    <span class="nav-icon"><i class="bi bi-phone-vibrate"></i></span>
+                    فرستندهٔ پیامک
+                </a>
+                </div>
+            </div>
+
+            <div class="nav-group" data-group="system">
+                <button class="nav-group-head" onclick="toggleNavGroup('system')" aria-expanded="true">
+                    <span class="ngh-label">سیستم</span>
+                    <i class="bi bi-chevron-down ngh-caret"></i>
+                </button>
+                <div class="nav-group-body">
+                <a class="nav-item-link" onclick="showSection('ai')" id="nav-link-ai">
+                    <span class="nav-icon"><i class="bi bi-stars"></i></span>
+                    هوش مصنوعی
+                </a>
+                <a class="nav-item-link" onclick="showSection('monitoring')" id="nav-link-monitoring">
+                    <span class="nav-icon"><i class="bi bi-activity"></i></span>
+                    پایش سامانه
+                </a>
+                <a class="nav-item-link d-none" onclick="showSection('users')" id="nav-users">
+                    <span class="nav-icon"><i class="bi bi-person-gear"></i></span>
+                    کاربران
+                </a>
+                </div>
+            </div>
         </nav>
 
         <div class="sidebar-footer">
@@ -493,6 +547,12 @@
                 <div class="topbar-subtitle" id="topbar-subtitle">خلاصه وضعیت سیستم</div>
             </div>
             <div class="topbar-spacer"></div>
+
+            <button class="topbar-search" onclick="openPalette()" title="جستجو و رفتن (Ctrl+K)" aria-label="جستجو">
+                <i class="bi bi-search"></i>
+                <span class="ts-label">جستجو</span>
+                <kbd>Ctrl K</kbd>
+            </button>
 
             <div class="topbar-badge" onclick="showSection('auth')" style="cursor:pointer;" title="رفتن به بخش احراز هویت دیوار">
                 <span class="dot dot-muted" id="cookie-dot"></span>
@@ -5089,12 +5149,12 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260923a"></script>
+<script src="js/app.js?v=20260923b"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
-<script src="js/ai/reader.js?v=20260923a"></script>
-<script src="js/ai/embed.js?v=20260923a"></script>
-<script src="js/ai/photo.js?v=20260923a"></script>
-<script src="js/ai/need.js?v=20260923a"></script>
+<script src="js/ai/reader.js?v=20260923b"></script>
+<script src="js/ai/embed.js?v=20260923b"></script>
+<script src="js/ai/photo.js?v=20260923b"></script>
+<script src="js/ai/need.js?v=20260923b"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

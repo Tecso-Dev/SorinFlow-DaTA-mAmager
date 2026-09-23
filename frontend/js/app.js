@@ -1339,6 +1339,216 @@ const SECTION_META = {
     profile:    { title: 'پروفایل من',           subtitle: 'مشخصات، تماس و تأیید، امنیت حساب' },
 };
 
+// ═══ Navigation: four groups, and a way to type your way to any of them ═══
+//
+// Fifteen screens in one flat list meant reading all fifteen to find one, and
+// the two labels it had ("منو اصلی", "تنظیمات") put the scraper's own session
+// page under Settings, three screens away from the scraper. They are grouped by
+// the work now, and the group holding the open screen opens itself.
+
+const NAV_GROUPS = {
+    daily:  ['dashboard', 'properties', 'crm', 'portal'],
+    scrape: ['scraper', 'auth', 'proxies', 'insights'],
+    comms:  ['sms', 'email', 'forwarder'],
+    system: ['ai', 'monitoring', 'users'],
+};
+const _NAV_SHUT_KEY = 'sf_nav_shut';
+
+function _navShut() {
+    try { return new Set(JSON.parse(localStorage.getItem(_NAV_SHUT_KEY) || '[]')); }
+    catch (e) { return new Set(); }
+}
+
+function toggleNavGroup(key) {
+    const shut = _navShut();
+    shut.has(key) ? shut.delete(key) : shut.add(key);
+    try { localStorage.setItem(_NAV_SHUT_KEY, JSON.stringify([...shut])); } catch (e) {}
+    _paintNavGroups();
+}
+
+function _paintNavGroups() {
+    const shut = _navShut();
+    // The group holding the open screen is never collapsed: hiding the active
+    // item leaves the panel with nothing highlighted and no clue where you are.
+    const live = Object.keys(NAV_GROUPS).find(k => NAV_GROUPS[k].includes(_currentSection));
+    document.querySelectorAll('.nav-group').forEach(g => {
+        const key = g.dataset.group;
+        const open = key === live || !shut.has(key);
+        g.classList.toggle('shut', !open);
+        g.querySelector('.nav-group-head')?.setAttribute('aria-expanded', String(open));
+    });
+    // A group whose every screen is hidden from this role is itself pointless.
+    document.querySelectorAll('.nav-group').forEach(g => {
+        const any = [...g.querySelectorAll('.nav-item-link')].some(a => !a.classList.contains('d-none'));
+        g.classList.toggle('d-none', !any);
+    });
+}
+
+// ── The palette ──────────────────────────────────────────────────────────────
+// Keywords are what someone would actually type, including the word they used
+// before the screen was renamed — «کوکی» still finds the Divar session page.
+const PALETTE_EXTRA_WORDS = {
+    dashboard:  'خانه آمار وضعیت خلاصه',
+    properties: 'ملک آگهی خانه آپارتمام جستجو لیست',
+    crm:        'مشتری لید تماس وظیفه یادآور معامله دفترچه تلفن تقویم',
+    portal:     'سایت درخواست بازدیدکننده فرم',
+    scraper:    'اجرا تسک جاب زمان‌بندی دیوار استخراج',
+    auth:       'کوکی نشست ورود شماره حساب دیوار session',
+    proxies:    'پروکسی آی‌پی ip proxy',
+    insights:   'نمودار قیف گزارش عملکرد تحلیل',
+    sms:        'پیامک کاوه‌نگار ارسال اس ام اس',
+    email:      'ایمیل smtp میل قالب',
+    forwarder:  'گوشی کد فوروارد forwarder',
+    ai:         'هوش ایجنت مدل توکن سورین دستیار',
+    monitoring: 'لاگ سلامت سرور منابع مانیتور',
+    users:      'کاربر دسترسی نقش حساب',
+    profile:    'پروفایل من رمز عبور دو مرحله‌ای امنیت',
+};
+
+// Things people do, not places they go. Each one lands on the screen that does
+// it — the palette is the shortest route to a task, not a menu with a filter.
+const PALETTE_ACTIONS = [
+    { label: 'اجرای اسکرپ تازه', icon: 'play-circle', section: 'scraper', words: 'شروع استخراج جدید run' },
+    { label: 'تماس‌های امروز', icon: 'telephone-outbound', section: 'crm', words: 'صف تماس زنگ' },
+    { label: 'افزودن شمارهٔ دیوار', icon: 'key', section: 'auth', words: 'حساب جدید کوکی ورود' },
+    { label: 'لاگ زندهٔ سامانه', icon: 'terminal', section: 'monitoring', words: 'خطا error لاگ' },
+    { label: 'مصرف و لاگ هوش مصنوعی', icon: 'stars', section: 'ai', words: 'هزینه توکن ایجنت' },
+    { label: 'پروفایل و امنیت من', icon: 'person-circle', section: 'profile', words: 'رمز دو مرحله‌ای' },
+    { label: 'خروج از حساب', icon: 'box-arrow-right', run: 'doLogout()', words: 'logout بیرون' },
+];
+
+let _paletteItems = [];
+let _paletteAt = 0;
+
+function _paletteBuild() {
+    const out = [];
+    for (const [sec, meta] of Object.entries(SECTION_META)) {
+        if (!_isSectionAllowed(sec)) continue;
+        out.push({ kind: 'صفحه', label: meta.title, hint: meta.subtitle, section: sec,
+                   icon: _navIcon(sec), words: `${meta.title} ${meta.subtitle} ${PALETTE_EXTRA_WORDS[sec] || ''} ${sec}` });
+    }
+    for (const a of PALETTE_ACTIONS) {
+        if (a.section && !_isSectionAllowed(a.section)) continue;
+        out.push({ kind: 'کار', label: a.label, hint: a.section ? (SECTION_META[a.section] || {}).title : '',
+                   section: a.section, run: a.run, icon: a.icon, words: `${a.label} ${a.words}` });
+    }
+    return out;
+}
+
+const NAV_ICONS = {
+    dashboard: 'speedometer2', properties: 'house-door', crm: 'people', portal: 'inbox',
+    scraper: 'robot', auth: 'key', proxies: 'shield-check', insights: 'graph-up-arrow',
+    sms: 'chat-left-text', email: 'envelope-at', forwarder: 'phone-vibrate',
+    ai: 'stars', monitoring: 'activity', users: 'person-gear', profile: 'person-circle',
+};
+
+function _navIcon(sec) {
+    return NAV_ICONS[sec] || 'arrow-left-circle';
+}
+
+// Persian is typed several ways: the Arabic ي/ك reach the field from phone
+// keyboards, and the digits come in both scripts. Fold them, or a search for
+// «کاربران» typed on a phone finds nothing.
+function _fold(t) {
+    return (t || '').toLowerCase()
+        .replace(/[يى]/g, 'ی').replace(/ك/g, 'ک').replace(/[ۀة]/g, 'ه')
+        .replace(/[\u200c\u064b-\u0652]/g, '')
+        .replace(/[۰-۹]/g, d => '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹'.indexOf(d) % 10)
+        .replace(/\s+/g, ' ').trim();
+}
+
+function openPalette() {
+    _paletteItems = _paletteBuild();
+    const box = document.getElementById('palette');
+    if (!box) return;
+    box.hidden = false;
+    document.body.classList.add('palette-open');
+    const q = document.getElementById('palette-q');
+    q.value = '';
+    paletteFilter();
+    setTimeout(() => q.focus(), 20);
+}
+
+function closePalette() {
+    const box = document.getElementById('palette');
+    if (box) box.hidden = true;
+    document.body.classList.remove('palette-open');
+}
+
+function paletteFilter() {
+    const raw = document.getElementById('palette-q')?.value || '';
+    const q = _fold(raw);
+    const terms = q ? q.split(' ') : [];
+    const hits = _paletteItems
+        .map(it => {
+            const hay = _fold(it.words);
+            if (!terms.every(t => hay.includes(t))) return null;
+            // A match on the name itself beats one buried in the keywords.
+            const head = _fold(it.label);
+            const score = (q && head.startsWith(q)) ? 0 : (head.includes(q) ? 1 : 2);
+            return { it, score };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.score - b.score)
+        .slice(0, 12)
+        .map(x => x.it);
+    _paletteAt = 0;
+    _paletteRender(hits);
+}
+
+function _paletteRender(hits) {
+    const list = document.getElementById('palette-list');
+    if (!list) return;
+    if (!hits.length) {
+        list.innerHTML = '<div class="palette-empty">چیزی پیدا نشد</div>';
+        list.dataset.n = '0';
+        return;
+    }
+    list.dataset.n = String(hits.length);
+    list.innerHTML = hits.map((it, i) => `
+        <button class="palette-row${i === _paletteAt ? ' on' : ''}" data-i="${i}"
+                onclick="paletteGo(${i})" onmousemove="paletteAt(${i})">
+            <span class="pr-icon"><i class="bi bi-${it.icon}"></i></span>
+            <span class="pr-text">
+                <span class="pr-label">${esc(it.label)}</span>
+                ${it.hint ? `<span class="pr-hint">${esc(it.hint)}</span>` : ''}
+            </span>
+            <span class="pr-kind">${it.kind}</span>
+        </button>`).join('');
+    list._hits = hits;
+}
+
+function paletteAt(i) {
+    _paletteAt = i;
+    document.querySelectorAll('.palette-row').forEach(r => r.classList.toggle('on', +r.dataset.i === i));
+}
+
+function paletteGo(i) {
+    const list = document.getElementById('palette-list');
+    const it = (list?._hits || [])[i];
+    if (!it) return;
+    closePalette();
+    if (it.run) { try { eval(it.run); } catch (e) {} return; }
+    if (it.section) showSection(it.section);
+}
+
+function _paletteKeys(e) {
+    const open = !document.getElementById('palette')?.hidden;
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        open ? closePalette() : openPalette();
+        return;
+    }
+    if (!open) return;
+    const n = +(document.getElementById('palette-list')?.dataset.n || 0);
+    if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+    else if (e.key === 'ArrowDown' && n) { e.preventDefault(); paletteAt((_paletteAt + 1) % n); }
+    else if (e.key === 'ArrowUp' && n) { e.preventDefault(); paletteAt((_paletteAt - 1 + n) % n); }
+    else if (e.key === 'Enter' && n) { e.preventDefault(); paletteGo(_paletteAt); }
+}
+document.addEventListener('keydown', _paletteKeys);
+
+
 // Section Navigation
 function _defaultSection() {
     // Land on the first area this account may actually open, so an admin
@@ -1395,6 +1605,7 @@ function showSection(sectionName) {
     const navLink = document.getElementById(`nav-link-${sectionName}`) ||
                     (sectionName === 'users' ? document.getElementById('nav-users') : null);
     if (navLink) navLink.classList.add('active');
+    _paintNavGroups();
 
     // Update topbar
     const meta = SECTION_META[sectionName] || {};

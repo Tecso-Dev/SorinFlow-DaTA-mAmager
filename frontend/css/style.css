@@ -309,12 +309,6 @@ option { background: var(--surface); color: var(--text); }
 .brand-text h6 { font-size: .85rem; font-weight: 700; color: var(--text); margin: 0; }
 .brand-text span { font-size: .68rem; color: var(--text-muted); }
 
-.sidebar-section-label {
-  font-size: .65rem; font-weight: 600; letter-spacing: .08em;
-  color: var(--text-muted); text-transform: uppercase;
-  padding: 1rem 1.2rem .4rem;
-}
-
 .sidebar-nav { flex: 1; overflow-y: auto; padding: .4rem 0; }
 
 .nav-item-link {
@@ -3667,3 +3661,147 @@ tr.ai-log-bad td { background: rgba(239,68,68,.06) }
 .match-gap { font-size: .7rem; margin-top: .15rem }
 .match-gap.near { color: #86efac }
 .match-gap.far { color: #fbbf24 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Navigation: four groups, and a palette to type your way past them
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── the search line at the top of the menu ────────────────────────────── */
+.nav-search {
+  display: flex; align-items: center; gap: .55rem;
+  width: calc(100% - 1.6rem); margin: .6rem .8rem .3rem;
+  padding: .5rem .7rem;
+  background: var(--input-bg-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 8px);
+  color: var(--text-muted);
+  font-size: .8rem; font-family: inherit;
+  cursor: pointer; transition: var(--trans);
+}
+.nav-search:hover { border-color: var(--accent); color: var(--text-dim); }
+.nav-search span { flex: 1; text-align: right; }
+.nav-search kbd, .topbar-search kbd, .palette kbd {
+  font-family: inherit; font-size: .62rem; letter-spacing: .02em;
+  padding: .12rem .35rem; border-radius: 4px;
+  background: var(--surface3); color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* ── the groups ───────────────────────────────────────────────────────── */
+.nav-group { margin-bottom: .15rem; }
+.nav-group-head {
+  display: flex; align-items: center; gap: .4rem;
+  width: 100%; padding: .8rem 1.2rem .35rem;
+  background: none; border: 0; cursor: pointer;
+  font-family: inherit; font-size: .65rem; font-weight: 600;
+  letter-spacing: .08em; color: var(--text-muted);
+  transition: var(--trans);
+}
+.nav-group-head:hover { color: var(--text-dim); }
+.ngh-label { flex: 1; text-align: right; }
+.ngh-caret { font-size: .7rem; transition: transform .18s ease; }
+.nav-group.shut .ngh-caret { transform: rotate(-90deg); }
+
+/* A ceiling well above any group's real height: `grid-template-rows: 0fr` only
+   zeroes the first row, and a group is four links, so it collapsed nothing.
+   ponytail: fixed ceiling — if a group ever grows past 40rem, measure instead. */
+.nav-group-body {
+  overflow: hidden; max-height: 40rem;
+  transition: max-height .22s ease, opacity .18s ease;
+}
+.nav-group.shut .nav-group-body { max-height: 0; opacity: 0; }
+
+/* ── the button in the topbar ─────────────────────────────────────────── */
+.topbar-search {
+  display: flex; align-items: center; gap: .45rem;
+  padding: .4rem .7rem;
+  background: var(--input-bg-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 8px);
+  color: var(--text-muted);
+  font-family: inherit; font-size: .78rem;
+  cursor: pointer; transition: var(--trans);
+}
+.topbar-search:hover { border-color: var(--accent); color: var(--text-dim); }
+
+/* ── the palette ──────────────────────────────────────────────────────── */
+.palette-backdrop {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(0,0,0,.6);
+  backdrop-filter: blur(3px);
+  /* flex-start, or the box stretches to the backdrop's height and two results
+     sit in a panel as tall as the screen */
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 12vh 1rem 1rem;
+}
+.palette-backdrop[hidden] { display: none; }
+body.palette-open { overflow: hidden; }
+
+.palette {
+  width: min(620px, 100%); max-height: 70vh;
+  display: flex; flex-direction: column;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0,0,0,.55);
+  overflow: hidden;
+  animation: palette-in .14s ease-out;
+}
+@keyframes palette-in { from { opacity: 0; transform: translateY(-8px); } }
+@media (prefers-reduced-motion: reduce) { .palette { animation: none; } }
+
+.palette-input {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .85rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.palette-input i { color: var(--text-muted); }
+.palette-input input {
+  flex: 1; background: none; border: 0; outline: none;
+  color: var(--text); font-family: inherit; font-size: .95rem;
+}
+.palette-input input::placeholder { color: var(--text-muted); }
+
+.palette-list { overflow-y: auto; padding: .35rem; }
+.palette-empty { padding: 1.6rem; text-align: center; color: var(--text-muted); font-size: .85rem; }
+
+.palette-row {
+  display: flex; align-items: center; gap: .7rem;
+  width: 100%; padding: .55rem .7rem;
+  background: none; border: 0; border-radius: var(--r-sm, 8px);
+  color: var(--text-dim); font-family: inherit; text-align: right;
+  cursor: pointer;
+}
+.palette-row.on { background: rgba(99,102,241,.16); color: #fff; }
+.pr-icon {
+  width: 30px; height: 30px; flex: 0 0 30px;
+  display: grid; place-items: center;
+  border-radius: 8px; background: var(--surface3); color: var(--accent2);
+}
+.palette-row.on .pr-icon { background: var(--accent); color: #fff; }
+.pr-text { flex: 1; min-width: 0; }
+.pr-label { display: block; font-size: .88rem; font-weight: 500; }
+.pr-hint {
+  display: block; font-size: .72rem; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pr-kind {
+  font-size: .65rem; color: var(--text-muted);
+  padding: .1rem .4rem; border: 1px solid var(--border); border-radius: 5px;
+}
+
+.palette-foot {
+  display: flex; gap: 1rem; justify-content: center;
+  padding: .5rem; border-top: 1px solid var(--border);
+  font-size: .68rem; color: var(--text-muted);
+}
+
+/* On a phone the palette is the whole screen and the shortcut hints are not
+   reachable from a touch keyboard, so they go. */
+@media (max-width: 640px) {
+  .palette-backdrop { padding: 0; align-items: stretch; }
+  .palette { width: 100%; max-height: 100%; height: 100%; border-radius: 0; border: 0; }
+  .palette-foot { display: none; }
+  .topbar-search .ts-label, .topbar-search kbd { display: none; }
+  .topbar-search { padding: .4rem .55rem; }
+}
