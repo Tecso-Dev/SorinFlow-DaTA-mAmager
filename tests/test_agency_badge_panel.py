@@ -51,8 +51,8 @@ class TestTheBadgeItself:
 
 class TestAllFourPlacesShowIt:
     def test_the_property_table_row(self):
-        i = APP_JS.index("${esc(property.title.substring(0, 40))}")
-        assert "agencyBadge(property)" in APP_JS[i:i + 200]
+        cell = APP_JS.split('<td data-l="عنوان"')[1].split("</td>")[0]
+        assert "agencyBadge(property)" in cell
 
     def test_the_property_modal(self):
         """_renderPropertyDetails is shared with the CRM lead modal, so this

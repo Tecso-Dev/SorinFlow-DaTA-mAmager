@@ -985,7 +985,7 @@ async def robots_txt(request: Request):
     lines = ["User-agent: *"]
     lines += [f"Disallow: {p}/" for p in _CLOSED_PATHS]
     lines += ["Allow: /$", "Allow: /portal", "", f"Sitemap: {root}/sitemap.xml", ""]
-    return Response("\n".join(lines), media_type="text/plain; charset=utf-8",
+    return Response("\n".join(lines), media_type="text/plain",
                     headers={"Cache-Control": "public, max-age=86400"})
 
 
@@ -1035,7 +1035,7 @@ _LLMS_TXT = """# SorinFlow — سورین‌فلو
 
 @app.get("/llms.txt", include_in_schema=False)
 async def llms_txt():
-    return Response(_LLMS_TXT, media_type="text/plain; charset=utf-8",
+    return Response(_LLMS_TXT, media_type="text/plain",
                     headers={"Cache-Control": "public, max-age=86400"})
 
 

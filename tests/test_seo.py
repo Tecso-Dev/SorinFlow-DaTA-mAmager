@@ -46,7 +46,9 @@ class TestWhatCrawlersAreTold:
     def test_robots_is_reachable_at_all(self):
         r = _client().get("/robots.txt")
         assert r.status_code == 200, "it used to 401 — no rules could be read"
-        assert "text/plain" in r.headers["content-type"]
+        ct = r.headers["content-type"]
+        assert "text/plain" in ct
+        assert ct.count("charset") == 1, f"Starlette adds charset itself: {ct}"
 
     def test_robots_closes_the_panel_and_the_api(self):
         body = _client().get("/robots.txt").text

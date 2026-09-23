@@ -3908,3 +3908,96 @@ body.palette-open { overflow: hidden; }
   #section-dashboard .stat-value { font-size: 1.35rem; line-height: 1.2; }
   #section-dashboard .stat-label { font-size: .72rem; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Properties on a phone: a card each, not a table to drag sideways
+   ══════════════════════════════════════════════════════════════════════════
+   Eight columns in a 375px viewport meant a 471px table inside a horizontal
+   scroller: the owner's phone number — the one thing a consultant standing
+   outside a building needs — was off the right edge, behind a drag. Each row
+   becomes a card, and every cell says what it is. */
+@media (max-width: 720px) {
+  #section-properties .table-responsive { overflow-x: visible; }
+  #section-properties .table,
+  #section-properties .table tbody,
+  #section-properties .table tr,
+  #section-properties .table td { display: block; width: auto; }
+  #section-properties .table thead { display: none; }
+
+  /* A row per fact stacked seven deep made the card taller than the table row
+     it replaced. The four small facts read as one line of chips instead. */
+  #section-properties .table tbody tr {
+    display: flex; flex-wrap: wrap; align-items: baseline;
+    gap: .15rem .9rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md, 12px);
+    padding: .85rem .95rem;
+    margin-bottom: .7rem;
+  }
+  #section-properties .table td {
+    display: flex; align-items: baseline; gap: .35rem;
+    flex: 0 0 auto; padding: .18rem 0; border: 0;
+    font-size: .85rem;
+  }
+  #section-properties .table td::before {
+    content: attr(data-l);
+    color: var(--text-muted); font-size: .72rem; flex: none;
+  }
+  #section-properties .table td.pt-title,
+  #section-properties .table td.pt-phone,
+  #section-properties .table td.pt-actions { flex: 1 0 100%; }
+  #section-properties .table td.pt-price { margin-inline-start: auto; }
+
+  /* The title heads the card, so it needs no label and no truncation —
+     there is a whole line for it here. */
+  #section-properties .table td.pt-title {
+    display: block; font-size: .95rem; font-weight: 600;
+    color: var(--text); padding: 0 0 .45rem;
+    border-bottom: 1px solid var(--border-soft); margin-bottom: .35rem;
+  }
+  #section-properties .table td.pt-title::before { content: none; }
+
+  #section-properties .table td.pt-price { font-weight: 700; }
+
+  /* The reason the screen is open. Big enough to hit with a thumb. */
+  #section-properties .table td.pt-phone { padding-top: .4rem; }
+  #section-properties .table td.pt-phone a { font-size: 1.05rem; font-weight: 700; }
+
+  #section-properties .table td.pt-actions {
+    justify-content: flex-start; gap: .4rem;
+    padding-top: .6rem; margin-top: .35rem;
+    border-top: 1px solid var(--border-soft);
+  }
+  #section-properties .table td.pt-actions::before { content: none; }
+  #section-properties .table td.pt-actions .btn { flex: 1; }
+
+  /* «هیچ ملکی یافت نشد» is one cell spanning eight columns; as a block it
+     would otherwise inherit the card's frame and read as a result. */
+  #section-properties .table td[colspan] {
+    display: block; text-align: center; border: 0;
+  }
+  #section-properties .table td[colspan]::before { content: none; }
+}
+
+/* The filters took the first screen and a half before a single listing: five
+   full-width controls plus two export buttons, stacked. Nobody exports a
+   spreadsheet from a phone, and the three that matter fit two to a row. */
+@media (max-width: 720px) {
+  #section-properties .card-header { gap: .5rem; }
+  /* :not(.d-none) matters — the rent filters are a .d-flex child of this same
+     header, hidden until a rental category is picked, and an unqualified
+     `display: grid !important` outranked Bootstrap's d-none and showed them. */
+  #section-properties .card-header > .d-flex:not(.d-none) {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: .45rem; width: 100%;
+  }
+  #section-properties .card-header > .d-flex > * { width: auto !important; }
+  #section-properties #search-properties { grid-column: 1 / -1; }
+  #section-properties .card-header [onclick^="exportProperties"] { display: none; }
+
+  /* The code is a fact like the others; on its own line above the title it
+     cost a whole row to say four digits. */
+  #section-properties .table td.pt-title { order: -1; }
+}

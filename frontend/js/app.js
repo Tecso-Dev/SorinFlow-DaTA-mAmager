@@ -2156,24 +2156,28 @@ async function loadProperties() {
         data.items.forEach(property => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td><span class="serial-badge">${formatSerial(property.serial_no)}</span></td>
-                <td title="${esc(property.title)}">${esc(property.title.substring(0, 40))}... ${agencyBadge(property)}</td>
-                <td>${property.city_name || '---'}</td>
-                <td>${formatNumber(property.area)} متر</td>
-                <td>${property.rooms != null ? property.rooms : '---'}</td>
-                <td>
+                <td data-l="کد"><span class="serial-badge">${formatSerial(property.serial_no)}</span></td>
+                <td data-l="عنوان" class="pt-title" title="${esc(property.title)}">${esc(
+                    // «…» only when something was actually cut off; it used to
+                    // be appended to every title, short ones included.
+                    property.title.length > 40 ? property.title.slice(0, 40) + '…' : property.title
+                )} ${agencyBadge(property)}</td>
+                <td data-l="شهر">${property.city_name || '---'}</td>
+                <td data-l="متراژ">${formatNumber(property.area)} متر</td>
+                <td data-l="اتاق">${property.rooms != null ? formatNumber(property.rooms) : '---'}</td>
+                <td data-l="قیمت" class="pt-price">
                     ${property.listing_type === 'rent'
                         ? `<small class="d-block text-muted">رهن: ${formatPrice(property.deposit)}</small><small class="d-block">اجاره: ${formatPrice(property.rent_price)}</small>`
                         : formatPrice(property.total_price || property.price)
                     }
                 </td>
-                <td>
+                <td data-l="شماره تماس" class="pt-phone">
                     ${property.phone_number 
                         ? `<a href="tel:${safeTel(property.phone_number)}" class="text-success">${property.phone_number}</a>`
                         : noPhoneCell(property)
                     }
                 </td>
-                <td>
+                <td data-l="" class="pt-actions">
                     <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${property.id})">
                         <i class="bi bi-eye"></i>
                     </button>
