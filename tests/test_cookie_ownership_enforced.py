@@ -8,6 +8,7 @@ number into Divar and spends a reveal, and reveals are charged to the
 account, not to us.
 """
 import inspect
+import re
 import os
 import sys
 
@@ -54,9 +55,11 @@ class TestTheListIsNarrowed:
     def test_it_requires_a_logged_in_user(self):
         assert "current_user" in inspect.signature(auth_routes.list_cookies).parameters
 
-    def test_an_admin_is_told_they_may_reassign(self):
+    def test_an_admin_is_told_they_are_seeing_the_whole_pool(self):
+        """And not told they may reassign a number, which nothing can do."""
         src = inspect.getsource(auth_routes.list_cookies)
-        assert '"can_reassign"' in src
+        bare = re.sub(r"#.*", "", src)      # not the note saying what it used to be
+        assert '"sees_every_session"' in bare and "can_reassign" not in bare
 
     def test_owner_names_are_only_resolved_for_an_admin(self):
         """Nobody else is shown a list that could hold somebody else's row."""
@@ -187,3 +190,38 @@ class TestTheSideDoor:
     def test_it_compares_digits_not_strings(self):
         src = inspect.getsource(scraper_routes._launch_job)
         assert "ch.isdigit()" in src
+
+
+class TestImportingOntoSomebodyElsesNumber:
+    """«شماره هر اکانت برای خودش است و نباید مالکیت آن برای کس دیگه ای باشد».
+
+    Pasting a cookie jar onto a number replaces the live session token on
+    somebody's Divar account. root was exempt from the check that stops it —
+    which is acting on an account, not administering a pool.
+    """
+
+    def test_root_is_no_longer_an_exception(self):
+        src = inspect.getsource(auth_routes.import_cookies)
+        guard = src.split("if existing:")[1].split("existing.cookies")[0]
+        assert "_sees_every_session" not in guard, \
+            "root could still replace the session token on somebody else's number"
+        assert "existing.owner_user_id != current_user.id" in guard
+        assert "status_code=403" in guard
+
+    def test_the_jar_is_not_written_before_the_refusal(self):
+        """It used to be assigned first and refused after, leaving the rejected
+        import sitting on the row in a session somebody else might flush."""
+        src = inspect.getsource(auth_routes.import_cookies)
+        body = src.split("if existing:")[1]
+        assert body.index("status_code=403") < body.index("existing.cookies = request.cookies")
+
+    def test_an_unclaimed_number_can_still_be_taken(self):
+        """A session nobody owns is not somebody else's."""
+        src = inspect.getsource(auth_routes.import_cookies)
+        assert "if not existing.owner_user_id and current_user:" in src
+
+    def test_the_login_path_still_hands_a_number_to_whoever_answered_the_code(self):
+        """The one way a number changes hands, and it is proof of holding the
+        phone rather than an admin act."""
+        src = inspect.getsource(auth_routes)
+        assert "existing_cookie.owner_user_id = current_user.id" in src

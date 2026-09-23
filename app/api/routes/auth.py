@@ -313,16 +313,18 @@ async def logout(
 def _sees_every_session(user) -> bool:
     """root and super_admin see the whole pool; everyone else sees their own.
 
-    Not a convenience: somebody has to be able to reassign a session when a
-    person leaves, and to notice a number nobody has claimed.
+    Seeing only — so an unclaimed number can be noticed and a departed
+    colleague's session can be found and removed. It does not carry the right
+    to use one: a number belongs to whoever answered Divar's code for it, and
+    nothing moves it to somebody else.
     """
     return bool(user) and (user.role or "") in ("root", "super_admin")
 
 
 def _usable_by(query, user):
     """Narrow a cookies query to what `user` may USE — their own, whatever the
-    role. root sees and reassigns everybody's sessions; root does not scrape
-    on somebody else's number."""
+    role. root sees everybody's sessions; root does not scrape on somebody
+    else's number, and does not answer its challenges."""
     if not user:
         return query.where(Cookie.id == -1)
     return query.where(Cookie.owner_user_id == user.id)
@@ -365,7 +367,11 @@ async def list_cookies(
                 select(User).where(User.id.in_(ids)))).scalars().all()}
 
     return {
-        "can_reassign": _sees_every_session(current_user) and not mine,
+        # Named for what it is. It used to be «can_reassign», which promised a
+        # capability the panel has no endpoint for and, since a number belongs
+        # to whoever answers Divar's code for it, will not get: the flag only
+        # ever meant «this caller is being shown the whole pool».
+        "sees_every_session": _sees_every_session(current_user) and not mine,
         "cookies": [
             {
                 "id": c.id,
@@ -442,13 +448,21 @@ async def import_cookies(
     existing = result.scalar_one_or_none()
 
     if existing:
-        existing.cookies = request.cookies
+        # Checked before a single field is written: the jar used to be assigned
+        # first and the refusal raised after, which left the rejected import
+        # sitting on the row in a session somebody else might flush.
+        #
+        # No exception for root. Replacing the session token on a number is
+        # acting on somebody's Divar account, not administering the pool —
+        # «شماره هر اکانت برای خودش است». root still sees every session and can
+        # claim one nobody owns; a number with an owner is theirs, and the only
+        # way it changes hands is somebody answering Divar's code for it.
         if (existing.owner_user_id and current_user
-                and existing.owner_user_id != current_user.id
-                and not _sees_every_session(current_user)):
+                and existing.owner_user_id != current_user.id):
             raise HTTPException(
                 status_code=403,
                 detail="این شماره به حساب کاربری دیگری تعلق دارد")
+        existing.cookies = request.cookies
         existing.token = token_value
         existing.is_valid = True
         existing.expires_at = expires_at

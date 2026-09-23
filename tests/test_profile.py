@@ -364,14 +364,14 @@ class TestSessionsAreNotShared:
         assert st["phone_number"] != "09121110001" and not st["is_valid"]
         # the list still shows it, for reassignment
         listed = client.get("/api/auth/cookies", headers=_auth(tok)).json()
-        assert listed["can_reassign"] is True
+        assert listed["sees_every_session"] is True
         assert any(c["phone_number"] == "09121110001" for c in listed["cookies"])
         # but nothing may be done to it
         assert client.post("/api/auth/refresh?phone_number=09121110001", headers=_auth(tok)).status_code == 403
         assert client.post("/api/auth/logout?phone_number=09121110001", headers=_auth(tok)).status_code == 403
         # and the panel asks for what root may USE — which is none of these
         mine = client.get("/api/auth/cookies?mine=1", headers=_auth(tok)).json()
-        assert mine["can_reassign"] is False and mine["cookies"] == []
+        assert mine["sees_every_session"] is False and mine["cookies"] == []
         health = client.get("/api/monitoring/cookies", headers=_auth(tok)).json()
         assert all(i["phone_number"] != "09121110001" for i in health["items"])
         assert client.post("/api/monitoring/cookies/check?phone=09121110001", headers=_auth(tok)).status_code == 404
