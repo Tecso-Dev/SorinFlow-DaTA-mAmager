@@ -172,3 +172,37 @@ class TestThroughTheApp:
         assert theirs["accounts_used"] == ["09125005495", "09146382408"], "a rotated run names every account"
         internal = next(i for i in items if i["id"] == ids["internal"])
         assert internal["owner_name"] is None and internal["divar_phone"] is None and internal["accounts_used"] == []
+
+
+class TestARunCanBeRemovedFromTheList:
+    """Test runs piled up with no way to clear one, so the only tidy-up left
+    was a hand-written DELETE against production."""
+
+    def test_the_endpoint_refuses_a_run_that_is_still_going(self):
+        src = (ROOT / "app/api/routes/scraper.py").read_text(encoding="utf-8")
+        body = src.split('@router.delete("/jobs/{job_id}")')[1].split("@router.")[0]
+        assert "_FINISHED_JOB_STATUSES" in body, \
+            "a live scraper keeps writing rows against the job it is running"
+        assert "اول لغوش کنید" in body
+
+    def test_the_children_go_first_or_the_database_refuses(self):
+        src = (ROOT / "app/api/routes/scraper.py").read_text(encoding="utf-8")
+        body = src.split('@router.delete("/jobs/{job_id}")')[1].split("@router.")[0]
+        assert "ScrapingLog" in body and "SkippedListing" in body, \
+            "both point at job_id with no cascade"
+        assert "Property" not in body, "a listing is not the run's to delete"
+
+    def test_only_the_owner_or_a_full_access_role_may_delete(self):
+        src = (ROOT / "app/api/routes/scraper.py").read_text(encoding="utf-8")
+        body = src.split('@router.delete("/jobs/{job_id}")')[1].split("@router.")[0]
+        assert "FULL_ACCESS_ROLES" in body and "owner_user_id" in body
+        assert "Depends(get_current_user)" in body
+
+    def test_the_panel_offers_it_only_on_a_finished_run(self):
+        js = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
+        assert "deleteJob(" in js and "method: 'DELETE'" in js
+        row = js.split('<td class="job-actions">')[1].split("</td>")[0]
+        assert "deleteJob" in row and "'completed', 'failed', 'cancelled'" in row
+        confirm = js.split("async function deleteJob(")[1].split("}\n")[0]
+        assert "askConfirm" in confirm and "آگهی‌ها" in confirm, \
+            "no native confirm, and it says what survives the delete"

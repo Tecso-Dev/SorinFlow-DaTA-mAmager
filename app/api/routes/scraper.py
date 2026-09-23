@@ -6,7 +6,7 @@ import json
 import time
 from fastapi import Request, APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, false
+from sqlalchemy import select, false, delete
 from typing import Optional, List
 from datetime import datetime
 import asyncio
@@ -22,6 +22,7 @@ from app.config import get_settings, CITIES, CATEGORIES
 from pydantic import BaseModel, Field
 from app.schemas import ScrapingJobCreate, ScrapingJobResponse, ScrapingJobList
 from app.auth.dependencies import get_current_user, get_current_user_optional
+from app.auth.permissions import FULL_ACCESS_ROLES
 from app.models.user import User
 
 router = APIRouter()
@@ -856,6 +857,47 @@ async def cancel_scraping_job(
     logger.info(f"Job {job_id} marked for cancellation (was {was}, otp cleared={freed})")
 
     return {"message": "Job cancelled successfully", "was": was, "otp_cleared": freed}
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_scraping_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Remove a finished run from the list, with its log and its skipped rows.
+
+    Test runs pile up in the list and there was no way to clear one, so the
+    only tidy-up available was a hand-written DELETE against production. The
+    listings a run brought in are not touched: nothing in properties points at
+    a job, so a run is only ever its own history.
+
+    A run still going is cancelled, not deleted — its scraper is mid-flight and
+    would keep writing rows against a job that no longer exists.
+    """
+    job = (await db.execute(
+        select(ScrapingJob).where(ScrapingJob.job_id == job_id))).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="تسک یافت نشد")
+
+    if job.status not in _FINISHED_JOB_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="این تسک هنوز تمام نشده — اول لغوش کنید، بعد حذف")
+
+    owner = (job.config or {}).get("owner_user_id")
+    if user.role not in FULL_ACCESS_ROLES and owner not in (None, user.id):
+        raise HTTPException(status_code=403, detail="این تسک را کاربر دیگری اجرا کرده است")
+
+    from app.models.scraping_job import ScrapingLog, SkippedListing
+    # Both point at job_id with no cascade, so the children go first or the
+    # delete is refused by the database.
+    for child in (ScrapingLog, SkippedListing):
+        await db.execute(delete(child).where(child.job_id == job.job_id))
+    await db.delete(job)
+    await db.commit()
+    logger.info(f"Job {job_id} deleted by {user.username} (was {job.status})")
+    return {"success": True, "job_id": job_id}
 
 
 @router.get("/estimate")

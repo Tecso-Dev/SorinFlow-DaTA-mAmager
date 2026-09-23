@@ -4243,6 +4243,21 @@ async function cancelJob(jobId) {
     }
 }
 
+async function deleteJob(jobId) {
+    if (!await askConfirm({
+        icon: 'bi-trash', title: 'حذف تسک', tone: 'danger', okLabel: 'حذف کن',
+        body: 'این اجرا با گزارش و ردشده‌هایش از فهرست پاک می‌شود. آگهی‌هایی که آورده دست‌نخورده می‌مانند. برگشت‌پذیر نیست.'
+    })) return;
+
+    try {
+        await apiCall(`/scraper/jobs/${jobId}`, { method: 'DELETE' });
+        showToast('موفق', 'تسک حذف شد', 'success');
+        loadJobs();
+    } catch (error) {
+        showToast('خطا', error.message, 'danger');
+    }
+}
+
 async function scrapeSingle() {
     const url = document.getElementById('single-url').value;
     
@@ -4586,6 +4601,12 @@ function _renderJobsTable(items) {
                     <button class="btn btn-sm btn-outline-primary" onclick="resumeJob('${job.job_id}')"
                             title="ادامه از همان‌جا — آگهی‌های ذخیره‌شده رد می‌شوند">
                         <i class="bi bi-play-fill"></i>
+                    </button>
+                ` : ''}
+                ${['completed', 'failed', 'cancelled'].includes(job.status) ? `
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteJob('${job.job_id}')"
+                            title="حذف این تسک از فهرست — آگهی‌ها دست‌نخورده می‌مانند">
+                        <i class="bi bi-trash"></i>
                     </button>
                 ` : ''}
             </td>
