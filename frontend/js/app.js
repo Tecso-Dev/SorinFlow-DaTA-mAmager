@@ -3890,7 +3890,11 @@ async function aiTest() {
 }
 
 // ── the AI screen: every agent, its state, its cost, its log ──
-const AI_KIND_FA = { loop: 'پس‌زمینه', on_demand: 'هنگام استفاده', telegram: 'تلگرام' };
+// How an agent runs. Named for what it is: the listing reader has its own
+// kinds — apartment, land, shop — and both were called AI_KIND_FA at the
+// top level of files loaded into the same scope, so the second one to load
+// threw «already been declared» and took its whole file down with it.
+const AI_AGENT_KIND_FA = { loop: 'پس‌زمینه', on_demand: 'هنگام استفاده', telegram: 'تلگرام' };
 const AI_JOB_FA = { write: 'نوشتن فارسی', read: 'خواندن', vision: 'تصویر', embed: 'جستجوی معنایی' };
 
 function _aiTokens(n) {
@@ -3935,7 +3939,7 @@ function _aiAgentCard(a) {
             <span class="ai-dot ${a.enabled ? 'on' : ''}"></span>
             <div>
                 <b>${esc(a.name)}</b>
-                <span class="badge bg-secondary-subtle text-secondary-emphasis">${esc(AI_KIND_FA[a.kind] || a.kind)}</span>
+                <span class="badge bg-secondary-subtle text-secondary-emphasis">${esc(AI_AGENT_KIND_FA[a.kind] || a.kind)}</span>
                 <span class="badge bg-primary-subtle text-primary-emphasis" title="کاری که این ایجنت از مدل می‌خواهد">${esc(AI_JOB_FA[a.job] || a.job)}</span>
             </div>
             <div class="form-check form-switch m-0 ms-auto">

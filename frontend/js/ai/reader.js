@@ -6,7 +6,7 @@
 // The globals (esc, apiCall, formatNumber, showToast, _currentUser) are the
 // ones app.js defines; this file adds nothing to the page on its own.
 
-const AI_KIND_FA = { apartment: 'آپارتمان', house: 'خانه / ویلایی', land: 'زمین', shop: 'مغازه', office: 'دفتر', other: 'سایر' };
+const AI_PROPERTY_KIND_FA = { apartment: 'آپارتمان', house: 'خانه / ویلایی', land: 'زمین', shop: 'مغازه', office: 'دفتر', other: 'سایر' };
 const AI_AMENITIES = [['has_elevator', 'آسانسور'], ['has_parking', 'پارکینگ'], ['has_storage', 'انباری'], ['has_balcony', 'بالکن']];
 const AI_DEAL_FLAGS = [['convertible', 'قابل تبدیل'], ['exchange', 'معاوضه'], ['vacant', 'تخلیه'], ['negotiable', 'قابل مذاکره']];
 
@@ -37,7 +37,7 @@ function aiRenderFacts(container, facts) {
     }
     const c = facts.confidence || {};
     const chips = [];
-    if (facts.kind) chips.push(_aiChip('نوع', AI_KIND_FA[facts.kind] || facts.kind, '', c.kind));
+    if (facts.kind) chips.push(_aiChip('نوع', AI_PROPERTY_KIND_FA[facts.kind] || facts.kind, '', c.kind));
     if (facts.floor !== null && facts.floor !== undefined) {
         const of = (facts.total_floors !== null && facts.total_floors !== undefined) ? ' از ' + formatNumber(facts.total_floors) : '';
         chips.push(_aiChip('طبقه', formatNumber(facts.floor) + of, '', c.floor));
