@@ -246,6 +246,29 @@ async def get_system_health(
     )
 
 
+@router.get("/today")
+async def get_today(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """What is waiting for somebody, right now.
+
+    The dashboard counted things — how many listings exist, how many carry a
+    number — and answered no question anyone opens it with. The morning
+    question is «what needs me today», and every part of that answer already
+    existed: calls due, matches nobody has decided, price drops nobody has
+    read, what came in since midnight. It sat three clicks inside the CRM,
+    and the assistant in Telegram could say it while the panel could not.
+
+    The counts come from the assistant's own queue reader rather than a second
+    copy of the same five queries — one definition of «due», so the dashboard
+    and the assistant can never disagree about it. Tehran midnight, like
+    everything else the office calls «today».
+    """
+    from app.ai.assistant import tool_queue_status
+    return await tool_queue_status(db)
+
+
 @router.get("/jobs-summary")
 async def get_jobs_summary(
     db: AsyncSession = Depends(get_db)

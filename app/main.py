@@ -466,7 +466,13 @@ async def api_key_middleware(request: Request, call_next):
                     # Its own auth is inside the route; this only keeps the
                     # API-key gate from 401ing it in production the way it did
                     # the login endpoints.
-                    "/api/scraper/otp-inbound", "/api/scraper/forwarder-heartbeat"}
+                    "/api/scraper/otp-inbound", "/api/scraper/forwarder-heartbeat",
+                    # What a crawler fetches before it fetches anything else,
+                    # with no credential of any kind — and the same trap as the
+                    # login endpoints: locally API_KEY is empty so these worked,
+                    # while in production a search engine asking for the crawl
+                    # rules got 401 JSON and therefore no rules at all.
+                    "/robots.txt", "/sitemap.xml", "/llms.txt", "/og.png"}
     is_dashboard = (request.url.path.startswith("/dashboard")
                     or request.url.path.startswith("/images")
                     # the APK is fetched by a phone that has nothing to

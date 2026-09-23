@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260923b">
+    <link rel="stylesheet" href="css/style.css?v=20260923d">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -599,6 +599,37 @@
                     </div>
                 </div>
 
+                <!-- ── Today: the only part of this screen that asks for
+                         something back. Counters live below it. ── -->
+                <section class="today" id="dash-today" aria-label="کارهای امروز">
+                    <header class="today-head">
+                        <h2><i class="bi bi-lightning-charge"></i> امروز</h2>
+                        <span class="today-note" id="today-note">در حال خواندن…</span>
+                    </header>
+                    <div class="today-grid">
+                        <button class="todo" id="todo-calls" onclick="goCrm('calls')">
+                            <span class="todo-n" id="today-calls">—</span>
+                            <span class="todo-l">تماس‌های امروز</span>
+                            <span class="todo-go"><i class="bi bi-arrow-left"></i></span>
+                        </button>
+                        <button class="todo" id="todo-matches" onclick="goCrm('calls', 'matches-card')">
+                            <span class="todo-n" id="today-matches">—</span>
+                            <span class="todo-l">تطبیق تصمیم‌نگرفته</span>
+                            <span class="todo-go"><i class="bi bi-arrow-left"></i></span>
+                        </button>
+                        <button class="todo" id="todo-drops" onclick="goCrm('calls', 'drops-card')">
+                            <span class="todo-n" id="today-drops">—</span>
+                            <span class="todo-l">ملک ارزان‌شده</span>
+                            <span class="todo-go"><i class="bi bi-arrow-left"></i></span>
+                        </button>
+                        <button class="todo" id="todo-new" onclick="showSection('properties')">
+                            <span class="todo-n" id="today-new">—</span>
+                            <span class="todo-l">آگهی تازهٔ امروز</span>
+                            <span class="todo-go"><i class="bi bi-arrow-left"></i></span>
+                        </button>
+                    </div>
+                </section>
+
                 <div class="row g-3 mb-4">
                     <div class="col-md-3">
                         <div class="stat-card s-purple">
@@ -694,42 +725,19 @@
                     </div>
                 </div>
 
-                <div class="card">
-                    <div class="card-header">
-                        <i class="bi bi-heart-pulse"></i> وضعیت سیستم
-                    </div>
-                    <div class="card-body">
-                        <div class="row g-3" id="system-health">
-                            <div class="col-md-3">
-                                <div class="health-item">
-                                    <i class="bi bi-database"></i>
-                                    <span>دیتابیس</span>
-                                    <span id="health-db" class="badge bg-secondary ms-auto">---</span>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="health-item">
-                                    <i class="bi bi-memory"></i>
-                                    <span>Redis</span>
-                                    <span id="health-redis" class="badge bg-secondary ms-auto">---</span>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="health-item">
-                                    <i class="bi bi-robot"></i>
-                                    <span>اسکرپر</span>
-                                    <span id="health-scraper" class="badge bg-secondary ms-auto">---</span>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="health-item">
-                                    <i class="bi bi-cookie"></i>
-                                    <span>کوکی دیوار</span>
-                                    <span id="health-cookie" class="badge bg-secondary ms-auto">---</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                <!-- Four green badges do not need a card of their own; when
+                     one of them is not green, that is the whole message. -->
+                <div class="health-strip" id="system-health" role="status">
+                    <span class="hs-label"><i class="bi bi-heart-pulse"></i> وضعیت سامانه</span>
+                    <span class="hs-item"><i class="bi bi-database"></i> دیتابیس
+                        <span id="health-db" class="badge bg-secondary">---</span></span>
+                    <span class="hs-item"><i class="bi bi-memory"></i> Redis
+                        <span id="health-redis" class="badge bg-secondary">---</span></span>
+                    <span class="hs-item"><i class="bi bi-robot"></i> اسکرپر
+                        <span id="health-scraper" class="badge bg-secondary">---</span></span>
+                    <span class="hs-item"><i class="bi bi-cookie"></i> کوکی دیوار
+                        <span id="health-cookie" class="badge bg-secondary">---</span></span>
+                    <button class="hs-more" onclick="showSection('monitoring')">پایش کامل ←</button>
                 </div>
             </div>
 
@@ -5149,12 +5157,12 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260923b"></script>
+<script src="js/app.js?v=20260923d"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
-<script src="js/ai/reader.js?v=20260923b"></script>
-<script src="js/ai/embed.js?v=20260923b"></script>
-<script src="js/ai/photo.js?v=20260923b"></script>
-<script src="js/ai/need.js?v=20260923b"></script>
+<script src="js/ai/reader.js?v=20260923d"></script>
+<script src="js/ai/embed.js?v=20260923d"></script>
+<script src="js/ai/photo.js?v=20260923d"></script>
+<script src="js/ai/need.js?v=20260923d"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

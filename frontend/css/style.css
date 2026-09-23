@@ -3805,3 +3805,106 @@ body.palette-open { overflow: hidden; }
   .topbar-search .ts-label, .topbar-search kbd { display: none; }
   .topbar-search { padding: .4rem .55rem; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Dashboard: «امروز» — what is waiting, above what merely exists
+   ══════════════════════════════════════════════════════════════════════════ */
+.today { margin-bottom: 1.5rem; }
+.today-head {
+  display: flex; align-items: baseline; gap: .8rem;
+  margin: 0 .2rem .7rem;
+}
+.today-head h2 {
+  font-size: 1.05rem; font-weight: 700; margin: 0; color: var(--text);
+}
+.today-head h2 i { color: var(--warning); }
+.today-note { font-size: .8rem; color: var(--text-muted); }
+.today-note.clear { color: var(--accent3); }
+
+.today-grid {
+  display: grid; gap: .8rem;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.todo {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center; gap: .1rem .7rem;
+  padding: 1rem 1.1rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 12px);
+  color: var(--text); font-family: inherit; text-align: right;
+  cursor: pointer; transition: var(--trans);
+  position: relative; overflow: hidden;
+}
+/* The bar says «this one is asking for you» before any number is read. */
+.todo::before {
+  content: ''; position: absolute; inset-inline-start: 0; top: 0; bottom: 0;
+  width: 3px; background: var(--accent);
+  transition: var(--trans);
+}
+.todo:hover { border-color: var(--accent); transform: translateY(-2px); }
+.todo-n { font-size: 1.9rem; font-weight: 800; line-height: 1.1; grid-row: 1 / 3; }
+.todo-l { font-size: .85rem; color: var(--text-dim); grid-column: 2; }
+.todo-go { grid-column: 3; grid-row: 1 / 3; color: var(--text-muted); transition: var(--trans); }
+.todo:hover .todo-go { color: var(--accent); transform: translateX(-3px); }
+
+/* Nothing waiting is the good case — it should read as calm, not as a zero
+   demanding attention next to three numbers that do. */
+.todo.idle { background: var(--surface); }
+.todo.idle .todo-n { color: var(--text-muted); font-weight: 600; }
+.todo.idle::before { background: var(--border); }
+
+#todo-calls::before   { background: var(--accent2); }
+#todo-matches::before { background: var(--accent); }
+#todo-drops::before   { background: var(--warning); }
+#todo-new::before     { background: var(--accent3); }
+
+/* ── system health: a strip, not a card that owns a screenful ──────────── */
+.health-strip {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .5rem 1.4rem;
+  padding: .75rem 1.1rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 12px);
+  font-size: .82rem; color: var(--text-dim);
+}
+.hs-label { font-weight: 600; color: var(--text); }
+.hs-label i { color: var(--danger); }
+.hs-item { display: inline-flex; align-items: center; gap: .4rem; }
+.hs-item i { color: var(--text-muted); }
+.hs-more {
+  margin-inline-start: auto;
+  background: none; border: 0; padding: 0;
+  color: var(--accent2); font-family: inherit; font-size: .8rem; cursor: pointer;
+}
+.hs-more:hover { text-decoration: underline; }
+
+@media (max-width: 900px) {
+  .today-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+  .today-grid { grid-template-columns: 1fr; gap: .6rem; }
+  .todo { padding: .8rem .9rem; }
+  .todo-n { font-size: 1.5rem; }
+  .health-strip { gap: .45rem 1rem; font-size: .78rem; }
+  .hs-more { margin-inline-start: 0; }
+}
+
+/* On a phone the four totals were a card each, 155px tall — 620px of scrolling
+   for four reference numbers, ahead of everything worth reading. Two to a row,
+   and the decorative icon steps aside for the number it decorates. */
+@media (max-width: 640px) {
+  #section-dashboard > .row.g-3 > [class*="col-md-3"] { width: 50%; }
+  #section-dashboard .stat-card {
+    padding: .8rem .85rem; margin-bottom: .6rem;
+    display: grid; grid-template-columns: auto 1fr; gap: .1rem .6rem;
+  }
+  #section-dashboard .stat-card .stat-icon {
+    width: 34px; height: 34px; border-radius: 9px;
+    font-size: 1rem; margin: 0; grid-row: 1 / 3;
+  }
+  #section-dashboard .stat-value { font-size: 1.35rem; line-height: 1.2; }
+  #section-dashboard .stat-label { font-size: .72rem; }
+}

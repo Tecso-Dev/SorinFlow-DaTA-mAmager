@@ -971,20 +971,96 @@ from pydantic import BaseModel
 
 # ─── OTP passthrough endpoints ────────────────────────────────────────────────
 
+# ── whose Divar number is being asked about ─────────────────────────────────
+#
+# Anything a person has to do for their own Divar number is theirs, and is
+# shown to nobody else. These prompts name a phone number and ask for a code
+# texted to it, and they were served to every logged-in panel: a colleague's
+# number on your screen, a code you cannot have received, for a run that is
+# not yours. Same rule the sessions list already follows — root reassigns
+# everybody's numbers, root does not answer challenges on them.
+
+async def _owner_of_account(db, phones) -> dict:
+    """Digits of each Divar number → the user who owns that session."""
+    from app.scraper.otp_store import _digits
+    from app.models.cookie import Cookie
+    wanted = {_digits(p) for p in phones if _digits(p)}
+    if not wanted:
+        return {}
+    rows = (await db.execute(select(Cookie.phone_number, Cookie.owner_user_id))).all()
+    return {_digits(ph): uid for ph, uid in rows if _digits(ph) in wanted}
+
+
+async def _owner_of_job(db, job_ids) -> dict:
+    """job_id → the user who started it, for a number no session claims."""
+    ids = {str(j) for j in job_ids if j}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(ScrapingJob.job_id, ScrapingJob.config)
+                             .where(ScrapingJob.job_id.in_(ids)))).all()
+    return {str(jid): (cfg or {}).get("owner_user_id") for jid, cfg in rows}
+
+
+def _is_mine(user, owner_id) -> bool:
+    """Owned by this person — or owned by nobody, in which case somebody with
+    the run of the place has to see it or the scraper waits on a prompt that
+    is on no screen at all."""
+    if owner_id is not None:
+        return owner_id == user.id
+    return (user.role or "") in FULL_ACCESS_ROLES
+
+
+async def _my_prompts(db, user, pending, identity):
+    """Narrow both lists to the numbers this person owns."""
+    from app.scraper.otp_store import _digits, job_of
+    phones = [p.get("phone_hint") for p in pending] + [i.get("phone") for i in identity]
+    by_phone = await _owner_of_account(db, phones)
+    by_job = await _owner_of_job(db, [job_of(p.get("key")) for p in pending])
+
+    def owner(phone, key=None):
+        # The number first — the prompt belongs to whoever owns it. The job
+        # only answers for a number no stored session claims.
+        got = by_phone.get(_digits(phone))
+        if got is None and key:
+            got = by_job.get(job_of(key))
+        return got
+
+    return ([p for p in pending if _is_mine(user, owner(p.get("phone_hint"), p.get("key")))],
+            [i for i in identity if _is_mine(user, owner(i.get("phone")))])
+
+
+async def _my_prompt_or_404(db, user, key: str):
+    """The pending prompt behind this key, if it is this person's to answer."""
+    from app.scraper import otp_store
+    mine, _ = await _my_prompts(db, user, otp_store.get_pending(), [])
+    got = next((p for p in mine if p.get("key") == key), None)
+    if not got:
+        # Deliberately the same answer as a key that does not exist: whether
+        # somebody else is waiting on a code is not this caller's business.
+        raise HTTPException(status_code=404, detail="No pending OTP request for this key")
+    return got
+
+
 @router.get("/otp-pending")
-async def get_otp_pending():
+async def get_otp_pending(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Return jobs currently waiting for Divar SMS-OTP code.
 
-    `timeout` and each entry's `remaining` come from the server so the
-    dashboard's countdown cannot promise more time than the scraper will
-    actually wait.
+    Only the ones on this person's own Divar numbers. `timeout` and each
+    entry's `remaining` come from the server so the dashboard's countdown
+    cannot promise more time than the scraper will actually wait.
     """
     from app.scraper import otp_store
-    return {"forwarders": await list_forwarders(), "pending": otp_store.get_pending(),
+    pending, identity = await _my_prompts(
+        db, current_user, otp_store.get_pending(),
+        # Accounts Divar wants identified — national ID, birth date. No
+        # code answers it; the panel opens a dialog naming the number.
+        otp_store.identity_required())
+    return {"forwarders": await list_forwarders(), "pending": pending,
             "timeout": otp_store.wait_window(),
-            # Accounts Divar wants identified — national ID, birth date. No
-            # code answers it; the panel opens a dialog naming the number.
-            "identity_required": otp_store.identity_required()}
+            "identity_required": identity}
 
 
 class DivarLinkRequest(BaseModel):
@@ -1012,9 +1088,18 @@ class OtpSubmitRequest(BaseModel):
 
 
 @router.post("/otp/{key:path}")
-async def submit_otp_code(key: str, body: OtpSubmitRequest):
-    """Submit SMS-OTP code that the browser is waiting for."""
+async def submit_otp_code(
+    key: str, body: OtpSubmitRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Submit SMS-OTP code that the browser is waiting for.
+
+    The code was texted to somebody's own phone, so only they can have it —
+    and only they can spend the account's attempts on a wrong guess.
+    """
     from app.scraper import otp_store
+    await _my_prompt_or_404(db, current_user, key)
     ok = otp_store.submit(key, body.code.strip())
     if not ok:
         raise HTTPException(status_code=404, detail="No pending OTP request for this key")
@@ -1320,16 +1405,22 @@ async def take_login_code(account: str):
 
 
 @router.post("/otp/{key}/resend")
-async def resend_otp_code(key: str):
+async def resend_otp_code(
+    key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Ask Divar to send the code again, for a prompt that is still open.
 
     The click happens in the parked browser — Divar's «ارسال مجدد» is on the
     page it is sitting on — so this only raises the flag; the wait loop acts
     on it within a couple of seconds and restarts the countdown.
 
-    Capped: every press is a real SMS Divar sends on the account's behalf.
+    Capped: every press is a real SMS Divar sends on the account's behalf —
+    which is why only the person who owns the account may press it.
     """
     from app.scraper import otp_store
+    await _my_prompt_or_404(db, current_user, key)
     result = otp_store.ask_resend(key)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("message"))
@@ -1337,7 +1428,11 @@ async def resend_otp_code(key: str):
 
 
 @router.post("/otp-cancel")
-async def cancel_otp(key: Optional[str] = None, job_id: Optional[str] = None):
+async def cancel_otp(
+    key: Optional[str] = None, job_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Dismiss a pending OTP prompt.
 
     A key clears that single prompt. Otherwise OTP is suppressed for the rest of
@@ -1348,15 +1443,29 @@ async def cancel_otp(key: Optional[str] = None, job_id: Optional[str] = None):
     """
     from app.scraper import otp_store
     if key:
+        await _my_prompt_or_404(db, current_user, key)
         otp_store.clear(key)
         return {"success": True, "cleared": 1}
 
     # The key carries the job («{job_id}:{divar_id}»), so a dismissal aimed at
     # one prompt can be scoped even when only the job is known.
-    target = job_id or None
-    cleared = otp_store.cancel_all(target)
+    #
+    # Without one it used to suppress every prompt on the server for fifteen
+    # minutes — one person closing a dialog stopped three other people's runs
+    # collecting phone numbers, with nothing on screen to say why. Dismissing
+    # reaches only this person's own runs now.
+    if job_id:
+        owner = (await _owner_of_job(db, [job_id])).get(str(job_id))
+        if not _is_mine(current_user, owner):
+            raise HTTPException(status_code=404, detail="تسک یافت نشد")
+        cleared = otp_store.cancel_all(job_id)
+        return {"success": True, "cleared": cleared, "suppressed": True, "scope": job_id}
+
+    mine, _ = await _my_prompts(db, current_user, otp_store.get_pending(), [])
+    jobs = {otp_store.job_of(p["key"]) for p in mine}
+    cleared = sum(otp_store.cancel_all(j) for j in jobs)
     return {"success": True, "cleared": cleared,
-            "suppressed": True, "scope": target or "all jobs"}
+            "suppressed": True, "scope": ", ".join(sorted(jobs)) or "none"}
 
 
 class SingleScrapeRequest(BaseModel):

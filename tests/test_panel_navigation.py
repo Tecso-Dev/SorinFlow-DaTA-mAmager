@@ -97,8 +97,9 @@ class TestThePalette:
             assert k in keys
 
     def test_on_a_phone_it_takes_the_whole_screen(self):
-        # the file has more than one 640px block; this is the palette's own
-        phone = CSS.split("@media (max-width: 640px)")[-1]
+        # the file has several 640px blocks; find the one the palette is in
+        phone = next(b for b in CSS.split("@media (max-width: 640px)")[1:]
+                     if ".palette" in b.split("\n}")[0])
         assert ".palette { width: 100%" in phone and "height: 100%" in phone
         assert ".palette-foot { display: none; }" in phone, \
             "a touch keyboard cannot press Ctrl+K, so the hints are noise"

@@ -1827,6 +1827,51 @@ async function loadDashboard() {
 
     _loadDashboardWidgets();
     loadUpcomingEvents();
+    _loadToday();
+}
+
+
+// ── «امروز» — the only part of the dashboard that asks for something back ────
+
+function goCrm(tab, scrollTo) {
+    showSection('crm');
+    setTimeout(() => {
+        document.querySelector(`[data-bs-target="#crm-tab-${tab}"]`)?.click();
+        if (scrollTo) {
+            setTimeout(() => document.getElementById(scrollTo)
+                ?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+        }
+    }, 250);
+}
+
+async function _loadToday() {
+    const note = document.getElementById('today-note');
+    let t;
+    try {
+        t = await apiCall('/stats/today');
+    } catch (e) {
+        if (note) note.textContent = 'خوانده نشد';
+        return;
+    }
+    const put = (id, n, card) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = formatNumber(n || 0);
+        // Nothing waiting is worth seeing at a glance, so an empty card goes
+        // quiet instead of sitting there looking like work.
+        document.getElementById(card)?.classList.toggle('idle', !n);
+    };
+    put('today-calls', t.calls_due, 'todo-calls');
+    put('today-matches', t.matches_waiting, 'todo-matches');
+    put('today-drops', t.price_drops_new, 'todo-drops');
+    put('today-new', t.listings_today, 'todo-new');
+
+    const waiting = (t.calls_due || 0) + (t.matches_waiting || 0) + (t.price_drops_new || 0);
+    if (note) {
+        note.textContent = waiting
+            ? `${formatNumber(waiting)} مورد منتظر شماست`
+            : 'چیزی معطل نمانده — کارتان تمام است';
+        note.classList.toggle('clear', !waiting);
+    }
 }
 
 // ── Latest-activity widgets (recent properties & leads) ──

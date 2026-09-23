@@ -33,6 +33,16 @@ def _client():
 
 class TestWhatCrawlersAreTold:
 
+    def test_they_are_reachable_with_the_api_key_gate_on(self, monkeypatch):
+        """The trap this file's own comments keep describing: locally API_KEY is
+        empty so the gate never runs, and in production a crawler asking for the
+        rules got 401 JSON. Every one of these is fetched with no credential."""
+        monkeypatch.setattr(m.settings, "api_key", "a-key-is-configured", raising=False)
+        for path in ("/robots.txt", "/sitemap.xml", "/llms.txt", "/og.png"):
+            r = _client().get(path)
+            assert r.status_code != 401, f"{path} is behind the API key"
+
+
     def test_robots_is_reachable_at_all(self):
         r = _client().get("/robots.txt")
         assert r.status_code == 200, "it used to 401 — no rules could be read"

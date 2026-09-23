@@ -138,7 +138,12 @@ class TestTheRegistry:
         assert otp_store.identity_required() == []
 
     def test_it_is_in_the_poll(self):
-        assert '"identity_required": otp_store.identity_required()' in inspect.getsource(sr.get_otp_pending)
+        """It rides the same poll — now filtered to the person who owns the
+        number, so the source reads through that filter rather than straight
+        off the store."""
+        src = inspect.getsource(sr.get_otp_pending)
+        assert "otp_store.identity_required()" in src
+        assert '"identity_required": identity' in src and "_my_prompts(" in src
 
 
 class TestClearingIt:

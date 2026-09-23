@@ -103,3 +103,6 @@ docker-compose.override.yml
 .claude/settings.json
 .claude/launch.json
 .playwright-mcp/
+
+# sqlite files the test suites create in the repo root
+_*.db
