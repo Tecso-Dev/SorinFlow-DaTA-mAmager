@@ -67,18 +67,6 @@ class TestTheStripSaysThereIsMore:
         assert "flex-wrap: nowrap !important" in CSS
 
 
-class TestTheCallQueueStopsExplainingItself:
-
-    def test_the_prose_is_two_lines_on_a_phone(self):
-        rule = CSS.split(".cq-intro {")[1].split("}")[0]
-        assert "-webkit-line-clamp: 2" in rule
-
-    def test_the_rest_is_one_tap_away(self):
-        assert ".cq-intro.open { -webkit-line-clamp: unset; }" in CSS
-        assert "content: 'بیشتر'" in CSS and "content: 'کمتر'" in CSS
-        assert "closest?.('.cq-intro')" in JS, "the panes render on demand, so the click is delegated"
-
-    def test_the_desktop_keeps_the_whole_explanation(self):
-        i = CSS.index(".cq-intro {")
-        media = CSS.rfind("@media", 0, i)
-        assert "max-width: 768px" in CSS[media:media + 40]
+# The call queue's explanations — clamped on a phone, whole on a desktop — are
+# covered in test_call_queue_density.py, next to the card density they are part
+# of. Keeping a second copy here meant one change broke two files.

@@ -4015,14 +4015,78 @@ body.palette-open { overflow: hidden; }
    office opens every morning, on the device with the least room for it.
    Two lines on a phone, the rest a tap away. */
 @media (max-width: 768px) {
-  .cq-intro {
+  .cq-intro { cursor: pointer; }
+  /* The clamp is on the text, not on the block: a pseudo-element sitting at
+     the end of clamped text is clipped along with the text, so the label that
+     said it could be opened was itself invisible. */
+  .cq-intro .cq-intro-text {
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
-    overflow: hidden; cursor: pointer; position: relative;
+    overflow: hidden;
   }
-  .cq-intro::after {
+  .cq-intro.open .cq-intro-text { -webkit-line-clamp: unset; }
+  .cq-intro-more::after {
     content: 'بیشتر';
-    color: var(--accent2); font-size: .72rem; margin-inline-start: .3rem;
+    color: var(--accent2); font-size: .72rem;
   }
-  .cq-intro.open { -webkit-line-clamp: unset; }
-  .cq-intro.open::after { content: 'کمتر'; }
+  .cq-intro.open .cq-intro-more::after { content: 'کمتر'; }
 }
+/* On a wider screen the whole explanation is there and nothing is a control. */
+@media (min-width: 769px) { .cq-intro-more { display: none; } }
+
+/* ── the «بیشتر» disclosure on a call / match / price-drop card ──────────────
+   Collapsed it is a chip beside the two main buttons; open it takes a row of
+   its own so the extra buttons wrap under them rather than shoving them out
+   of line. */
+.cq-more { flex: 0 0 auto; }
+.cq-more[open] { flex: 1 1 100%; }
+.cq-more > summary {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .25rem .65rem;
+  border: 1px solid var(--border); border-radius: var(--r-sm, 8px);
+  color: var(--text-muted); font-size: .8rem;
+  cursor: pointer; user-select: none;
+  list-style: none;                 /* Firefox's triangle */
+}
+.cq-more > summary::-webkit-details-marker { display: none; }
+.cq-more > summary::after {
+  content: '\F282';                 /* bootstrap-icons chevron-down */
+  font-family: 'bootstrap-icons'; font-size: .7rem;
+  transition: transform .18s ease;
+}
+.cq-more[open] > summary::after { transform: rotate(180deg); }
+.cq-more > summary:hover { border-color: var(--accent); color: var(--text-dim); }
+.cq-more[open] > summary { margin-bottom: .45rem; }
+.cq-more-row { display: flex; gap: .35rem; flex-wrap: wrap; }
+
+@media (max-width: 640px) {
+  /* Two buttons at 46% each left no room for the chip, so it wrapped to a row
+     of its own and cost 42px on every card. At 38% all three share one line. */
+  .cq-actions > .btn { flex: 1 1 30%; }
+  .cq-more > summary { min-height: 42px; justify-content: center; padding: .25rem .7rem; }
+  .cq-more-row .btn { flex: 1 1 46%; }
+}
+
+/* ── «فیلترهای بیشتر» on the scrape form ─────────────────────────────────────
+   The optional filters were 663px of a 1445px form — two screens of empty
+   money fields between «دسته‌بندی» and the button that starts a run. */
+.scraper-more { margin-bottom: 1rem; }
+.scraper-more > summary {
+  display: flex; align-items: center; gap: .4rem;
+  padding: .55rem .8rem;
+  background: var(--input-bg-solid);
+  border: 1px solid var(--border); border-radius: var(--r-sm, 8px);
+  color: var(--text-dim); font-size: .85rem;
+  cursor: pointer; user-select: none; list-style: none;
+}
+.scraper-more > summary::-webkit-details-marker { display: none; }
+.scraper-more > summary::before {
+  content: '\F282';                 /* bootstrap-icons chevron-down */
+  font-family: 'bootstrap-icons'; font-size: .7rem;
+  margin-inline-end: .1rem; transition: transform .18s ease;
+}
+.scraper-more[open] > summary::before { transform: rotate(180deg); }
+.scraper-more > summary:hover { border-color: var(--accent); color: var(--text); }
+/* A fold holding something that will narrow the run says so without opening. */
+.scraper-more.has-filters > summary { border-color: var(--accent); color: var(--text); }
+#scraper-more-count { color: var(--accent2); font-size: .78rem; }
+.scraper-more-body { padding-top: .85rem; }

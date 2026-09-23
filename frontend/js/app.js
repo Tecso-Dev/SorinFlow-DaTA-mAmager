@@ -2992,10 +2992,19 @@ function _initScraperDatePicker() {
             onSelect: _onScraperDateChange,
         });
     } catch (e) { console.warn('scraper datepicker init failed:', e); }
+    // Switching deal type hides one price block and shows another, so what
+    // counts as a set filter changes with it.
+    try { _scraperMoreSync(); } catch (_) {}
 }
 
 function _onScraperDateChange() {
-    const hasDate = !!document.getElementById('scraper-posted-date').value.trim();
+    const el = document.getElementById('scraper-posted-date');
+    const hasDate = !!el.value.trim();
+    // persianDatepicker writes today into the field the moment it initialises,
+    // so a value alone does not mean anybody picked one. This fires when they
+    // do — and it is what «فیلترهای بیشتر» counts, or the fold would sit open
+    // on every visit announcing a filter nobody set.
+    if (hasDate) el.dataset.userSet = '1'; else delete el.dataset.userSet;
     const pages = document.getElementById('scraper-pages');
     // In date mode the count is an optional cap: empty = the whole day
     document.getElementById('scraper-pages-hint').classList.toggle('d-none', !hasDate);
@@ -3352,13 +3361,58 @@ function restoreScraperForm() {
         const el = document.getElementById(id);
         if (el && typeof data[id] === 'boolean') el.checked = data[id];
     });
+    const dateEl = document.getElementById('scraper-posted-date');
+    if (dateEl && (data['scraper-posted-date'] || '').trim()) dateEl.dataset.userSet = '1';
     // city picker + category-driven filter visibility
     const picker = document.getElementById('scraper-city-picker');
     if (picker && picker._setCityValue && data.city) picker._setCityValue(data.city);
     if (document.getElementById('scraper-category')?.value) {
         try { onScraperCategoryChange(); } catch (_) {}
     }
+    _scraperMoreSync();
 }
+
+
+// ── «فیلترهای بیشتر» ─────────────────────────────────────────────────────────
+// The optional filters are folded away, which is only safe as long as a filter
+// can never be applied out of sight: the panel remembers the form, so somebody
+// could return to a run narrowed by a price set last week and never see it.
+// The summary counts what is set, and a set filter forces the fold open.
+
+const _SCRAPER_FILTER_IDS = [
+    'scraper-min-price', 'scraper-max-price', 'scraper-min-ppm', 'scraper-max-ppm',
+    'scraper-min-deposit', 'scraper-max-deposit', 'scraper-min-rent', 'scraper-max-rent',
+    'scraper-min-area', 'scraper-max-area', 'scraper-min-rooms', 'scraper-max-rooms',
+    'scraper-advertiser-type', 'scraper-posted-date',
+    'scraper-has-images', 'scraper-has-elevator', 'scraper-has-parking',
+    'scraper-has-storage', 'scraper-has-balcony',
+];
+
+function _scraperActiveFilters() {
+    return _SCRAPER_FILTER_IDS.filter(id => {
+        const el = document.getElementById(id);
+        if (!el) return false;
+        // A hidden block belongs to the other deal type — its leftovers are
+        // not sent and must not be counted.
+        if (el.closest('.d-none')) return false;
+        if (id === 'scraper-posted-date') return el.dataset.userSet === '1';
+        return el.type === 'checkbox' ? el.checked : !!(el.value || '').trim();
+    }).length;
+}
+
+function _scraperMoreSync() {
+    const box = document.getElementById('scraper-more');
+    if (!box) return;
+    const n = _scraperActiveFilters();
+    const tag = document.getElementById('scraper-more-count');
+    if (tag) tag.textContent = n ? ` · ${formatNumber(n)} فعال` : '';
+    box.classList.toggle('has-filters', n > 0);
+    if (n > 0) box.open = true;
+}
+
+document.addEventListener('change', e => {
+    if (e.target.closest?.('#scraper-more')) _scraperMoreSync();
+});
 
 // ─── «چند آگهی با این فیلترها هست؟» ──────────────────────────────────────────
 // Divar prints this above its own results («۳۴۳ آگهی در این محدوده») and its
@@ -9148,6 +9202,17 @@ async function loadCalls() {
     }
 }
 
+// Seven buttons on a call card, five on a match, four on a price drop — and
+// six cards to a screen meant forty-two buttons competing for one glance. The
+// two that carry almost every card stay out; the rest go behind a disclosure.
+// <details> rather than a class and a listener: the browser already has this
+// widget, keyboard and screen-reader behaviour included.
+function _cqMore(html) {
+    return `<details class="cq-more"><summary>بیشتر</summary>
+        <div class="cq-more-row">${html}</div>
+    </details>`;
+}
+
 function _cqCard(l) {
     const price = l.price ? formatNumber(l.price) + ' تومان' : '';
     const meta = [l.city_name, l.category_name, l.district, l.area ? `${formatNumber(l.area)} متر` : '', price]
@@ -9170,11 +9235,12 @@ function _cqCard(l) {
         <div class="cq-actions">
             <button class="btn btn-sm btn-success" onclick="cqOutcome(${l.id}, 'answered')"><i class="bi bi-check-lg"></i> پاسخ داد</button>
             <button class="btn btn-sm btn-outline-secondary" onclick="cqOutcome(${l.id}, 'no_answer')"><i class="bi bi-telephone-x"></i> پاسخ نداد</button>
-            <button class="btn btn-sm btn-outline-secondary" onclick="cqOutcome(${l.id}, 'busy')">مشغول</button>
-            <button class="btn btn-sm btn-outline-warning" onclick="cqCallback(${l.id})"><i class="bi bi-alarm"></i> دوباره زنگ بزن</button>
+            ${_cqMore(`
             <button class="btn btn-sm btn-outline-primary" onclick="cqVisit(${l.id})"><i class="bi bi-calendar-check"></i> بازدید</button>
+            <button class="btn btn-sm btn-outline-warning" onclick="cqCallback(${l.id})"><i class="bi bi-alarm"></i> دوباره زنگ بزن</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="cqOutcome(${l.id}, 'busy')">مشغول</button>
             <button class="btn btn-sm btn-outline-danger" onclick="cqOutcome(${l.id}, 'not_interested')">علاقه ندارد</button>
-            <button class="btn btn-sm btn-outline-danger" onclick="cqOutcome(${l.id}, 'wrong_number')">شماره اشتباه</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="cqOutcome(${l.id}, 'wrong_number')">شماره اشتباه</button>`)}
         </div>
     </div>`;
 }
@@ -9316,9 +9382,10 @@ function _matchQueueCard(m) {
         <div class="cq-actions">
             <button class="btn btn-sm btn-success" onclick="mqDecide(${m.id}, 'contacted')"><i class="bi bi-check-lg"></i> تماس گرفتم</button>
             <button class="btn btn-sm btn-primary" onclick="mqSms(${m.id})" ${c.mobile1 ? '' : 'disabled title="مشتری شماره ندارد"'}><i class="bi bi-chat-dots"></i> پیامک به مشتری</button>
+            ${_cqMore(`
             <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${p.id})"><i class="bi bi-eye"></i> جزئیات ملک</button>
-            <button class="btn btn-sm btn-outline-secondary" onclick="shareFile(${p.id})" title="واتساپ / تلگرام / کپی"><i class="bi bi-share"></i></button>
-            <button class="btn btn-sm btn-outline-danger" onclick="mqDecide(${m.id}, 'dismissed')"><i class="bi bi-x-lg"></i> مناسب نیست</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="shareFile(${p.id})" title="واتساپ / تلگرام / کپی"><i class="bi bi-share"></i> ارسال</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="mqDecide(${m.id}, 'dismissed')"><i class="bi bi-x-lg"></i> مناسب نیست</button>`)}
         </div>
     </div>`;
 }
@@ -9414,10 +9481,11 @@ function _dropCard(a) {
                 <span class="small text-muted">${_cqWhen(a.moved_at)}</span></div>
         </div>
         <div class="cq-actions">
-            <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${p.id})"><i class="bi bi-eye"></i> جزئیات</button>
             <button class="btn btn-sm btn-outline-success" onclick="showCustomersForProperty(${p.id})"><i class="bi bi-person-check"></i> متقاضیان هم‌خوان</button>
-            <button class="btn btn-sm btn-outline-secondary" onclick="shareFile(${p.id})"><i class="bi bi-share"></i> ارسال برای مشتری</button>
             <button class="btn btn-sm btn-outline-secondary" onclick="pdDecide(${a.id}, 'seen')"><i class="bi bi-check2"></i> دیدم</button>
+            ${_cqMore(`
+            <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${p.id})"><i class="bi bi-eye"></i> جزئیات</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="shareFile(${p.id})"><i class="bi bi-share"></i> ارسال برای مشتری</button>`)}
         </div>
     </div>`;
 }

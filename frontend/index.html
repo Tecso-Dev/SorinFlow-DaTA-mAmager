@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260923m">
+    <link rel="stylesheet" href="css/style.css?v=20260923r">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -847,127 +847,137 @@
                                     </div>
 
                                     <!-- فیلتر قیمت خرید -->
-                                    <div id="scraper-buy-filters" class="d-none">
-                                        <div class="mb-2">
-                                            <label class="form-label small text-muted">قیمت کل (تومان)</label>
-                                            <div class="d-flex gap-2">
-                                                <input type="text" inputmode="numeric" id="scraper-min-price" class="form-control form-control-sm money-input"
-                                                       placeholder="از">
-                                                <input type="text" inputmode="numeric" id="scraper-max-price" class="form-control form-control-sm money-input"
-                                                       placeholder="تا">
+                                    <!-- Everything optional, behind one tap. On a phone these four
+                                         blocks were 663px of the form's 1445 — two screens of empty
+                                         money fields between «دسته‌بندی» and the button that starts a
+                                         run. It opens itself when any of them is set, so a filter can
+                                         never be applied out of sight; the summary counts them. -->
+                                    <details id="scraper-more" class="scraper-more">
+                                        <summary>فیلترهای بیشتر<span id="scraper-more-count"></span></summary>
+                                        <div class="scraper-more-body">
+                                        <div id="scraper-buy-filters" class="d-none">
+                                            <div class="mb-2">
+                                                <label class="form-label small text-muted">قیمت کل (تومان)</label>
+                                                <div class="d-flex gap-2">
+                                                    <input type="text" inputmode="numeric" id="scraper-min-price" class="form-control form-control-sm money-input"
+                                                           placeholder="از">
+                                                    <input type="text" inputmode="numeric" id="scraper-max-price" class="form-control form-control-sm money-input"
+                                                           placeholder="تا">
+                                                </div>
+    <div class="range-slider" data-min-input="scraper-min-price" data-max-input="scraper-max-price" data-ceiling="100000000000"></div>
                                             </div>
-<div class="range-slider" data-min-input="scraper-min-price" data-max-input="scraper-max-price" data-ceiling="100000000000"></div>
-                                        </div>
-                                        <div class="mb-2">
-                                            <label class="form-label small text-muted">قیمت هر متر مربع (تومان)</label>
-                                            <div class="d-flex gap-2">
-                                                <input type="text" inputmode="numeric" id="scraper-min-ppm" class="form-control form-control-sm money-input"
-                                                       placeholder="از">
-                                                <input type="text" inputmode="numeric" id="scraper-max-ppm" class="form-control form-control-sm money-input"
-                                                       placeholder="تا">
+                                            <div class="mb-2">
+                                                <label class="form-label small text-muted">قیمت هر متر مربع (تومان)</label>
+                                                <div class="d-flex gap-2">
+                                                    <input type="text" inputmode="numeric" id="scraper-min-ppm" class="form-control form-control-sm money-input"
+                                                           placeholder="از">
+                                                    <input type="text" inputmode="numeric" id="scraper-max-ppm" class="form-control form-control-sm money-input"
+                                                           placeholder="تا">
+                                                </div>
+    <div class="range-slider" data-min-input="scraper-min-ppm" data-max-input="scraper-max-ppm" data-ceiling="500000000"></div>
                                             </div>
-<div class="range-slider" data-min-input="scraper-min-ppm" data-max-input="scraper-max-ppm" data-ceiling="500000000"></div>
                                         </div>
-                                    </div>
 
-                                    <!-- فیلتر قیمت اجاره -->
-                                    <div id="scraper-rent-filters" class="d-none">
-                                        <div class="mb-2">
-                                            <label class="form-label small text-muted">ودیعه (تومان)</label>
-                                            <div class="d-flex gap-2">
-                                                <input type="text" inputmode="numeric" id="scraper-min-deposit" class="form-control form-control-sm money-input"
-                                                       placeholder="از">
-                                                <input type="text" inputmode="numeric" id="scraper-max-deposit" class="form-control form-control-sm money-input"
-                                                       placeholder="تا">
+                                        <!-- فیلتر قیمت اجاره -->
+                                        <div id="scraper-rent-filters" class="d-none">
+                                            <div class="mb-2">
+                                                <label class="form-label small text-muted">ودیعه (تومان)</label>
+                                                <div class="d-flex gap-2">
+                                                    <input type="text" inputmode="numeric" id="scraper-min-deposit" class="form-control form-control-sm money-input"
+                                                           placeholder="از">
+                                                    <input type="text" inputmode="numeric" id="scraper-max-deposit" class="form-control form-control-sm money-input"
+                                                           placeholder="تا">
+                                                </div>
+    <div class="range-slider" data-min-input="scraper-min-deposit" data-max-input="scraper-max-deposit" data-ceiling="20000000000"></div>
                                             </div>
-<div class="range-slider" data-min-input="scraper-min-deposit" data-max-input="scraper-max-deposit" data-ceiling="20000000000"></div>
-                                        </div>
-                                        <div class="mb-2">
-                                            <label class="form-label small text-muted">اجاره ماهانه (تومان)</label>
-                                            <div class="d-flex gap-2">
-                                                <input type="text" inputmode="numeric" id="scraper-min-rent" class="form-control form-control-sm money-input"
-                                                       placeholder="از">
-                                                <input type="text" inputmode="numeric" id="scraper-max-rent" class="form-control form-control-sm money-input"
-                                                       placeholder="تا">
+                                            <div class="mb-2">
+                                                <label class="form-label small text-muted">اجاره ماهانه (تومان)</label>
+                                                <div class="d-flex gap-2">
+                                                    <input type="text" inputmode="numeric" id="scraper-min-rent" class="form-control form-control-sm money-input"
+                                                           placeholder="از">
+                                                    <input type="text" inputmode="numeric" id="scraper-max-rent" class="form-control form-control-sm money-input"
+                                                           placeholder="تا">
+                                                </div>
+    <div class="range-slider" data-min-input="scraper-min-rent" data-max-input="scraper-max-rent" data-ceiling="500000000"></div>
                                             </div>
-<div class="range-slider" data-min-input="scraper-min-rent" data-max-input="scraper-max-rent" data-ceiling="500000000"></div>
                                         </div>
-                                    </div>
 
-                                    <!-- فیلترهای مشترک -->
-                                    <div id="scraper-common-filters" class="d-none">
-                                        <div class="mb-2">
-                                            <label class="form-label small text-muted">متراژ (متر)</label>
-                                            <div class="d-flex gap-2">
-                                                <input type="number" id="scraper-min-area" class="form-control form-control-sm"
-                                                       placeholder="از">
-                                                <input type="number" id="scraper-max-area" class="form-control form-control-sm"
-                                                       placeholder="تا">
-                                            </div>
-                                        </div>
-                                        <div class="mb-2">
-                                            <label class="form-label small text-muted">تعداد اتاق</label>
-                                            <div class="d-flex gap-2">
-                                                <input type="number" id="scraper-min-rooms" class="form-control form-control-sm"
-                                                       placeholder="از" min="0">
-                                                <input type="number" id="scraper-max-rooms" class="form-control form-control-sm"
-                                                       placeholder="تا" min="0">
-                                            </div>
-                                        </div>
-                                        <div class="mb-2">
-                                            <label class="form-label small text-muted">آگهی‌دهنده</label>
-                                            <select id="scraper-advertiser-type" class="form-select form-select-sm">
-                                                <option value="">همه</option>
-                                                <option value="personal">شخصی</option>
-                                                <option value="agency">مشاور املاک</option>
-                                            </select>
-                                            <div class="form-text" style="font-size:.66rem;line-height:1.5">
-                                                با انتخاب «شخصی» یا «مشاور املاک»، آگهی‌هایی که نوع
-                                                آگهی‌دهنده‌شان مشخص نیست ذخیره نمی‌شوند — پس نتیجه کمتر
-                                                ولی دقیق است.
-                                            </div>
-                                        </div>
-                                        <div class="mb-2">
-                                            <label class="form-label small text-muted">ویژگی‌ها</label>
-                                            <div class="d-flex flex-wrap gap-2">
-                                                <div class="form-check">
-                                                    <input class="form-check-input" type="checkbox" id="scraper-has-images">
-                                                    <label class="form-check-label small" for="scraper-has-images">دارای عکس</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input class="form-check-input" type="checkbox" id="scraper-has-elevator">
-                                                    <label class="form-check-label small" for="scraper-has-elevator">آسانسور</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input class="form-check-input" type="checkbox" id="scraper-has-parking">
-                                                    <label class="form-check-label small" for="scraper-has-parking">پارکینگ</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input class="form-check-input" type="checkbox" id="scraper-has-storage">
-                                                    <label class="form-check-label small" for="scraper-has-storage">انباری</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input class="form-check-input" type="checkbox" id="scraper-has-balcony">
-                                                    <label class="form-check-label small" for="scraper-has-balcony">بالکن</label>
+                                        <!-- فیلترهای مشترک -->
+                                        <div id="scraper-common-filters" class="d-none">
+                                            <div class="mb-2">
+                                                <label class="form-label small text-muted">متراژ (متر)</label>
+                                                <div class="d-flex gap-2">
+                                                    <input type="number" id="scraper-min-area" class="form-control form-control-sm"
+                                                           placeholder="از">
+                                                    <input type="number" id="scraper-max-area" class="form-control form-control-sm"
+                                                           placeholder="تا">
                                                 </div>
                                             </div>
+                                            <div class="mb-2">
+                                                <label class="form-label small text-muted">تعداد اتاق</label>
+                                                <div class="d-flex gap-2">
+                                                    <input type="number" id="scraper-min-rooms" class="form-control form-control-sm"
+                                                           placeholder="از" min="0">
+                                                    <input type="number" id="scraper-max-rooms" class="form-control form-control-sm"
+                                                           placeholder="تا" min="0">
+                                                </div>
+                                            </div>
+                                            <div class="mb-2">
+                                                <label class="form-label small text-muted">آگهی‌دهنده</label>
+                                                <select id="scraper-advertiser-type" class="form-select form-select-sm">
+                                                    <option value="">همه</option>
+                                                    <option value="personal">شخصی</option>
+                                                    <option value="agency">مشاور املاک</option>
+                                                </select>
+                                                <div class="form-text" style="font-size:.66rem;line-height:1.5">
+                                                    با انتخاب «شخصی» یا «مشاور املاک»، آگهی‌هایی که نوع
+                                                    آگهی‌دهنده‌شان مشخص نیست ذخیره نمی‌شوند — پس نتیجه کمتر
+                                                    ولی دقیق است.
+                                                </div>
+                                            </div>
+                                            <div class="mb-2">
+                                                <label class="form-label small text-muted">ویژگی‌ها</label>
+                                                <div class="d-flex flex-wrap gap-2">
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="checkbox" id="scraper-has-images">
+                                                        <label class="form-check-label small" for="scraper-has-images">دارای عکس</label>
+                                                    </div>
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="checkbox" id="scraper-has-elevator">
+                                                        <label class="form-check-label small" for="scraper-has-elevator">آسانسور</label>
+                                                    </div>
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="checkbox" id="scraper-has-parking">
+                                                        <label class="form-check-label small" for="scraper-has-parking">پارکینگ</label>
+                                                    </div>
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="checkbox" id="scraper-has-storage">
+                                                        <label class="form-check-label small" for="scraper-has-storage">انباری</label>
+                                                    </div>
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="checkbox" id="scraper-has-balcony">
+                                                        <label class="form-check-label small" for="scraper-has-balcony">بالکن</label>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
 
-                                    <div class="mb-3">
-                                        <label class="form-label">تاریخ انتشار آگهی (شمسی)</label>
-                                        <div class="input-group">
-                                            <span class="input-group-text"><i class="bi bi-calendar-event"></i></span>
-                                            <input type="text" id="scraper-posted-date" class="form-control"
-                                                   placeholder="انتخاب تاریخ..." autocomplete="off" readonly>
-                                            <button type="button" class="btn btn-outline-danger" onclick="clearScraperDate()">
-                                                <i class="bi bi-x"></i>
-                                            </button>
+                                        <div class="mb-3">
+                                            <label class="form-label">تاریخ انتشار آگهی (شمسی)</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text"><i class="bi bi-calendar-event"></i></span>
+                                                <input type="text" id="scraper-posted-date" class="form-control"
+                                                       placeholder="انتخاب تاریخ..." autocomplete="off" readonly>
+                                                <button type="button" class="btn btn-outline-danger" onclick="clearScraperDate()">
+                                                    <i class="bi bi-x"></i>
+                                                </button>
+                                            </div>
+                                            <small class="text-muted d-block mt-1">
+                                                با انتخاب تاریخ، فقط آگهی‌های منتشرشده در همان روز اسکرپ می‌شوند
+                                            </small>
                                         </div>
-                                        <small class="text-muted d-block mt-1">
-                                            با انتخاب تاریخ، فقط آگهی‌های منتشرشده در همان روز اسکرپ می‌شوند
-                                        </small>
-                                    </div>
+                                        </div>
+                                    </details>
                                     <div class="mb-3" id="scraper-pages-wrap">
                                         <label class="form-label">تعداد آگهی برای اسکرپ</label>
                                         <input type="number" id="scraper-pages" class="form-control" min="1" max="500">
@@ -1595,9 +1605,10 @@
                                 </div>
                             </div>
                             <div class="card-body">
-                                <div class="cq-intro small text-muted mb-3">
+                                <div class="cq-intro small text-muted mb-3"><span class="cq-intro-text">
                                     هر آگهی تازه که اسکرپ می‌شود، خودکار با معیارهای مشتری‌ها (شهر، منطقه، نوع، بودجه، متراژ، خواب) سنجیده می‌شود.
                                     چیزی که خوب بخواند اینجا می‌آید — و اگر تلگرام تنظیم باشد، همان لحظه پیام می‌رود. یک تماس، یک دکمه.
+                                    </span><span class="cq-intro-more" aria-hidden="true"></span>
                                 </div>
                                 <div id="matches-list"><div class="text-muted small">در حال بارگذاری…</div></div>
                             </div>
@@ -1617,9 +1628,10 @@
                                 </div>
                             </div>
                             <div class="card-body">
-                                <div class="cq-intro small text-muted mb-3">
+                                <div class="cq-intro small text-muted mb-3"><span class="cq-intro-text">
                                     آگهی‌هایی که از آخرین اسکرپ ارزان‌تر شده‌اند — رهن و اجاره با هم سنجیده می‌شود، نه فقط ودیعه.
                                     هر کاهش دوباره با معیار مشتری‌ها سنجیده می‌شود؛ اگر حالا در بودجهٔ کسی بگنجد، بالا در کارت تطبیق‌ها می‌آید.
+                                    </span><span class="cq-intro-more" aria-hidden="true"></span>
                                 </div>
                                 <div id="drops-list"><div class="text-muted small">در حال بارگذاری…</div></div>
                             </div>
@@ -1635,9 +1647,10 @@
                                 </div>
                             </div>
                             <div class="card-body">
-                                <div class="cq-intro small text-muted mb-3">
+                                <div class="cq-intro small text-muted mb-3"><span class="cq-intro-text">
                                     لیدهایی که نوبت تماسشان است: آن‌هایی که هنوز کسی زنگ نزده، پاسخ‌نداده‌ها که وقت تلاش دوباره‌شان رسیده،
                                     و کسانی که خودشان گفته‌اند «دوباره زنگ بزن». اولین تماس، لید را <b>مال شما</b> می‌کند.
+                                    </span><span class="cq-intro-more" aria-hidden="true"></span>
                                 </div>
                                 <div id="calls-list"><div class="text-muted small">در حال بارگذاری…</div></div>
                                 <div id="calls-summary" class="crm-superadmin-only mt-3"></div>
@@ -5157,12 +5170,12 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260923m"></script>
+<script src="js/app.js?v=20260923r"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
-<script src="js/ai/reader.js?v=20260923m"></script>
-<script src="js/ai/embed.js?v=20260923m"></script>
-<script src="js/ai/photo.js?v=20260923m"></script>
-<script src="js/ai/need.js?v=20260923m"></script>
+<script src="js/ai/reader.js?v=20260923r"></script>
+<script src="js/ai/embed.js?v=20260923r"></script>
+<script src="js/ai/photo.js?v=20260923r"></script>
+<script src="js/ai/need.js?v=20260923r"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">
