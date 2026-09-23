@@ -4,8 +4,11 @@ Handles click-to-reveal phone numbers and captcha solving.
 """
 import re
 import asyncio
+import json
+import shutil
 import time
 import random
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 
@@ -251,9 +254,11 @@ class ContactExtractor:
                         f"Captcha attempt {attempt_num}/{MAX_ATTEMPTS} did not reveal "
                         f"phone — retrying with a fresh puzzle"
                     )
+                    self._keep_failed_captcha()
                     await self._refresh_captcha()
                     await asyncio.sleep(random.uniform(1.0, 1.8))
 
+            self._keep_failed_captcha()
             logger.warning("No phone element found after clicking contact button")
             if self.contact_channel is None:
                 self.contact_channel = "unavailable"
@@ -1176,6 +1181,39 @@ class ContactExtractor:
         except Exception as e:
             logger.warning(f"Error in SMS-OTP handler: {e}")
 
+    CAPTCHA_KEEP = 40      # puzzles kept on disk; a pod is not a photo album
+
+    def _keep_failed_captcha(self) -> None:
+        """Keep the pictures of a puzzle the solver got wrong.
+
+        The three files carry fixed names, so the next attempt overwrites them
+        and a failure leaves nothing to tune against — the only reason the last
+        run could be read at all is that nothing ran after it. A failed attempt
+        is copied aside with the numbers it produced: the hole it picked, the
+        piece's box, and how far it actually slid.
+        """
+        info = getattr(self, "_last_captcha", None)
+        if not info:
+            return
+        self._last_captcha = None
+        try:
+            box = self.images_dir.parent / "debug" / "captcha"
+            out = box / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            out.mkdir(parents=True, exist_ok=True)
+            for key in ("bg", "gap", "result"):
+                src = Path(info[key])
+                if src.exists():
+                    shutil.copyfile(src, out / f"{key}.png")
+            meta = {k: v for k, v in info.items() if k not in ("bg", "gap", "result")}
+            meta["account"] = self.account_phone
+            (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1),
+                                           encoding="utf-8")
+            for old_dir in sorted(box.iterdir(), reverse=True)[self.CAPTCHA_KEEP:]:
+                shutil.rmtree(old_dir, ignore_errors=True)
+            logger.info(f"Kept the failed puzzle in {out.name}")
+        except Exception as e:
+            logger.debug(f"could not keep the failed captcha: {e}")
+
     async def _handle_captcha_if_present(self) -> None:
         """Detect and attempt to solve an ARCaptcha puzzle if present."""
         try:
@@ -1246,43 +1284,55 @@ class ContactExtractor:
             await gap_element.screenshot(path=str(gap_path))
             await bg_element.screenshot(path=str(bg_path))
 
-            # Get background element's on-screen width for pixel scaling
+            # Both boxes, in screen pixels. The background's tells us how the
+            # screenshot scales; the piece's tells the solver which row the
+            # hole is on and where the journey starts.
             bg_box = await bg_element.bounding_box()
+            gap_box = await gap_element.bounding_box()
             bg_screen_w = bg_box["width"] if bg_box else None
+
+            scale = 1.0
+            try:
+                import cv2 as _cv2
+                _bg_img = _cv2.imread(str(bg_path))
+                if _bg_img is not None and bg_screen_w and _bg_img.shape[1] > 0:
+                    scale = bg_screen_w / _bg_img.shape[1]
+            except Exception:
+                pass
+
+            piece_box = None
+            if bg_box and gap_box and scale:
+                piece_box = ((gap_box["x"] - bg_box["x"]) / scale,
+                             (gap_box["y"] - bg_box["y"]) / scale,
+                             gap_box["width"] / scale,
+                             gap_box["height"] / scale)
 
             solver = PuzzleCaptchaSolver(
                 gap_image_path=str(gap_path),
                 bg_image_path=str(bg_path),
                 output_image_path=str(result_path),
+                piece_box=piece_box,
             )
             # Run synchronous OpenCV work in a thread pool to avoid blocking the event loop
             loop = asyncio.get_event_loop()
-            position = await loop.run_in_executor(None, solver.discern)
-            logger.info(f"PuzzleCaptchaSolver returned slide position: {position}")
+            hole_x = await loop.run_in_executor(None, solver.discern)
+            travel = solver.slide_distance()
+            logger.info(f"PuzzleCaptchaSolver hole x={hole_x} travel={travel} scale={scale:.2f}")
 
-            # Scale position from screenshot pixels → screen pixels
-            if position is not None and bg_screen_w:
-                try:
-                    import cv2 as _cv2
-                    bg_img = _cv2.imread(str(bg_path))
-                    if bg_img is not None:
-                        bg_img_w = bg_img.shape[1]
-                        if bg_img_w > 0:
-                            scale = bg_screen_w / bg_img_w
-                            position = position * scale
-                            logger.info(f"Scaled position: {position:.1f}px (scale={scale:.2f})")
-                except Exception:
-                    pass
-
-            # Sanity check: puzzle gaps are never in the first 15% of background
-            if position is not None and bg_screen_w and position < bg_screen_w * 0.15:
-                logger.warning(f"Position {position:.1f} looks too small, using 40% fallback")
-                position = bg_screen_w * 0.40
-
-            if position is None:
-                # No solver — try a single drag at 40% of background width as fallback
+            if travel is not None:
+                position = travel * scale
+            elif hole_x is not None:
+                # No piece box to measure against; the hole's own x is the best
+                # guess left, as it was before the piece's row was known.
+                position = hole_x * scale
+            else:
                 position = (bg_screen_w * 0.40) if bg_screen_w else 80.0
                 logger.warning(f"Captcha solver failed, using fallback position: {position:.1f}px")
+
+            # A hole sitting on top of the piece is a misread, not a puzzle.
+            if bg_screen_w and position < bg_screen_w * 0.08:
+                logger.warning(f"Position {position:.1f} looks too small, using 40% fallback")
+                position = bg_screen_w * 0.40
 
             slider = await self.page.query_selector(
                 "#challenge .draggable, #challenge [class*='draggable'], #challenge [role='slider']"
@@ -1299,6 +1349,7 @@ class ContactExtractor:
             start_x = box["x"] + box["width"] / 2
             start_y = box["y"] + box["height"] / 2
             drag_distance = max(20.0, min(float(position), 500.0))
+            piece_x0 = gap_box["x"] if gap_box else None
 
             # Human-like drag with easing
             await self.page.mouse.move(start_x, start_y)
@@ -1315,9 +1366,43 @@ class ContactExtractor:
                     start_y + random.uniform(-0.5, 0.5),
                 )
                 await asyncio.sleep(random.uniform(0.01, 0.03))
+
+            # The handle and the piece need not move one pixel for one: the
+            # track and the picture can be different widths, and that ratio is
+            # not written anywhere. So before letting go, read how far the
+            # piece actually went and finish the journey.
+            moved_extra = 0.0
+            if piece_x0 is not None and travel is not None:
+                try:
+                    now = await gap_element.bounding_box()
+                    moved = (now["x"] - piece_x0) if now else 0.0
+                    want = travel * scale
+                    if moved > want * 0.3:          # the piece tracks the handle
+                        residual = want - moved
+                        if 1.0 <= abs(residual) <= 120.0:
+                            for i in range(6):
+                                await self.page.mouse.move(
+                                    start_x + drag_distance + residual * (i + 1) / 6.0,
+                                    start_y + random.uniform(-0.5, 0.5),
+                                )
+                                await asyncio.sleep(random.uniform(0.02, 0.05))
+                            moved_extra = residual
+                            logger.info(
+                                f"Piece moved {moved:.1f}px of {want:.1f}px — corrected by {residual:+.1f}px")
+                except Exception as e:
+                    logger.debug(f"could not measure the piece mid-drag: {e}")
+
             await self.page.mouse.up()
             await asyncio.sleep(2.5)
-            logger.info(f"Captcha slider dragged {drag_distance:.1f}px")
+            logger.info(f"Captcha slider dragged {drag_distance + moved_extra:.1f}px")
+
+            # What the solver saw and what it decided, kept for the copy a
+            # failed attempt leaves behind.
+            self._last_captcha = {
+                "bg": str(bg_path), "gap": str(gap_path), "result": str(result_path),
+                "hole": solver.hole, "piece_box": piece_box, "scale": round(scale, 3),
+                "travel": travel, "dragged": round(drag_distance + moved_extra, 1),
+            }
 
         except Exception as e:
             logger.warning(f"Error handling captcha: {e}")

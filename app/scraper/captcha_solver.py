@@ -11,13 +11,22 @@ except Exception as e:
 
 # Confidence threshold — below this every strategy is considered unreliable
 _CONF_THRESHOLD = 0.30
+# A dark mask covering more of the picture than this caught the artwork,
+# not the hole
+_MASK_MAX_SHARE = 0.15
 
 
 class PuzzleCaptchaSolver:
-    def __init__(self, gap_image_path: str, bg_image_path: str, output_image_path: str):
+    def __init__(self, gap_image_path: str, bg_image_path: str, output_image_path: str,
+                 piece_box=None):
         self.gap_image_path = gap_image_path
         self.bg_image_path = bg_image_path
         self.output_image_path = output_image_path
+        # (x, y, w, h) of the draggable piece's own element, in background-image
+        # pixels. The page knows it for free, and it is what tells the shape
+        # search which row the hole is on and how far the piece has to travel.
+        self.piece_box = piece_box
+        self.hole = None
 
     # ── Image helpers ────────────────────────────────────────────────────────
 
@@ -88,10 +97,18 @@ class PuzzleCaptchaSolver:
         lowest.  Entirely independent of the gap template image.
         """
         gray = self._to_gray(bg).astype(np.float32)
-        bg_h, bg_w = gray.shape
+        bg_w = gray.shape[1]
 
         if gap_w >= bg_w:
             return None, 0.0
+
+        # Only the piece's own row can hold the hole; the rest of the picture
+        # is artwork that drags the average around.
+        if self.piece_box:
+            _, py, _, ph = self.piece_box
+            y0, y1 = max(0, int(py)), min(gray.shape[0], int(py + ph))
+            if y1 - y0 >= 8:
+                gray = gray[y0:y1]
 
         # Build column-sum integral image for O(1) window sums
         col_means = np.array([
@@ -99,10 +116,15 @@ class PuzzleCaptchaSolver:
             for x in range(bg_w - gap_w)
         ])
 
-        # Ignore first 10% and last 10% of background (slider track borders)
-        margin = int(bg_w * 0.10)
-        col_means[:margin] = np.inf
-        col_means[-(margin + gap_w):] = np.inf
+        # Ignore a sliver at each edge (slider track borders). col_means is
+        # already only bg_w - gap_w long, so the tail margin is `margin` on its
+        # own: taking gap_w off again fenced away the right third of the
+        # picture, and a hole that lands there could never be found — three
+        # attempts on one listing slid to 133, 59 and 26 px when it was at 191.
+        margin = int(bg_w * 0.06)
+        if margin:
+            col_means[:margin] = np.inf
+            col_means[-margin:] = np.inf
 
         best_x = int(np.argmin(col_means))
         # Confidence: how much darker the best column is vs the overall mean
@@ -141,6 +163,74 @@ class PuzzleCaptchaSolver:
                 best_x = x
         return best_x, best_conf
 
+    # ── The hole as a shape ──────────────────────────────────────────────────
+
+    def _on_the_pieces_row(self, y, h) -> bool:
+        """The piece only ever moves sideways, so the hole shares its row."""
+        if not self.piece_box:
+            return True
+        _, py, _, ph = self.piece_box
+        return abs((y + h / 2.0) - (py + ph / 2.0)) <= max(ph * 0.5, 12.0)
+
+    def _find_hole(self, bg):
+        """Find the cut-out by its shape: dark, solid, square-ish, on the row.
+
+        A column mean cannot see it. ARCaptcha's artwork is bright and busy and
+        the cut-out is a quarter of the picture's height, so averaged down a
+        whole column it scores barely darker than a blue swirl. As a connected
+        component it is unmistakable: nothing else in the picture is both that
+        dark and that solid.
+
+        The threshold is relative to the picture's own brightness — every
+        ARCaptcha background is a different colour, but the hole is always the
+        dark thing in it — and tightens until the mask stops swallowing artwork.
+        """
+        v = cv2.cvtColor(bg, cv2.COLOR_BGR2HSV)[:, :, 2]
+        bg_h, bg_w = v.shape
+        median = float(np.median(v)) or 1.0
+        kernel = np.ones((3, 3), np.uint8)
+
+        for ratio in (0.65, 0.55, 0.45, 0.35):
+            mask = (v < median * ratio).astype(np.uint8)
+            if mask.mean() > _MASK_MAX_SHARE:
+                continue                      # still catching artwork — go darker
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            _, _, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+            best = None
+            for x, y, w, h, area in stats[1:]:
+                if w < 10 or h < 10 or w > bg_w * 0.5 or h > bg_h * 0.7:
+                    continue
+                fill = area / float(w * h)
+                square = min(w, h) / float(max(w, h))
+                if fill < 0.5 or square < 0.5:
+                    continue                  # a stroke of artwork is thin and long
+                if not self._on_the_pieces_row(y, h):
+                    continue                  # a decoy drawn into the picture
+                score = area * fill
+                if best is None or score > best[0]:
+                    best = (score, (int(x), int(y), int(w), int(h)))
+            if best:
+                return best[1]
+        return None
+
+    def slide_distance(self):
+        """How far the piece must travel, in background-image pixels.
+
+        The widget draws the piece inset inside its own element, so the
+        element's left edge is not the piece's — sliding to the hole's x
+        overshoots by that inset. It needs no constant to guess at: the piece
+        never moves vertically, so the hole's own y minus the element's y is
+        the inset, measured on the captcha in front of us.
+        """
+        if not self.hole or not self.piece_box:
+            return None
+        hx, hy, _, _ = self.hole
+        px, py, pw, _ = self.piece_box
+        inset = hy - py
+        if not 0 <= inset <= pw * 0.4:
+            inset = 0                          # not the shape we assumed — no inset
+        return float(hx - inset - px)
+
     # ── Main entry point ─────────────────────────────────────────────────────
 
     def discern(self):
@@ -169,7 +259,15 @@ class PuzzleCaptchaSolver:
             logger.warning("Gap image is same size or larger than background")
             return None
 
-        # ── Primary: dark-column scan ────────────────────────────────────────
+        # ── Primary: the hole as a shape ─────────────────────────────────────
+        self.hole = self._find_hole(bg)
+        if self.hole:
+            hx, hy, hw, hh = self.hole
+            logger.info(f"  [shape] hole at x={hx} y={hy}  {hw}×{hh}")
+            self._save_debug(bg, hx, hw, hh, hy)
+            return hx
+
+        # ── Fallback: dark-column scan ───────────────────────────────────────
         # ARCaptcha background has a dark hole/shadow at the gap position.
         # Scanning for the darkest band is more reliable than template matching
         # the puzzle piece (which does NOT appear in the background as-is).
@@ -219,10 +317,11 @@ class PuzzleCaptchaSolver:
 
         return None
 
-    def _save_debug(self, bg, x_pos, w, h):
+    def _save_debug(self, bg, x_pos, w, h, y=0):
         try:
             debug = bg.copy()
-            cv2.rectangle(debug, (x_pos, 0), (x_pos + w, h), (0, 0, 255), 2)
+            x_pos = int(x_pos)
+            cv2.rectangle(debug, (x_pos, int(y)), (x_pos + int(w), int(y) + int(h)), (0, 0, 255), 2)
             cv2.imwrite(self.output_image_path, debug)
         except Exception:
             pass

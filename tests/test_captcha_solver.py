@@ -144,3 +144,78 @@ class TestPuzzleCaptchaSolver:
                 for p in (bg_path, gap_path, out_path):
                     try: os.unlink(p)
                     except OSError: pass
+
+
+def _make_arcaptcha(hole=(190, 80, 30, 30), decoy=(127, 37, 19, 19), size=(260, 161)):
+    """A background the way ARCaptcha actually draws one.
+
+    The old fixtures are a dark band down the full height of a flat grey
+    picture — which is nothing like the real thing, and why a solver that
+    could not read a real one passed them. ARCaptcha paints bright colourful
+    artwork, cuts one solid dark square out of it, and draws small dark puzzle
+    icons into the artwork that look exactly like the cut-out.
+    """
+    w, h = size
+    bg = np.full((h, w, 3), (174, 198, 99), dtype=np.uint8)      # the green
+    for cy in (20, 70, 130):                                      # swirls
+        cv2.circle(bg, (40, cy), 22, (150, 90, 60), 7)
+        cv2.circle(bg, (215, cy), 26, (150, 90, 60), 7)
+    cv2.ellipse(bg, (95, 60), (40, 22), 20, 0, 360, (245, 255, 245), -1)   # a leaf
+    for x, y, bw, bh in (hole, decoy):
+        cv2.rectangle(bg, (x, y), (x + bw, y + bh), (40, 50, 20), -1)
+    return bg
+
+
+class TestTheHoleIsAShapeNotADarkColumn:
+    """Why the solver slid to 26px when the hole was at 191.
+
+    Averaging darkness down a whole column drowns a cut-out that covers a
+    quarter of the picture's height, and the search window fenced off the
+    right third of the background besides — so a hole on the right could not
+    be found at all, whatever the artwork looked like.
+    """
+
+    def _solve(self, bg_img, piece_box=None, gap_img=None):
+        from app.scraper.captcha_solver import PuzzleCaptchaSolver
+        bg_path = _write_img(bg_img)
+        gap_path = _write_img(gap_img if gap_img is not None else _make_gap_piece(50, 44))
+        out_path = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
+        try:
+            s = PuzzleCaptchaSolver(gap_path, bg_path, out_path, piece_box=piece_box)
+            return s, s.discern()
+        finally:
+            for p in (bg_path, gap_path, out_path):
+                try: os.unlink(p)
+                except OSError: pass
+
+    def test_a_hole_on_the_right_is_found(self):
+        """The old window arithmetic could never return past 133 here."""
+        _, x = self._solve(_make_arcaptcha(), piece_box=(0, 70, 50, 44))
+        assert x is not None and abs(x - 190) <= 4, f"expected the hole at ~190, got {x}"
+
+    def test_the_slide_leaves_out_the_inset_the_piece_is_drawn_with(self):
+        """The piece sits inside its element, so its element's left edge is
+        not where the piece starts. The hole's own y says by how much."""
+        s, _ = self._solve(_make_arcaptcha(), piece_box=(0, 70, 50, 44))
+        assert abs(s.slide_distance() - 180) <= 4, \
+            f"element at x=0 drawn 10px in, hole at 190 — expected ~180, got {s.slide_distance()}"
+
+    def test_a_puzzle_icon_in_the_artwork_is_not_the_hole(self):
+        """Even when the decoy is the bigger of the two, it is on the wrong
+        row — the piece only ever moves sideways."""
+        s, x = self._solve(_make_arcaptcha(hole=(190, 80, 26, 26), decoy=(120, 20, 40, 40)),
+                           piece_box=(0, 70, 50, 44))
+        assert x is not None and abs(x - 190) <= 4, f"the decoy won: got {x}"
+
+    def test_without_the_pieces_row_the_solid_dark_square_still_wins(self):
+        _, x = self._solve(_make_arcaptcha())
+        assert x is not None and abs(x - 190) <= 4, f"expected ~190, got {x}"
+
+    def test_the_column_fallback_can_reach_the_right_of_the_picture(self):
+        from app.scraper.captcha_solver import PuzzleCaptchaSolver
+        bg = np.full((161, 260, 3), 200, dtype=np.uint8)
+        bg[70:114, 195:235] = 60                      # the only dark thing
+        s = PuzzleCaptchaSolver("a", "b", "c", piece_box=(0, 70, 50, 44))
+        x, conf = s._strategy_dark_column(bg, 40)
+        assert x is not None and abs(x - 195) <= 10, \
+            f"the tail margin used to fence off everything past 133; got {x}"
