@@ -538,6 +538,9 @@ def _apply_panel_cache_policy(request: Request, response) -> None:
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
     else:
         response.headers.setdefault("Cache-Control", "public, max-age=86400")
+    # robots.txt asks; this tells. A panel URL shared in a chat or landing in a
+    # log a crawler reads is still not something to index.
+    response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
 
 
 # ─── metrics ────────────────────────────────────────────────────────────────
@@ -950,6 +953,93 @@ async def root():
 
 
 _FAVICON_HEADERS = {"Cache-Control": "public, max-age=86400"}
+
+
+# ─── what crawlers are told ──────────────────────────────────────────────────
+# /robots.txt and /sitemap.xml did not exist, so the API-key middleware answered
+# both with 401 — a search engine asking for the crawl rules was turned away at
+# the door, and with no rules to read, nothing said the panel was off limits.
+#
+# Answer engines get the same welcome as search engines, deliberately: being
+# quoted in an answer is how an office in Urmia gets found now. What must not be
+# crawled is the panel and the API, and that is said once, for everyone.
+_PUBLIC_PATHS = ("/", "/portal")
+_CLOSED_PATHS = ("/dashboard", "/api", "/images", "/downloads", "/maintenance-access")
+
+
+def _site_root(request: Request) -> str:
+    """The origin this request actually arrived on, so the links are right
+    whichever hostname the site is reached by."""
+    return f"{request.url.scheme}://{request.url.netloc}".rstrip("/")
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt(request: Request):
+    root = _site_root(request)
+    lines = ["User-agent: *"]
+    lines += [f"Disallow: {p}/" for p in _CLOSED_PATHS]
+    lines += ["Allow: /$", "Allow: /portal", "", f"Sitemap: {root}/sitemap.xml", ""]
+    return Response("\n".join(lines), media_type="text/plain; charset=utf-8",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+async def sitemap_xml(request: Request):
+    root = _site_root(request)
+    urls = "".join(
+        f"<url><loc>{root}{'' if p == '/' else p}/</loc>"
+        f"<changefreq>weekly</changefreq>"
+        f"<priority>{'1.0' if p == '/' else '0.8'}</priority></url>"
+        for p in _PUBLIC_PATHS)
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>'
+           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+           f'{urls}</urlset>')
+    return Response(xml, media_type="application/xml",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+# The convention answer engines are converging on: the site in plain words, at a
+# fixed address, so a model summarising it quotes the product rather than
+# whatever it reconstructs from a page built out of animation and gradients.
+_LLMS_TXT = """# SorinFlow — سورین‌فلو
+
+> پلتفرم داده‌محور املاک: آگهی‌های دیوار را خودکار جمع می‌کند، هر آگهی را به یک
+> لید تبدیل می‌کند، و کل مسیر تا قرارداد را برای دفتر املاک قابل پیگیری می‌کند.
+> ساخت Tecso، فارسی و راست‌به‌چپ، با تقویم شمسی.
+
+## چه می‌کند
+- اسکرپر دیوار: جست‌وجوی خودکار با فیلتر قیمت، ودیعه و اجاره، متراژ، تعداد اتاق،
+  امکانات و تاریخ انتشار شمسی؛ همراه با استخراج شمارهٔ تماس و تصاویر آگهی.
+- CRM: هر آگهی یک لید، با وضعیت پیگیری، صف تماس روزانه، وظیفه، یادآور و معامله.
+- پروفایل مشتری و DPA: ثبت نیاز مشتری با تحلیل بودجه (BANT) و ارزیابی روزانهٔ
+  امتیازی عملکرد مشاوران.
+- تطبیق و اطلاع‌رسانی: آگهی تازه با معیار مشتری سنجیده می‌شود و نتیجه از راه
+  تلگرام و پیامک به مشاور می‌رسد.
+- دستیار هوش مصنوعی «سورین» در تلگرام که از دیتابیس دفتر جواب می‌دهد.
+
+## صفحه‌ها
+- /            صفحهٔ معرفی محصول
+- /portal      ثبت درخواست ملک برای مشتریان
+- /dashboard   پنل مدیریت (نیازمند ورود، برای موتورها بسته است)
+
+## تماس
+ایمیل info@sorinflow.com · تلفن ۰۹۱۲۵۰۰۵۴۹۵ · تلگرام @sorinflow
+"""
+
+
+@app.get("/llms.txt", include_in_schema=False)
+async def llms_txt():
+    return Response(_LLMS_TXT, media_type="text/plain; charset=utf-8",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/og.png", include_in_schema=False)
+async def og_image():
+    """The picture that shows when the link is pasted in Telegram or WhatsApp,
+    which is how this product is passed around. Served from the root because
+    that is the address in the page's og:image."""
+    return FileResponse("frontend/og.png", media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=604800"})
 
 
 @app.get("/portal", response_class=HTMLResponse, include_in_schema=False)
