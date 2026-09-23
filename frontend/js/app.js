@@ -1417,6 +1417,25 @@ const PALETTE_ACTIONS = [
     { label: 'خروج از حساب', icon: 'box-arrow-right', run: 'doLogout()', words: 'logout بیرون' },
 ];
 
+// The CRM's own thirteen screens. They live behind a tab strip that scrolls
+// sideways on a phone with two of the thirteen in view, so «معاملات» was a
+// drag through eleven others to reach — unless you can just type it.
+const CRM_TABS = [
+    { tab: 'calls',     label: 'تماس‌های امروز',  icon: 'telephone-outbound', words: 'صف زنگ تماس سررسید' },
+    { tab: 'tasks',     label: 'وظایف',           icon: 'check2-square',      words: 'کار تسک انجام' },
+    { tab: 'filing',    label: 'کمد و زونکن',     icon: 'archive',            words: 'بایگانی پرونده مدرک' },
+    { tab: 'calendar',  label: 'تقویم',           icon: 'calendar3',          words: 'قرار بازدید روز هفته' },
+    { tab: 'customers', label: 'مشتریان',         icon: 'person-vcard',       words: 'خریدار مستاجر نیاز بودجه' },
+    { tab: 'contacts',  label: 'دفترچه تلفن',     icon: 'person-lines-fill',  words: 'شماره مخاطب تلفن' },
+    { tab: 'deals',     label: 'معاملات',         icon: 'handshake',          words: 'قرارداد فروش کمیسیون' },
+    { tab: 'notes',     label: 'یادداشت‌ها',       icon: 'journal-text',       words: 'نوشته یادداشت' },
+    { tab: 'reminders', label: 'یادآورها',        icon: 'alarm',              words: 'هشدار یادآوری زنگ' },
+    { tab: 'sms',       label: 'پیامک مشتریان',   icon: 'chat-dots',          words: 'اس ام اس ارسال گروهی' },
+    { tab: 'leads',     label: 'لیدها',           icon: 'people',             words: 'سرنخ مشتری تازه' },
+    { tab: 'dpa',       label: 'ارزیابی روزانه',  icon: 'clipboard-data',     words: 'dpa امتیاز عملکرد مشاور' },
+    { tab: 'report',    label: 'گزارش CRM',       icon: 'graph-up',           words: 'ریپورت آمار خلاصه' },
+];
+
 let _paletteItems = [];
 let _paletteAt = 0;
 
@@ -1431,6 +1450,12 @@ function _paletteBuild() {
         if (a.section && !_isSectionAllowed(a.section)) continue;
         out.push({ kind: 'کار', label: a.label, hint: a.section ? (SECTION_META[a.section] || {}).title : '',
                    section: a.section, run: a.run, icon: a.icon, words: `${a.label} ${a.words}` });
+    }
+    if (_isSectionAllowed('crm')) {
+        for (const t of CRM_TABS) {
+            out.push({ kind: 'CRM', label: t.label, hint: 'CRM — لیدها', crmTab: t.tab,
+                       icon: t.icon, words: `${t.label} ${t.words} crm` });
+        }
     }
     return out;
 }
@@ -1455,6 +1480,19 @@ function _fold(t) {
         .replace(/[\u200c\u064b-\u0652]/g, '')
         .replace(/[۰-۹]/g, d => '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹'.indexOf(d) % 10)
         .replace(/\s+/g, ' ').trim();
+}
+
+// «معامله» has to find «معاملات», «قرارداد» has to find «قراردادها». Persian
+// plurals and the ezafe are suffixes, so a substring match on the written form
+// misses the word somebody actually typed. Trimming the handful of endings
+// that matter off both sides is enough — this ranks results, it does not
+// parse the language.
+function _stem(w) {
+    return w.length > 4 ? w.replace(/(هایی|های|ها|ات|ان|ی|ه)$/, '') : w;
+}
+
+function _stemAll(t) {
+    return t.split(' ').map(_stem).join(' ');
 }
 
 function openPalette() {
@@ -1482,10 +1520,16 @@ function paletteFilter() {
     const hits = _paletteItems
         .map(it => {
             const hay = _fold(it.words);
-            if (!terms.every(t => hay.includes(t))) return null;
-            // A match on the name itself beats one buried in the keywords.
+            const stemmed = _stemAll(hay);
+            if (!terms.every(t => hay.includes(t) || stemmed.includes(_stem(t)))) return null;
+            // A match on the name itself beats one buried in the keywords —
+            // and it counts when «معامله» meets «معاملات», or the tab loses to
+            // the section that merely mentions it.
             const head = _fold(it.label);
-            const score = (q && head.startsWith(q)) ? 0 : (head.includes(q) ? 1 : 2);
+            const headStem = _stemAll(head);
+            const qs = _stemAll(q);
+            const score = (q && (head.startsWith(q) || headStem.startsWith(qs))) ? 0
+                        : (head.includes(q) || headStem.includes(qs)) ? 1 : 2;
             return { it, score };
         })
         .filter(Boolean)
@@ -1528,6 +1572,7 @@ function paletteGo(i) {
     const it = (list?._hits || [])[i];
     if (!it) return;
     closePalette();
+    if (it.crmTab) { goCrm(it.crmTab); return; }
     if (it.run) { try { eval(it.run); } catch (e) {} return; }
     if (it.section) showSection(it.section);
 }
@@ -1547,6 +1592,13 @@ function _paletteKeys(e) {
     else if (e.key === 'Enter' && n) { e.preventDefault(); paletteGo(_paletteAt); }
 }
 document.addEventListener('keydown', _paletteKeys);
+
+// The call queue's explanations are clamped to two lines on a phone; a tap
+// opens the one you tapped. Delegated, because the panes render on demand.
+document.addEventListener('click', e => {
+    const intro = e.target.closest?.('.cq-intro');
+    if (intro) intro.classList.toggle('open');
+});
 
 
 // Section Navigation

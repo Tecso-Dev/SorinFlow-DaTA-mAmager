@@ -3547,6 +3547,14 @@ tr.ai-log-bad td { background: rgba(239,68,68,.06) }
   }
   #crm-main-tabs::-webkit-scrollbar { display: none }
   #crm-main-tabs .nav-link { white-space: nowrap }
+  /* Two of thirteen fit, and a hidden scrollbar left nothing to say the other
+     eleven were there. The strip fades where it is cut off, so the edge reads
+     as «more this way» rather than as the end of the list. (Ctrl+K reaches
+     any of them by name from anywhere — this is only the nudge.) */
+  #crm-main-tabs {
+    -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 26px), transparent);
+    mask-image: linear-gradient(to left, #000 calc(100% - 26px), transparent);
+  }
   /* the call list: full-width dial, two buttons per row */
   .cq-phone { display: flex; justify-content: center; width: 100%; font-size: 1.35rem; padding: .6rem }
   .cq-head { flex-direction: column; gap: .5rem }
@@ -4000,4 +4008,21 @@ body.palette-open { overflow: hidden; }
   /* The code is a fact like the others; on its own line above the title it
      cost a whole row to say four digits. */
   #section-properties .table td.pt-title { order: -1; }
+}
+
+/* The three explanations in the call queue are worth reading once and cost
+   84px each on every visit after that — 252px of prose on the screen the
+   office opens every morning, on the device with the least room for it.
+   Two lines on a phone, the rest a tap away. */
+@media (max-width: 768px) {
+  .cq-intro {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    overflow: hidden; cursor: pointer; position: relative;
+  }
+  .cq-intro::after {
+    content: 'بیشتر';
+    color: var(--accent2); font-size: .72rem; margin-inline-start: .3rem;
+  }
+  .cq-intro.open { -webkit-line-clamp: unset; }
+  .cq-intro.open::after { content: 'کمتر'; }
 }

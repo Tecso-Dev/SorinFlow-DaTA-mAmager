@@ -71,8 +71,13 @@ class TestThePalette:
         assert "'صفحه'" in kinds and "'کار'" in kinds
 
     def test_it_never_offers_a_screen_this_role_cannot_open(self):
+        """Screens, actions and the CRM's own tabs — every group it builds."""
         body = JS.split("function _paletteBuild()")[1].split("\n}")[0]
-        assert body.count("_isSectionAllowed") == 2, "both screens and actions must be checked"
+        groups = [g for g in body.split("for (const") if "out.push" in g]
+        assert groups, "nothing is being built"
+        for g in groups:
+            assert "_isSectionAllowed" in g or "_isSectionAllowed" in body.split(g)[0][-120:], \
+                f"an unchecked group: {g.strip()[:70]}"
 
     def test_the_old_word_still_finds_the_renamed_screen(self):
         """«کوکی» is what the office calls the Divar session page."""
