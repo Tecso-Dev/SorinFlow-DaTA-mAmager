@@ -1214,8 +1214,11 @@ async def _verify_auth_v2(conn):
     """
     from sqlalchemy import text
 
+    # totp_last_step: if both Alembic 0010 and its boot ALTER lost the lock
+    # race (a DR pg_dump holding the table), every user load would 500 on a
+    # pod that reported Ready — refusing here rolls the deploy back instead.
     required = {"phone", "phone_verified", "email_verified", "email_2fa_enabled",
-                "marketing_opt_in", "permissions"}
+                "marketing_opt_in", "permissions", "totp_last_step"}
     dialect = conn.engine.dialect.name
 
     if dialect == "postgresql":

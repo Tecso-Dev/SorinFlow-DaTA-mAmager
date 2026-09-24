@@ -452,3 +452,33 @@ def test_a_second_0009_that_added_cookies_enabled_does_not_strand_is_enabled():
         db.engine, db.async_session_maker = saved_engine, saved_maker
 
     assert "is_enabled" in cols
+
+
+def test_the_boot_refuses_a_users_table_without_totp_last_step():
+    """Were Alembic 0010 and its boot ALTER both to lose the lock race, every
+    user load would 500 on a pod reporting Ready. The boot check refuses, so
+    the deploy rolls back instead."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from app.database import _migrate_auth_v2, _verify_auth_v2
+
+    async def _go():
+        eng = create_async_engine(PG_URL)
+        try:
+            async with eng.begin() as c:
+                for stmt in OLD_SCHEMA.strip().split(";"):
+                    if stmt.strip():
+                        await c.execute(text(stmt))
+                await _migrate_auth_v2(c)
+                await c.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS totp_last_step"))
+                with pytest.raises(RuntimeError, match="totp_last_step"):
+                    await _verify_auth_v2(c)
+        finally:
+            # leave a users table later boots can migrate, as the test above does
+            async with eng.begin() as c:
+                for stmt in OLD_SCHEMA.strip().split(";"):
+                    if stmt.strip():
+                        await c.execute(text(stmt))
+            await eng.dispose()
+
+    _run(_go())

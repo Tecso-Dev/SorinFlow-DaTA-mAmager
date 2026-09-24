@@ -42,6 +42,9 @@ TEHRAN = timezone(timedelta(hours=3, minutes=30), "Asia/Tehran")
 SMS_CAP_MESSAGE = "سقف روزانهٔ پیامک کد تأیید پر شده است. فردا دوباره تلاش کنید، یا اگر ایمیل دارید با ایمیل"
 
 
+_alerts: set = set()
+
+
 class _SmsDailyCap(Exception):
     """Today's SMS-code budget is spent — not a delivery failure."""
 
@@ -75,9 +78,13 @@ async def _spend_sms_budget() -> bool:
         # once, on the first refusal of the day
         logger.error(f"[verification] daily SMS-code cap {cap} reached")
         from app.services import backup_service as bk
-        asyncio.create_task(bk.send_text(
+        task = asyncio.create_task(bk.send_text(
             f"⚠️ سقف روزانهٔ پیامک کد تأیید ({cap}) پر شد. تا نیمه‌شب تهران کدی با پیامک "
             "فرستاده نمی‌شود — اگر حمله نیست، AUTH_SMS_DAILY_CAP را بالا ببرید."))
+        # the loop keeps only a weak reference: without this the alert could
+        # be collected before it is sent
+        _alerts.add(task)
+        task.add_done_callback(_alerts.discard)
     return n <= cap
 
 
