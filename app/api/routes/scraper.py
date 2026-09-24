@@ -256,7 +256,7 @@ async def run_scraping_job(
         # A switch nobody got to belongs to a run that has ended.
         try:
             from app.scraper import otp_store as _os
-            _os.take_switch(job_id)
+            await _os.take_switch(job_id)
         except Exception:
             pass
 
