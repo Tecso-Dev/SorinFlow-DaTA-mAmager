@@ -1,0 +1,40 @@
+# Configure Traefik (built-in k3s) with Let's Encrypt ACME
+# This replaces cert-manager — no external image needed
+#
+# Deliberately NOT one of this overlay's kustomization.yaml resources: a
+# HelmChartConfig lives in kube-system by contract with k3s's helm-controller,
+# and kustomize's namespace transformer (which is how overlays/production and
+# overlays/staging otherwise turn one base into two namespaces) would rewrite
+# that to whichever namespace the overlay builds for, which breaks it either
+# way. scripts/deploy_k8s.sh applies this file directly and only for
+# OVERLAY=production; there is no staging equivalent — one Traefik already
+# serves both hosts, staging just adds an Ingress for its own.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    certificatesResolvers:
+      letsencrypt:
+        acme:
+          email: sahand.mosanejad4488@gmail.com
+          storage: /data/acme.json
+          httpChallenge:
+            entryPoint: web
+    persistence:
+      enabled: true
+      size: 128Mi
+    ports:
+      web:
+        redirectTo:
+          port: websecure
+    # Local: k3s's ServiceLB hands Traefik the caller's own address instead of
+    # rewriting every request to an internal one — otherwise every per-address
+    # limit in the app (logins, SMS codes) was one limit for the whole world.
+    # Single node, so no traffic is lost. Needs k3s without node-external-ip
+    # (new_server.sh does not set it).
+    service:
+      spec:
+        externalTrafficPolicy: Local
