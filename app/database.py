@@ -4,19 +4,66 @@ SorinFlow Divar Scraper - Database Connection
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
 import redis.asyncio as redis
 from typing import AsyncGenerator
 from app.config import get_settings
 
 settings = get_settings()
 
-# Create async engine
+# Create async engine.
+#
+# NullPool was the choice from the project's first commit, with no comment
+# and no bug tied to it in history (git log -S NullPool) — the honest read is
+# that it was never a deliberate fix, just the safe-by-construction option: it
+# opens a fresh DBAPI connection per checkout and drops it right after, so it
+# can never hand a pooled asyncpg connection to a different event loop than
+# the one that opened it. asyncpg connections are loop-bound; using one from
+# another loop fails with "attached to a different loop" or "another
+# operation is in progress".
+#
+# In the running app that risk does not exist — one uvicorn worker
+# (Dockerfile), one process, one event loop, and every background job runs as
+# asyncio.create_task() on it (app/main.py), never asyncio.run() or a second
+# loop. It only bites where a NEW loop can appear inside the SAME process:
+# pytest-asyncio hands every test function its own loop, and at least one
+# test mixes in a third loop of its own (asyncio.run() on top of a
+# TestClient's loop) — see tests/conftest.py, which is why the suite defaults
+# DB_POOL_SIZE to 0 rather than fighting that pattern from here. The one-shot
+# CLI scripts (scripts/*.py, app/services/dr_backup.py) each call
+# asyncio.run() exactly once per process and exit, so they never see a second
+# loop either. alembic's own run (migrations/env.py) opens a throwaway engine
+# of its own, not this one.
+#
+# DB_POOL_SIZE=0 keeps NullPool — an honest escape hatch, not a hidden mode,
+# for any other process that turns out to violate the one-loop assumption.
+def _pool_kwargs_for(pool_size: int, max_overflow: int) -> dict:
+    """The create_async_engine() pooling kwargs for a given DB_POOL_SIZE.
+
+    poolclass is explicit (AsyncAdaptedQueuePool) rather than left to dialect
+    defaults when pooling: a file-backed sqlite+aiosqlite URL — what most of
+    the test suite uses — defaults to NullPool on its own, and NullPool
+    rejects pool_size/max_overflow/pool_timeout outright, so leaving
+    poolclass unset broke every test module at import time the moment
+    DB_POOL_SIZE was not 0.
+    """
+    if pool_size == 0:
+        return {"poolclass": NullPool}
+    return {
+        "poolclass": AsyncAdaptedQueuePool,
+        "pool_size": pool_size,
+        "max_overflow": max_overflow,
+        "pool_pre_ping": True,    # a connection Postgres closed while idle fails fast, not mid-query
+        "pool_recycle": 1800,     # stay under any load balancer / firewall idle-close window
+        "pool_timeout": 30,
+    }
+
+
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
-    poolclass=NullPool,
-    future=True
+    future=True,
+    **_pool_kwargs_for(settings.db_pool_size, settings.db_max_overflow),
 )
 
 # Create async session factory

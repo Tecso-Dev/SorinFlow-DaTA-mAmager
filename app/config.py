@@ -2,7 +2,7 @@
 SorinFlow Divar Scraper - Application Configuration
 """
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, AliasChoices
 from typing import Optional, List
 from functools import lru_cache
 
@@ -285,7 +285,12 @@ class Settings(BaseSettings):
     smtp_user: str = Field(default="", env="SMTP_USER")
     smtp_password: str = Field(default="", env="SMTP_PASSWORD")
     notification_email: str = Field(default="", env="NOTIFICATION_EMAIL")
-    
+
+    # Connection pool (app/database.py). 0 means NullPool — see there for why
+    # that is still a real option and not just a default to move past.
+    db_pool_size: int = Field(default=5, validation_alias=AliasChoices("DB_POOL_SIZE", "db_pool_size"))
+    db_max_overflow: int = Field(default=10, validation_alias=AliasChoices("DB_MAX_OVERFLOW", "db_max_overflow"))
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
