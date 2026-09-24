@@ -53,6 +53,25 @@ router = APIRouter()
 _super_admin = Depends(_role_dep(ROLE_ROOT, "super_admin"))
 
 
+async def _guard_name_is_free(db: AsyncSession, name, exclude_id=None) -> None:
+    """A display name another account already goes by is refused.
+
+    Ownership in this panel is by name (app/auth/visibility.py: a private
+    file's filer, a match's consultant, a lead's assignee, and «سورین»'s
+    customer scope all compare against full_name, else username), so taking
+    a colleague's name would hand over their files, matches and customers.
+    """
+    name = (name or "").strip()
+    if not name:
+        return
+    q = select(User.id).where(or_(func.lower(func.trim(User.full_name)) == name.lower(),
+                                  func.lower(User.username) == name.lower()))
+    if exclude_id is not None:
+        q = q.where(User.id != exclude_id)
+    if (await db.execute(q)).scalars().first() is not None:
+        raise HTTPException(409, "این نام را حساب دیگری دارد؛ نامی بنویسید که با همکاران یکی نباشد")
+
+
 def _guard_root_target(actor: User, target: User) -> None:
     """Only root may touch a root account.
 
@@ -534,6 +553,7 @@ async def register_user(
         if dup.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="این شماره دیوار قبلاً برای یک حساب ثبت شده است")
 
+    await _guard_name_is_free(db, data.full_name)
     user = User(
         username=data.username,
         email=data.email,
@@ -731,6 +751,7 @@ async def update_me(data: ProfileUpdate,
             current_user.username = u
             renamed = True
     if data.full_name is not None:
+        await _guard_name_is_free(db, data.full_name, exclude_id=current_user.id)
         current_user.full_name = data.full_name.strip() or None
     if data.headline is not None:
         current_user.headline = data.headline.strip() or None
@@ -1186,6 +1207,7 @@ async def create_user(
         if dup_email.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="ایمیل قبلاً ثبت شده است")
 
+    await _guard_name_is_free(db, data.full_name)
     user = User(
         username=data.username,
         email=data.email,
@@ -1241,6 +1263,7 @@ async def update_user(
             user.email_verified = False
         user.email = new_email
     if data.full_name is not None:
+        await _guard_name_is_free(db, data.full_name, exclude_id=user.id)
         user.full_name = data.full_name
     if data.role is not None:
         user.role = data.role

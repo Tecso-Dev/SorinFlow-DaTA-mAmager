@@ -276,6 +276,10 @@ async def decide_ticket(ticket_id: int, data: UpgradeTicketDecision,
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
 
     if data.approve:
+        # a visitor becoming staff joins the name-based ownership rules — the
+        # same guard as a name typed in the profile (app/api/routes/users.py)
+        from app.api.routes.users import _guard_name_is_free
+        await _guard_name_is_free(db, user.full_name, exclude_id=user.id)
         perms = normalize_permissions(data.permissions)
         if not perms:
             perms = list(DEFAULT_ADMIN_PERMISSIONS)
