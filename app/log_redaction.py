@@ -12,8 +12,22 @@ Applied as a loguru `filter=` on both sinks, so a new call site cannot bypass
 it by forgetting to mask. Call sites are still fixed where they were obviously
 wrong; this is what catches the ones nobody thought about.
 """
+import contextvars
 import re
 from typing import Any
+
+# The request-id middleware (app/main.py) sets this for the life of one
+# request; "-" is what every background loop and startup log line carries,
+# since none of them run inside a request.
+request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default="-")
+
+
+def inject_request_id(record: dict) -> None:
+    """loguru patcher: stamp every record with the request id in scope right
+    now, so a line logged three calls deep still carries it without every
+    call site threading it through by hand."""
+    record["extra"]["request_id"] = request_id_var.get()
 
 # Persian and Arabic-Indic digits appear in scraped Divar text, so a pattern
 # written only for 0-9 would miss the numbers that matter most here.
