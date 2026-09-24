@@ -107,7 +107,11 @@ ITEMS=()
 for d in "$DDIR"/*; do
   base="$(basename "$d")"
   case "$base" in
-    images|dr-outbox|.sorinflow-dr-work.*) continue ;;
+    # downloads/ is the forwarder APK mirror, fetched again every few hours;
+    # backups/ is 14 nightly JSON copies of the database the pg_dump above
+    # already carries — together they would make every bundle many times
+    # the size of what is irreplaceable.
+    images|dr-outbox|downloads|backups|.sorinflow-dr-work.*) continue ;;
   esac
   ITEMS+=("$base")
 done

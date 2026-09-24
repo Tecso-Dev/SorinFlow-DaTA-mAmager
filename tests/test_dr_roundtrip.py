@@ -176,6 +176,10 @@ def pipeline(tmp_path_factory):
     (prof / "Default" / "Preferences").write_text('{"pref": true}')
     (prof / "GrShaderCache").mkdir(parents=True)
     (prof / "GrShaderCache" / "shader0").write_bytes(b"SHADER-JUNK")
+    (pvc / "downloads").mkdir()
+    (pvc / "downloads" / "sorinflow-forwarder.apk").write_bytes(b"APK-BYTES")
+    (pvc / "backups").mkdir()
+    (pvc / "backups" / "sorinflow-backup-20260924-0000.json.gz").write_bytes(b"NIGHTLY-COPY")
     (traefik / "acme.json").write_text('{"letsencrypt": {"Account": {}}}')
 
     # ── throwaway postgres (never sorinflow-local-*) ────────────────────────
@@ -384,6 +388,8 @@ class TestRestore:
             "Chromium cache should have been excluded"
         assert not (extract / "profiles" / "09121234567" / "GrShaderCache").exists(), \
             "Chromium shader cache should have been excluded"
+        assert not (extract / "downloads").exists(), "the APK mirror is fetched again, not backed up"
+        assert not (extract / "backups").exists(), "the nightly JSON copies duplicate the pg_dump"
 
     def test_dump_restores_into_a_fresh_database_with_matching_row_counts(self, pipeline):
         outdir = pipeline["outdir"]
@@ -432,3 +438,37 @@ class TestTamperIsRefused:
         assert "MISSING part" in r.stderr
         assert missing_name in r.stderr
         assert not (copy_dir / f"restored-{manifest['stamp']}").exists()
+
+
+class TestInstall:
+    """install_dr_backup.sh on a fake host: systemd is a logging stub."""
+
+    def _run(self, tmp_path):
+        fakebin = tmp_path / "bin"
+        fakebin.mkdir(exist_ok=True)
+        log = tmp_path / "systemctl.log"
+        (fakebin / "systemctl").write_text(f'#!/usr/bin/env bash\necho "$*" >> "{log}"\n')
+        (fakebin / "systemctl").chmod(0o755)
+        env = dict(os.environ,
+                   PATH=f"{fakebin}{os.pathsep}{os.environ['PATH']}",
+                   DR_SYSTEMD_UNIT_DIR=str(tmp_path / "units"),
+                   DR_BIN_DIR=str(tmp_path / "opt"),
+                   DR_DATA_DIR=str(tmp_path / "pvc"))
+        r = subprocess.run(["bash", str(REPO / "scripts" / "install_dr_backup.sh")],
+                           env=env, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        calls = log.read_text() if log.exists() else ""
+        log.unlink(missing_ok=True)
+        return calls
+
+    def test_the_unit_runs_a_fixed_copy_and_a_rerun_changes_nothing(self, tmp_path):
+        first = self._run(tmp_path)
+        assert "daemon-reload" in first
+        service = (tmp_path / "units" / "dr-backup.service").read_text()
+        assert f"ExecStart={tmp_path / 'opt'}/dr_backup.sh" in service, \
+            "the unit must not run the runner's checkout, which the next job replaces"
+        assert (tmp_path / "opt" / "dr_backup.sh").read_bytes() == \
+            (REPO / "scripts" / "dr_backup.sh").read_bytes()
+        assert f"PathExists={tmp_path / 'pvc'}/dr-request" in \
+            (tmp_path / "units" / "dr-backup.path").read_text()
+        assert "daemon-reload" not in self._run(tmp_path)
