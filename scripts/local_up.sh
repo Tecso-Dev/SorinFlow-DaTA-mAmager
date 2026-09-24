@@ -7,7 +7,8 @@ cd "$(dirname "$0")/.."
 [ -f .env.local ] || cp .env.local.example .env.local
 # The port this stack answers on — not whatever else holds 8000, whose
 # /health would pass for ours.
-PORT=$(sed -n 's/^BACKEND_PORT=//p' .env.local)
+# An exported BACKEND_PORT beats .env.local for compose, so it does here too.
+PORT=${BACKEND_PORT:-$(sed -n 's/^BACKEND_PORT=//p' .env.local)}
 PORT=${PORT:-8000}
 
 docker compose --env-file .env.local -f docker-compose.local.yml up -d --build

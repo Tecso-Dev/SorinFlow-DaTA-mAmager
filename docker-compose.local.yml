@@ -15,6 +15,9 @@
 #   docker compose -f docker-compose.local.yml exec backend python scripts/seed_local.py
 #   (or just scripts/local_up.sh)
 #
+# Ports listen on 127.0.0.1 only: the passwords here are committed, and
+# nobody else on the network should reach root/local-pass-1234.
+#
 # Every container reads .env.local itself (env_file), so no command needs
 # compose-side interpolation: exec, logs and down work without --env-file.
 # Only `up` wants it, and only so BACKEND_PORT from .env.local applies.
@@ -33,7 +36,7 @@ services:
     env_file:
       - .env.local          # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - sorinflow_local_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -48,7 +51,7 @@ services:
       - .env.local          # REDIS_PASSWORD
     command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
       interval: 5s
@@ -68,7 +71,7 @@ services:
       - ./scripts:/app/scripts
       - ./alembic.ini:/app/alembic.ini
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
