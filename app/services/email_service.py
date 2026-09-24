@@ -46,7 +46,7 @@ from typing import Optional
 from loguru import logger
 
 from app.config import get_settings
-from app.services import secret_box
+from app.services import net_guard, secret_box
 
 settings = get_settings()
 
@@ -138,6 +138,7 @@ async def resolve_config(db=None) -> dict:
 
     if not cfg["host"] and v.get(KEY_HOST):
         cfg["host"] = v[KEY_HOST].strip()
+        cfg["host_from_panel"] = True
     if v.get(KEY_PORT):
         try:
             cfg["port"] = int(v[KEY_PORT])
@@ -216,6 +217,20 @@ def _strip_html(html: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+async def _host_refused(cfg: dict) -> Optional[str]:
+    """Why the SMTP host may not be connected to, or None. A host typed on
+    the panel is a public address only (app/services/net_guard.py), checked
+    before every connection; SMTP_HOST from the environment is the
+    operator's."""
+    if not cfg.get("host_from_panel"):
+        return None
+    try:
+        await net_guard.resolve_public(cfg["host"], cfg["port"])
+    except net_guard.BlockedAddress as e:
+        return f"میزبان SMTP: {e}"
+    return None
+
+
 def _missing_fields(cfg: dict) -> list:
     """Which required settings are blank, in Persian, for the panel.
 
@@ -247,6 +262,9 @@ async def send(to: str, subject: str, html: str, text: str = "",
     if missing:
         return {"success": False,
                 "error": f"این فیلدها خالی است: {'، '.join(missing)}"}
+    refused = await _host_refused(cfg)
+    if refused:
+        return {"success": False, "error": refused}
 
     try:
         mid = await asyncio.to_thread(_sync_send, cfg, to.strip(), subject, html, text)
@@ -273,6 +291,9 @@ async def verify_connection(db=None) -> dict:
     if missing:
         return {"ok": False, "missing": missing,
                 "error": f"این فیلدها خالی است: {'، '.join(missing)}"}
+    refused = await _host_refused(cfg)
+    if refused:
+        return {"ok": False, "error": refused}
 
     def _check():
         with _connect(cfg) as server:

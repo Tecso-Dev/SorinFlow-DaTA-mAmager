@@ -21,7 +21,7 @@ from loguru import logger
 
 from app.config import get_settings
 from app.database import Base, async_session_maker
-from app.services import secret_box
+from app.services import net_guard, secret_box
 
 settings = get_settings()
 
@@ -280,6 +280,22 @@ def _legs(route: dict, *, direct: bool) -> list:
     return legs
 
 
+async def _leg_is_public(base: str, proxy) -> None:
+    """A relay or proxy set on the panel reaches public addresses only
+    (app/services/net_guard.py) — checked on every call, since a name can
+    change what it points at after it was saved. The environment's own
+    TELEGRAM_API_BASE / TELEGRAM_PROXY are the operator's, and a sidecar on
+    localhost is a fair thing for them to name. Raises BlockedAddress."""
+    target = proxy or base
+    if target in ((getattr(settings, "telegram_api_base", "") or "").strip(),
+                  (settings.telegram_proxy or "").strip()):
+        return
+    # ponytail: checked, then connected to by name; the pod's egress policy
+    # covers the moment between. Pin the address as fetch_text does if the
+    # relay ever stops being an operator-only setting.
+    await (net_guard.check_proxy(proxy) if proxy else net_guard.check_url(base, schemes=("https",)))
+
+
 class RelayError(RuntimeError):
     """The relay itself refused, not Telegram: its own JSON body carries a
     "relay" reason (deploy/telegram-relay/worker.js)."""
@@ -324,7 +340,7 @@ async def tg_request(token: str, method: str, route: Optional[dict] = None, *, j
     route = route or _route("manual", [])
     if direct is None:
         direct = _direct_first() and not _direct_is_resting()
-    last = None
+    last: Optional[Exception] = None
     for label, base, proxy, headers in _legs(route, direct=direct):
         url = f"{base.rstrip('/')}/bot{token}/{method}"
         # Direct gets a short CONNECT timeout — a filtered host usually never
@@ -332,6 +348,8 @@ async def tg_request(token: str, method: str, route: Optional[dict] = None, *, j
         # upload of a backup part takes as long as it takes.
         tmo = httpx.Timeout(timeout, connect=DIRECT_CONNECT_TIMEOUT) if label == "direct" else timeout
         try:
+            if label != "direct":
+                await _leg_is_public(base, proxy)
             async with telegram_client(proxy or "", timeout=tmo) as client:
                 if json is not None or data is not None or files is not None:
                     resp = await client.post(url, json=json, data=data, files=files, headers=headers)
@@ -347,6 +365,9 @@ async def tg_request(token: str, method: str, route: Optional[dict] = None, *, j
                 logger.warning(f"[telegram] {method} via relay refused: {refused}")
                 continue
             return resp, label
+        except net_guard.BlockedAddress as e:
+            last = e
+            logger.warning(f"[telegram] {method} via {mask_url(label)} refused: {e}")
         except (httpx.TransportError, OSError) as e:
             last = e
             if label == "direct":
@@ -365,6 +386,8 @@ async def diagnose(token: str, route: dict) -> list:
         row = {"route": "direct" if label == "direct" else ("relay" if label == "relay" else "proxy"),
                "target": (base if label != "direct" else TELEGRAM_API) if not proxy else mask_url(proxy)}
         try:
+            if label != "direct":
+                await _leg_is_public(base, proxy)
             tmo = httpx.Timeout(15, connect=DIRECT_CONNECT_TIMEOUT if label == "direct" else 10)
             async with telegram_client(proxy or "", timeout=tmo) as client:
                 r = await client.get(f"{base.rstrip('/')}/bot{token}/getMe", headers=headers)
@@ -378,7 +401,8 @@ async def diagnose(token: str, route: dict) -> list:
                            (relay_refusal(r) if label == "relay" else None)
                            or body.get("description") or f"HTTP {r.status_code}"))
         except Exception as e:
-            row.update(ok=False, http=None, error=type(e).__name__)
+            row.update(ok=False, http=None,
+                       error=str(e) if isinstance(e, net_guard.BlockedAddress) else type(e).__name__)
         row["ms"] = int((time.monotonic() - started) * 1000)
         out.append(row)
     return out

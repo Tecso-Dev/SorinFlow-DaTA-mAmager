@@ -38,6 +38,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database import async_session_maker
 from app.models.proxy import Proxy
+from app.services import net_guard
 
 settings = get_settings()
 
@@ -60,6 +61,10 @@ async def probe(proxy: Proxy) -> dict:
     start = datetime.now()
     outcome = {"proxy_id": proxy.id, "address": f"{proxy.address}:{proxy.port}"}
     try:
+        # a proxy is a server the panel named: public addresses only, checked
+        # before every probe — the daily refresh included, so a name that
+        # starts pointing inside stops being «working»
+        await net_guard.check_proxy(proxy.url)
         async with httpx.AsyncClient(proxy=proxy.url, timeout=TIMEOUT) as client:
             r = await client.get(DIVAR)
             elapsed = (datetime.now() - start).total_seconds()
@@ -195,8 +200,6 @@ def parse_list(text: str) -> List[dict]:
 
 
 async def fetch_list(url: str) -> str:
-    """Download a proxy list. Plain text, one per line, up to 1 MB."""
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        return r.text[:1_000_000]
+    """Download a proxy list. Plain text, one per line, up to 1 MB, from a
+    public address only (app/services/net_guard.py)."""
+    return await net_guard.fetch_text(url, max_bytes=1_000_000, timeout=30.0)
