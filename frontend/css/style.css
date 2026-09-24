@@ -3346,6 +3346,9 @@ html[data-theme="light"] .table thead th {
 .ai-card-where { display: flex; flex-wrap: wrap; gap: .3rem }
 .ai-card-where .pill { font-size: .68rem; padding: .1rem .5rem }
 .ai-card-state { font-size: .75rem; color: var(--accent2); font-variant-numeric: tabular-nums }
+/* this agent's own daily ceiling, on top of the shared one */
+.ai-card-budget { display: flex; align-items: center; gap: .5rem; font-size: .72rem; color: var(--text-muted) }
+.ai-card-budget .ai-cap-bar { flex: 1 1 auto; margin-top: 0 }
 .ai-card-foot {
   display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
   font-size: .72rem; color: var(--text-muted); font-variant-numeric: tabular-nums;

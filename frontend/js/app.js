@@ -4379,6 +4379,8 @@ function _aiAgentCard(a) {
     const st = a.state || {};
     const runnable = a.kind === 'loop';
     const err = (a.today.failed || 0);
+    const spent = a.today.cost_usd || 0;
+    const capPct = a.cap_usd ? Math.min(100, Math.round(spent / a.cap_usd * 100)) : 0;
     return `
     <div class="ai-card ${a.enabled ? '' : 'is-off'}">
         <div class="ai-card-head">
@@ -4396,6 +4398,11 @@ function _aiAgentCard(a) {
         <div class="ai-card-desc">${esc(a.desc)}</div>
         <div class="ai-card-where">${(a.where || []).map(w => `<span class="pill">${esc(w)}</span>`).join('')}</div>
         <div class="ai-card-state">${_aiAgentState(a)}</div>
+        <div class="ai-card-budget">
+            <span>بودجهٔ امروز: $${spent >= 0.01 ? spent.toFixed(2) : spent.toFixed(4)} از $${(a.cap_usd || 0).toFixed(2)}</span>
+            <div class="ai-cap-bar"><span style="width:${capPct}%" class="${capPct >= 100 ? 'is-full' : ''}"></span></div>
+            <button class="ai-photo-btn" onclick="aiAgentCapEdit(${jsArg(a.key)}, ${jsArg(a.cap_usd)})">ویرایش سقف</button>
+        </div>
         <div class="ai-card-foot">
             <span title="مدل این کار" dir="ltr">${esc(a.model || '—')}</span>
             <span>امروز: ${formatNumber(a.today.calls || 0)} فراخوانی · ${formatNumber(a.today.cost_toman || 0)} تومان</span>
@@ -4457,6 +4464,26 @@ async function aiAgentToggle(key, on) {
         showToast(on ? 'روشن شد' : 'خاموش شد', '', 'success');
         loadAiScreen();
     } catch (e) { showToast('خطا', e.message, 'danger'); loadAiScreen(); }
+}
+
+/** This agent's own daily ceiling — on top of the shared one, so a noisy
+ * agent stops alone instead of using up everyone else's budget too. */
+async function aiAgentCapEdit(key, current) {
+    const v = await askText({
+        icon: 'bi-cash-coin', title: 'سقف روزانهٔ این ایجنت',
+        body: 'با پر شدن این سقف، فقط همین ایجنت تا فردا صبر می‌کند؛ بقیه ادامه می‌دهند.',
+        field: { label: 'سقف (دلار)', type: 'number', inputmode: 'decimal', dir: 'ltr',
+                 value: current || '0', placeholder: '۰ تا ۱۰۰',
+                 validate: v => {
+                     const n = Number(v);
+                     return v !== '' && !isNaN(n) && n >= 0 && n <= 100 ? '' : 'عددی بین ۰ و ۱۰۰ وارد کنید';
+                 } } });
+    if (v === null) return;
+    try {
+        await apiCall(`/ai/agents/${encodeURIComponent(key)}/cap`, { method: 'PUT', body: JSON.stringify({ cap_usd: Number(v) }) });
+        showToast('ذخیره شد', '', 'success');
+        loadAiScreen();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
 /** «اجرای یک دور» — one pass now, for an agent that otherwise waits for its tick. */

@@ -53,7 +53,14 @@ def agent_key(agent: str) -> str:
     return f"ai_agent_{agent}"
 
 
+def agent_cap_key(agent: str) -> str:
+    return f"ai_agent_cap_{agent}"
+
+
 DEFAULT_CAP_USD = 2.0
+# a runaway agent gets half the office's daily budget by default — enough to
+# keep working, never enough to spend the whole day alone
+AGENT_CAP_SHARE = 0.5
 TIMEOUT = 40.0
 # reasoning models (Liara's GLM family): the floor and the ceiling of the
 # budget they get, because their thinking comes out of the same max_tokens
@@ -108,9 +115,10 @@ def workspace_id() -> str:
 
 async def config(db) -> Dict[str, Any]:
     """What is in effect: env first, the panel's overrides on top."""
+    agent_cap_keys = tuple(agent_cap_key(a) for a in AGENTS)
     rows = {}
     try:
-        rows = await secret_box.get_many(db, (*KEY_MODELS.values(), KEY_CAP, KEY_NOTES, KEY_ENABLED))
+        rows = await secret_box.get_many(db, (*KEY_MODELS.values(), KEY_CAP, KEY_NOTES, KEY_ENABLED, *agent_cap_keys))
     except Exception as e:
         logger.warning(f"[ai] settings unreadable: {e}")
     models, sources = {}, {}
@@ -122,6 +130,15 @@ async def config(db) -> Dict[str, Any]:
         cap = float(rows.get(KEY_CAP)) if rows.get(KEY_CAP) else DEFAULT_CAP_USD
     except ValueError:
         cap = DEFAULT_CAP_USD
+    # each agent's own ceiling — a panel override, or half the global cap so
+    # it moves with it when nobody has set one by hand
+    agent_caps = {}
+    for a in AGENTS:
+        raw = rows.get(agent_cap_key(a))
+        try:
+            agent_caps[a] = float(raw) if raw not in (None, "") else round(cap * AGENT_CAP_SHARE, 4)
+        except ValueError:
+            agent_caps[a] = round(cap * AGENT_CAP_SHARE, 4)
     enabled = (rows.get(KEY_ENABLED) or "true").lower() != "false"
     return {
         "configured": configured(),
@@ -130,6 +147,7 @@ async def config(db) -> Dict[str, Any]:
         "models": models,
         "model_sources": sources,
         "cap_usd": cap,
+        "agent_caps": agent_caps,
         "notes": rows.get(KEY_NOTES) or "",
     }
 
@@ -181,11 +199,12 @@ async def agents_enabled(db) -> Dict[str, bool]:
     return {a: (rows.get(agent_key(a)) or "true").lower() != "false" for a in AGENTS}
 
 
-async def spent_today(db) -> float:
+async def spent_today(db, agent: Optional[str] = None) -> float:
     from app.models.ai_usage import AiUsage
-    return float((await db.execute(
-        select(func.coalesce(func.sum(AiUsage.cost_usd), 0.0))
-        .where(AiUsage.created_at >= _day_start_utc()))).scalar_one() or 0.0)
+    q = select(func.coalesce(func.sum(AiUsage.cost_usd), 0.0)).where(AiUsage.created_at >= _day_start_utc())
+    if agent:
+        q = q.where(AiUsage.agent == agent)
+    return float((await db.execute(q)).scalar_one() or 0.0)
 
 
 async def _record(agent: str, job: str, model: str, usage: Dict[str, Any], ms: int,
@@ -253,7 +272,7 @@ def _url(path: str) -> str:
 
 
 async def _gate(db, cfg: Optional[Dict[str, Any]] = None, agent: str = "") -> Dict[str, Any]:
-    """Configured, switched on, and under the cap — or the reason it is not."""
+    """Configured, switched on, and under both caps — or the reason it is not."""
     if not configured():
         raise NotConfigured("هوش مصنوعی تنظیم نشده است (LLM_API_KEY / LLM_BASE_URL)")
     cfg = cfg or await config(db)
@@ -263,7 +282,15 @@ async def _gate(db, cfg: Optional[Dict[str, Any]] = None, agent: str = "") -> Di
         raise Disabled(f"این ایجنت از پنل خاموش است ({agent})")
     spent = await spent_today(db)
     if spent >= cfg["cap_usd"]:
-        raise BudgetExceeded(f"سقف روزانه پر شد ({spent:.2f} از {cfg['cap_usd']:.2f} دلار)")
+        who = f" — ایجنت «{agent}»" if agent else ""
+        raise BudgetExceeded(f"سقف روزانهٔ کل پر شد{who} ({spent:.2f} از {cfg['cap_usd']:.2f} دلار)")
+    if agent:
+        # the agent's own ceiling, on top of the shared one — a noisy agent
+        # stops alone and the rest of the office keeps working
+        agent_cap = cfg["agent_caps"].get(agent, cfg["cap_usd"] * AGENT_CAP_SHARE)
+        agent_spent = await spent_today(db, agent=agent)
+        if agent_spent >= agent_cap:
+            raise BudgetExceeded(f"سقف روزانهٔ ایجنت «{agent}» پر شد ({agent_spent:.2f} از {agent_cap:.2f} دلار)")
     return cfg
 
 

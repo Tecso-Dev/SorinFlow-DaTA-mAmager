@@ -65,8 +65,8 @@ def configured(monkeypatch):
         ledger.append({"agent": agent, "job": job, "model": model, "ok": ok,
                        "cost": float(usage.get("cost") or 0), "error": error})
 
-    async def spent(_db):
-        return sum(r["cost"] for r in ledger)
+    async def spent(_db, agent=None):
+        return sum(r["cost"] for r in ledger if not agent or r["agent"] == agent)
 
     monkeypatch.setattr(llm.secret_box, "get_many", get_many)
     monkeypatch.setattr(llm.secret_box, "put", put)
@@ -111,11 +111,13 @@ class TestTheGate:
 
     def test_the_daily_cap_stops_the_next_call(self, configured, monkeypatch):
         configured["rows"][llm.KEY_CAP] = "0.002"
+        # a generous cap of its own, so only the shared cap below is what stops it
+        configured["rows"][llm.agent_cap_key("explainer")] = "100"
         _gateway(monkeypatch, lambda r: _answer("سلام", cost=0.0015))
-        asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
-        asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="explainer", db=object()))
+        asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="explainer", db=object()))
         with pytest.raises(llm.BudgetExceeded):
-            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="explainer", db=object()))
 
     def test_the_panel_test_ignores_the_cap(self, configured, monkeypatch):
         configured["rows"][llm.KEY_CAP] = "0"
@@ -364,3 +366,126 @@ class TestTheAiScreen:
         fn2 = JS[JS.index("function aiShowErrors"):JS.index("async function loadAiLog")]
         assert "ai-log-failed" in fn2 and "ai-log-agent" in fn2 and "loadAiLog()" in fn2
         assert ".ai-err.is-stale" in (ROOT / "frontend/css/style.css").read_text(encoding="utf-8")
+
+
+# ── phase 2: a budget per agent, on top of the shared one ───────────────────
+
+class TestPerAgentBudget:
+    """A separate daily budget per agent, so a noisy reader cannot spend the
+    whole day and the assistant keeps answering. The shared cap still bounds
+    the office as a whole, on top."""
+
+    def test_each_agent_defaults_to_half_the_global_cap(self, configured):
+        configured["rows"][llm.KEY_CAP] = "4.00"
+        cfg = asyncio.run(llm.config(object()))
+        assert cfg["agent_caps"] == {a: 2.0 for a in llm.AGENTS}
+
+    def test_a_panel_override_wins_over_the_default(self, configured):
+        configured["rows"][llm.KEY_CAP] = "4.00"
+        configured["rows"][llm.agent_cap_key("reader")] = "0.75"
+        cfg = asyncio.run(llm.config(object()))
+        assert cfg["agent_caps"]["reader"] == 0.75
+        assert cfg["agent_caps"]["explainer"] == 2.0, "an untouched agent still gets the default share"
+
+    def test_an_agents_own_cap_stops_only_that_agent(self, configured, monkeypatch):
+        configured["rows"][llm.KEY_CAP] = "10"
+        configured["rows"][llm.agent_cap_key("reader")] = "0.001"
+        _gateway(monkeypatch, lambda r: _answer("سلام", cost=0.002))
+        asyncio.run(llm.chat("read", [{"role": "user", "content": "x"}], agent="reader", db=object()))
+        with pytest.raises(llm.BudgetExceeded):
+            asyncio.run(llm.chat("read", [{"role": "user", "content": "x"}], agent="reader", db=object()))
+        # a different agent, same day: its own cap (half of 10 = 5) is untouched
+        out = asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="explainer", db=object()))
+        assert out["content"] == "سلام"
+
+    def test_the_message_is_persian_and_names_the_agent_and_both_figures(self, configured, monkeypatch):
+        configured["rows"][llm.KEY_CAP] = "10.00"
+        configured["rows"][llm.agent_cap_key("reader")] = "0.50"
+        _gateway(monkeypatch, lambda r: _answer("سلام", cost=0.60))
+        asyncio.run(llm.chat("read", [{"role": "user", "content": "x"}], agent="reader", db=object()))
+        with pytest.raises(llm.BudgetExceeded) as e:
+            asyncio.run(llm.chat("read", [{"role": "user", "content": "x"}], agent="reader", db=object()))
+        msg = str(e.value)
+        assert "reader" in msg and "دلار" in msg and "0.60" in msg and "0.50" in msg, msg
+
+    def test_the_global_cap_still_applies_on_top(self, configured, monkeypatch):
+        configured["rows"][llm.KEY_CAP] = "0.001"
+        _gateway(monkeypatch, lambda r: _answer("سلام", cost=0.002))
+        asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="explainer", db=object()))
+        with pytest.raises(llm.BudgetExceeded) as e:
+            # "need" has spent nothing itself — only the shared cap stops it
+            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="need", db=object()))
+        assert "کل" in str(e.value)
+
+    def test_the_endpoint_validates_the_range_and_shares_the_guard(self):
+        src = (ROOT / "app/api/routes/ai.py").read_text(encoding="utf-8")
+        assert '@router.put("/agents/{key}/cap")' in src
+        fn = src[src.index("class AgentCapIn"):src.index('@router.get("/log")')]
+        assert "ge=0, le=100" in fn and "_super_admin" in fn and "agent_cap_key" in fn
+
+    def test_the_card_shows_and_edits_each_agents_budget(self):
+        card = JS[JS.index("function _aiAgentCard"):JS.index("async function loadAiScreen")]
+        assert "cap_usd" in card and "aiAgentCapEdit(" in card
+        fn = JS[JS.index("async function aiAgentCapEdit"):JS.index("async function aiRunAgent")]
+        assert "/cap`" in fn and "askText(" in fn
+        for bad in ("prompt(", "confirm(", "alert("):
+            assert bad not in fn
+
+
+@pytest.fixture
+def real_db(tmp_path):
+    """A sqlite database of its own with just the tables llm.py touches, and
+    nothing monkeypatched in front of it — for the handful of tests that
+    check the real SQL rather than the `configured` fixture's fake ledger."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+    from app.database import Base
+    from app.models.ai_usage import AiUsage
+    from app.models.app_setting import AppSetting
+    tables = [t.__table__ for t in (AppSetting, AiUsage)]
+    eng = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/core.db", poolclass=NullPool)
+
+    async def _build():
+        async with eng.begin() as c:
+            await c.run_sync(lambda sc: Base.metadata.create_all(sc, tables=tables))
+    asyncio.run(_build())
+    maker = async_sessionmaker(eng, expire_on_commit=False)
+    yield maker
+    asyncio.run(eng.dispose())
+
+
+class TestSpentTodayFiltersByAgent:
+    """The `agent` filter is real SQL, not just a fixture's fake — checked
+    against an actual (small, throwaway) database."""
+
+    def test_the_real_query_sums_only_that_agent(self, real_db):
+        from app.models.ai_usage import AiUsage
+
+        async def _run():
+            async with real_db() as s:
+                s.add_all([
+                    AiUsage(agent="reader", job="read", cost_usd=0.5, ok=True),
+                    AiUsage(agent="reader", job="read", cost_usd=0.25, ok=True),
+                    AiUsage(agent="explainer", job="write", cost_usd=1.0, ok=True),
+                ])
+                await s.commit()
+                assert await llm.spent_today(s, agent="reader") == pytest.approx(0.75)
+                assert await llm.spent_today(s, agent="explainer") == pytest.approx(1.0)
+                assert await llm.spent_today(s, agent="vision") == 0.0
+                assert await llm.spent_today(s) == pytest.approx(1.75), "no agent = everyone, as before"
+        asyncio.run(_run())
+
+
+class TestConfigAgentCapsAgainstARealDatabase:
+
+    def test_the_real_round_trip_through_secret_box(self, real_db, monkeypatch):
+        monkeypatch.setattr(llm.settings, "llm_model", "openai/gpt-4.1-mini", raising=False)
+
+        async def _run():
+            async with real_db() as s:
+                await llm.secret_box.put(s, llm.KEY_CAP, "6.00", "tester")
+                await llm.secret_box.put(s, llm.agent_cap_key("vision"), "1.00", "tester")
+                cfg = await llm.config(s)
+                assert cfg["agent_caps"]["vision"] == 1.00
+                assert cfg["agent_caps"]["reader"] == 3.00   # half of 6, no override on file
+        asyncio.run(_run())
