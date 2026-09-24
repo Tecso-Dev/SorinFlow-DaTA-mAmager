@@ -15,6 +15,7 @@ import hmac
 import ipaddress
 import secrets
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
@@ -34,6 +35,49 @@ class VerificationError(Exception):
         super().__init__(message)
         self.message = message
         self.retry_after = retry_after
+
+
+TEHRAN = timezone(timedelta(hours=3, minutes=30), "Asia/Tehran")
+SMS_CAP_MESSAGE = "سقف روزانهٔ پیامک کد تأیید پر شده است. فردا دوباره تلاش کنید، یا اگر ایمیل دارید با ایمیل"
+
+
+class _SmsDailyCap(Exception):
+    """Today's SMS-code budget is spent — not a delivery failure."""
+
+
+def _seconds_to_tehran_midnight() -> int:
+    now = datetime.now(TEHRAN)
+    return int((now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1) - now).total_seconds())
+
+
+async def _spend_sms_budget() -> bool:
+    """One code SMS off today's budget (Tehran day), all addresses together.
+
+    Until the server saw real client addresses, the per-address budgets were
+    accidentally one budget for everybody and that was the only thing keeping
+    SMS cost down. Fails open like the other limiters: codes are how people
+    log in, and a Redis blip must not stop that.
+    """
+    cap = int(getattr(settings, "auth_sms_daily_cap", 0) or 0)
+    if cap <= 0:
+        return True
+    key = f"{_NS}:sms:day:{datetime.now(TEHRAN):%Y%m%d}"
+    try:
+        r = await get_redis()
+        n = int(await r.incr(key))
+        if n == 1:
+            await r.expire(key, 2 * 86400)
+    except Exception as e:
+        logger.warning(f"[verification] daily SMS budget unavailable, sending: {e}")
+        return True
+    if n == cap + 1:
+        # once, on the first refusal of the day
+        logger.error(f"[verification] daily SMS-code cap {cap} reached")
+        from app.services import backup_service as bk
+        asyncio.create_task(bk.send_text(
+            f"⚠️ سقف روزانهٔ پیامک کد تأیید ({cap}) پر شد. تا نیمه‌شب تهران کدی با پیامک "
+            "فرستاده نمی‌شود — اگر حمله نیست، AUTH_SMS_DAILY_CAP را بالا ببرید."))
+    return n <= cap
 
 
 @dataclass
@@ -130,8 +174,12 @@ async def issue_code(purpose: str, identifier: str, phone: str,
     pipe.expire(keys["sends"], 3600)
     await pipe.execute()
 
-    used = await _deliver(code, purpose=purpose, phone=phone, email=email, channel=channel,
-                          message_template=message_template, ttl=ttl, db=db)
+    try:
+        used = await _deliver(code, purpose=purpose, phone=phone, email=email, channel=channel,
+                              message_template=message_template, ttl=ttl, db=db)
+    except _SmsDailyCap:
+        await r.delete(keys["code"], keys["cooldown"])
+        raise VerificationError(SMS_CAP_MESSAGE, retry_after=_seconds_to_tehran_midnight())
     if not used:
         # Burn the code rather than leave one alive that nobody received. This
         # is why _deliver returns a channel-or-None instead of raising: the
@@ -172,6 +220,8 @@ async def _deliver(code: str, *, phone: str, email: str | None,
     async def _sms() -> bool:
         if not phone:
             return False
+        if not await _spend_sms_budget():
+            raise _SmsDailyCap()
         try:
             # A template first, when one is configured.
             #
@@ -238,11 +288,18 @@ async def _deliver(code: str, *, phone: str, email: str | None,
     sms_ready = bool((settings.kavenegar_api_key or "").strip()) or \
         settings.auth_sms_provider == "console"
     order = ["sms", "email"] if sms_ready else ["email", "sms"]
+    capped = False
     for leg in order:
-        if leg == "sms" and await _sms():
-            return "sms"
+        if leg == "sms":
+            try:
+                if await _sms():
+                    return "sms"
+            except _SmsDailyCap:
+                capped = True            # the email leg may still get it there
         if leg == "email" and await _email():
             return "email"
+    if capped:
+        raise _SmsDailyCap()
     return None
 
 

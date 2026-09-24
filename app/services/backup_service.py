@@ -397,6 +397,31 @@ async def telegram_ping(token: str, proxies="", route: Optional[dict] = None) ->
     return {"bot": body["result"].get("username", ""), "ms": int((time.monotonic() - started) * 1000), "via": via}
 
 
+async def send_text(text: str) -> bool:
+    """One Telegram message to the backup chats, the same way out as the
+    backups. For the host's DR alerts and the daily SMS-code cap. Never raises."""
+    from app.database import async_session_maker
+    try:
+        async with async_session_maker() as session:
+            cfg = await resolve_telegram(session)
+            chats = chat_ids(cfg["chat_id"])
+            if not cfg["token"] or not chats:
+                return False
+            route = await resolve_route(session)
+            ok = False
+            for chat in chats:
+                try:
+                    r, _ = await tg_request(cfg["token"], "sendMessage", route, timeout=30,
+                                            json={"chat_id": chat, "text": text[:3500]})
+                    ok = ok or r.status_code == 200
+                except Exception as e:
+                    logger.warning(f"[telegram] message to {chat} failed: {e}")
+            return ok
+    except Exception as e:
+        logger.warning(f"[telegram] message failed: {e}")
+        return False
+
+
 def chat_ids(value: Optional[str]) -> list:
     """The chats a message goes to: «542901635» or «542901635, 133142359».
     One setting, several recipients — the owner and a colleague, or a group

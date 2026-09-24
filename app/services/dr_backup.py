@@ -211,27 +211,8 @@ async def alert(text: str) -> bool:
     cur = read_status()
     cur["last_alert"] = {"text": text[:500], "at": _now()}
     _save(cur)
-    from app.database import async_session_maker
     from app.services import backup_service as bk
-    try:
-        async with async_session_maker() as session:
-            cfg = await bk.resolve_telegram(session)
-            chats = bk.chat_ids(cfg["chat_id"])
-            if not cfg["token"] or not chats:
-                return False
-            route = await bk.resolve_route(session)
-            ok = False
-            for chat in chats:
-                try:
-                    r, _ = await bk.tg_request(cfg["token"], "sendMessage", route, timeout=30,
-                                               json={"chat_id": chat, "text": text[:3500]})
-                    ok = ok or r.status_code == 200
-                except Exception as e:
-                    logger.warning(f"[dr] alert to {chat} failed: {e}")
-            return ok
-    except Exception as e:
-        logger.warning(f"[dr] alert failed: {e}")
-        return False
+    return await bk.send_text(text)
 
 
 def _main(argv) -> int:

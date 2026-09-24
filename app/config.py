@@ -265,6 +265,10 @@ class Settings(BaseSettings):
     auth_code_resend_cooldown: int = Field(default=90, env="AUTH_CODE_RESEND_COOLDOWN")
     auth_code_max_attempts: int = Field(default=5, env="AUTH_CODE_MAX_ATTEMPTS")
     auth_code_max_sends_per_hour: int = Field(default=5, env="AUTH_CODE_MAX_SENDS_PER_HOUR")
+    # Every verification code sent by SMS, all addresses together, per Tehran
+    # day. The per-address budgets only slow one address down; this is what
+    # stops many of them together from emptying the SMS credit. 0 = no cap.
+    auth_sms_daily_cap: int = Field(default=200, env="AUTH_SMS_DAILY_CAP")
     # Failed password attempts per identifier per 15 minutes before lockout.
     auth_login_max_attempts: int = Field(default=10, env="AUTH_LOGIN_MAX_ATTEMPTS")
 
