@@ -131,10 +131,67 @@ async def _release_orphaned_jobs() -> None:
         logger.warning(f"Could not release orphaned scraping jobs: {e}")
 
 
+# SECRET_KEY values printed in this repository: the default, the examples and
+# the placeholders. Shorter ones are caught by the length check.
+_PUBLISHED_SECRET_KEYS = {
+    "your-super-secret-key-change-in-production",                     # config.py, docker-compose.yml
+    "your-super-secret-key-change-in-production-with-random-string",  # .env.example
+    "local-dev-only-secret-key-do-not-use-in-prod",                   # .env.local.example
+    "replace-with-a-long-random-value",                               # README
+}
+
+
+async def _users_table_empty() -> bool:
+    """Whether _seed_super_admin is about to create the first account.
+
+    False when the database cannot be asked: init_db fails on that next, and
+    with the real reason rather than this one.
+    """
+    from sqlalchemy import inspect, text
+    from app.database import engine, _guard
+    try:
+        async with engine.connect() as conn:
+            await _guard(conn)
+            if not await conn.run_sync(lambda c: inspect(c).has_table("users")):
+                return True
+            return (await conn.execute(text("SELECT 1 FROM users LIMIT 1"))).first() is None
+    except Exception as e:
+        logger.warning(f"could not tell whether the users table is empty: {e}")
+        return False
+
+
+async def _refuse_default_secrets() -> None:
+    """Production does not start on a credential anyone can read in this repo.
+
+    SECRET_KEY signs every token: a published or short one lets anybody mint a
+    root token. The seed password is refused only when it is about to be used.
+    The live Secret has no SUPER_ADMIN_PASSWORD and the live users table has
+    rows, so refusing the placeholder outright would have taken the site down
+    at its next deploy over a value it never reads.
+    """
+    if settings.environment != "production":
+        return
+    why = []
+    key = settings.secret_key or ""
+    if key in _PUBLISHED_SECRET_KEYS or len(key) < 32:
+        why.append("SECRET_KEY is a published default or shorter than 32 characters, "
+                   "so anyone could sign a root token")
+    if settings.super_admin_password == "CHANGE_ME" and await _users_table_empty():
+        why.append("SUPER_ADMIN_PASSWORD is unset and the users table is empty, so the "
+                   "first account would be created with the published placeholder")
+    if why:
+        for reason in why:
+            logger.critical(f"Refusing to start in production: {reason}")
+        raise RuntimeError("Refusing to start in production: " + "; ".join(why))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     logger.info("Starting SorinFlow Divar Scraper...")
+
+    # Before init_db, which would seed the placeholder password.
+    await _refuse_default_secrets()
 
     # Startup warnings, in the order they matter. Each says what is actually at
     # risk — a warning that overstates the danger gets ignored, and then so do

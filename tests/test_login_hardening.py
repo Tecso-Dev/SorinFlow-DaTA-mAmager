@@ -361,6 +361,89 @@ def test_an_inactive_account_is_checked_in_full_before_it_is_named(client, monke
     assert len(calls) == 2
 
 
+# ── production does not start on a published secret ──────────────────────────
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def test_production_with_the_default_secret_key_exits_nonzero():
+    """The real process: uvicorn and the real lifespan, stopped before any
+    database work."""
+    import subprocess
+    env = {**os.environ, "ENVIRONMENT": "production",
+           "SECRET_KEY": "your-super-secret-key-change-in-production"}
+    p = subprocess.run([sys.executable, "-m", "uvicorn", "app.main:app", "--port", "0"],
+                       cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
+    out = p.stdout + p.stderr
+    assert p.returncode != 0, out[-2000:]
+    assert "Refusing to start in production: SECRET_KEY" in out
+
+
+@pytest.mark.parametrize("key", [
+    "your-super-secret-key-change-in-production-with-random-string",
+    "replace-with-a-long-random-value",
+    "a-31-character-key-is-too-shor",
+    "",
+])
+def test_production_refuses_a_published_or_short_secret_key(monkeypatch, key):
+    import app.main as m
+    monkeypatch.setattr(m.settings, "environment", "production")
+    monkeypatch.setattr(m.settings, "secret_key", key)
+    monkeypatch.setattr(m.settings, "super_admin_password", "set-for-real-1234")
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        asyncio.run(m._refuse_default_secrets())
+
+
+def test_the_live_pods_config_starts(client, monkeypatch):
+    """What production has (k8s/04-backend.yaml and the Secret): ENVIRONMENT
+    production, a 64-character SECRET_KEY, no SUPER_ADMIN_PASSWORD at all —
+    so the placeholder — and a users table with rows. It must boot."""
+    import secrets
+    import app.main as m
+    monkeypatch.setattr(m.settings, "environment", "production")
+    monkeypatch.setattr(m.settings, "secret_key", secrets.token_hex(32))
+    monkeypatch.setattr(m.settings, "super_admin_password", "CHANGE_ME")
+    asyncio.run(m._refuse_default_secrets())
+
+
+def test_the_placeholder_is_refused_only_where_it_would_seed(client, monkeypatch):
+    """An empty database is where _seed_super_admin writes the placeholder in
+    as a real password. Its own schema, so the table really is missing."""
+    import secrets
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    import app.database as db
+    import app.main as m
+
+    async def _schema(*sql):
+        eng = create_async_engine(os.environ["DATABASE_URL"])
+        async with eng.begin() as c:
+            for s in sql:
+                await c.execute(text(s))
+        await eng.dispose()
+
+    asyncio.run(_schema("DROP SCHEMA IF EXISTS sf_no_users CASCADE", "CREATE SCHEMA sf_no_users"))
+    monkeypatch.setattr(db, "engine", create_async_engine(
+        os.environ["DATABASE_URL"],
+        connect_args={"server_settings": {"search_path": "sf_no_users"}}))
+    monkeypatch.setattr(m.settings, "environment", "production")
+    monkeypatch.setattr(m.settings, "secret_key", secrets.token_hex(32))
+    try:
+        monkeypatch.setattr(m.settings, "super_admin_password", "CHANGE_ME")
+        with pytest.raises(RuntimeError, match="SUPER_ADMIN_PASSWORD"):
+            asyncio.run(m._refuse_default_secrets())
+        monkeypatch.setattr(m.settings, "super_admin_password", "set-for-real-1234")
+        asyncio.run(m._refuse_default_secrets())
+        # and outside production the placeholder and the default key still boot
+        monkeypatch.setattr(m.settings, "environment", "development")
+        monkeypatch.setattr(m.settings, "super_admin_password", "CHANGE_ME")
+        monkeypatch.setattr(m.settings, "secret_key", "your-super-secret-key-change-in-production")
+        asyncio.run(m._refuse_default_secrets())
+    finally:
+        asyncio.run(db.engine.dispose())
+        asyncio.run(_schema("DROP SCHEMA IF EXISTS sf_no_users CASCADE"))
+
+
 def test_without_redis_login_still_works(client, monkeypatch):
     """Fail open: a Redis blip must not lock the office out of the panel.
     /ready already takes the pod out of service if Redis stays down."""
