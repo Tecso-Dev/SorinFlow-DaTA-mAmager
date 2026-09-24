@@ -543,7 +543,9 @@ def test_the_placeholder_is_refused_only_where_it_would_seed(client, monkeypatch
 
 def test_without_redis_login_still_works(client, monkeypatch):
     """Fail open: a Redis blip must not lock the office out of the panel.
-    /ready already takes the pod out of service if Redis stays down."""
+    /ready reports Redis but no longer gates on it either (app/main.py) —
+    the two together mean a Redis outage degrades rate limiting, not the
+    whole API."""
     import app.services.verification as v
 
     async def _down():

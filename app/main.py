@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 import hmac
+import re
 import time
 import uuid
 from html import escape as html_escape
@@ -34,12 +35,17 @@ from app.api.routes import router as api_router
 # diagnose=False matters as much as the filter: with it on, loguru prints local
 # variable values inside a traceback, which is how a connection error turns into
 # DATABASE_URL and its password appearing in the log.
-from app.log_redaction import redact_filter
+from app.log_redaction import redact_filter, request_id_var, inject_request_id
 
 logger.remove()
+# Every record, from every sink — including the GCP one added later in
+# lifespan — carries the request id in scope right now ("-" outside a
+# request, such as a background loop). See log_redaction.inject_request_id
+# and the request_id_middleware below, which is what sets the var.
+logger.configure(patcher=inject_request_id)
 logger.add(
     sys.stdout,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{extra[request_id]}</cyan> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     level="INFO",
     filter=redact_filter,
     backtrace=False,
@@ -54,7 +60,7 @@ try:
         str(Path(get_settings().logs_path) / "scraper.log"),
         rotation="10 MB",
         retention="7 days",
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {extra[request_id]} | {name}:{function}:{line} - {message}",
         level="INFO",
         filter=redact_filter,
         backtrace=False,
@@ -240,6 +246,10 @@ async def lifespan(app: FastAPI):
     # Rented leads come back as fresh files when the lease year ends
     lease_task = asyncio.create_task(_lease_expiry_checker())
 
+    # The audit trail (app/services/audit.py) is kept deliberately, not by
+    # however long disk happens to last.
+    audit_retention_task = asyncio.create_task(_audit_retention_checker())
+
     # Keep the panel's session state true. is_valid is only a belief until
     # somebody asks Divar, and for a day and a half nobody did.
     from app.services.divar_session import verifier_loop
@@ -318,6 +328,7 @@ async def lifespan(app: FastAPI):
     reminder_task.cancel()
     backup_task.cancel()
     lease_task.cancel()
+    audit_retention_task.cancel()
     session_task.cancel()
     proxy_task.cancel()
     forwarder_task.cancel()
@@ -668,6 +679,34 @@ async def metrics_middleware(request: Request, call_next):
         mx.http_requests.labels(route, request.method, status).inc()
 
 
+# ─── request id ───────────────────────────────────────────────────────────────
+# Registered after maintenance, the API key check and metrics (below them in
+# this file), so it is outermost of the three — before any of them can log or
+# respond, and wrapping their responses too when they short-circuit, not only
+# the ones the router itself produces. Registered before gzip, so gzip stays
+# the outermost layer of all (test_panel_delivery.py depends on that) — gzip
+# neither logs nor answers early, so its order relative to this one does not
+# matter for what this middleware exists to guarantee.
+#
+# No try/finally around call_next to reset the contextvar: an exception that
+# escapes every handler below reaches Starlette's ServerErrorMiddleware —
+# outside this middleware entirely — which is what calls internal_error_handler
+# above. A finally here would already have reset the var by then, and the 500
+# page would carry "-" instead of the request's own id. Each request runs its
+# own asyncio task (uvicorn), so nothing else could read this value anyway.
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    incoming = request.headers.get("X-Request-ID", "")
+    rid = incoming if _REQUEST_ID_RE.match(incoming) else uuid.uuid4().hex[:12]
+    request_id_var.set(rid)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = rid
+    return response
+
+
 # ─── compression ─────────────────────────────────────────────────────────────
 # Registered last, so it is outermost and compresses whatever the layers below
 # produce. The panel was being served raw: 665 KB of app.js, 359 KB of markup
@@ -835,6 +874,22 @@ async def _reactivate_expired_leases():
             logger.info(f"Lease expiry: {len(rows)} rented lead(s) returned to the fresh pool")
 
 
+# ─── Audit-log retention ──────────────────────────────────────────────────
+async def _audit_retention_checker():
+    """Once a day: drop audit_events rows older than a year (app/services/audit.py)."""
+    while True:
+        try:
+            await asyncio.sleep(24 * 3600)
+            from app.services import audit as _audit
+            n = await _audit.prune()
+            if n:
+                logger.info(f"Audit retention: dropped {n} event(s) older than a year")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Audit retention checker error: {e}")
+
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():
@@ -844,15 +899,23 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": settings.app_version
+        "version": settings.app_version,
+        "git_sha": settings.git_sha,
     }
 
 
 @app.get("/ready")
 async def readiness_check():
-    """The process can serve. Readiness asks this: 503 while Postgres or
-    Redis is unreachable, so Traefik answers 503 instead of the app answering
-    500 on every request (roadmap #13 — /health used to check nothing)."""
+    """The process can serve. Readiness asks this: 503 while Postgres is
+    unreachable, so Traefik answers 503 instead of the app answering 500 on
+    every request (roadmap #13 — /health used to check nothing).
+
+    Redis is still reported, but does not gate `ready`: a Redis outage
+    degrades rate limiting and verification codes, which the routes that use
+    them already handle (they fail open with a warning), not the whole API —
+    taking every pod out of rotation over that is a bigger outage than the
+    one being guarded against.
+    """
     from sqlalchemy import text as _text
     from app.database import async_session_maker as _maker, get_redis as _redis
     checks = {}
@@ -867,7 +930,7 @@ async def readiness_check():
         checks["redis"] = "ok"
     except Exception as e:
         checks["redis"] = f"down: {type(e).__name__}"
-    ok = all(v == "ok" for v in checks.values())
+    ok = checks["postgres"] == "ok"
     return JSONResponse({"ready": ok, **checks}, status_code=200 if ok else 503)
 
 
@@ -1180,7 +1243,30 @@ def _wants_html(request: Request) -> bool:
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
+    """This used to catch two different things under one name: a path no
+    route matches, and a route's OWN `HTTPException(404, detail=…)` — the
+    second lost its Persian detail to "Resource not found" or the HTML page.
+
+    Starlette's Router puts the route it matched in scope["route"] before
+    calling it (routing.py, Router.app) — for a FULL match, and for a
+    Mount's path-prefix match too — and never sets it at all when nothing
+    matched (Router.not_found raises this same HTTPException with the scope
+    untouched). A Mount is the one matched "route" whose own 404 must still
+    read as "nothing here": StaticFiles raises plain HTTPException(404) for
+    a file it does not have under /dashboard, /images or /downloads, and
+    that must keep today's page, not become FastAPI's bare {"detail": "Not
+    Found"}. So: no route at all, or a Mount, is a real 404 page; anything
+    else is a route's own answer, exactly as FastAPI would give it by
+    default.
+    """
+    from starlette.routing import Mount
+    from fastapi.exception_handlers import http_exception_handler
     from app import error_pages
+
+    route = request.scope.get("route")
+    if route is not None and not isinstance(route, Mount):
+        return await http_exception_handler(request, exc)
+
     if _wants_html(request):
         return HTMLResponse(error_pages.render_not_found(request.url.path),
                             status_code=404)
@@ -1190,14 +1276,27 @@ async def not_found_handler(request: Request, exc):
 @app.exception_handler(500)
 async def internal_error_handler(request: Request, exc):
     from app import error_pages
-    # A short id, logged next to the traceback and shown on the page, so a
-    # report of "the site broke" can be matched to a specific line.
-    ref = uuid.uuid4().hex[:8]
-    logger.error(f"[{ref}] Internal error on {request.url.path}: {exc}")
+    # The request id, not a fresh one: it is already on every log line this
+    # request produced (the loguru patcher) and on the X-Request-ID response
+    # header, so one id ties the error page to the traceback and everything
+    # else this request logged.
+    ref = request_id_var.get()
+    # opt(exception=exc) logs the full traceback. diagnose stays False on
+    # both sinks (see their logger.add calls above) — this adds the stack,
+    # never local variable values, which is how DATABASE_URL leaked before.
+    logger.opt(exception=exc).error(
+        f"[{ref}] Internal error: {request.method} {request.url.path}")
+    # Starlette's ServerErrorMiddleware — which is what calls this handler for
+    # an exception nothing below caught — sends this response straight back
+    # itself, outside every middleware including request_id_middleware. That
+    # is the one path here the header would otherwise be missing from.
     if _wants_html(request):
-        return HTMLResponse(error_pages.render_server_error(ref), status_code=500)
-    return JSONResponse(status_code=500,
-                        content={"detail": "Internal server error", "ref": ref})
+        response = HTMLResponse(error_pages.render_server_error(ref), status_code=500)
+    else:
+        response = JSONResponse(status_code=500,
+                                content={"detail": "Internal server error", "ref": ref})
+    response.headers["X-Request-ID"] = ref
+    return response
 
 
 # Mount static files for frontend. Each mount on its own: one directory
