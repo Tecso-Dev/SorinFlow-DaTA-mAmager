@@ -381,6 +381,12 @@ class DivarScraper:
                             logger.info(f"Session restored successfully using fallback: {phone_number}")
                         elif candidates:
                             logger.warning("Fallback sessions also failed. Phone numbers will not be extracted.")
+                            # Without this line the run's own log said nothing
+                            # and the panel showed «مرورگر اسکرپر بالا نیامد: نامشخص».
+                            await self._log_run(
+                                f"نشست {failed} کار نکرد و هیچ‌کدام از شماره‌های دیگر خودتان هم باز نشد — "
+                                "شمارهٔ تماس آگهی‌ها استخراج نمی‌شود. نشست‌ها را در «احراز هویت دیوار» تازه کنید.",
+                                level="error", phone=failed)
                             return False
                         else:
                             logger.warning("No valid session found. Phone numbers will not be extracted.")
@@ -2745,8 +2751,8 @@ class DivarScraper:
             # us. An account Divar wants identified is not a candidate either:
             # handing it back would spend a reveal to hit the same wall. And a
             # number its owner switched off is not reachable — a code sent to
-            # it parks the run. A run with no known owner keeps the old
-            # behaviour so an internally-started scrape does not lose its pool.
+            # it parks the run. A run with no known owner gets only the
+            # numbers nobody owns (see _usable_accounts_query).
             query = self._usable_accounts_query(select(CookieModel))
             rows = (await self.db_session.execute(
                 query.order_by(CookieModel.reveals.asc(),

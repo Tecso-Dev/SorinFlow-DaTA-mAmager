@@ -257,6 +257,18 @@ class TestInitialize:
         assert ROOT_NUM not in tried
         assert not ok and active is None
 
+    def test_when_none_of_the_owners_numbers_opens_the_run_log_says_so(self, people, monkeypatch):
+        """It said nothing there, and the panel read «مرورگر اسکرپر بالا نیامد: نامشخص»."""
+        import app.scraper.divar_scraper as ds
+        lines = []
+
+        async def _log(self, message, *, level="info", **extra):
+            lines.append((level, message))
+        monkeypatch.setattr(ds.DivarScraper, "_log_run", _log)
+        ok, tried, active = _initialize(people["jan"], monkeypatch, restorable=set())
+        assert not ok and tried == [JAN_1, JAN_2]
+        assert any(lvl == "error" and JAN_1 in msg for lvl, msg in lines), lines
+
     def test_a_named_number_that_is_not_the_owners_is_ignored(self, people, monkeypatch):
         ok, tried, active = _initialize(people["jan"], monkeypatch, named=ROOT_NUM,
                                         restorable={ROOT_NUM, JAN_1})
