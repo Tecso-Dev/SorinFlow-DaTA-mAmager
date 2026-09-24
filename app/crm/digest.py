@@ -114,9 +114,9 @@ async def build(db, *, now: Optional[datetime] = None) -> Dict:
 
 
 def _backup_line(lo: Dict, since: datetime) -> str:
-    """One phrase about last night's shipment. The outcome's `at` is naive
-    server-local time (backup_service writes datetime.now()), so the window
-    check is against a naive `since` in the same clock."""
+    """One phrase about last night's shipment. `at` carries its UTC offset;
+    one written before it did is naive server-local time (datetime.now()),
+    which .astimezone() reads as exactly that."""
     at = lo.get("at")
     if not at:
         return "هنوز فرستاده نشده"
@@ -124,8 +124,10 @@ def _backup_line(lo: Dict, since: datetime) -> str:
         when = datetime.fromisoformat(at)
     except ValueError:
         return "نامشخص"
-    if when < since.astimezone().replace(tzinfo=None):
-        return f"در ۲۴ ساعت گذشته فرستاده نشد (آخری: {at[:16].replace('T', ' ')})"
+    if when.tzinfo is None:
+        when = when.astimezone()
+    if when < since:
+        return f"در ۲۴ ساعت گذشته فرستاده نشد (آخری: {when.astimezone(TEHRAN).strftime('%Y-%m-%d %H:%M')})"
     if lo.get("ok"):
         size = lo.get("size_kb") or 0
         chats = len(lo.get("delivered") or [])

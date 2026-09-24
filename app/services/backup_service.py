@@ -12,7 +12,7 @@ import itertools
 import json
 import re
 import time
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -487,7 +487,8 @@ async def send_to_telegram(path: Path, db=None) -> bool:
         # the usual reason on this server, said where the panel shows it
         error = "تلگرام مستقیم از سرور در دسترس نبود و راه جایگزینی (رلهٔ Cloudflare یا پراکسی) تنظیم نشده است"
     if db is not None:
-        await _remember_offsite(db, {"at": datetime.now().isoformat(timespec="seconds"),
+        # with its offset — a bare container time is UTC, read by the browser as Tehran
+        await _remember_offsite(db, {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                                      "ok": ok, "file": path.name, "size_kb": size_kb,
                                      "delivered": delivered, "error": error[:200]})
     return ok
@@ -508,7 +509,7 @@ def local_snapshots() -> list:
     for p in sorted(BACKUP_DIR.glob("sorinflow-backup-*.json.gz"), reverse=True):
         st = p.stat()
         out.append({"file": p.name, "size_kb": st.st_size // 1024,
-                    "at": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")})
+                    "at": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(timespec="seconds")})
     return out
 
 
