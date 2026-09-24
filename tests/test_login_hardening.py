@@ -361,6 +361,26 @@ def test_an_inactive_account_is_checked_in_full_before_it_is_named(client, monke
     assert len(calls) == 2
 
 
+# ── /me/email-2fa takes a model, not a dict ───────────────────────────────────
+
+def test_email_2fa_switch_reads_a_typed_body(client):
+    _mk_user("lh_mail2fa", email="lh_mail2fa@example.com")
+    _mk_user("lh_mail2fa_none")
+    auth = {"Authorization": f"Bearer {_login(client, 'lh_mail2fa').json()['access_token']}"}
+    post = lambda body, h=auth: client.post("/api/users/me/email-2fa", headers=h, json=body)
+
+    r = post({"enabled": True})
+    assert r.status_code == 200 and r.json()["enabled"] is True
+    assert post({"enabled": False}).json()["enabled"] is False
+    assert post({}).json()["enabled"] is False              # as bool(dict.get) read it
+    assert post({"enabled": "not-a-switch"}).status_code == 422
+    assert post(["enabled"]).status_code == 422
+
+    no_mail = {"Authorization":
+               f"Bearer {_login(client, 'lh_mail2fa_none').json()['access_token']}"}
+    assert post({"enabled": True}, no_mail).status_code == 400
+
+
 # ── production does not start on a published secret ──────────────────────────
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

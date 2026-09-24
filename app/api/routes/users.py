@@ -992,9 +992,13 @@ async def totp_enable(
     return {"success": True, "message": "احراز هویت دو مرحله‌ای فعال شد"}
 
 
+class Email2faIn(BaseModel):
+    enabled: bool = False
+
+
 @router.post("/me/email-2fa")
 async def set_email_2fa(
-    data: dict,
+    data: Email2faIn,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1004,7 +1008,7 @@ async def set_email_2fa(
     out of its own panel, and the only way back would be the database — which
     is precisely the hole this feature exists to close.
     """
-    want = bool(data.get("enabled"))
+    want = data.enabled
     if want and not (current_user.email or "").strip():
         raise HTTPException(
             status_code=400,
