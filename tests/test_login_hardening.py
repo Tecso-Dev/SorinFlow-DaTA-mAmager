@@ -6,9 +6,15 @@ operator would get locked out if it were wrong.
   * a TOTP code is accepted once — also when the same code arrives twice at
     the same moment.
   * failed logins are limited per account and per address, the right
-    password is refused while locked, a forged X-Forwarded-For neither dodges
-    the address limit nor spends somebody else's, and an address that is not
-    a real client's (production's 10.42.x.x) is never locked at all.
+    password is refused while locked, a burst of parallel guesses gets no
+    more than the limit, a forged X-Forwarded-For neither dodges the address
+    limit nor spends somebody else's, and an address that is not a real
+    client's (production's 10.42.x.x) is never locked at all.
+  * a name that does not exist costs one bcrypt round, like one that does.
+  * production refuses to start on a published SECRET_KEY, or on the
+    placeholder seed password where it would actually seed — and the live
+    pod's configuration starts.
+  * /me/email-2fa reads a typed body.
 """
 import asyncio
 import os
@@ -274,10 +280,7 @@ def real_redis(monkeypatch):
             made["r"] = aioredis.from_url(url, decode_responses=True)
         return made["r"]
     monkeypatch.setattr(v, "get_redis", _get)
-    sync = redis.Redis.from_url(url, decode_responses=True)
-    yield sync
-    for k in sync.scan_iter("sf:auth:*lh_*"):
-        sync.delete(k)
+    yield redis.Redis.from_url(url, decode_responses=True)
 
 
 def test_a_burst_of_parallel_guesses_gets_no_more_than_the_limit(client, real_redis):
@@ -294,6 +297,7 @@ def test_a_burst_of_parallel_guesses_gets_no_more_than_the_limit(client, real_re
 
     with ThreadPoolExecutor(n) as pool:
         codes = list(pool.map(guess, range(n)))
+    real_redis.delete(f"sf:auth:login:uid:{uid}")
     assert codes.count(401) == _max() and codes.count(429) == n - _max(), codes
 
 
