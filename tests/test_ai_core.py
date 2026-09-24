@@ -489,3 +489,39 @@ class TestConfigAgentCapsAgainstARealDatabase:
                 assert cfg["agent_caps"]["vision"] == 1.00
                 assert cfg["agent_caps"]["reader"] == 3.00   # half of 6, no override on file
         asyncio.run(_run())
+
+
+# Phones with spaces, dashes, dots and parentheses; Persian, Arabic-Indic and
+# mixed digits; +98/0098/98 forms; landlines — all of these must be masked.
+_MASK_POSITIVE = [
+    "09143495300", "۰۹۱۲۳۴۵۶۷۸۹", "+989143495300", "00989143495300", "989143495300",
+    "0914-349-5300", "0914 349 5300", "0914.349.5300", "۰۹۱۴ ۳۴۹ ۵۳۰۰", "٠٩١٤٣٤٩٥٣٠٠",
+    "۰914 349 5300", "0912-3456789", "+98 914 349 5300", "9143495300", "9021234567",
+    "9301234567", "9991234567", "9931112222", "+98-914-349-5300", "۰۰۹۸۹۱۴۳۴۹۵۳۰۰",
+    "09199999999",
+    "044-33221100", "۰۴۴ ۳۳۲۲ ۱۱۰۰", "021 8888 7777", "02188887777", "(021) 8888-7777",
+    "021-88887777", "0261234567", "031-3222334", "044.3322.1100", "(044)33221100",
+    "021-4444-5555",
+]
+
+# Prices, grouped prices, dates, postal codes and listing codes — none of
+# these is a phone number and none of them may be touched.
+_MASK_NEGATIVE = [
+    "9500000000", "۲٬۵۰۰٬۰۰۰٬۰۰۰", "2,500,000,000", "۱۴۰۳/۰۵/۱۲", "1403/05/12",
+    "۱۴۰۰", "1400", "1583649811", "9812345678", "4471123",
+    "12345678901234", "100200300", "5000000", "88", "۱۰۴۲", "سلام، چطورید؟",
+]
+
+
+class TestMaskingTableDriven:
+
+    @pytest.mark.parametrize("s", _MASK_POSITIVE)
+    def test_masked(self, s):
+        out = llm.mask_pii(f"متن: {s} پایان")
+        assert s not in out, out
+        assert "×" in out, out
+
+    @pytest.mark.parametrize("s", _MASK_NEGATIVE)
+    def test_not_masked(self, s):
+        text = f"متن: {s} پایان"
+        assert llm.mask_pii(text) == text

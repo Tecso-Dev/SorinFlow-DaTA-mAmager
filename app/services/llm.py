@@ -27,7 +27,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 import httpx
 from loguru import logger
@@ -154,23 +154,56 @@ async def config(db) -> Dict[str, Any]:
 
 # ── privacy ──────────────────────────────────────────────────────────────────
 
-_PHONE = re.compile(r"(?<!\d)(?:\+?98|0)?9\d{9}(?!\d)")
-_PHONE_FA = re.compile(r"(?<![۰-۹])(?:\+?۹۸|۰)?۹[۰-۹]{9}(?![۰-۹])")
-_LANDLINE = re.compile(r"(?<!\d)0\d{2,3}[-\s]?\d{7,8}(?!\d)")
+# Mobile numbers: an optional country/trunk prefix, then a real carrier
+# prefix — Iranian mobiles only ever start 90x/91x/92x/93x/99x, which is what
+# keeps a bare 10-digit price like «9500000000» or a postal code from reading
+# as a phone number — then the rest of the number with at most one separator
+# between any two digits (no run of two spaces, no doubled dash).
+_MOBILE = re.compile(r"(?<!\d)(?:0098|\+?98|0)?9[0139](?:[-.\s]?\d){8}(?!\d)")
+# Landlines: trunk 0, a 2–3 digit area code (optionally in parens), then a
+# 7–8 digit local number — same loose, single-separator rule.
+_LANDLINE = re.compile(r"(?<!\d)\(?0\d{2,3}\)?[-.\s]?\d(?:[-.\s]?\d){6,7}(?!\d)")
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+
+# Persian and Arabic-Indic digits fold to ASCII one-for-one, so the
+# normalised copy is exactly as long as the original and its match offsets
+# still point at the right characters in it.
+_DIGIT_FOLD = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
 
 def mask_pii(text: Optional[str]) -> str:
     """Phone numbers and e-mail addresses out, before text leaves the office.
     A listing's text is the owner's; a need's text is the customer's. Neither
     number is the model's business, and the model does not need them to do
-    its job."""
+    its job.
+
+    Numbers are found on a digit-folded copy — Persian, Arabic-Indic and
+    plain digits (and mixes of the three within one number) all become
+    ASCII — then the matched spans are cut from the original, which is what
+    lets one pair of patterns catch every digit system instead of one
+    pattern per script. A price, a date, a listing code or a postal code
+    never has a real carrier prefix or the exact landline shape, so they
+    read through untouched; see tests/test_ai_core.py for the cases this
+    was tuned against."""
     if not text:
         return ""
-    t = _PHONE.sub("۰۹×××××××××", str(text))
-    t = _PHONE_FA.sub("۰۹×××××××××", t)
-    t = _LANDLINE.sub("۰××××××××", t)
-    return _EMAIL.sub("ایمیل", t)
+    t = str(text)
+    normalized = t.translate(_DIGIT_FOLD)
+    spans: Dict[Tuple[int, int], str] = {}
+    for rx, mask in ((_LANDLINE, "۰××××××××"), (_MOBILE, "۰۹×××××××××")):
+        for m in rx.finditer(normalized):
+            spans[m.span()] = mask   # a mobile match on the same span as a
+                                      # landline one (it can look like both)
+                                      # wins — it is the narrower, surer read
+    out, cursor = [], 0
+    for (start, end), mask in sorted(spans.items()):
+        if start < cursor:
+            continue   # already covered by an earlier, wider span
+        out.append(t[cursor:start])
+        out.append(mask)
+        cursor = end
+    out.append(t[cursor:])
+    return _EMAIL.sub("ایمیل", "".join(out))
 
 
 # ── the ledger and the cap ───────────────────────────────────────────────────
