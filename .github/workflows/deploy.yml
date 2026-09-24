@@ -20,11 +20,13 @@ jobs:
   ci:
     uses: ./.github/workflows/ci.yml
 
-  # Owned by another stream — see .github/workflows/e2e.yml.
+  # The panel driven in a real browser: smoke checks and the axe
+  # accessibility gate (.github/workflows/e2e.yml).
   e2e:
     uses: ./.github/workflows/e2e.yml
 
-  # Owned by another stream — see .github/workflows/k8s.yml.
+  # The Kubernetes manifests rendered and schema-checked before anything is
+  # built from them (.github/workflows/k8s.yml).
   k8s:
     uses: ./.github/workflows/k8s.yml
 
