@@ -128,3 +128,38 @@ class TestCloseDbDisposesTheEngine:
         monkeypatch.setattr(type(dbmod.engine), "dispose", _fake_dispose)
         await dbmod.close_db()
         assert calls, "close_db must dispose the shared engine, or shutdown leaks connections"
+
+
+# ── the boot's timeouts stay in the boot ──────────────────────────────────────
+
+@pytest.mark.skipif(not os.environ.get("DATABASE_URL", "").startswith("postgresql"),
+                    reason="lock_timeout and statement_timeout are Postgres settings")
+def test_the_boot_guard_does_not_ride_along_into_the_pool():
+    """_guard sets a 5 s lock_timeout and a 120 s statement_timeout for the
+    boot's migrations. A session-level SET stayed on the connection, and a
+    pool hands that connection to the next request — which would then give
+    up on any lock after 5 s. One pooled connection, so the second checkout
+    is the same connection the guard ran on."""
+    import asyncio
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    eng = create_async_engine(os.environ["DATABASE_URL"], poolclass=AsyncAdaptedQueuePool,
+                              pool_size=1, max_overflow=0)
+
+    async def _go():
+        async with eng.begin() as c:
+            await dbmod._guard(c)
+            inside = (await c.execute(text("SHOW lock_timeout"))).scalar()
+            pid = (await c.execute(text("SELECT pg_backend_pid()"))).scalar()
+        async with eng.connect() as c:
+            again = (await c.execute(text("SELECT pg_backend_pid()"))).scalar()
+            after = ((await c.execute(text("SHOW lock_timeout"))).scalar(),
+                     (await c.execute(text("SHOW statement_timeout"))).scalar())
+        await eng.dispose()
+        return inside, pid, again, after
+
+    inside, pid, again, after = asyncio.run(_go())
+    assert inside == "5s", "the guard still holds for the boot's own statements"
+    assert pid == again, "the pool handed back the same connection"
+    assert after == ("0", "0")

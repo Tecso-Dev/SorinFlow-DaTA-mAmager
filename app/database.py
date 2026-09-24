@@ -287,9 +287,14 @@ async def _guard(conn):
     Five seconds is far more than any of these statements needs against a free
     table, and a timeout is caught by the caller — so the pod boots and the
     migration applies on the next restart instead of taking the deploy down.
+
+    LOCAL — this transaction only. Every caller runs inside engine.begin(),
+    and with a connection pool the connection goes back to the pool after
+    boot: a plain SET would ride along into ordinary requests, which would
+    then give up on a lock after 5 s and on any query after 120 s.
     """
-    await conn.execute(text("SET lock_timeout = '5s'"))
-    await conn.execute(text("SET statement_timeout = '120s'"))
+    await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+    await conn.execute(text("SET LOCAL statement_timeout = '120s'"))
 
 
 async def _migrate_dpa_activities(conn):
@@ -1322,7 +1327,8 @@ async def _seed_super_admin():
         # its port, so the readiness probe gets "connection refused", the
         # liveness probe kills the pod, and it crashloops. That is the b491c0c
         # rollout, exactly.
-        await session.execute(text("SET lock_timeout = '5s'"))
+        # LOCAL: the session's transaction only — see _guard
+        await session.execute(text("SET LOCAL lock_timeout = '5s'"))
         result = await session.execute(
             __import__("sqlalchemy", fromlist=["select"]).select(User)
         )
@@ -1509,7 +1515,7 @@ async def _seed_root():
         return
 
     async with async_session_maker() as session:
-        await session.execute(text("SET lock_timeout = '5s'"))   # see _seed_super_admin
+        await session.execute(text("SET LOCAL lock_timeout = '5s'"))   # see _seed_super_admin
         existing = await session.execute(
             select(User).where(User.username == cfg.root_username))
         if existing.scalars().first():
