@@ -110,8 +110,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     # Never from a pull request: building would push an image to the registry
-    # tagged with a SHA that may never reach main.
-    if: github.event_name != 'pull_request'
+    # tagged with a SHA that may never reach main. Never from any other
+    # branch either: a workflow_dispatch run on a feature branch used to
+    # reach this job and build+push+deploy that branch's code to production.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
@@ -162,7 +164,9 @@ jobs:
   deploy:
     runs-on: [self-hosted, sorinflow]
     needs: build
-    if: github.event_name != 'pull_request'
+    # Same guard as build: without github.ref, a workflow_dispatch on any
+    # branch would roll that branch out to the production cluster.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: read
