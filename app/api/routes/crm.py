@@ -452,6 +452,13 @@ async def export_leads_excel(
     return xlsx_response("leads.xlsx", "لیدها", headers, rows)
 
 
+# Text columns have no length; the old handlers stored whatever came. A cap
+# here only stops abuse, so it sits far above any real note — below it, a
+# record with long notes (a deal made from a lead's call log) could no
+# longer be saved from its own edit form.
+_TEXT = 100_000
+
+
 class BulkLeadsIn(_BaseModel):
     ids: List[int] = []
     action: Optional[str] = _Field(None, max_length=20)
@@ -572,7 +579,7 @@ from app.crm import call_queue as _cq
 
 class CallOutcomeIn(_BaseModel):
     outcome: str
-    note: Optional[str] = _Field(None, max_length=1000)
+    note: Optional[str] = _Field(None, max_length=_TEXT)
     callback_at: Optional[datetime] = None
     visit_at: Optional[datetime] = None
 
@@ -1367,8 +1374,8 @@ class ContactIn(_BaseModel):
     contact_type: Optional[str] = _Field(None, max_length=50)
     category: Optional[str] = _Field(None, max_length=50)
     city: Optional[str] = _Field(None, max_length=100)
-    address: Optional[str] = _Field(None, max_length=2000)
-    notes: Optional[str] = _Field(None, max_length=5000)
+    address: Optional[str] = _Field(None, max_length=_TEXT)
+    notes: Optional[str] = _Field(None, max_length=_TEXT)
     tags: Optional[Union[List[str], str]] = None
 
 
@@ -1619,8 +1626,8 @@ class CustomerIn(_BaseModel):
     desired_city: Optional[str] = _Field(None, max_length=100)
     desired_type: Optional[str] = _Field(None, max_length=20)
     deal_type: Optional[str] = _Field(None, max_length=10)
-    red_lines: Optional[str] = _Field(None, max_length=5000)
-    notes: Optional[str] = _Field(None, max_length=5000)
+    red_lines: Optional[str] = _Field(None, max_length=_TEXT)
+    notes: Optional[str] = _Field(None, max_length=_TEXT)
     showings: Optional[List[dict]] = None
     followups: Optional[List[dict]] = None
 
@@ -1742,24 +1749,26 @@ async def list_dpa(
 
 
 class DpaIn(_BaseModel):
+    # counts stay as loose as _apply_dpa_payload makes them: 2.5 is saved as 2,
+    # junk is skipped — as a whole form, not a 422
     agent_name: Optional[str] = _Field(None, max_length=200)
     role: Optional[str] = _Field(None, max_length=20)
     date_jalali: Optional[str] = _Field(None, max_length=20)
-    target_points: Optional[int] = None
-    new_files: Optional[int] = None
-    showings_count: Optional[int] = None
-    offers_count: Optional[int] = None
-    closed_count: Optional[int] = None
+    target_points: Optional[Union[float, str]] = None
+    new_files: Optional[Union[float, str]] = None
+    showings_count: Optional[Union[float, str]] = None
+    offers_count: Optional[Union[float, str]] = None
+    closed_count: Optional[Union[float, str]] = None
     base_tasks: Optional[dict] = None
     activities: Optional[dict] = None
-    bonus_exclusive: Optional[int] = None
-    bonus_offer: Optional[int] = None
-    bonus_close: Optional[int] = None
-    pen_crm_delay: Optional[int] = None
-    pen_cancel: Optional[int] = None
-    pen_hot_lead: Optional[int] = None
-    mentor_feedback: Optional[str] = _Field(None, max_length=5000)
-    rca: Optional[str] = _Field(None, max_length=5000)
+    bonus_exclusive: Optional[Union[float, str]] = None
+    bonus_offer: Optional[Union[float, str]] = None
+    bonus_close: Optional[Union[float, str]] = None
+    pen_crm_delay: Optional[Union[float, str]] = None
+    pen_cancel: Optional[Union[float, str]] = None
+    pen_hot_lead: Optional[Union[float, str]] = None
+    mentor_feedback: Optional[str] = _Field(None, max_length=_TEXT)
+    rca: Optional[str] = _Field(None, max_length=_TEXT)
 
 
 @router.post("/dpa")
@@ -1835,7 +1844,7 @@ async def list_notes(
 
 
 class NoteIn(_BaseModel):
-    content: Optional[str] = _Field(None, max_length=10000)
+    content: Optional[str] = _Field(None, max_length=_TEXT)
     contact_id: Optional[int] = None
     property_id: Optional[int] = None
     deal_id: Optional[int] = None
@@ -1843,7 +1852,7 @@ class NoteIn(_BaseModel):
 
 
 class NoteUpdate(_BaseModel):
-    content: Optional[str] = _Field(None, max_length=10000)
+    content: Optional[str] = _Field(None, max_length=_TEXT)
 
 
 @router.post("/notes")
@@ -1943,7 +1952,7 @@ async def list_tasks(
 
 class TaskIn(_BaseModel):
     title: Optional[str] = _Field(None, max_length=500)
-    description: Optional[str] = _Field(None, max_length=10000)
+    description: Optional[str] = _Field(None, max_length=_TEXT)
     due_date: Optional[str] = _Field(None, max_length=40)
     priority: Optional[str] = _Field(None, max_length=20)
     status: Optional[str] = _Field(None, max_length=20)
@@ -2103,7 +2112,7 @@ class DealIn(_BaseModel):
     amount: Optional[Union[int, float]] = None
     commission: Optional[Union[int, float]] = None
     commission_paid: Optional[bool] = None
-    notes: Optional[str] = _Field(None, max_length=10000)
+    notes: Optional[str] = _Field(None, max_length=_TEXT)
     contract_date: Optional[str] = _Field(None, max_length=40)
     close_date: Optional[str] = _Field(None, max_length=40)
 
@@ -2727,8 +2736,8 @@ class CalendarEventIn(_BaseModel):
     customer_id: Optional[int] = None
     contact_id: Optional[int] = None
     deal_id: Optional[int] = None
-    description: Optional[str] = _Field(None, max_length=10000)
-    outcome: Optional[str] = _Field(None, max_length=10000)
+    description: Optional[str] = _Field(None, max_length=_TEXT)
+    outcome: Optional[str] = _Field(None, max_length=_TEXT)
     status: Optional[str] = _Field(None, max_length=20)
     remind_before: Optional[int] = None
     sms_reminder: Optional[bool] = None

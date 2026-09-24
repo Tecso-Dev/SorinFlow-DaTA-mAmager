@@ -166,7 +166,9 @@ async def _binder_ids_within(db, binder_id: int) -> list:
 
 
 class CabinetIn(_BaseModel):
-    name: Optional[str] = _Field(None, max_length=120)
+    # no cap: the handler cuts it to 120 as it always has — a longer name was
+    # saved shortened, and must not start answering 422
+    name: Optional[str] = None
     color: Optional[str] = _Field(None, max_length=20)
     icon: Optional[str] = _Field(None, max_length=40)
     personal: Optional[bool] = None
@@ -264,13 +266,13 @@ async def delete_cabinet(
 # ── binders ─────────────────────────────────────────────────────────────
 
 class BinderIn(_BaseModel):
-    name: Optional[str] = _Field(None, max_length=120)
+    name: Optional[str] = None                 # cut to 120 by the handler
     parent_id: Optional[int] = None
     cabinet_id: Optional[int] = None
     kind: Optional[str] = _Field(None, max_length=20)
     deal_type: Optional[str] = _Field(None, max_length=20)
     color: Optional[str] = _Field(None, max_length=20)
-    description: Optional[str] = _Field(None, max_length=300)
+    description: Optional[str] = None          # cut to 300 by the handler
 
 
 @router.post("/binders")

@@ -196,10 +196,13 @@ class TestDpa:
         assert r.status_code == 200, r.text
         assert r.json()["new_files"] == 3
 
-    def test_a_non_numeric_count_is_refused(self, client, root_headers):
+    def test_counts_stay_as_forgiving_as_the_form_has_always_been(self, client, root_headers):
+        """The handler has always saved 2.5 as 2 and skipped junk. A typed
+        model that 422'd the whole form on one of them lost the day's entry."""
         r = client.post("/api/crm/dpa", headers=root_headers,
-                        json={"agent_name": "م", "new_files": "زیاد"})
-        assert r.status_code == 422, r.text
+                        json={"agent_name": "م", "new_files": 2.5, "showings_count": "زیاد"})
+        assert r.status_code == 200, r.text
+        assert r.json()["new_files"] == 2 and r.json()["showings_count"] == 0
 
 
 class TestNotes:
@@ -236,6 +239,13 @@ class TestDeals:
         r = client.post("/api/crm/deals", headers=root_headers,
                         json={"title": "معاملهٔ تستی", "amount": 1_500_000_000})
         assert r.status_code == 200 and r.json()["title"] == "معاملهٔ تستی", r.text
+
+    def test_long_notes_still_save(self, client, root_headers):
+        """crm_deals.notes is Text; a deal made from a lead carries its call
+        log. A 10 000-character cap made such a deal unsavable from its form."""
+        r = client.post("/api/crm/deals", headers=root_headers,
+                        json={"title": "یادداشت بلند", "notes": "ی" * 20_000})
+        assert r.status_code == 200 and len(r.json()["notes"]) == 20_000, r.text
 
     def test_a_non_numeric_amount_is_refused(self, client, root_headers):
         r = client.post("/api/crm/deals", headers=root_headers,
@@ -308,9 +318,9 @@ class TestCabinetsAndBinders:
                              json={"name": "زونکن تستی", "cabinet_id": cab_id})
         assert binder.status_code == 200 and binder.json()["name"] == "زونکن تستی", binder.text
 
-    def test_a_cabinet_name_past_the_column_width_is_refused(self, client, root_headers):
+    def test_a_long_cabinet_name_is_saved_shortened_as_before(self, client, root_headers):
         r = client.post("/api/filing/cabinets", headers=root_headers, json={"name": "ک" * 200})
-        assert r.status_code == 422, r.text
+        assert r.status_code == 200 and r.json()["name"] == "ک" * 120, r.text
 
     def test_a_non_numeric_cabinet_id_on_a_binder_is_refused(self, client, root_headers):
         r = client.post("/api/filing/binders", headers=root_headers,
