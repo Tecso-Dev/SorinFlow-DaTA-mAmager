@@ -143,6 +143,13 @@ gpg --batch --yes --pinentry-mode loopback --no-symkey-cache \
   -o "$WORK/enc.gpg" "$WORK/plain.tar"
 rm -f "$WORK/plain.tar"
 
+# A bundle stays in the outbox until Telegram takes it. With Telegram out
+# of reach for a week, every night would add another full bundle to the
+# data volume until it filled; the newest undelivered one is all a retry
+# needs. (Stamps sort by time; nullglob is on from step 4.)
+STALE=( "$DDIR"/dr-outbox/*/ )
+for ((i = 0; i < ${#STALE[@]} - 1; i++)); do rm -rf "${STALE[i]}"; done
+
 OUTDIR="$DDIR/dr-outbox/$STAMP"
 mkdir -p "$OUTDIR"
 PART_PREFIX="sorinflow-dr-$STAMP.tar.gpg.part"

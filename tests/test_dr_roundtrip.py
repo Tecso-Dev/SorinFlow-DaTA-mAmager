@@ -176,6 +176,9 @@ def pipeline(tmp_path_factory):
     (prof / "Default" / "Preferences").write_text('{"pref": true}')
     (prof / "GrShaderCache").mkdir(parents=True)
     (prof / "GrShaderCache" / "shader0").write_bytes(b"SHADER-JUNK")
+    for stale in ("20200101-000000", "20200102-000000"):     # undelivered, earlier nights
+        (pvc / "dr-outbox" / stale).mkdir(parents=True)
+        (pvc / "dr-outbox" / stale / "part").write_bytes(b"OLD")
     (pvc / "downloads").mkdir()
     (pvc / "downloads" / "sorinflow-forwarder.apk").write_bytes(b"APK-BYTES")
     (pvc / "backups").mkdir()
@@ -371,6 +374,10 @@ class TestRestore:
     def test_traefik_acme_json_round_trips(self, pipeline):
         original = (pipeline["base"] / "traefik" / "acme.json").read_text()
         assert (pipeline["outdir"] / "k8s" / "traefik-acme.json").read_text() == original
+
+    def test_undelivered_bundles_do_not_pile_up(self, pipeline):
+        left = sorted(d.name for d in (pipeline["pvc"] / "dr-outbox").iterdir())
+        assert left == ["20200102-000000"], left
 
     def test_data_pvc_keeps_avatars_cookies_and_profiles_but_drops_photos_and_cache(self, pipeline):
         outdir = pipeline["outdir"]

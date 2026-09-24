@@ -111,7 +111,9 @@ async def ship(bundle_dir: Path, db=None) -> dict:
     """Send one bundle's parts to every configured chat. Never raises.
 
     Delivered = at least one chat received every part. The directory is
-    removed once delivered; the host keeps its own copies."""
+    removed once delivered: Telegram holds the only copy on purpose — one on
+    this server's disk would be lost with the server it exists to replace.
+    An undelivered bundle stays for the next attempt."""
     from app.database import async_session_maker
     from app.services import backup_service as bk
 
