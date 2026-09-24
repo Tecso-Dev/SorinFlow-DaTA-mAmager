@@ -376,9 +376,9 @@ async def spend_ip_budget(request, bucket: str) -> None:
         pass
 
 
-# Failed staff logins per address. check_login_rate stops one account being
+# Failed staff logins per address. The account budget stops one account being
 # guessed; this stops one host trying a common password on many. A fixed
-# quarter of an hour from the first failure, not pushed back by later ones:
+# quarter of an hour from the first attempt, not pushed back by later ones:
 # an office behind one NAT does not mistype twenty times in it, and a spray is
 # held to about two thousand guesses a day per address.
 LOGIN_IP_LIMIT = 20
@@ -406,41 +406,72 @@ def login_ip(request) -> str | None:
     return str(addr)
 
 
-async def check_login_ip(request) -> None:
-    """Raise VerificationError once this address has spent its failures.
+def _ip_login_key(request):
+    ip = login_ip(request)
+    return (f"{_NS}:ip:login:{ip}", LOGIN_IP_WINDOW, LOGIN_IP_LIMIT) if ip else None
 
-    Fails open when Redis is unavailable, like check_login_rate.
+
+async def take_login_attempt(request, identifier: str) -> None:
+    """Count this attempt against the account and the address, then decide.
+
+    Counted first and atomically, not checked and recorded afterwards: a burst
+    of parallel guesses would all read «under the limit» before the first
+    failure was written. Each window is fixed from its first attempt — SET NX
+    EX then INCR in one transaction, so a key never counts without an expiry.
+    A refused attempt is handed back, so retrying while locked neither
+    lengthens the lock nor spends the office's address. A wrong password or
+    code needs nothing further; a right one calls login_attempt_passed.
+
+    Raises VerificationError with retry_after. Fails open when Redis is
+    unavailable, like check_login_rate.
     """
-    ip = login_ip(request)
-    if not ip:
-        return
-    key = f"{_NS}:ip:login:{ip}"
-    try:
-        r = await get_redis()
-        fails = int(await r.get(key) or 0)
-        ttl = await r.ttl(key) if fails >= LOGIN_IP_LIMIT else 0
-    except Exception as e:
-        logger.warning(f"[verification] login ip throttle unavailable, allowing: {e}")
-        return
-    if fails >= LOGIN_IP_LIMIT:
-        raise VerificationError(
-            "تلاش‌های ناموفق از این دستگاه بیش از حد مجاز است. "
-            f"{max(ttl // 60, 1)} دقیقهٔ دیگر تلاش کنید",
-            retry_after=max(ttl, 1))
-
-
-async def record_login_ip_failure(request) -> None:
-    ip = login_ip(request)
-    if not ip:
-        return
-    key = f"{_NS}:ip:login:{ip}"
+    # the account key is check_login_rate's, so the two share one budget
+    keys = [(f"{_NS}:login:{_norm(identifier)}", 900, settings.auth_login_max_attempts)]
+    ipk = _ip_login_key(request)
+    if ipk:
+        keys.append(ipk)
     try:
         r = await get_redis()
         pipe = r.pipeline()
-        # One transaction: the window starts with the first failure and a
-        # key can never be left counting with no expiry.
-        pipe.set(key, 0, ex=LOGIN_IP_WINDOW, nx=True)
-        pipe.incr(key)
+        for key, window, _limit in keys:
+            pipe.set(key, 0, ex=window, nx=True)
+            pipe.incr(key)
+            pipe.ttl(key)
+        res = await pipe.execute()
+    except Exception as e:
+        logger.warning(f"[verification] login throttle unavailable, allowing: {e}")
+        return
+    over = [(i, res[3 * i + 2]) for i, (_k, _w, limit) in enumerate(keys)
+            if res[3 * i + 1] > limit]
+    if not over:
+        return
+    await _hand_back(keys)
+    i, ttl = over[0]
+    raise VerificationError(
+        (f"تلاش‌های ناموفق بیش از حد مجاز. {max(ttl, 1)} ثانیه دیگر تلاش کنید" if i == 0 else
+         "تلاش‌های ناموفق از این دستگاه بیش از حد مجاز است. "
+         f"{max(ttl // 60, 1)} دقیقهٔ دیگر تلاش کنید"),
+        retry_after=max(ttl, 1))
+
+
+async def login_attempt_passed(request) -> None:
+    """The password or code was right: the address gets its attempt back, so
+    an office behind one NAT is never locked out by logging in. The account's
+    count stays until clear_login_failures, once no second factor is owed."""
+    ipk = _ip_login_key(request)
+    if ipk:
+        await _hand_back([ipk])
+
+
+async def _hand_back(keys) -> None:
+    try:
+        r = await get_redis()
+        pipe = r.pipeline()
+        for key, window, _limit in keys:
+            # SET NX first: a key that expired a moment ago comes back with an
+            # expiry rather than as a -1 that never goes away
+            pipe.set(key, 0, ex=window, nx=True)
+            pipe.decr(key)
         await pipe.execute()
     except Exception:
         pass

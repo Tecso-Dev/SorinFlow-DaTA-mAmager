@@ -258,10 +258,59 @@ def test_an_account_locks_and_the_right_password_waits_out_the_window(client, re
     assert _login(client, "lh_lock").status_code == 200
 
 
+@pytest.fixture
+def real_redis(monkeypatch):
+    """The Redis the suite runs against, for what the fake cannot show: its
+    calls never yield to the event loop, so requests never interleave there."""
+    import redis
+    import redis.asyncio as aioredis
+    import app.services.verification as v
+    url = os.environ.get("REDIS_URL", "redis://localhost:6379/9")
+    made = {}
+
+    async def _get():
+        # built on first use, inside the app's own event loop
+        if "r" not in made:
+            made["r"] = aioredis.from_url(url, decode_responses=True)
+        return made["r"]
+    monkeypatch.setattr(v, "get_redis", _get)
+    sync = redis.Redis.from_url(url, decode_responses=True)
+    yield sync
+    for k in sync.scan_iter("sf:auth:*lh_*"):
+        sync.delete(k)
+
+
+def test_a_burst_of_parallel_guesses_gets_no_more_than_the_limit(client, real_redis):
+    """Checked-then-recorded, every request in a burst reads «under the limit»
+    before the first failure is written: thirty at once were thirty guesses."""
+    uid = _mk_user("lh_burst")
+    real_redis.delete(f"sf:auth:login:uid:{uid}")
+    n = 3 * _max()
+    gate = threading.Barrier(n)
+
+    def guess(i):
+        gate.wait()
+        return _login(client, "lh_burst", f"guess-{i}").status_code
+
+    with ThreadPoolExecutor(n) as pool:
+        codes = list(pool.map(guess, range(n)))
+    assert codes.count(401) == _max() and codes.count(429) == n - _max(), codes
+
+
 def test_a_name_that_does_not_exist_locks_the_same_way(client):
     """Otherwise the 429 itself would say which names are real."""
     codes = [_login(client, "lh_nobody_at_all", "x").status_code for _ in range(_max() + 1)]
     assert codes == [401] * _max() + [429]
+
+
+def test_typing_an_accounts_internal_key_does_not_spend_its_budget(client):
+    """Accounts are counted under uid:<id>. A made-up name spelled the same
+    must not land on that counter, or every account could be locked by
+    walking the ids without knowing one username."""
+    uid = _mk_user("lh_by_id")
+    for _ in range(_max() + 1):
+        _login(client, f"uid:{uid}", "x")
+    assert _login(client, "lh_by_id").status_code == 200
 
 
 def test_a_finished_login_clears_the_account_count(client):
@@ -274,12 +323,13 @@ def test_a_finished_login_clears_the_account_count(client):
 
 def test_totp_guesses_count_and_the_right_code_waits_too(client):
     """The password is not the only thing guessed: a five-minute session used
-    to take any number of codes."""
+    to take any number of codes. The password step itself stays counted until
+    the code is paid, so it is one of the ten."""
     totp = _totp_user("lh_totp_guess")
     half = _half(client, "lh_totp_guess")
     right = totp.now()
     wrong = f"{(int(right) + 1) % 1_000_000:06d}"
-    for _ in range(_max()):
+    for _ in range(_max() - 1):
         r = client.post("/api/users/token/verify-totp", json={"totp_session": half, "code": wrong})
         assert r.status_code == 401
     r = client.post("/api/users/token/verify-totp", json={"totp_session": half, "code": right})
@@ -298,6 +348,15 @@ def test_one_address_spraying_many_names_is_stopped(client):
     assert 0 < int(r.headers["Retry-After"]) <= 900
     # the same account from anywhere else is untouched
     assert _login(client, "lh_spray_target", xff="149.154.167.99").status_code == 200
+
+
+def test_an_office_behind_one_address_is_not_locked_by_logging_in(client):
+    """A right password hands the address its attempt back: the address
+    budget is for failures, and twenty people start work at nine."""
+    from app.services.verification import LOGIN_IP_LIMIT
+    _mk_user("lh_office_nat")
+    for _ in range(LOGIN_IP_LIMIT + 5):
+        assert _login(client, "lh_office_nat", xff="31.56.10.20").status_code == 200
 
 
 def test_a_forged_forwarded_for_neither_dodges_nor_frames(client):

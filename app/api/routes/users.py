@@ -123,26 +123,31 @@ def _account_key(user: User) -> str:
     return f"uid:{user.id}"
 
 
-async def _login_allowed(request: Request, key: str) -> None:
-    """429 once this address or this account has failed too often.
+async def _login_attempt(request: Request, key: str) -> None:
+    """Count this attempt, or 429 once this address or account has spent its.
 
-    Asked before the password or code is looked at, so the right one is
-    refused as well until the window passes — otherwise the lock would only
-    slow a guesser down. Redis down: allowed, with a warning (verification.py).
+    Before the password or code is looked at, so the right one is refused as
+    well until the window passes — otherwise the lock would only slow a
+    guesser down. A wrong answer is already counted; a right one calls
+    _login_passed. Redis down: allowed, with a warning (verification.py).
     """
-    from app.services.verification import check_login_ip, check_login_rate, VerificationError
+    from app.services.verification import take_login_attempt, VerificationError
     try:
-        await check_login_ip(request)
-        await check_login_rate(key)
+        await take_login_attempt(request, key)
     except VerificationError as e:
         raise HTTPException(status_code=429, detail=e.message,
                             headers={"Retry-After": str(e.retry_after)})
 
 
-async def _login_failed(request: Request, key: str) -> None:
-    from app.services.verification import record_login_failure, record_login_ip_failure
-    await record_login_ip_failure(request)
-    await record_login_failure(key)
+async def _login_passed(request: Request, key: str, done: bool) -> None:
+    """The answer was right: the address gets its attempt back. `done` once a
+    token is issued: only then is the account's count cleared — clearing it on
+    the password alone would let whoever holds it reset the count between
+    code guesses."""
+    from app.services.verification import login_attempt_passed, clear_login_failures
+    await login_attempt_passed(request)
+    if done:
+        await clear_login_failures(key)
 
 
 def _mask_email(addr: str) -> str:
@@ -185,20 +190,22 @@ async def login(
 
     # A name that does not exist is charged to what was typed, so it runs out
     # exactly like one that does and the 429 says nothing about which is real.
-    key = _account_key(user) if user else ident
-    await _login_allowed(request, key)
+    # Prefixed, or typing «uid:1» would spend account 1's budget: every
+    # account locked without knowing a single username.
+    key = _account_key(user) if user else f"name:{ident}"
+    await _login_attempt(request, key)
 
     # One bcrypt round whether or not the name exists. An inactive account
     # is checked in full too; it is only told so after its password is right.
     ok = verify_password(form.password,
                          user.hashed_password if user else DUMMY_PASSWORD_HASH)
     if not user or not ok:
-        await _login_failed(request, key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="نام کاربری یا رمز عبور اشتباه است",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    await _login_passed(request, key, done=False)
     if not user.is_active:
         raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال است")
 
@@ -248,8 +255,7 @@ async def login(
         )
         return TokenResponse(requires_totp=True, totp_session=totp_session)
 
-    # Cleared only once no second factor is owed. Clearing on the password
-    # alone would let whoever holds it reset the count between code guesses.
+    # no second factor owed: the login is done
     from app.services.verification import clear_login_failures
     await clear_login_failures(key)
     user.last_login = datetime.now(timezone.utc)
@@ -283,7 +289,7 @@ async def verify_email_login(
     from app.auth.jwt import decode_token
     from app.services.verification import (
         verify_code, VerificationError, check_ip_budget, spend_ip_budget,
-        IP_VERIFY_LIMIT, clear_login_failures)
+        IP_VERIFY_LIMIT)
 
     try:
         await check_ip_budget(request, "verify", IP_VERIFY_LIMIT)
@@ -302,17 +308,16 @@ async def verify_email_login(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="حساب کاربری در دسترس نیست")
     key = _account_key(user)
-    await _login_allowed(request, key)
+    await _login_attempt(request, key)
 
     try:
         await verify_code(PURPOSE_EMAIL_2FA, username, data.code)
     except VerificationError as e:
         # A wrong guess is the thing the budget exists to count.
         await spend_ip_budget(request, "verify")
-        await _login_failed(request, key)
         raise HTTPException(status_code=400, detail=e.message)
 
-    await clear_login_failures(key)
+    await _login_passed(request, key, done=True)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     return TokenResponse(
@@ -460,18 +465,15 @@ async def verify_totp_login(
     # The session lives five minutes and takes any number of codes; this is
     # what stops it being a million-guess ticket.
     key = _account_key(user)
-    await _login_allowed(request, key)
+    await _login_attempt(request, key)
 
     step = _totp_step(user.totp_secret, data.code) if user.totp_secret else None
     if step is None:
-        await _login_failed(request, key)
         raise HTTPException(status_code=401, detail="کد احراز هویت اشتباه است")
     if not await _claim_totp_step(db, user, step):
-        await _login_failed(request, key)
         raise HTTPException(status_code=401, detail=TOTP_REUSED)
 
-    from app.services.verification import clear_login_failures
-    await clear_login_failures(key)
+    await _login_passed(request, key, done=True)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
 
@@ -1074,18 +1076,12 @@ async def totp_disable(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.services.verification import (
-        check_login_rate, record_login_failure, clear_login_failures, VerificationError)
+    from app.services.verification import clear_login_failures
 
-    # The throttle «change password» has, on the same budget: a stolen session
-    # must not get unlimited guesses at the password here instead.
-    try:
-        await check_login_rate(current_user.username)
-    except VerificationError as e:
-        raise HTTPException(status_code=429, detail=e.message,
-                            headers={"Retry-After": str(e.retry_after)})
+    # On the budget «change password» uses (keyed on the username): a stolen
+    # session must not get unlimited guesses at the password here instead.
+    await _login_attempt(None, current_user.username)
     if not verify_password(data.password, current_user.hashed_password):
-        await record_login_failure(current_user.username)
         raise HTTPException(status_code=400, detail="رمز عبور اشتباه است")
     await clear_login_failures(current_user.username)
 
