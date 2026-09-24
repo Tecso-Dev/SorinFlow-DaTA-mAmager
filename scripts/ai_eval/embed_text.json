@@ -1,0 +1,183 @@
+[
+  {
+    "key": "E1",
+    "title": "آپارتمان ۹۵ متری خیابان گلها",
+    "district": "خیابان گلها", "city_name": "ارومیه", "property_type": "آپارتمان",
+    "listing_type": "buy", "area": 95, "rooms": 2,
+    "description": "آپارتمان تمیز و نورگیر، بازدید با هماهنگی قبلی.",
+    "ai_facts": {
+      "kind": "apartment", "document": "تک‌برگ", "condition": "نوساز",
+      "has_elevator": true, "has_parking": true, "has_storage": false, "has_balcony": true,
+      "convertible": false, "exchange": false, "vacant": true, "negotiable": false,
+      "suitable_for": [], "red_flags": [],
+      "summary": "آپارتمان ۹۵ متری دوخوابه در خیابان گلها با آسانسور و پارکینگ"
+    },
+    "expect_in_text": [
+      "آپارتمان ۹۵ متری دوخوابه در خیابان گلها با آسانسور و پارکینگ",
+      "آسانسور", "پارکینگ", "بالکن", "تخلیه", "تک‌برگ", "نوساز"
+    ]
+  },
+  {
+    "key": "E2",
+    "title": "مغازه ۳۰ متری خیابان کاشانی، رهن و اجاره",
+    "district": "خیابان کاشانی", "city_name": "ارومیه", "property_type": "مغازه",
+    "listing_type": "rent", "area": 30,
+    "description": "مغازه با کف سرامیک و سرویس بهداشتی مستقل.",
+    "ai_facts": {
+      "kind": "shop", "document": "قولنامه‌ای", "condition": "بازسازی‌شده",
+      "has_elevator": false, "has_parking": true, "has_storage": true, "has_balcony": false,
+      "convertible": true, "exchange": false, "vacant": false, "negotiable": true,
+      "suitable_for": [], "red_flags": ["سند قولنامه‌ای"],
+      "summary": "مغازه ۳۰ متری با بر مناسب در خیابان کاشانی، رهن و اجاره قابل تبدیل"
+    },
+    "expect_in_text": [
+      "مغازه ۳۰ متری با بر مناسب در خیابان کاشانی، رهن و اجاره قابل تبدیل",
+      "پارکینگ", "انباری", "قابل تبدیل", "قابل مذاکره", "قولنامه‌ای", "بازسازی‌شده", "سند قولنامه‌ای"
+    ]
+  },
+  {
+    "key": "E3",
+    "title": "مغازه ۴۰ متری بلوار سعدی مناسب کافه",
+    "district": "بلوار سعدی", "city_name": "ارومیه", "property_type": "مغازه",
+    "listing_type": "buy", "area": 40,
+    "description": "مغازه خالی، تحویل فوری، نورگیر عالی.",
+    "ai_facts": {
+      "kind": "shop", "document": "سرقفلی", "condition": null,
+      "has_elevator": null, "has_parking": false, "has_storage": false, "has_balcony": false,
+      "convertible": false, "exchange": false, "vacant": true, "negotiable": false,
+      "suitable_for": ["کافه", "رستوران"], "red_flags": [],
+      "summary": "مغازه ۴۰ متری تخلیه در بلوار سعدی، مناسب کافه و رستوران"
+    },
+    "expect_in_text": [
+      "مغازه ۴۰ متری تخلیه در بلوار سعدی، مناسب کافه و رستوران",
+      "کافه", "رستوران", "تخلیه", "سرقفلی"
+    ]
+  },
+  {
+    "key": "E4",
+    "title": "خانه قدیمی ۲۰۰ متری بلوار استادان",
+    "district": "بلوار استادان", "city_name": "ارومیه", "property_type": "مغازه",
+    "listing_type": "buy", "area": 200, "rooms": 3,
+    "description": "بنای قدیمی با حیاط بزرگ، برای اهل ذوق.",
+    "ai_facts": {
+      "kind": "house", "document": "وقفی", "condition": "کلنگی",
+      "has_elevator": false, "has_parking": false, "has_storage": false, "has_balcony": false,
+      "convertible": false, "exchange": true, "vacant": false, "negotiable": true,
+      "suitable_for": ["مهدکودک"], "red_flags": ["وقفی", "بدون سند"],
+      "summary": "خانه ویلایی کلنگی ۲۰۰ متری در بلوار استادان، قابل معاوضه"
+    },
+    "expect_in_text": [
+      "خانه ویلایی کلنگی ۲۰۰ متری در بلوار استادان، قابل معاوضه",
+      "مهدکودک", "وقفی", "بدون سند", "معاوضه", "قابل مذاکره", "کلنگی"
+    ]
+  },
+  {
+    "key": "E5",
+    "title": "دفتر اداری ۵۵ متری خیابان مدرس",
+    "district": "خیابان مدرس", "city_name": "ارومیه", "property_type": "اداری",
+    "listing_type": "rent", "area": 55,
+    "description": "دفتر رو به حیاط، آبونمان مستقل.",
+    "ai_facts": {
+      "kind": "office", "document": "مشاع", "condition": null,
+      "has_elevator": true, "has_parking": false, "has_storage": false, "has_balcony": false,
+      "convertible": false, "exchange": false, "vacant": false, "negotiable": true,
+      "suitable_for": ["دفتر وکالت"], "red_flags": [],
+      "summary": "دفتر اداری ۵۵ متری در خیابان مدرس، رهن و اجاره قابل مذاکره"
+    },
+    "expect_in_text": [
+      "دفتر اداری ۵۵ متری در خیابان مدرس، رهن و اجاره قابل مذاکره",
+      "آسانسور", "قابل مذاکره", "مشاع", "دفتر وکالت"
+    ]
+  },
+  {
+    "key": "E6",
+    "title": "آپارتمان ۷۰ متری شهرک فرهنگیان",
+    "district": "شهرک فرهنگیان", "city_name": "ارومیه", "property_type": "آپارتمان",
+    "listing_type": "buy", "area": 70, "rooms": 1,
+    "description": "واحد کوچک، مناسب زوج جوان.",
+    "ai_facts": {
+      "kind": "apartment", "document": null, "condition": "معمولی",
+      "has_elevator": false, "has_parking": false, "has_storage": false, "has_balcony": true,
+      "convertible": false, "exchange": false, "vacant": false, "negotiable": false,
+      "suitable_for": [], "red_flags": [],
+      "summary": "آپارتمان ۷۰ متری یک‌خوابه در شهرک فرهنگیان"
+    },
+    "expect_in_text": [
+      "آپارتمان ۷۰ متری یک‌خوابه در شهرک فرهنگیان",
+      "بالکن", "معمولی"
+    ]
+  },
+  {
+    "key": "E7",
+    "title": "زمین ۳۰۰ متری بلوار رودکی",
+    "district": "بلوار رودکی", "city_name": "ارومیه", "property_type": "زمین",
+    "listing_type": "buy", "area": 300,
+    "description": "زمین با سند مشاع، مناسب انبارداری.",
+    "ai_facts": {
+      "kind": "land", "document": "مشاع", "condition": null,
+      "has_elevator": null, "has_parking": null, "has_storage": null, "has_balcony": null,
+      "convertible": false, "exchange": false, "vacant": true, "negotiable": true,
+      "suitable_for": ["انبار"], "red_flags": ["مشاع"],
+      "summary": "زمین ۳۰۰ متری در بلوار رودکی، سند مشاع، مناسب انبار"
+    },
+    "expect_in_text": [
+      "زمین ۳۰۰ متری در بلوار رودکی، سند مشاع، مناسب انبار",
+      "انبار", "مشاع", "تخلیه", "قابل مذاکره"
+    ]
+  },
+  {
+    "key": "E8",
+    "title": "آپارتمان ۹۰ متری خیابان ورزش، رهن و اجاره",
+    "district": "خیابان ورزش", "city_name": "ارومیه", "property_type": "آپارتمان",
+    "listing_type": "rent", "area": 90, "rooms": 2,
+    "description": "واحد ساده، بدون امکانات خاص.",
+    "ai_facts": {
+      "kind": "apartment", "document": null, "condition": "نوساز",
+      "has_elevator": false, "has_parking": false, "has_storage": false, "has_balcony": false,
+      "convertible": false, "exchange": false, "vacant": false, "negotiable": false,
+      "suitable_for": [], "red_flags": [],
+      "summary": "آپارتمان ۹۰ متری دوخوابه در خیابان ورزش"
+    },
+    "expect_in_text": [
+      "آپارتمان ۹۰ متری دوخوابه در خیابان ورزش",
+      "نوساز"
+    ]
+  },
+  {
+    "key": "E9",
+    "title": "مغازه ۴۵ متری باغ ملی",
+    "district": "باغ ملی", "city_name": "ارومیه", "property_type": "مغازه",
+    "listing_type": "buy", "area": 45,
+    "description": "مغازه در طبقه همکف، بر عریض.",
+    "ai_facts": {
+      "kind": "shop", "document": "تک‌برگ", "condition": null,
+      "has_elevator": null, "has_parking": false, "has_storage": true, "has_balcony": false,
+      "convertible": false, "exchange": false, "vacant": true, "negotiable": false,
+      "suitable_for": ["موبایل‌فروشی", "لوازم آرایشی"], "red_flags": ["در رهن بانک"],
+      "summary": "مغازه ۴۵ متری تخلیه در باغ ملی، مناسب موبایل‌فروشی"
+    },
+    "expect_in_text": [
+      "مغازه ۴۵ متری تخلیه در باغ ملی، مناسب موبایل‌فروشی",
+      "موبایل‌فروشی", "لوازم آرایشی", "در رهن بانک", "تک‌برگ", "تخلیه", "انباری"
+    ]
+  },
+  {
+    "key": "E10",
+    "title": "آپارتمان ۱۱۰ متری خیابان دانشکده، فول امکانات",
+    "district": "خیابان دانشکده", "city_name": "ارومیه", "property_type": "آپارتمان",
+    "listing_type": "buy", "area": 110, "rooms": 3,
+    "description": "آپارتمان تمیز با بازسازی کامل.",
+    "ai_facts": {
+      "kind": "apartment", "document": "تک‌برگ", "condition": "نوساز",
+      "has_elevator": true, "has_parking": true, "has_storage": true, "has_balcony": true,
+      "convertible": true, "exchange": true, "vacant": true, "negotiable": true,
+      "suitable_for": ["دفتر"], "red_flags": ["مشاع"],
+      "summary": "آپارتمان ۱۱۰ متری سه‌خوابه فول امکانات در خیابان دانشکده"
+    },
+    "expect_in_text": [
+      "آپارتمان ۱۱۰ متری سه‌خوابه فول امکانات در خیابان دانشکده",
+      "آسانسور", "پارکینگ", "انباری", "بالکن", "قابل تبدیل", "معاوضه", "تخلیه", "قابل مذاکره",
+      "تک‌برگ", "نوساز", "دفتر", "مشاع"
+    ]
+  }
+]
