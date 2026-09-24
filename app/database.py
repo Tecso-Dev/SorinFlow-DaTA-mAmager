@@ -106,6 +106,7 @@ async def init_db():
     # Order still matters where one migration depends on another's columns;
     # it is preserved. What changed is the blast radius when one fails.
     for step in (_migrate_users_totp,
+                 _migrate_users_totp_last_step,
                  _migrate_users_divar_phone,
                  _migrate_scraping_jobs_divar_phone,
                  _migrate_properties_owner_phone,
@@ -845,6 +846,29 @@ async def _migrate_users_totp(conn):
             ))
     except Exception:
         pass
+
+
+async def _migrate_users_totp_last_step(conn):
+    """users.totp_last_step (Alembic 0010 adds it too).
+
+    Also here because the User model selects it on every query and Alembic's
+    failures at boot are only logged: a skipped 0010 would fail every login.
+    The catalog is asked first, so a boot with nothing to add never queues for
+    the lock.
+    """
+    try:
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='users' AND column_name='totp_last_step' "
+            "AND table_schema=current_schema()"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step BIGINT"
+            ))
+    except Exception as e:
+        print(f"totp_last_step migration skipped: {e}")
 
 
 async def _migrate_users_divar_phone(conn):
