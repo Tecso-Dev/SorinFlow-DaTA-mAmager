@@ -132,3 +132,24 @@ def test_multiple_files_are_independent():
         "+z\n"
     )
     assert parse_unified_diff(diff) == {"app/a.py": {1}, "app/b.py": {10}}
+
+
+def test_a_mypy_error_without_a_line_number_fails_the_gate(monkeypatch):
+    """mypy's «Source file found twice» (a test importing a script by its bare
+    name) stops it before it checks anything; parsed as «no findings», the
+    gate passed on the whole phase without having looked."""
+    import subprocess
+    from scripts import lint_new_code as gate
+
+    class _Done:
+        returncode = 1
+        stdout = ('scripts/lint_new_code.py: error: Source file found twice under different '
+                  'module names: "lint_new_code" and "scripts.lint_new_code"\n')
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Done())
+    out = gate.run_mypy(["scripts/lint_new_code.py"], {"scripts/lint_new_code.py": {1}})
+    assert out and "stopped before checking" in out[0]
+
+    _Done.returncode, _Done.stdout = 2, "mypy: error: invalid config\n"
+    assert "failed to run" in gate.run_mypy(["a.py"], {"a.py": {1}})[0]

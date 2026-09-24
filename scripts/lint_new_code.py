@@ -39,6 +39,8 @@ HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))
 # mypy's normal (non-JSON) output: "path/to/file.py:12: error: message  [code]"
 # Only "error:" lines count — notes and warnings are noise for a merge gate.
 MYPY_LINE = re.compile(r"^(?P<path>[^:\n]+):(?P<line>\d+):(?:\d+:)?\s*error:\s*(?P<message>.+)$")
+# A file-level error with no line number: mypy gave up on that file (or all).
+MYPY_FATAL = re.compile(r"^[^:\s][^:]*\.py: error: ")
 MYPY_CODE = re.compile(r"\[([a-z0-9-]+)\]\s*$")
 
 
@@ -172,7 +174,16 @@ def run_mypy(files: list[str], changed: dict[str, set[int]]) -> list[str]:
         cwd=REPO_ROOT, capture_output=True, text=True,
     )
     findings = []
+    # 0 = clean, 1 = type errors. Anything else is mypy not running at all, and
+    # an error with no line number («Source file found twice», a config error)
+    # stops it before it checks a single file — both used to parse as «no
+    # findings», so the gate passed without having looked.
+    if proc.returncode not in (0, 1):
+        return [f"lint_new_code: mypy failed to run (exit {proc.returncode}): "
+                f"{(proc.stdout + proc.stderr).strip()[:300]}"]
     for line in proc.stdout.splitlines():
+        if MYPY_FATAL.match(line):
+            return [f"lint_new_code: mypy stopped before checking: {line.strip()[:300]}"]
         m = MYPY_LINE.match(line)
         if not m:
             continue

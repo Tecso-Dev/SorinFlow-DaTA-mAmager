@@ -20,6 +20,11 @@ ignore_missing_imports = true
 # about. No strict flags: this is a gate on new code, not a rewrite of the
 # existing (untyped) codebase.
 follow_imports = "silent"
+# scripts/ and tests/ are not packages, and a test that imports a script by
+# its bare name made mypy see the same file as two modules — «Source file
+# found twice» — and stop before checking anything. Mapping every file by
+# its path from the repository root keeps one name per file.
+explicit_package_bases = true
 
 [tool.coverage.run]
 source = ["app"]
