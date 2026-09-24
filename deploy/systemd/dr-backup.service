@@ -1,0 +1,15 @@
+[Unit]
+Description=SorinFlow disaster-recovery backup
+# The bundle needs kubectl exec into postgres-0 and deploy/backend, so k3s
+# must already be answering.
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Environment=KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+ExecStart=@@REPO@@/scripts/dr_backup.sh
+# A stuck kubectl exec (pod half up) should not wedge the box forever; the
+# next scheduled or requested run tries again from a clean state.
+TimeoutStartSec=30m

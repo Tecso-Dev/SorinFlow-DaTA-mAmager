@@ -1,0 +1,13 @@
+[Unit]
+Description=SorinFlow disaster-recovery backup on request (panel «همین حالا»)
+
+[Path]
+# app/services/dr_backup.py's request_run() drops data/dr-request in the
+# pod, which is @@DATA_PVC@@/dr-request on the host. dr_backup.sh removes
+# the file itself as soon as a run starts, so this does not refire on its
+# own output.
+PathExists=@@DATA_PVC@@/dr-request
+Unit=dr-backup.service
+
+[Install]
+WantedBy=multi-user.target
