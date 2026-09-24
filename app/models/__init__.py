@@ -24,6 +24,7 @@ from app.models.forwarder import ForwarderDevice
 from app.models.scrape_schedule import ScrapeSchedule
 from app.models.ai_usage import AiUsage
 from app.models.ai_chat import AiChat
+from app.models.telegram_link import TelegramLink
 
 __all__ = [
     "Property", "City", "Category",
@@ -31,5 +32,5 @@ __all__ = [
     "Contact", "Deal", "Note", "Task", "Reminder", "SmsLog", "Customer",
     "DailyPerformance", "CalendarEvent", "ActivityLog", "Cabinet", "Binder",
     "User", "PropertyRequest", "UpgradeTicket", "EmailLog", "SmsEvent",
-    "AppSetting", "ForwarderDevice", "ScrapeSchedule", "AiUsage", "AiChat",
+    "AppSetting", "ForwarderDevice", "ScrapeSchedule", "AiUsage", "AiChat", "TelegramLink",
 ]
