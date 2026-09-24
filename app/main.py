@@ -364,16 +364,25 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
-_cors_origins = (
-    [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
-    if settings.cors_origins != "*"
-    else ["*"]
-)
+# CORS. The panel, the portal and the landing page are served from this same
+# origin and need none, and the forwarder app is not a browser — so by default
+# no other origin may call across. Only origins CORS_ORIGINS names may, and
+# "*" never with credentials: Starlette answers a credentialed request under
+# "*" by echoing the caller's Origin, which lets any site read the response.
+# Harmless while logins are bearer tokens; not once they are cookies.
+def _cors_config(value: str):
+    """(allowed origins, whether credentials may ride along) for CORS_ORIGINS."""
+    origins = [o.strip() for o in (value or "").split(",") if o.strip()]
+    if "*" in origins:
+        return ["*"], False
+    return origins, bool(origins)
+
+
+_cors_origins, _cors_credentials = _cors_config(settings.cors_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

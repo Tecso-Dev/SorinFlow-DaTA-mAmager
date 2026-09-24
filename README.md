@@ -1077,7 +1077,7 @@ Cluster secrets and the self-hosted runner must already exist. To bring up a new
 - There are no default credentials any more. `POSTGRES_PASSWORD`, `REDIS_PASSWORD`,
   `SECRET_KEY` and `SUPER_ADMIN_PASSWORD` have no working fallback, so an unset
   one fails loudly instead of quietly accepting a published password.
-- Restrict `CORS_ORIGINS` in production.
+- `CORS_ORIGINS` is empty by default: the panel, portal and landing page are same-origin and need no CORS. List explicit origins only for a frontend served elsewhere; `*` is never combined with credentials.
 - Put the service behind HTTPS and trusted network controls.
 - Protect `data/cookies/`, `data/backups/`, `data/images/`, logs, and database volumes.
 - Treat phone numbers and listing/contact data according to applicable privacy and retention requirements.
