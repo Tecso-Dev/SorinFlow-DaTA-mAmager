@@ -67,8 +67,9 @@
 | شروع `sorinflow-v2` (`2499ba4`) | 3022 | 18 | 0 |
 | بعد از ادغام (`b681d8a`) | 3022 | 18 | 0 |
 | آخر فاز ۰ (`a8e08f4`)، Redis واقعی و `PG_TEST_URL` در یک اجرا | 3035 | 6 | 0 |
+| آخر فاز ۱ (`9c6eb82`)، وابستگی‌های تازه (`~/.venvs/sorinflow-v2`)، Redis و `PG_TEST_URL` | 3140 | 6 | 0 |
 
-- `tests/test_pg_migration.py` با `PG_TEST_URL` (همان alembic check): **10 passed** در هر سه نقطه.
+- `tests/test_pg_migration.py` جدا با `PG_TEST_URL` (همان alembic check): **10 passed** در فاز ۰ و **12 passed** در آخر فاز ۱. تست‌های Worker با `node --test`: **11 passed**. تست escape پنل: **15 check**.
 - دلیل skipها در اجرای معمولی:
   - ۱۰ تست migration که `PG_TEST_URL` می‌خواهند؛
   - ۶ تست `test_fingerprint.py`، چون Chromium مخصوص Playwright در venv این مک نصب نیست؛
