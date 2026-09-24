@@ -220,10 +220,15 @@ async def login(
     ok = verify_password(form.password,
                          user.hashed_password if user else DUMMY_PASSWORD_HASH)
     if not user or not ok:
+        # An unknown name is not stored as typed: a password put in the
+        # username box would sit in the trail for a year. A known one is a
+        # username the table already holds.
         await audit.record(
             "login_failed", actor=user, target_type="user",
             target_id=user.id if user else None,
-            summary=f"تلاش ورود ناموفق برای «{ident}»", detail={"reason": "wrong_password"},
+            summary=(f"تلاش ورود ناموفق برای «{ident}»" if user
+                     else f"تلاش ورود ناموفق با نام کاربری ناشناس ({len(ident)} نویسه)"),
+            detail={"reason": "wrong_password" if user else "unknown_user"},
             request=request)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

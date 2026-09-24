@@ -2,7 +2,7 @@
 رویدادها — the audit trail. Read-only API over what app/services/audit.py
 writes: root and super_admin only, checked inside (like backup.py, sms.py).
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,11 +20,21 @@ router = APIRouter()
 _super_admin = Depends(_role_dep(ROLE_ROOT, ROLE_SUPER_ADMIN))
 
 
+# Fixed +03:30 — the production image has no tz database (CLAUDE.md).
+TEHRAN = timezone(timedelta(hours=3, minutes=30), "Asia/Tehran")
+
+
 def _parse_iso(value: str, field: str) -> datetime:
     try:
-        return datetime.fromisoformat(value)
+        when = datetime.fromisoformat(value)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"{field} نامعتبر است (فرمت ISO 8601)")
+    # the panel sends a bare day — a Tehran day, not the database session's
+    return when.replace(tzinfo=TEHRAN) if when.tzinfo is None else when
+
+
+def _is_bare_date(value: str) -> bool:
+    return len(value.strip()) == 10
 
 
 def _serialize(row: AuditEvent) -> dict:
@@ -66,7 +76,10 @@ async def list_events(
     if since:
         conds.append(AuditEvent.created_at >= _parse_iso(since, "since"))
     if until:
-        conds.append(AuditEvent.created_at <= _parse_iso(until, "until"))
+        end = _parse_iso(until, "until")
+        # «تا ۱۴۰۵/۰۷/۰۲» means through the end of that day, not its first second
+        conds.append(AuditEvent.created_at < end + timedelta(days=1) if _is_bare_date(until)
+                     else AuditEvent.created_at <= end)
 
     total = (await db.execute(
         select(func.count()).select_from(AuditEvent).where(*conds))).scalar() or 0

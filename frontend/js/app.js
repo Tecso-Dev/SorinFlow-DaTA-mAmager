@@ -7446,7 +7446,10 @@ function _toDateStr(jsDate) {
 function jalaliToGregorian(jalaliStr) {
     if (!jalaliStr || !jalaliStr.trim()) return '';
     try {
-        const parts = jalaliStr.trim().split('/').map(Number);
+        // the placeholders say ۱۴۰۵/۰۱/۰۱ — Persian (and Arabic-Indic) digits are what people type
+        const ascii = jalaliStr.trim().replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+                                      .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+        const parts = ascii.split('/').map(Number);
         if (parts.length < 3 || parts.some(isNaN)) return '';
         const jsDate = new persianDate(parts).toDate();
         const result = _toDateStr(jsDate);

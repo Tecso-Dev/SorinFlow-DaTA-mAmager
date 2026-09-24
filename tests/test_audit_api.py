@@ -161,6 +161,15 @@ class TestListingEvents:
         assert body["total"] == 1
         assert body["items"][0]["action"] == "user_delete"
 
+    def test_a_bare_until_day_includes_that_whole_day(self, client, root_user):
+        """The panel sends «تا» as a day. It means through the end of that
+        Tehran day — as midnight it dropped every event of the day itself."""
+        tehran = timezone(timedelta(hours=3, minutes=30))
+        today = datetime.now(tehran).date().isoformat()
+        body = client.get("/api/audit/events", headers=_auth(root_user),
+                          params=_q({"since": today, "until": today})).json()
+        assert any(i["action"] == "login_success" for i in body["items"]), body
+
     def test_bad_since_is_a_400_not_a_500(self, client, root_user):
         r = client.get("/api/audit/events", headers=_auth(root_user),
                        params=_q({"since": "not-a-date"}))
