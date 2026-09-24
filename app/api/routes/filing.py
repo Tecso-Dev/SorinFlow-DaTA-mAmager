@@ -7,9 +7,10 @@ it only says where a file lives and how it is marked (سنجاق / بایگان�
 شخصی / برچسب).
 """
 import re
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel as _BaseModel, Field as _Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -164,12 +165,21 @@ async def _binder_ids_within(db, binder_id: int) -> list:
     return [binder_id, *kids]
 
 
+class CabinetIn(_BaseModel):
+    name: Optional[str] = _Field(None, max_length=120)
+    color: Optional[str] = _Field(None, max_length=20)
+    icon: Optional[str] = _Field(None, max_length=40)
+    personal: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
 @router.post("/cabinets")
 async def create_cabinet(
-    data: dict,
+    data: CabinetIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    data = data.model_dump(exclude_unset=True)
     name = (data.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="نام کمد الزامی است")
@@ -192,10 +202,11 @@ async def create_cabinet(
 @router.patch("/cabinets/{cabinet_id}")
 async def update_cabinet(
     cabinet_id: int,
-    data: dict,
+    data: CabinetIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    data = data.model_dump(exclude_unset=True)
     cabinet = (await db.execute(_cabinets_visible_to(
         select(Cabinet).where(Cabinet.id == cabinet_id), current_user))).scalar_one_or_none()
     if not cabinet:
@@ -252,12 +263,23 @@ async def delete_cabinet(
 
 # ── binders ─────────────────────────────────────────────────────────────
 
+class BinderIn(_BaseModel):
+    name: Optional[str] = _Field(None, max_length=120)
+    parent_id: Optional[int] = None
+    cabinet_id: Optional[int] = None
+    kind: Optional[str] = _Field(None, max_length=20)
+    deal_type: Optional[str] = _Field(None, max_length=20)
+    color: Optional[str] = _Field(None, max_length=20)
+    description: Optional[str] = _Field(None, max_length=300)
+
+
 @router.post("/binders")
 async def create_binder(
-    data: dict,
+    data: BinderIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    data = data.model_dump(exclude_unset=True)
     name = (data.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="نام زونکن الزامی است")
@@ -301,10 +323,11 @@ async def create_binder(
 @router.patch("/binders/{binder_id}")
 async def update_binder(
     binder_id: int,
-    data: dict,
+    data: BinderIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    data = data.model_dump(exclude_unset=True)
     binder = (await db.execute(_cabinets_visible_to(
         select(Binder).join(Cabinet, Binder.cabinet_id == Cabinet.id)
         .where(Binder.id == binder_id), current_user))).scalar_one_or_none()
@@ -475,9 +498,16 @@ async def list_files(
     return {"items": [_file_brief(p) for p in rows], "total": total}
 
 
+class BulkFilesIn(_BaseModel):
+    ids: List[int] = []
+    action: Optional[str] = _Field(None, max_length=20)
+    binder_id: Optional[int] = None
+    tags: Optional[str] = _Field(None, max_length=2000)
+
+
 @router.post("/files/bulk")
 async def bulk_file_action(
-    data: dict,
+    data: BulkFilesIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -492,6 +522,7 @@ async def bulk_file_action(
     in sequence, which made guessing them trivial. Files that were filtered
     out come back as `skipped` rather than failing the whole call.
     """
+    data = data.model_dump(exclude_unset=True)
     ids = [int(i) for i in (data.get("ids") or []) if str(i).isdigit()][:500]
     action = data.get("action")
     if not ids:
@@ -583,13 +614,51 @@ async def get_file(
     return _file_full(prop)
 
 
+class FileUpdateIn(_BaseModel):
+    title: Optional[str] = _Field(None, max_length=500)
+    description: Optional[str] = _Field(None, max_length=20000)
+    district: Optional[str] = _Field(None, max_length=200)
+    neighborhood: Optional[str] = _Field(None, max_length=200)
+    address: Optional[str] = _Field(None, max_length=20000)
+    seller_name: Optional[str] = _Field(None, max_length=200)
+    phone_number: Optional[str] = _Field(None, max_length=20)
+    property_type: Optional[str] = _Field(None, max_length=50)
+    listing_type: Optional[str] = _Field(None, max_length=50)
+    document_type: Optional[str] = _Field(None, max_length=100)
+    building_direction: Optional[str] = _Field(None, max_length=50)
+    corner_type: Optional[str] = _Field(None, max_length=20)
+    unit_status: Optional[str] = _Field(None, max_length=50)
+    # the edit form sends these as trimmed strings (still carrying Divar's
+    # «/» thousands separator); other callers may send a plain number
+    area: Optional[Union[int, str]] = None
+    rooms: Optional[Union[int, str]] = None
+    floor: Optional[Union[int, str]] = None
+    total_floors: Optional[Union[int, str]] = None
+    year_built: Optional[Union[int, str]] = None
+    total_price: Optional[Union[int, str]] = None
+    price: Optional[Union[int, str]] = None
+    price_per_meter: Optional[Union[int, str]] = None
+    deposit: Optional[Union[int, str]] = None
+    rent_price: Optional[Union[int, str]] = None
+    has_elevator: Optional[bool] = None
+    has_parking: Optional[bool] = None
+    has_storage: Optional[bool] = None
+    has_balcony: Optional[bool] = None
+    is_pinned: Optional[bool] = None
+    is_private: Optional[bool] = None
+    is_draft: Optional[bool] = None
+    tags: Optional[str] = _Field(None, max_length=2000)
+    binder_id: Optional[int] = None
+
+
 @router.patch("/files/{property_id}")
 async def update_file(
     property_id: int,
-    data: dict,
+    data: FileUpdateIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    data = data.model_dump(exclude_unset=True)
     prop = (await db.execute(_visible_to(
         select(Property).where(Property.id == property_id), current_user))).scalar_one_or_none()
     if not prop:
