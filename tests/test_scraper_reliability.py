@@ -668,7 +668,10 @@ class TestCiAppliesWhatTheBudgetAssumes:
     def test_the_workflow_still_parses(self):
         import yaml
         d = yaml.safe_load(self._workflow())
-        assert set(d["jobs"]) >= {"test", "build", "deploy"}
+        # test moved to ci.yml (called from here as the "ci" job) so a plain
+        # push and a pull request run the exact same gate; build now also
+        # waits on the e2e and k8s workflows other streams own.
+        assert set(d["jobs"]) >= {"ci", "e2e", "k8s", "build", "deploy"}
 
 
 class TestTheHostSetupIsInTheRepository:
