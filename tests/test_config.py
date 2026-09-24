@@ -66,6 +66,60 @@ class TestSettings:
         assert s.proxy_enabled is False
 
 
+class TestEnvAliasesMatchDocumentedNames:
+    """Field(..., env="X") is pydantic v1 syntax. pydantic-settings 2.1.0
+    silently ignores it (it becomes json_schema_extra), so a field whose
+    documented env name differed from its own name — SCRAPER_REST_AFTER_REVEALS
+    for rest_after_reveals, for one — was never actually readable from the
+    environment it documented. Fixed with
+    validation_alias=AliasChoices(env_name, field_name), which keeps both the
+    documented name and the field name working."""
+
+    def test_a_mismatched_scraper_pacing_var_now_works(self, monkeypatch):
+        monkeypatch.setenv("SCRAPER_REST_AFTER_REVEALS", "77")
+        from app.config import Settings
+        assert Settings().rest_after_reveals == 77
+
+    def test_a_second_mismatched_var(self, monkeypatch):
+        monkeypatch.setenv("SCRAPER_REVEAL_DWELL_MIN", "9.5")
+        from app.config import Settings
+        assert Settings().reveal_dwell_min_seconds == 9.5
+
+    def test_a_third_mismatched_var(self, monkeypatch):
+        monkeypatch.setenv("SCRAPER_CHALLENGE_GOAL_REVEALS", "42")
+        from app.config import Settings
+        assert Settings().challenge_goal_reveals == 42
+
+    def test_the_field_name_itself_still_works_as_a_fallback(self, monkeypatch):
+        # AliasChoices keeps both names alive, so anywhere already relying on
+        # the (undocumented, but previously the only one that worked) field
+        # name does not go dark either.
+        monkeypatch.setenv("REST_AFTER_REVEALS", "13")
+        from app.config import Settings
+        assert Settings().rest_after_reveals == 13
+
+    def test_a_field_whose_name_already_matched_its_env_still_works(self, monkeypatch):
+        monkeypatch.setenv("AUTH_SMS_DAILY_CAP", "50")
+        from app.config import Settings
+        assert Settings().auth_sms_daily_cap == 50
+
+    def test_git_sha_from_env(self, monkeypatch):
+        monkeypatch.setenv("GIT_SHA", "deadbeef")
+        from app.config import Settings
+        assert Settings().git_sha == "deadbeef"
+
+    def test_git_sha_defaults_to_empty(self, monkeypatch):
+        monkeypatch.delenv("GIT_SHA", raising=False)
+        from app.config import Settings
+        assert Settings().git_sha == ""
+
+    def test_dotenv_file_also_reaches_a_previously_mismatched_field(self, tmp_path, monkeypatch):
+        (tmp_path / ".env").write_text("SCRAPER_REST_HOURS=3\n")
+        monkeypatch.chdir(tmp_path)
+        from app.config import Settings
+        assert Settings().rest_hours == 3.0
+
+
 class TestCitiesAndCategories:
     def test_cities_is_non_empty_dict(self):
         from app.config import CITIES

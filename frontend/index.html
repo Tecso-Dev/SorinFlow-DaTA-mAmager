@@ -499,6 +499,10 @@
                     <span class="nav-icon"><i class="bi bi-person-gear"></i></span>
                     کاربران
                 </a>
+                <a class="nav-item-link d-none" onclick="showSection('audit')" id="nav-link-audit">
+                    <span class="nav-icon"><i class="bi bi-shield-lock"></i></span>
+                    رویدادها
+                </a>
                 </div>
             </div>
         </nav>
@@ -4025,6 +4029,44 @@
                         <i class="bi bi-person-x"></i>
                         <p>کاربری با این فیلتر پیدا نشد.</p>
                     </div>
+                </div>
+            </div>
+
+            <!-- رویدادها: audit trail — root/super_admin only (nav-link-audit gates it, applyRoleUI) -->
+            <div id="section-audit" class="section-content" style="display:none;">
+                <div class="card">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-shield-lock"></i> رویدادها
+                        <span class="text-muted small" id="audit-count"></span>
+                        <div class="d-flex gap-2 flex-wrap ms-auto">
+                            <input type="search" id="audit-filter-actor" class="form-control form-control-sm"
+                                  style="width:150px" placeholder="کاربر… (Enter)"
+                                  onkeydown="if(event.key==='Enter')_auditFilterChanged()" autocomplete="off">
+                            <select id="audit-filter-action" class="form-select form-select-sm" style="width:200px"
+                                   onchange="_auditFilterChanged()">
+                                <option value="">همهٔ عملکردها</option>
+                            </select>
+                            <input type="text" id="audit-filter-since" class="form-control form-control-sm"
+                                  style="width:130px" placeholder="از… ۱۴۰۵/۰۱/۰۱"
+                                  onkeydown="if(event.key==='Enter')_auditFilterChanged()" autocomplete="off">
+                            <input type="text" id="audit-filter-until" class="form-control form-control-sm"
+                                  style="width:130px" placeholder="تا… ۱۴۰۵/۰۱/۰۱"
+                                  onkeydown="if(event.key==='Enter')_auditFilterChanged()" autocomplete="off">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="loadAuditEvents()" title="بازخوانی">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0" id="audit-table">
+                            <thead><tr>
+                                <th>زمان</th><th>کاربر</th><th>عملکرد</th><th>هدف</th><th>IP</th>
+                            </tr></thead>
+                            <tbody id="audit-rows"></tbody>
+                        </table>
+                    </div>
+                    <div id="audit-empty" class="text-center text-muted py-4 d-none">رویدادی با این فیلتر پیدا نشد.</div>
+                    <div id="audit-pagination" class="py-2"></div>
                 </div>
             </div>
 

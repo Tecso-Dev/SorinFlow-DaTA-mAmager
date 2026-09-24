@@ -185,6 +185,44 @@ def test_live_polling_stops_when_the_screen_is_hidden():
         "the live interval never stops itself when the section is hidden")
 
 
+# ── the audit section must be registered in all its places ──────────────────
+
+def test_audit_section_is_fully_registered():
+    """Same failure mode as the monitoring section above, for رویدادها — role-
+    gated like users/ai rather than permission-gated, so the five places are
+    NAV_ROLE_ONLY and _isSectionAllowed instead of NAV_PERMISSION/SECTION_PERMISSION."""
+    js = _app_js()
+    with open(INDEX, encoding="utf-8") as fh:
+        html = fh.read()
+
+    assert 'id="nav-link-audit"' in html, "no nav entry"
+    assert 'id="section-audit"' in html, "no section container"
+    assert "'nav-link-audit': ['root', 'super_admin']" in js, "not in NAV_ROLE_ONLY"
+    body = js[js.index("function _isSectionAllowed("):]
+    body = body[:body.index("\n}")]
+    assert "'audit'" in body, "_isSectionAllowed does not know about audit"
+    meta = js[js.index("const SECTION_META"):]
+    meta = meta[:meta.index("\n};")]
+    assert re.search(r"audit:\s*\{ title:", meta), "not in SECTION_META"
+    assert "case 'audit':" in js, "showSection has no case, so it renders empty"
+
+
+def test_audit_uses_the_panels_own_card_and_table_styles():
+    with open(INDEX, encoding="utf-8") as fh:
+        html = fh.read()
+    section = html[html.index('id="section-audit"'):html.index('<!-- /.content-wrapper -->')]
+    for cls in ("card", "card-header", "table-responsive", "table"):
+        assert cls in section, f"audit section does not use {cls}"
+
+
+def test_audit_rows_are_escaped():
+    """The row values (actor, target, ip) come straight from the database."""
+    js = _app_js()
+    fn = js[js.index("async function loadAuditEvents"):]
+    fn = fn[:fn.index("\nfunction _renderAuditPagination")]
+    assert "html`" in fn, "audit rows are not built through the escaping html`` helper"
+
+
 def test_live_rates_are_derived_from_two_samples():
     """Counters are monotonic — showing them raw would display 'requests since
     boot' and call it a rate."""

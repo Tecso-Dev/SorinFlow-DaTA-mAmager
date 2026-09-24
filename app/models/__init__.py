@@ -25,6 +25,7 @@ from app.models.scrape_schedule import ScrapeSchedule
 from app.models.ai_usage import AiUsage
 from app.models.ai_chat import AiChat
 from app.models.telegram_link import TelegramLink
+from app.models.audit_event import AuditEvent
 
 __all__ = [
     "Property", "City", "Category",
@@ -33,4 +34,5 @@ __all__ = [
     "DailyPerformance", "CalendarEvent", "ActivityLog", "Cabinet", "Binder",
     "User", "PropertyRequest", "UpgradeTicket", "EmailLog", "SmsEvent",
     "AppSetting", "ForwarderDevice", "ScrapeSchedule", "AiUsage", "AiChat", "TelegramLink",
+    "AuditEvent",
 ]

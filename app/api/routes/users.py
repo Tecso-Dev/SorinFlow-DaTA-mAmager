@@ -38,6 +38,7 @@ from app.auth.permissions import (
     PERMISSIONS, ALL_PERMISSIONS, ROLE_ROOT, ASSIGNABLE_BY_SUPER_ADMIN,
     DEFAULT_ADMIN_PERMISSIONS, normalize_permissions, user_permissions,
 )
+from app.services import audit
 from app.schemas import (
     UserResponse, UserCreate, UserRegister, UserUpdate, UserPasswordReset, TokenResponse, UserList,
     TotpSetupResponse, TotpEnableRequest, TotpDisableRequest, TotpLoginRequest,
@@ -200,6 +201,11 @@ async def login(
     ok = verify_password(form.password,
                          user.hashed_password if user else DUMMY_PASSWORD_HASH)
     if not user or not ok:
+        await audit.record(
+            "login_failed", actor=user, target_type="user",
+            target_id=user.id if user else None,
+            summary=f"تلاش ورود ناموفق برای «{ident}»", detail={"reason": "wrong_password"},
+            request=request)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="نام کاربری یا رمز عبور اشتباه است",
@@ -260,6 +266,8 @@ async def login(
     await clear_login_failures(key)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
+    await audit.record("login_success", actor=user, target_type="user", target_id=user.id,
+                       summary=f"ورود موفق: {user.username}", request=request)
 
     return TokenResponse(
         access_token=create_access_token(access_claims(user)),
@@ -315,11 +323,17 @@ async def verify_email_login(
     except VerificationError as e:
         # A wrong guess is the thing the budget exists to count.
         await spend_ip_budget(request, "verify")
+        await audit.record(
+            "login_failed", actor=user, target_type="user", target_id=user.id,
+            summary=f"کد ایمیل نادرست هنگام ورود: {user.username}",
+            detail={"reason": "wrong_email_code"}, request=request)
         raise HTTPException(status_code=400, detail=e.message)
 
     await _login_passed(request, key, done=True)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
+    await audit.record("login_success", actor=user, target_type="user", target_id=user.id,
+                       summary=f"ورود موفق (کد ایمیل): {user.username}", request=request)
     return TokenResponse(
         access_token=create_access_token(access_claims(user)),
         token_type="bearer",
@@ -469,13 +483,23 @@ async def verify_totp_login(
 
     step = _totp_step(user.totp_secret, data.code) if user.totp_secret else None
     if step is None:
+        await audit.record(
+            "login_failed", actor=user, target_type="user", target_id=user.id,
+            summary=f"کد TOTP نادرست هنگام ورود: {user.username}",
+            detail={"reason": "wrong_totp_code"}, request=request)
         raise HTTPException(status_code=401, detail="کد احراز هویت اشتباه است")
     if not await _claim_totp_step(db, user, step):
+        await audit.record(
+            "login_failed", actor=user, target_type="user", target_id=user.id,
+            summary=f"کد TOTP تکراری هنگام ورود: {user.username}",
+            detail={"reason": "totp_code_reused"}, request=request)
         raise HTTPException(status_code=401, detail=TOTP_REUSED)
 
     await _login_passed(request, key, done=True)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
+    await audit.record("login_success", actor=user, target_type="user", target_id=user.id,
+                       summary=f"ورود موفق (TOTP): {user.username}", request=request)
 
     return TokenResponse(
         access_token=create_access_token(access_claims(user)),
@@ -492,7 +516,8 @@ async def verify_totp_login(
 async def register_user(
     data: UserRegister,
     db: AsyncSession = Depends(get_db),
-    _: User = _super_admin,
+    actor: User = _super_admin,
+    request: Request = None,
 ):
     """Only a super_admin may create accounts — public sign-up is disabled."""
     existing = await db.execute(select(User).where(User.username == data.username))
@@ -526,6 +551,8 @@ async def register_user(
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    await audit.record("user_create", actor=actor, target_type="user", target_id=user.id,
+                       summary=f"کاربر «{user.username}» ساخته شد (register)", request=request)
     return user
 
 
@@ -724,7 +751,8 @@ async def update_me(data: ProfileUpdate,
 @router.post("/me/password")
 async def change_my_password(data: PasswordChangeRequest,
                              current_user: User = Depends(get_current_user),
-                             db: AsyncSession = Depends(get_db)):
+                             db: AsyncSession = Depends(get_db),
+                             request: Request = None):
     """Change my password. Every other device is signed out: token_version
     moves, and a token minted before it is refused from then on. This
     device gets a fresh token in the response so it stays in."""
@@ -751,6 +779,10 @@ async def change_my_password(data: PasswordChangeRequest,
     await clear_login_failures(f"name:{current_user.username}")
     logger.warning(f"[profile] {current_user.username} changed their password; "
                    f"other sessions signed out")
+    await audit.record("password_change", actor=current_user, target_type="user",
+                       target_id=current_user.id,
+                       summary=f"{current_user.username} رمز عبور خود را تغییر داد",
+                       request=request)
     return {"success": True,
             "message": "رمز عوض شد و دستگاه‌های دیگر از حساب خارج شدند",
             "access_token": create_access_token(access_claims(current_user))}
@@ -987,6 +1019,7 @@ async def totp_enable(
     data: TotpEnableRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     if not current_user.totp_secret:
         raise HTTPException(status_code=400, detail="ابتدا TOTP را راه‌اندازی کنید")
@@ -1000,6 +1033,10 @@ async def totp_enable(
 
     current_user.totp_enabled = True
     await db.commit()
+    await audit.record("totp_enable", actor=current_user, target_type="user",
+                       target_id=current_user.id,
+                       summary=f"{current_user.username} احراز هویت دومرحله‌ای (برنامه) را فعال کرد",
+                       request=request)
     return {"success": True, "message": "احراز هویت دو مرحله‌ای فعال شد"}
 
 
@@ -1012,6 +1049,7 @@ async def set_email_2fa(
     data: Email2faIn,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     """Turn the emailed second factor on or off for the caller's own account.
 
@@ -1027,6 +1065,12 @@ async def set_email_2fa(
 
     current_user.email_2fa_enabled = want
     await db.commit()
+    await audit.record(
+        "email_2fa_enable" if want else "email_2fa_disable",
+        actor=current_user, target_type="user", target_id=current_user.id,
+        summary=f"{current_user.username} احراز هویت دومرحله‌ای (ایمیل) را "
+                f"{'فعال' if want else 'غیرفعال'} کرد",
+        request=request)
     return {
         "enabled": want,
         "email": _mask_email(current_user.email or ""),
@@ -1084,6 +1128,7 @@ async def totp_disable(
     data: TotpDisableRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     from app.services.verification import clear_login_failures
 
@@ -1097,6 +1142,10 @@ async def totp_disable(
     current_user.totp_enabled = False
     current_user.totp_secret = None
     await db.commit()
+    await audit.record("totp_disable", actor=current_user, target_type="user",
+                       target_id=current_user.id,
+                       summary=f"{current_user.username} احراز هویت دومرحله‌ای (برنامه) را غیرفعال کرد",
+                       request=request)
     return {"success": True, "message": "احراز هویت دو مرحله‌ای غیرفعال شد"}
 
 
@@ -1122,10 +1171,11 @@ async def list_users(
 @router.post("", response_model=UserResponse, status_code=201)
 async def create_user(
     data: UserCreate,
-    _: User = _super_admin,
+    actor: User = _super_admin,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
-    _guard_role_assignment(_, data.role)
+    _guard_role_assignment(actor, data.role)
     # Check duplicate username / email
     existing = await db.execute(select(User).where(User.username == data.username))
     if existing.scalar_one_or_none():
@@ -1149,6 +1199,9 @@ async def create_user(
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    await audit.record("user_create", actor=actor, target_type="user", target_id=user.id,
+                       summary=f"کاربر «{user.username}» ساخته شد (نقش {user.role})",
+                       request=request)
     return user
 
 
@@ -1156,15 +1209,24 @@ async def create_user(
 async def update_user(
     user_id: int,
     data: UserUpdate,
-    _: User = _super_admin,
+    actor: User = _super_admin,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
-    _guard_root_target(_, user)
-    _guard_role_assignment(_, data.role)
+    _guard_root_target(actor, user)
+    _guard_role_assignment(actor, data.role)
+
+    # Field names only, for the audit trail — never the values themselves,
+    # since one of them is the permission list and another the phone number.
+    changed = [name for name, v in (
+        ("ایمیل", data.email), ("نام", data.full_name), ("نقش", data.role),
+        ("فعال/غیرفعال", data.is_active), ("شمارهٔ دیوار", data.divar_phone),
+        ("موبایل", data.phone), ("دسترسی‌ها", data.permissions))
+        if v is not None]
 
     if data.email is not None:
         new_email = (data.email or "").strip() or None
@@ -1220,6 +1282,11 @@ async def update_user(
 
     await db.commit()
     await db.refresh(user)
+    if changed:
+        await audit.record(
+            "user_update", actor=actor, target_type="user", target_id=user.id,
+            summary=f"کاربر «{user.username}» ویرایش شد: " + "، ".join(changed),
+            detail={"fields": changed}, request=request)
     return user
 
 
@@ -1272,6 +1339,10 @@ async def set_verification_flags(
         _ip = request.client.host if request.client else "?"
         logger.warning(f"[audit] {current_user.username} (root) from {_ip} set "
                        f"{user.username}: {'; '.join(changes)}")
+        await audit.record(
+            "user_verification_set", actor=current_user, target_type="user", target_id=user.id,
+            summary=f"تأیید دستی برای «{user.username}»: " + "، ".join(changes),
+            request=request)
     return user
 
 
@@ -1279,17 +1350,22 @@ async def set_verification_flags(
 async def reset_password(
     user_id: int,
     data: UserPasswordReset,
-    _: User = _super_admin,
+    actor: User = _super_admin,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
-    _guard_root_target(_, user)
+    _guard_root_target(actor, user)
 
     user.hashed_password = get_password_hash(data.new_password)
     await db.commit()
+    await audit.record(
+        "user_password_reset_admin", actor=actor, target_type="user", target_id=user.id,
+        summary=f"رمز عبور «{user.username}» توسط «{actor.username}» بازنشانی شد",
+        request=request)
     return {"success": True, "message": "رمز عبور با موفقیت تغییر کرد"}
 
 
@@ -1298,6 +1374,7 @@ async def delete_user(
     user_id: int,
     current_user: User = _super_admin,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="نمی‌توانید حساب خودتان را حذف کنید")
@@ -1308,26 +1385,37 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
     _guard_root_target(current_user, user)
 
+    # Captured before the delete: the row (and the id/username it would
+    # otherwise carry into the audit record) is gone after commit.
+    target_id, target_username = user.id, user.username
     await db.delete(user)
     await db.commit()
+    await audit.record("user_delete", actor=current_user, target_type="user",
+                       target_id=target_id, summary=f"کاربر «{target_username}» حذف شد",
+                       request=request)
     return {"success": True, "message": "کاربر حذف شد"}
 
 
 @router.post("/{user_id}/totp/disable")
 async def admin_disable_totp(
     user_id: int,
-    _: User = _super_admin,
+    actor: User = _super_admin,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
-    _guard_root_target(_, user)
+    _guard_root_target(actor, user)
 
     user.totp_enabled = False
     user.totp_secret = None
     await db.commit()
+    await audit.record(
+        "user_totp_disable_admin", actor=actor, target_type="user", target_id=user.id,
+        summary=f"احراز هویت دومرحله‌ای «{user.username}» توسط «{actor.username}» غیرفعال شد",
+        request=request)
     return {"success": True, "message": "احراز هویت دو مرحله‌ای کاربر غیرفعال شد"}
 
 

@@ -18,7 +18,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
@@ -31,6 +31,7 @@ from app.database import get_db
 from app.models.crm_models import Contact, SmsLog
 from app.models.portal import PropertyRequest
 from app.models.user import User
+from app.services import audit
 from app.services import sms_service as sms
 from app.services import sms_log
 
@@ -94,7 +95,8 @@ async def get_sms_settings(db: AsyncSession = Depends(get_db),
 @router.put("/settings")
 async def put_sms_settings(payload: SmsSettingsIn,
                            db: AsyncSession = Depends(get_db),
-                           user: User = _super_admin):
+                           user: User = _super_admin,
+                           request: Request = None):
     actor = user.username
     if payload.api_key is not None:
         key = payload.api_key.strip()
@@ -129,6 +131,10 @@ async def put_sms_settings(payload: SmsSettingsIn,
         await sms_log.record(sms_log.SETTINGS,
                              "تنظیمات تغییر کرد: " + "، ".join(changed),
                              actor=actor, fields=changed)
+        # Field names only — never a value, since one of them is the API key.
+        await audit.record("sms_settings_save", actor=user,
+                           summary="تنظیمات پیامک تغییر کرد: " + "، ".join(changed),
+                           detail={"fields": changed}, request=request)
 
     return await get_sms_settings(db, user)
 

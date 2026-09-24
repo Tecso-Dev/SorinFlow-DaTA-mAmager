@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.log_redaction import redact, redact_filter
+from app.log_redaction import redact, redact_filter, request_id_var, inject_request_id
 
 
 class TestSecrets:
@@ -73,6 +73,41 @@ class TestFilterBehaviour:
     def test_redaction_is_idempotent(self):
         once = redact("token=abcdefghijklmnop and 09123456789")
         assert redact(once) == once
+
+
+class TestRequestIdPatcher:
+    def test_default_outside_a_request_is_a_dash(self):
+        rec = {"extra": {}}
+        inject_request_id(rec)
+        assert rec["extra"]["request_id"] == "-"
+
+    def test_carries_whatever_the_middleware_set(self):
+        token = request_id_var.set("abc123")
+        try:
+            rec = {"extra": {}}
+            inject_request_id(rec)
+            assert rec["extra"]["request_id"] == "abc123"
+        finally:
+            request_id_var.reset(token)
+
+    def test_scoped_to_where_it_was_set(self):
+        """A reset must not leak into log lines logged after it."""
+        token = request_id_var.set("only-here")
+        request_id_var.reset(token)
+        rec = {"extra": {}}
+        inject_request_id(rec)
+        assert rec["extra"]["request_id"] == "-"
+
+
+def test_no_app_module_logs_through_std_logging():
+    """auth.py used std logging.getLogger(__name__), so its lines — including
+    the [audit] ones — bypassed loguru and the redaction filter entirely: a
+    Divar session or a phone number logged there was never masked."""
+    import pathlib
+    app_dir = pathlib.Path(__file__).resolve().parent.parent / "app"
+    offenders = [str(p) for p in app_dir.rglob("*.py")
+                if "logging.getLogger" in p.read_text(encoding="utf-8")]
+    assert not offenders, f"still logging through std logging: {offenders}"
 
 
 def test_both_sinks_are_filtered():

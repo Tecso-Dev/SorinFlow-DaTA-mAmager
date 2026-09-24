@@ -8,18 +8,22 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
-    
+
     # App Info
     app_name: str = "SorinFlow Divar Scraper"
     app_version: str = "1.0.0"
-    environment: str = Field(default="production", env="ENVIRONMENT")
-    debug: bool = Field(default=False, env="DEBUG")
+    # The commit this image was built from (Dockerfile ARG/ENV, set by
+    # deploy.yml's build step). Empty outside a built image — local dev, tests
+    # — which /health then shows honestly rather than a stale placeholder.
+    git_sha: str = Field(default="", validation_alias=AliasChoices("GIT_SHA", "git_sha"))
+    environment: str = Field(default="production", validation_alias=AliasChoices("ENVIRONMENT", "environment"))
+    debug: bool = Field(default=False, validation_alias=AliasChoices("DEBUG", "debug"))
     
     # Server
     # Injected by the manifest from the node itself (status.hostIP). No
     # default: a stale address shown as fact is worse than a dash.
-    server_ip: str = Field(default="", env="SERVER_IP")
-    domain: str = Field(default="scc.sorinflow.com", env="DOMAIN")
+    server_ip: str = Field(default="", validation_alias=AliasChoices("SERVER_IP", "server_ip"))
+    domain: str = Field(default="scc.sorinflow.com", validation_alias=AliasChoices("DOMAIN", "domain"))
     
     # Database
     # No working default on purpose. It used to carry a real password that was
@@ -27,42 +31,42 @@ class Settings(BaseSettings):
     # look healthy. Now an unset DATABASE_URL fails to connect and says so.
     database_url: str = Field(
         default="postgresql+asyncpg://sorinflow:CHANGE_ME@db:5432/divar_scraper",
-        env="DATABASE_URL"
+        validation_alias=AliasChoices("DATABASE_URL", "database_url")
     )
     
     # Redis
     redis_url: str = Field(
         default="redis://:CHANGE_ME@redis:6379/0",
-        env="REDIS_URL"
+        validation_alias=AliasChoices("REDIS_URL", "redis_url")
     )
     
     # Security
     secret_key: str = Field(
         default="your-super-secret-key-change-in-production",
-        env="SECRET_KEY"
+        validation_alias=AliasChoices("SECRET_KEY", "secret_key")
     )
-    api_key: str = Field(default="", env="API_KEY")
+    api_key: str = Field(default="", validation_alias=AliasChoices("API_KEY", "api_key"))
     # Guards /metrics with its own credential, separate from API_KEY so a
     # monitoring scraper never needs the key that opens the rest of the API.
     # Empty disables the endpoint outright — it 404s rather than 401s, because a
     # feature nobody enabled should not advertise itself.
-    metrics_token: str = Field(default="", env="METRICS_TOKEN")
+    metrics_token: str = Field(default="", validation_alias=AliasChoices("METRICS_TOKEN", "metrics_token"))
     access_token_expire_minutes: int = 60 * 24  # 24 hours — re-login daily
 
     # CORS
     # empty: same origin only (app/main.py says why)
-    cors_origins: str = Field(default="", env="CORS_ORIGINS")
+    cors_origins: str = Field(default="", validation_alias=AliasChoices("CORS_ORIGINS", "cors_origins"))
     
     # Scraper Settings
-    scraper_headless: bool = Field(default=True, env="SCRAPER_HEADLESS")
-    scraper_delay_min: float = Field(default=2.0, env="SCRAPER_DELAY_MIN")
-    scraper_delay_max: float = Field(default=5.0, env="SCRAPER_DELAY_MAX")
+    scraper_headless: bool = Field(default=True, validation_alias=AliasChoices("SCRAPER_HEADLESS", "scraper_headless"))
+    scraper_delay_min: float = Field(default=2.0, validation_alias=AliasChoices("SCRAPER_DELAY_MIN", "scraper_delay_min"))
+    scraper_delay_max: float = Field(default=5.0, validation_alias=AliasChoices("SCRAPER_DELAY_MAX", "scraper_delay_max"))
     # Max seconds to wait for a Divar SMS-OTP code before giving up on a phone.
     # 120 was not enough: the SMS itself can take a minute, the dashboard only
     # polls for the prompt every 4s, and then someone has to read and type it.
     # The code would be entered against a request the scraper had already
     # dropped, and come back "no pending OTP request".
-    otp_wait_timeout: int = Field(default=300, env="OTP_WAIT_TIMEOUT")
+    otp_wait_timeout: int = Field(default=300, validation_alias=AliasChoices("OTP_WAIT_TIMEOUT", "otp_wait_timeout"))
     # Whether a scrape WAITS for a human when Divar asks for a code.
     #
     # Off: an unanswered prompt suppresses contact reveals for the job and the
@@ -70,23 +74,23 @@ class Settings(BaseSettings):
     # On: the run stays paused with the prompt live until somebody enters the
     # code, up to otp_wait_max_seconds. For a business whose product IS the
     # phone number, waiting beats finishing without one.
-    otp_wait_for_human: bool = Field(default=True, env="OTP_WAIT_FOR_HUMAN")
+    otp_wait_for_human: bool = Field(default=True, validation_alias=AliasChoices("OTP_WAIT_FOR_HUMAN", "otp_wait_for_human"))
     # The cap on that wait. A run parked here holds a browser and its Divar
     # session, so it must not wait forever on a job nobody will come back to.
-    otp_wait_max_seconds: int = Field(default=6 * 3600, env="OTP_WAIT_MAX_SECONDS")
+    otp_wait_max_seconds: int = Field(default=6 * 3600, validation_alias=AliasChoices("OTP_WAIT_MAX_SECONDS", "otp_wait_max_seconds"))
     # How long an unanswered prompt waits before emailing whoever can answer it.
-    otp_notify_after_seconds: int = Field(default=120, env="OTP_NOTIFY_AFTER_SECONDS")
+    otp_notify_after_seconds: int = Field(default=120, validation_alias=AliasChoices("OTP_NOTIFY_AFTER_SECONDS", "otp_notify_after_seconds"))
     # How many listings one saved Divar account handles before the scraper
     # switches to the next. Counted per listing *opened*, not per listing
     # saved, so a filtered-out ad costs the account the same as a kept one.
     # 0 = never rotate.
-    cookie_rotate_every: int = Field(default=100, env="COOKIE_ROTATE_EVERY")
+    cookie_rotate_every: int = Field(default=100, validation_alias=AliasChoices("COOKIE_ROTATE_EVERY", "cookie_rotate_every"))
     # An account challenged by Divar after this many reveals is rested for
     # SCRAPER_REST_HOURS before rotation may pick it again. Light accounts are
     # not rested: a cold account's first challenge is a one-time verification,
     # after which it is trusted on its device. A heavy one being challenged is
     # Divar saying «not this one, not today».
-    rest_after_reveals: int = Field(default=50, env="SCRAPER_REST_AFTER_REVEALS")
+    rest_after_reveals: int = Field(default=50, validation_alias=AliasChoices("SCRAPER_REST_AFTER_REVEALS", "rest_after_reveals"))
 
     # Least time between two contact reveals, in seconds.
     #
@@ -96,13 +100,13 @@ class Settings(BaseSettings):
     # about five reveals a minute; raising it trades speed for fewer code
     # challenges, and 0 restores the old behaviour of revealing as fast as the
     # listings arrive.
-    reveal_min_gap_seconds: float = Field(default=12.0, env="SCRAPER_REVEAL_MIN_GAP_SECONDS")
+    reveal_min_gap_seconds: float = Field(default=12.0, validation_alias=AliasChoices("SCRAPER_REVEAL_MIN_GAP_SECONDS", "reveal_min_gap_seconds"))
 
     # How long to wait after Divar challenges an account before revealing
     # again. A challenge is Divar saying «slow down» in the only words it has;
     # carrying on at the same pace on the next account is how one challenge
     # becomes five.
-    challenge_cooldown_seconds: float = Field(default=45.0, env="SCRAPER_CHALLENGE_COOLDOWN_SECONDS")
+    challenge_cooldown_seconds: float = Field(default=45.0, validation_alias=AliasChoices("SCRAPER_CHALLENGE_COOLDOWN_SECONDS", "challenge_cooldown_seconds"))
 
     # How long a person spends on an ad before asking for the number.
     #
@@ -110,36 +114,36 @@ class Settings(BaseSettings):
     # milliseconds later, which is what the scraper did. The dwell scales
     # with how much there is to read — a two-line ad and a two-paragraph one
     # are not read in the same time — between these two bounds, in seconds.
-    reveal_dwell_min_seconds: float = Field(default=4.0, env="SCRAPER_REVEAL_DWELL_MIN")
-    reveal_dwell_max_seconds: float = Field(default=22.0, env="SCRAPER_REVEAL_DWELL_MAX")
+    reveal_dwell_min_seconds: float = Field(default=4.0, validation_alias=AliasChoices("SCRAPER_REVEAL_DWELL_MIN", "reveal_dwell_min_seconds"))
+    reveal_dwell_max_seconds: float = Field(default=22.0, validation_alias=AliasChoices("SCRAPER_REVEAL_DWELL_MAX", "reveal_dwell_max_seconds"))
 
     # A person does not reveal forty numbers in a row without looking up.
     # Roughly every this-many reveals the run takes a longer break, of about
     # this many seconds; both are means, not exact, so the rhythm has no
     # period to detect. 0 for either turns the breaks off.
-    reveal_break_every: int = Field(default=12, env="SCRAPER_REVEAL_BREAK_EVERY")
-    reveal_break_seconds: float = Field(default=90.0, env="SCRAPER_REVEAL_BREAK_SECONDS")
+    reveal_break_every: int = Field(default=12, validation_alias=AliasChoices("SCRAPER_REVEAL_BREAK_EVERY", "reveal_break_every"))
+    reveal_break_seconds: float = Field(default=90.0, validation_alias=AliasChoices("SCRAPER_REVEAL_BREAK_SECONDS", "reveal_break_seconds"))
 
     # The goal, as a number the finish line can be held against: at most one
     # code challenge per this many reveals. Nothing enforces it; the run
     # reports its own ratio so the pacing above can be tuned toward it.
-    challenge_goal_reveals: int = Field(default=100, env="SCRAPER_CHALLENGE_GOAL_REVEALS")
+    challenge_goal_reveals: int = Field(default=100, validation_alias=AliasChoices("SCRAPER_CHALLENGE_GOAL_REVEALS", "challenge_goal_reveals"))
 
-    rest_hours: float = Field(default=24.0, env="SCRAPER_REST_HOURS")
+    rest_hours: float = Field(default=24.0, validation_alias=AliasChoices("SCRAPER_REST_HOURS", "rest_hours"))
     # How often to ask Divar whether each stored session still works. Costs one
     # outbound request per account per interval. 0 disables it, leaving the
     # manual button as the only real check.
-    divar_session_check_minutes: int = Field(default=10, env="DIVAR_SESSION_CHECK_MINUTES")
+    divar_session_check_minutes: int = Field(default=10, validation_alias=AliasChoices("DIVAR_SESSION_CHECK_MINUTES", "divar_session_check_minutes"))
     
     # Image download limits. A listing's photo list comes from Divar and is not
     # something we control, so both the count and the size of each file are
     # capped rather than trusted.
-    max_images_per_property: int = Field(default=20, env="MAX_IMAGES_PER_PROPERTY")
-    max_image_bytes: int = Field(default=8 * 1024 * 1024, env="MAX_IMAGE_BYTES")
+    max_images_per_property: int = Field(default=20, validation_alias=AliasChoices("MAX_IMAGES_PER_PROPERTY", "max_images_per_property"))
+    max_image_bytes: int = Field(default=8 * 1024 * 1024, validation_alias=AliasChoices("MAX_IMAGE_BYTES", "max_image_bytes"))
     # Decoded pixel ceiling. A few hundred KB of PNG can decode to gigabytes of
     # bitmap — the classic decompression bomb. 40MP is far above any real estate
     # photo and far below anything that hurts.
-    max_image_pixels: int = Field(default=40_000_000, env="MAX_IMAGE_PIXELS")
+    max_image_pixels: int = Field(default=40_000_000, validation_alias=AliasChoices("MAX_IMAGE_PIXELS", "max_image_pixels"))
 
     # ── Google Cloud Observability ────────────────────────────────────────
     # OFF by default. Google's endpoints are not reachable from this server, so
@@ -147,144 +151,144 @@ class Settings(BaseSettings):
     # pointing at a client's project. Everything fails soft when it cannot
     # connect: the exporter degrades and reports on /api/gcp/status, and no
     # request path or scraper ever waits on Google.
-    gcp_enabled: bool = Field(default=False, env="GCP_ENABLED")
-    gcp_project_id: str = Field(default="", env="GCP_PROJECT_ID")
+    gcp_enabled: bool = Field(default=False, validation_alias=AliasChoices("GCP_ENABLED", "gcp_enabled"))
+    gcp_project_id: str = Field(default="", validation_alias=AliasChoices("GCP_PROJECT_ID", "gcp_project_id"))
     # Either the service-account JSON itself, or a path to it.
-    gcp_service_account_json: str = Field(default="", env="GCP_SERVICE_ACCOUNT_JSON")
-    gcp_log_name: str = Field(default="sorinflow", env="GCP_LOG_NAME")
-    gcp_pubsub_topic: str = Field(default="", env="GCP_PUBSUB_TOPIC")
+    gcp_service_account_json: str = Field(default="", validation_alias=AliasChoices("GCP_SERVICE_ACCOUNT_JSON", "gcp_service_account_json"))
+    gcp_log_name: str = Field(default="sorinflow", validation_alias=AliasChoices("GCP_LOG_NAME", "gcp_log_name"))
+    gcp_pubsub_topic: str = Field(default="", validation_alias=AliasChoices("GCP_PUBSUB_TOPIC", "gcp_pubsub_topic"))
     # generic_node resource labels — this is self-hosted k3s, not GKE
-    gcp_location: str = Field(default="ir-tehran", env="GCP_LOCATION")
-    gcp_namespace: str = Field(default="sorinflow", env="GCP_NAMESPACE")
-    gcp_node_id: str = Field(default="backend", env="GCP_NODE_ID")
-    gcp_export_interval: int = Field(default=60, env="GCP_EXPORT_INTERVAL")
-    gcp_batch_size: int = Field(default=200, env="GCP_BATCH_SIZE")
+    gcp_location: str = Field(default="ir-tehran", validation_alias=AliasChoices("GCP_LOCATION", "gcp_location"))
+    gcp_namespace: str = Field(default="sorinflow", validation_alias=AliasChoices("GCP_NAMESPACE", "gcp_namespace"))
+    gcp_node_id: str = Field(default="backend", validation_alias=AliasChoices("GCP_NODE_ID", "gcp_node_id"))
+    gcp_export_interval: int = Field(default=60, validation_alias=AliasChoices("GCP_EXPORT_INTERVAL", "gcp_export_interval"))
+    gcp_batch_size: int = Field(default=200, validation_alias=AliasChoices("GCP_BATCH_SIZE", "gcp_batch_size"))
     # Short: from a host that cannot reach Google the connection hangs rather
     # than refusing, and a background task blocked for 30s is its own problem.
-    gcp_timeout_seconds: float = Field(default=10.0, env="GCP_TIMEOUT_SECONDS")
+    gcp_timeout_seconds: float = Field(default=10.0, validation_alias=AliasChoices("GCP_TIMEOUT_SECONDS", "gcp_timeout_seconds"))
 
     # Proxy Settings
-    proxy_enabled: bool = Field(default=False, env="PROXY_ENABLED")
+    proxy_enabled: bool = Field(default=False, validation_alias=AliasChoices("PROXY_ENABLED", "proxy_enabled"))
     # Re-test every active proxy this often. 0 disables the loop.
-    proxy_refresh_hours: float = Field(default=24.0, env="PROXY_REFRESH_HOURS")
+    proxy_refresh_hours: float = Field(default=24.0, validation_alias=AliasChoices("PROXY_REFRESH_HOURS", "proxy_refresh_hours"))
     # How often to check whether each registered phone is still forwarding.
     # 0 disables the check and its emails.
-    forwarder_watch_minutes: float = Field(default=5.0, env="FORWARDER_WATCH_MINUTES")
+    forwarder_watch_minutes: float = Field(default=5.0, validation_alias=AliasChoices("FORWARDER_WATCH_MINUTES", "forwarder_watch_minutes"))
 
     # ── automatic OTP intake from a phone-side SMS forwarder ──
     # Shared secret the forwarder signs each POST with (HMAC-SHA256 of the raw
     # body in X-Signature, or the secret itself in X-OTP-Secret). Empty = the
     # inbound endpoints answer 503 and manual entry is the only path.
-    otp_inbound_secret: str = Field(default="", env="OTP_INBOUND_SECRET")
+    otp_inbound_secret: str = Field(default="", validation_alias=AliasChoices("OTP_INBOUND_SECRET", "otp_inbound_secret"))
     # With no code after this many seconds, press Divar's «ارسال مجدد» once
     # (twice at most per challenge). Divar accepts a contact code for ~120s,
     # so a first SMS the carrier lost is worth asking again for well inside
     # that window rather than after it.
-    otp_resend_after_seconds: int = Field(default=90, env="OTP_RESEND_AFTER_SECONDS")
-    proxy_list: str = Field(default="", env="PROXY_LIST")
+    otp_resend_after_seconds: int = Field(default=90, validation_alias=AliasChoices("OTP_RESEND_AFTER_SECONDS", "otp_resend_after_seconds"))
+    proxy_list: str = Field(default="", validation_alias=AliasChoices("PROXY_LIST", "proxy_list"))
     
     # Divar Login
-    divar_phone_number: str = Field(default="", env="DIVAR_PHONE_NUMBER")
+    divar_phone_number: str = Field(default="", validation_alias=AliasChoices("DIVAR_PHONE_NUMBER", "divar_phone_number"))
     
     # Paths
     cookies_path: str = "/app/data/cookies"
     images_path: str = "/app/data/images"
     # The forwarder APK the panel offers, mirrored from GitHub (apk_mirror.py).
     downloads_path: str = "/app/data/downloads"
-    apk_mirror_hours: float = Field(default=6, env="APK_MIRROR_HOURS")
+    apk_mirror_hours: float = Field(default=6, validation_alias=AliasChoices("APK_MIRROR_HOURS", "apk_mirror_hours"))
     # Saved scrapes fire themselves at their hour (scrape_scheduler.py).
-    scrape_scheduler: bool = Field(default=True, env="SCRAPE_SCHEDULER")
+    scrape_scheduler: bool = Field(default=True, validation_alias=AliasChoices("SCRAPE_SCHEDULER", "scrape_scheduler"))
     # New listings are scored against every customer's criteria as they arrive
     # (app/crm/match_engine.py); the matches wait on the call queue.
-    match_engine: bool = Field(default=True, env="MATCH_ENGINE")
+    match_engine: bool = Field(default=True, validation_alias=AliasChoices("MATCH_ENGINE", "match_engine"))
     # The morning digest to the Telegram chat (app/crm/digest.py): the Tehran
     # hour after which the day's message goes out; -1 turns it off.
-    digest_hour: int = Field(default=8, env="DIGEST_HOUR")
+    digest_hour: int = Field(default=8, validation_alias=AliasChoices("DIGEST_HOUR", "digest_hour"))
     logs_path: str = "/app/logs"
     
     # Divar URLs
     divar_login_url: str = "https://divar.ir/my-divar/my-posts"
 
     # Default super admin (created on first startup if no users exist)
-    super_admin_username: str = Field(default="admin", env="SUPER_ADMIN_USERNAME")
+    super_admin_username: str = Field(default="admin", validation_alias=AliasChoices("SUPER_ADMIN_USERNAME", "super_admin_username"))
     # Seeded only when the users table is empty. The old default was published
     # in this repo and in INSTALL.md, so anyone could read it.
-    super_admin_password: str = Field(default="CHANGE_ME", env="SUPER_ADMIN_PASSWORD")
+    super_admin_password: str = Field(default="CHANGE_ME", validation_alias=AliasChoices("SUPER_ADMIN_PASSWORD", "super_admin_password"))
 
     # SMS — Kavenegar
-    kavenegar_api_key: str = Field(default="", env="KAVENEGAR_API_KEY")
-    kavenegar_sender: str = Field(default="", env="KAVENEGAR_SENDER")
+    kavenegar_api_key: str = Field(default="", validation_alias=AliasChoices("KAVENEGAR_API_KEY", "kavenegar_api_key"))
+    kavenegar_sender: str = Field(default="", validation_alias=AliasChoices("KAVENEGAR_SENDER", "kavenegar_sender"))
     # Kavenegar template used for login codes (verify/lookup). Templates are
     # the correct channel for one-time codes: dedicated route, no approved
     # sender line needed, and they reach numbers opted out of advertising.
-    kavenegar_otp_template: str = Field(default="", env="KAVENEGAR_OTP_TEMPLATE")
+    kavenegar_otp_template: str = Field(default="", validation_alias=AliasChoices("KAVENEGAR_OTP_TEMPLATE", "kavenegar_otp_template"))
 
     # SMS — Melipayamak
-    melipayamak_api_key: str = Field(default="", env="MELIPAYAMAK_API_KEY")
-    melipayamak_from: str = Field(default="", env="MELIPAYAMAK_FROM")
+    melipayamak_api_key: str = Field(default="", validation_alias=AliasChoices("MELIPAYAMAK_API_KEY", "melipayamak_api_key"))
+    melipayamak_from: str = Field(default="", validation_alias=AliasChoices("MELIPAYAMAK_FROM", "melipayamak_from"))
 
     # LLM (optional) — powers the AI reasons in property matching.
     # Any OpenAI-compatible endpoint works (OpenAI, OpenRouter, local vLLM…).
-    llm_api_key: str = Field(default="", env="LLM_API_KEY")
-    llm_base_url: str = Field(default="https://api.openai.com/v1", env="LLM_BASE_URL")
-    llm_model: str = Field(default="gpt-4o-mini", env="LLM_MODEL")
+    llm_api_key: str = Field(default="", validation_alias=AliasChoices("LLM_API_KEY", "llm_api_key"))
+    llm_base_url: str = Field(default="https://api.openai.com/v1", validation_alias=AliasChoices("LLM_BASE_URL", "llm_base_url"))
+    llm_model: str = Field(default="gpt-4o-mini", validation_alias=AliasChoices("LLM_MODEL", "llm_model"))
     # One key, several jobs: LLM_MODEL writes Persian for people to read; these
     # read listings and needs, look at photos, and embed text (the AI agents,
     # app/ai/). Liara names models provider/model.
-    llm_model_read: str = Field(default="openai/gpt-4.1-mini", env="LLM_MODEL_READ")
-    llm_model_vision: str = Field(default="openai/gpt-4.1-mini", env="LLM_MODEL_VISION")
-    llm_model_embed: str = Field(default="openai/text-embedding-3-small", env="LLM_MODEL_EMBED")
+    llm_model_read: str = Field(default="openai/gpt-4.1-mini", validation_alias=AliasChoices("LLM_MODEL_READ", "llm_model_read"))
+    llm_model_vision: str = Field(default="openai/gpt-4.1-mini", validation_alias=AliasChoices("LLM_MODEL_VISION", "llm_model_vision"))
+    llm_model_embed: str = Field(default="openai/text-embedding-3-small", validation_alias=AliasChoices("LLM_MODEL_EMBED", "llm_model_embed"))
     # Liara's account token, for the credit and usage lines on the AI card —
     # GET only. Empty = those lines say «تنظیم نشده».
-    liara_api_token: str = Field(default="", env="LIARA_API_TOKEN")
+    liara_api_token: str = Field(default="", validation_alias=AliasChoices("LIARA_API_TOKEN", "liara_api_token"))
 
     # CRN — Telegram notification
-    telegram_bot_token: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
-    telegram_chat_id: str = Field(default="", env="TELEGRAM_CHAT_ID")
+    telegram_bot_token: str = Field(default="", validation_alias=AliasChoices("TELEGRAM_BOT_TOKEN", "telegram_bot_token"))
+    telegram_chat_id: str = Field(default="", validation_alias=AliasChoices("TELEGRAM_CHAT_ID", "telegram_chat_id"))
     # api.telegram.org is blocked from Iranian networks and the server is in
     # one; every Bot API call goes through this when set (http/socks5 URL).
-    telegram_proxy: str = Field(default="", env="TELEGRAM_PROXY")
+    telegram_proxy: str = Field(default="", validation_alias=AliasChoices("TELEGRAM_PROXY", "telegram_proxy"))
     # or a relay in front of api.telegram.org (a Cloudflare Worker), reached
     # directly — Cloudflare answers from Iran — with an optional shared key
-    telegram_api_base: str = Field(default="", env="TELEGRAM_API_BASE")
-    telegram_relay_key: str = Field(default="", env="TELEGRAM_RELAY_KEY")
+    telegram_api_base: str = Field(default="", validation_alias=AliasChoices("TELEGRAM_API_BASE", "telegram_api_base"))
+    telegram_relay_key: str = Field(default="", validation_alias=AliasChoices("TELEGRAM_RELAY_KEY", "telegram_relay_key"))
     # Try api.telegram.org straight from the server before the relay/proxies.
     # 0 for a server that is known never to reach it.
-    telegram_direct_first: str = Field(default="1", env="TELEGRAM_DIRECT_FIRST")
+    telegram_direct_first: str = Field(default="1", validation_alias=AliasChoices("TELEGRAM_DIRECT_FIRST", "telegram_direct_first"))
 
     # ── Public portal auth (visitor sign-up) ──────────────────────────────
     # OFF until the Iranian SMS panel is provisioned. While it is off the
     # public endpoints answer 404, so the live panel is untouched and no user
     # can reach a sign-up whose verification code would never arrive.
-    public_auth_enabled: bool = Field(default=False, env="PUBLIC_AUTH_ENABLED")
+    public_auth_enabled: bool = Field(default=False, validation_alias=AliasChoices("PUBLIC_AUTH_ENABLED", "public_auth_enabled"))
     # Which SMS provider carries the login/registration code.
-    auth_sms_provider: str = Field(default="kavenegar", env="AUTH_SMS_PROVIDER")
+    auth_sms_provider: str = Field(default="kavenegar", validation_alias=AliasChoices("AUTH_SMS_PROVIDER", "auth_sms_provider"))
     # Verification code: length, lifetime, resend cooldown, and how many wrong
     # guesses a single code tolerates before it is burned.
-    auth_code_length: int = Field(default=5, env="AUTH_CODE_LENGTH")
-    auth_code_ttl_seconds: int = Field(default=180, env="AUTH_CODE_TTL_SECONDS")
-    auth_code_resend_cooldown: int = Field(default=90, env="AUTH_CODE_RESEND_COOLDOWN")
-    auth_code_max_attempts: int = Field(default=5, env="AUTH_CODE_MAX_ATTEMPTS")
-    auth_code_max_sends_per_hour: int = Field(default=5, env="AUTH_CODE_MAX_SENDS_PER_HOUR")
+    auth_code_length: int = Field(default=5, validation_alias=AliasChoices("AUTH_CODE_LENGTH", "auth_code_length"))
+    auth_code_ttl_seconds: int = Field(default=180, validation_alias=AliasChoices("AUTH_CODE_TTL_SECONDS", "auth_code_ttl_seconds"))
+    auth_code_resend_cooldown: int = Field(default=90, validation_alias=AliasChoices("AUTH_CODE_RESEND_COOLDOWN", "auth_code_resend_cooldown"))
+    auth_code_max_attempts: int = Field(default=5, validation_alias=AliasChoices("AUTH_CODE_MAX_ATTEMPTS", "auth_code_max_attempts"))
+    auth_code_max_sends_per_hour: int = Field(default=5, validation_alias=AliasChoices("AUTH_CODE_MAX_SENDS_PER_HOUR", "auth_code_max_sends_per_hour"))
     # Every verification code sent by SMS, all addresses together, per Tehran
     # day. The per-address budgets only slow one address down; this is what
     # stops many of them together from emptying the SMS credit. 0 = no cap.
-    auth_sms_daily_cap: int = Field(default=200, env="AUTH_SMS_DAILY_CAP")
+    auth_sms_daily_cap: int = Field(default=200, validation_alias=AliasChoices("AUTH_SMS_DAILY_CAP", "auth_sms_daily_cap"))
     # Failed password attempts per identifier per 15 minutes before lockout.
-    auth_login_max_attempts: int = Field(default=10, env="AUTH_LOGIN_MAX_ATTEMPTS")
+    auth_login_max_attempts: int = Field(default=10, validation_alias=AliasChoices("AUTH_LOGIN_MAX_ATTEMPTS", "auth_login_max_attempts"))
 
     # Root account — the developer's own access. Seeded on boot, never
     # creatable from the panel. Leave the password empty to skip seeding.
-    root_username: str = Field(default="root", env="ROOT_USERNAME")
-    root_password: str = Field(default="", env="ROOT_PASSWORD")
-    root_email: str = Field(default="", env="ROOT_EMAIL")
+    root_username: str = Field(default="root", validation_alias=AliasChoices("ROOT_USERNAME", "root_username"))
+    root_password: str = Field(default="", validation_alias=AliasChoices("ROOT_PASSWORD", "root_password"))
+    root_email: str = Field(default="", validation_alias=AliasChoices("ROOT_EMAIL", "root_email"))
 
     # CRN — Email (SMTP) notification
-    smtp_host: str = Field(default="", env="SMTP_HOST")
-    smtp_port: int = Field(default=587, env="SMTP_PORT")
-    smtp_user: str = Field(default="", env="SMTP_USER")
-    smtp_password: str = Field(default="", env="SMTP_PASSWORD")
-    notification_email: str = Field(default="", env="NOTIFICATION_EMAIL")
+    smtp_host: str = Field(default="", validation_alias=AliasChoices("SMTP_HOST", "smtp_host"))
+    smtp_port: int = Field(default=587, validation_alias=AliasChoices("SMTP_PORT", "smtp_port"))
+    smtp_user: str = Field(default="", validation_alias=AliasChoices("SMTP_USER", "smtp_user"))
+    smtp_password: str = Field(default="", validation_alias=AliasChoices("SMTP_PASSWORD", "smtp_password"))
+    notification_email: str = Field(default="", validation_alias=AliasChoices("NOTIFICATION_EMAIL", "notification_email"))
 
     # Connection pool (app/database.py). 0 means NullPool — see there for why
     # that is still a real option and not just a default to move past.

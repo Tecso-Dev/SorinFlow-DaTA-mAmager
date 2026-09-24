@@ -141,7 +141,7 @@ async def init_db():
     from app.models import (property, cookie, scraping_job, lead, user,
                             crm_models, app_setting, portal, email_log,
                             sms_log, forwarder, scrape_schedule, ai_usage, ai_chat,
-                            telegram_link)
+                            telegram_link, audit_event)
 
     # Whether this database existed before this boot decides what Alembic is
     # told below: a fresh one IS the models (stamp head); an established one
