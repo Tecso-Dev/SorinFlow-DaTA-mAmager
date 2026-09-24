@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from app.api.routes import (
     properties, scraper, auth, stats, proxies, crm, users, filing,
     public_auth, portal, gcp, monitoring, sms, email, forwarder, backup, ai,
-    ai_reader, ai_embed, ai_photo, ai_need, ai_assistant
+    ai_reader, ai_embed, ai_photo, ai_need, ai_assistant, audit
 )
 from app.auth.dependencies import require_permission, get_staff_user
 
@@ -58,6 +58,8 @@ router.include_router(forwarder.router, prefix="/forwarder", tags=["SMS Forwarde
 router.include_router(email.router, prefix="/email", tags=["Email"], dependencies=_perm("email"))
 # root and super_admin only, checked inside: it is the whole database.
 router.include_router(backup.router, prefix="/backup", tags=["Backup"])
+# Same: the audit trail names who did what, not something every admin sees.
+router.include_router(audit.router, prefix="/audit", tags=["Audit"])
 # Same: the AI card spends money and switches the agents off.
 router.include_router(ai.router, prefix="/ai", tags=["AI"])
 # The agents' own controls (a pass spends money): root and super_admin, checked inside.
