@@ -96,10 +96,14 @@ def test_0010_upgrades_downgrades_and_the_boot_builds_the_column_anyway():
         asyncio.run(db.engine.dispose())
         db.engine, db.async_session_maker = saved_engine, saved_maker
 
-    assert fresh == (("bigint", "YES"), "0010")
+    # head, not "0010": later revisions stack on top, and a downgrade to 0009
+    # runs each of their downgrades on the way — the path this test walks
+    from alembic.script import ScriptDirectory
+    head = ScriptDirectory.from_config(cfg).get_current_head()
+    assert fresh == (("bigint", "YES"), head)
     assert down == (None, "0009")
-    assert up == (("bigint", "YES"), "0010")
-    assert booted == (("bigint", "YES"), "0010")
+    assert up == (("bigint", "YES"), head)
+    assert booted == (("bigint", "YES"), head)
 
 
 # ── the app, on Postgres, with a fake Redis ───────────────────────────────────

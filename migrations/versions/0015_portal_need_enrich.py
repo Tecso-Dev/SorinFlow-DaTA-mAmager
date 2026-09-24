@@ -1,7 +1,7 @@
 """portal requests remember whether their description was read
 
 Revision ID: 0015
-Revises: 0010
+Revises: 0014
 Create Date: 2026-09-24
 
 The visitor's request is created from the form alone now — the model reads
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 
 
 revision = "0015"
-down_revision = "0010"
+down_revision = "0014"
 branch_labels = None
 depends_on = None
 
