@@ -2,8 +2,8 @@
 The schema step of a rollout, on its own: `python -m app.migrate`.
 
 A pod started with DB_MIGRATE_ON_BOOT=false only checks that the database is
-at its image's Alembic head (assert_schema_current) and refuses to start
-otherwise. The migration Job is what gets it there — the same init_db a boot
+not behind its image's Alembic head (assert_schema_current) and refuses to
+start if it is. The migration Job is what gets it there — the same init_db a boot
 runs, but strict: an Alembic failure fails the Job instead of being printed.
 """
 import asyncio
@@ -28,7 +28,7 @@ ON_POSTGRES = str(database.engine.url).startswith("postgresql")
 
 class TestTheSchemaCheck:
 
-    async def test_behind_ahead_or_empty_refuses_and_at_head_passes(self, tmp_path):
+    async def test_behind_or_empty_refuses_ahead_or_at_head_passes(self, tmp_path):
         from sqlalchemy import text
         from sqlalchemy.ext.asyncio import create_async_engine
         head = database._script_head(database._alembic_config())
@@ -43,10 +43,12 @@ class TestTheSchemaCheck:
             with pytest.raises(RuntimeError) as behind:
                 await database.assert_schema_current(eng)
             assert "0001" in str(behind.value) and head in str(behind.value), "both revisions, named"
+            # Ahead: a revision this image has never heard of is a newer
+            # release's schema — a rollback onto it must still start, since
+            # every migration is additive.
             async with eng.begin() as c:
                 await c.execute(text("UPDATE alembic_version SET version_num = '9999'"))
-            with pytest.raises(RuntimeError, match="9999"):
-                await database.assert_schema_current(eng)
+            await database.assert_schema_current(eng)
             async with eng.begin() as c:
                 await c.execute(text("UPDATE alembic_version SET version_num = :h"), {"h": head})
             await database.assert_schema_current(eng)

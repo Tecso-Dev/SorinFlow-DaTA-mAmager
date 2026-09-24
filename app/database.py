@@ -301,22 +301,30 @@ def _script_head(cfg) -> str | None:
 
 
 async def assert_schema_current(eng=None) -> None:
-    """Refuse to start unless the database is at this image's Alembic head.
+    """Refuse to start while the database is BEHIND this image's Alembic head.
 
     For a pod started with DB_MIGRATE_ON_BOOT=false, which leaves the schema
     to `python -m app.migrate`. A database behind the image means the Job did
-    not run or failed; one at a revision this image does not know is ahead of
-    it — a rollback onto a newer schema, which DB_MIGRATE_ON_BOOT=true (the
-    old boot path) still allows. Either way, serving now would fail requests
-    on a pod that reported Ready, so this raises and the pod never becomes
-    ready: the rollout halts with the previous pods still serving.
+    not run or failed: serving now would fail requests on a pod that reported
+    Ready, so this raises, the pod never becomes ready, and the rollout halts
+    with the previous pods still serving.
+
+    A database AHEAD of the image — at a revision this image has never heard
+    of — is allowed. That is a rollback (`kubectl rollout undo`, or the deploy
+    script undoing a failed rollout) onto a schema the newer release already
+    migrated, and every migration here is additive precisely so that older
+    code keeps working on it. Refusing it would turn a routine rollback into
+    an outage: the previous image could no longer start anywhere.
     """
     from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from loguru import logger
 
     cfg = _alembic_config()
     if cfg is None:
         raise RuntimeError("alembic.ini not found — cannot tell whether the schema is current")
-    head = _script_head(cfg)
+    script = ScriptDirectory.from_config(cfg)
+    head = script.get_current_head()
 
     def _read(sync_conn):
         if not inspect(sync_conn).has_table("users"):
@@ -327,10 +335,18 @@ async def assert_schema_current(eng=None) -> None:
         if conn.dialect.name == "postgresql":
             await _guard(conn)      # a migration holding alembic_version must not hang the boot
         has_users, current = await conn.run_sync(_read)
-    if not has_users or current != head:
-        raise RuntimeError(
-            f"database schema is at {current or 'nothing'}{'' if has_users else ' (no users table)'}, "
-            f"this image needs {head} — run `python -m app.migrate` first. Refusing to start.")
+    if has_users and current == head:
+        return
+    if has_users and current is not None:
+        try:
+            script.get_revision(current)
+        except Exception:
+            logger.warning(f"database schema is at {current}, newer than this image's {head} — "
+                           "a rollback onto a newer schema; migrations are additive, starting")
+            return
+    raise RuntimeError(
+        f"database schema is at {current or 'nothing'}{'' if has_users else ' (no users table)'}, "
+        f"this image needs {head} — run `python -m app.migrate` first. Refusing to start.")
 
 
 async def _guard(conn):
