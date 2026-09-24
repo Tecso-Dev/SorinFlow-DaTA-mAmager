@@ -168,4 +168,36 @@ check('safeUrl() refuses a backslash-led path browsers read as another site', ()
     assert.equal(safeUrl('/images/a.jpg'), '/images/a.jpg');
 });
 
+// ── the runtime card on پایش سامانه ──────────────────────────────────────
+// Its values come from Redis, written there by each process about itself —
+// host names, loop names, error lines, the sandbox's own report. Rendered
+// through the real helpers and the real card functions.
+
+new Function([
+    body,                                   // esc, raw, html, … as above
+    extractConst('_FA_DIGITS'),
+    extractFunction('faNum'),
+    extractConst('RT_ROLE_FA'),
+    extractConst('RT_LOOP_FA'),
+    extractFunction('_rtAgo'),
+    extractFunction('_rtProc'),
+    extractFunction('_rtLoop'),
+    '\nglobalThis.__runtime = { _rtProc, _rtLoop };',
+].join('\n\n'))();
+const { _rtProc, _rtLoop } = globalThis.__runtime;
+
+check('the runtime card escapes whatever a process reports about itself', () => {
+    const evil = `"><img src=x onerror=alert(1)>`;
+    const proc = _rtProc({ role: evil, host: evil, age_seconds: 3, draining: true,
+                           running: ['a'], sandbox: { mode: evil } });
+    assert.ok(!proc.includes('<img'), `payload leaked: ${proc}`);
+    assert.ok(proc.includes('در حال تخلیه'), 'a draining process says so');
+    const loop = _rtLoop({ name: evil, role: evil, restarts: 2, last_error: evil,
+                           last_error_at: 1700000000, last_beat: Date.now() / 1000 - 5 });
+    assert.ok(!loop.includes('<img'), `payload leaked: ${loop}`);
+    assert.ok(loop.includes('بار ری‌استارت'), 'a restarted loop says how often');
+    assert.ok(_rtLoop({ name: 'digest', stale: true }).includes('گیرکرده'));
+    assert.ok(_rtLoop({ name: 'digest', off: true, stale: false }).includes('خاموش'));
+});
+
 console.log(`${passed} checks passed`);

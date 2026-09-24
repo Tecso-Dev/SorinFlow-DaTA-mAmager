@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260924p2">
+    <link rel="stylesheet" href="css/style.css?v=20260925p3">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -3074,6 +3074,20 @@
                     </div>
                 </div>
 
+                <!-- every process and background loop as it reports itself to Redis,
+                     and the scrape queue; root and super_admin only -->
+                <div class="card mb-3 d-none" id="mon-runtime-card">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-diagram-3"></i> پردازه‌ها و کارهای پس‌زمینه
+                        <span class="small text-muted ms-auto" id="mon-rt-queue"></span>
+                    </div>
+                    <div class="card-body">
+                        <div id="mon-rt-procs" class="rt-procs"></div>
+                        <div id="mon-rt-running" class="rt-dim mt-2"></div>
+                        <div id="mon-rt-loops" class="table-responsive mt-3"></div>
+                    </div>
+                </div>
+
                 <!-- errors that happened in users' browsers, with the browser -->
                 <div class="card mb-3" id="mon-client-errors-card">
                     <div class="card-header d-flex align-items-center gap-2">
@@ -5301,7 +5315,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260924p2"></script>
+<script src="js/app.js?v=20260925p3"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
 <script src="js/ai/reader.js?v=20260924b"></script>
 <script src="js/ai/embed.js?v=20260924b"></script>
