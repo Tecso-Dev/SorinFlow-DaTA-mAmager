@@ -252,9 +252,19 @@ kubectl -n "$NS" rollout status deployment/scheduler --timeout=300s || rollback_
 # for that old pod to fully disappear too. All that actually matters here is
 # that the NEW pod came up; the old one is left alone to drain on its own
 # schedule, up to 2 hours, and nothing after this waits on it.
-say "waiting for worker's new pod to become ready (the old one may keep draining for up to 2h)"
-ok=0
+# Staging ships the worker at 0 replicas (no Chromium beside production on
+# one 8 GB node): there is no new pod to wait for, and waiting anyway ran into
+# the timeout and «rolled back» a Deployment that had done exactly as asked.
+WORKER_REPLICAS="$(kubectl -n "$NS" get deployment worker -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 1)"
+if [ "$WORKER_REPLICAS" = 0 ]; then
+  say "worker is set to 0 replicas in this overlay — nothing to wait for"
+  ok=1
+else
+  say "waiting for worker's new pod to become ready (the old one may keep draining for up to 2h)"
+  ok=0
+fi
 for i in $(seq 1 60); do
+  [ "$ok" = 1 ] && break
   new_rs="$(kubectl -n "$NS" get rs -l app=worker --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
   if [ -n "$new_rs" ]; then
     hash="$(kubectl -n "$NS" get rs "$new_rs" -o jsonpath='{.metadata.labels.pod-template-hash}' 2>/dev/null || true)"
