@@ -8,6 +8,7 @@ number into Divar and spends a reveal, and reveals are charged to the
 account, not to us.
 """
 import inspect
+import pytest
 import re
 import os
 import sys
@@ -123,10 +124,13 @@ class TestRotationStaysInsideThePool:
         src = inspect.getsource(DivarScraper._usable_account_count)
         assert "Cookie.owner_user_id == owner" in src
 
-    def test_a_run_with_no_owner_keeps_the_old_behaviour(self):
-        """An internally started scrape must not lose its pool."""
-        src = inspect.getsource(DivarScraper._usable_account_count)
-        assert "if owner:" in src
+    def test_a_run_with_no_owner_gets_only_unowned_numbers(self):
+        """It used to keep the whole table «so an internally-started scrape
+        does not lose its pool» — which made every internal run a way onto
+        everybody's numbers."""
+        src = inspect.getsource(DivarScraper._load_rotation_pool)
+        assert "CookieModel.owner_user_id.is_(None)" in src
+        assert "keeps the old behaviour" not in src
 
 
 class TestTheSideDoor:
@@ -225,3 +229,78 @@ class TestImportingOntoSomebodyElsesNumber:
         phone rather than an admin act."""
         src = inspect.getsource(auth_routes)
         assert "existing_cookie.owner_user_id = current_user.id" in src
+
+
+class TestARunNeverBorrowsANumber:
+    """Job 29300082: started by user 23 on his own number 09125005495, the
+    ownership check passed — and accounts_used says 09058432452, user 21's.
+    His session was dead, and initialize()'s «trying other saved sessions»
+    took the most recently updated valid row in the whole table. The other
+    person's phone got Divar's code.
+
+    A run's fallbacks are the owner's own pool, and nothing else.
+    """
+
+    def _scraper(self, rows, owner=21):
+        from app.scraper.divar_scraper import DivarScraper
+        s = DivarScraper.__new__(DivarScraper)
+
+        class _Res:
+            def __init__(self, rows): self._rows = rows
+            def scalars(self): return self
+            def all(self): return self._rows
+
+        class _DB:
+            async def execute(self, q): return _Res(rows)
+        s.db_session = _DB()
+        s.owner_user_id = owner
+        return s
+
+    @pytest.mark.asyncio
+    async def test_owned_compares_digits_not_spelling(self):
+        s = self._scraper(["09058432452"])
+        assert await s._owned("+989058432452") and await s._owned("۰۹۰۵۸۴۳۲۴۵۲")
+        assert not await s._owned("09125005495")
+
+    @pytest.mark.asyncio
+    async def test_a_run_nobody_owns_answers_for_nobody(self):
+        """No owner means nothing to check against — the pool query is what
+        narrows an unowned run, to the numbers nobody owns."""
+        s = self._scraper([], owner=None)
+        assert await s._owned("09058432452")
+
+    def test_the_dead_session_fallback_is_the_owners_pool(self):
+        src = inspect.getsource(DivarScraper.initialize)
+        assert "order_by(CookieModel.updated_at.desc())" not in src, \
+            "the whole-table fallback that put one person's run on another's number"
+        after = src.split("Session not restored for")[1]
+        assert "_load_rotation_pool()" in after.split("if phone_number:")[0]
+
+    def test_the_env_number_never_overrides_an_owner(self):
+        src = inspect.getsource(DivarScraper.initialize)
+        assert "if not phone_number and not owner:" in src
+        assert "phone_number = settings.divar_phone_number or None" in src
+        assert "phone_number or settings.divar_phone_number" not in src
+
+    def test_a_named_number_must_be_the_owners_even_from_inside(self):
+        """The route refuses it too; this is for any caller that is not the
+        route."""
+        src = inspect.getsource(DivarScraper.initialize)
+        assert "not await self._owned(phone_number)" in src
+
+    def test_the_run_says_which_of_the_owners_numbers_it_moved_to(self):
+        src = inspect.getsource(DivarScraper.initialize)
+        assert "از حساب‌های خودتان ادامه می‌دهیم" in src
+        assert "حساب دیوار دیگری به نام شما نیست" in src
+
+    def test_an_unowned_run_gets_only_unowned_numbers(self):
+        for fn in (DivarScraper._load_rotation_pool, DivarScraper._usable_account_count):
+            src = inspect.getsource(fn)
+            assert "owner_user_id.is_(None)" in src, f"{fn.__name__} still hands an unowned run the whole table"
+
+    def test_continuing_a_run_is_using_a_number_so_root_is_not_exempt(self):
+        src = inspect.getsource(scraper_routes.resume_scraping_job)
+        guard = src.split("owner = cfg.pop")[1].split("config = ScrapingJobCreate")[0]
+        bare = re.sub(r"#.*", "", guard)          # not the note saying who used to be exempt
+        assert "current_user.id != owner" in bare
+        assert "root" not in bare and "super_admin" not in bare

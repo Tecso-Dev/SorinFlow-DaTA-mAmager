@@ -260,25 +260,40 @@ class DivarScraper:
 
             # Restore authentication session
             if restore_session:
-                # Explicit phone takes priority, then env var, then auto-select from DB
-                phone_number = phone_number or settings.divar_phone_number
-                # If DIVAR_PHONE_NUMBER not configured, find any valid cookie in DB
+                owner = getattr(self, "owner_user_id", None)
+
+                # Whose numbers this run may touch is settled before anything
+                # else is. Three ways in existed and two of them ignored the
+                # owner:
+                #  · DIVAR_PHONE_NUMBER from the environment beat the owner's
+                #    pool, so one global number would have carried every
+                #    person's «خودکار» run. It is a fallback for a run nobody
+                #    owns now, and nothing more.
+                #  · «Session not restored … trying other saved sessions» took
+                #    the most recently updated valid row in the whole table —
+                #    which is how a run one person started on his own number
+                #    ended up on a colleague's when his session was dead, and
+                #    the colleague's phone got the code.
+                # An owned run: the number it names must be the owner's, and
+                # every fallback is the owner's pool. No owner: the numbers
+                # nobody owns, plus the env number.
+                if phone_number and owner and not await self._owned(phone_number):
+                    logger.error(
+                        f"[session] {phone_number} is not owned by user {owner} — "
+                        "refusing it; choosing from the owner's own numbers")
+                    await self._session_note(
+                        f"شمارهٔ {phone_number} به حساب شما تعلق ندارد — از شماره‌های خودتان انتخاب می‌شود",
+                        level="warning")
+                    phone_number = None
+                if not phone_number and not owner:
+                    phone_number = settings.divar_phone_number or None
                 if not phone_number and self.db_session:
                     try:
-                        from app.models.cookie import Cookie as CookieModel
-                        from sqlalchemy import select as _select
-                        # Least-spent first, oldest-used to break the tie.
-                        #
-                        # This used to take the most recently *updated* row, and
-                        # saving a session on rotation bumps updated_at — so the
-                        # account that had just been used was always the one
-                        # picked next, and with up to three jobs at once they
-                        # all landed on the same number. One account absorbed
-                        # every reveal while the others sat idle, which is what
-                        # the constant SMS was.
-                        # The same ordering and the same rest rule rotation
-                        # uses, so the first account of a run is chosen the
-                        # way every later one is.
+                        # Least-spent first, oldest-used to break the tie — the
+                        # same ordering and the same rest rule rotation uses,
+                        # so the first account of a run is chosen the way every
+                        # later one is. (Taking the most recently *updated* row
+                        # used to land three concurrent jobs on one number.)
                         _pool = await self._load_rotation_pool()
                         if _pool:
                             phone_number = _pool[0]
@@ -297,55 +312,45 @@ class DivarScraper:
                 if phone_number:
                     restored = await self.auth.restore_session(phone_number)
                     if not restored:
-                        logger.warning(f"Session not restored for {phone_number}. Trying other saved sessions...")
-                        # Fall back to any other valid session in DB
+                        failed = phone_number
+                        logger.warning(f"Session not restored for {failed}. Trying the owner's other sessions...")
+                        # The same pool rotation draws from — never the table.
                         phone_number = None
-                        if self.db_session:
+                        try:
+                            others = [c for c in await self._load_rotation_pool() if c != failed]
+                        except Exception as _e:
+                            logger.warning(f"Could not load the fallback pool: {_e}")
+                            others = []
+                        for candidate in others:
                             try:
-                                from app.models.cookie import Cookie as CookieModel
-                                from sqlalchemy import select as _select
-                                _res = await self.db_session.execute(
-                                    _select(CookieModel)
-                                    .where(CookieModel.is_valid == True)
-                                    .order_by(CookieModel.updated_at.desc())
-                                    .limit(1)
-                                )
-                                _rec = _res.scalar_one_or_none()
-                                if _rec:
-                                    phone_number = _rec.phone_number
-                                    logger.info(f"Falling back to session for {phone_number}")
-                                    # A different person, so a different laptop.
-                                    await apply_device(self.page, Device.for_account(phone_number))
-                                    from app.services import job_log
-                                    await job_log.record(
-                                        self.current_job.job_id if self.current_job else None,
-                                        job_log.SESSION,
-                                        f"نشست اصلی کار نکرد — با شمارهٔ {phone_number} ادامه می‌دهیم",
-                                        level="warning", phone=phone_number)
+                                # A different account is a different laptop.
+                                await apply_device(self.page, Device.for_account(candidate))
+                                if await self.auth.restore_session(candidate):
+                                    phone_number = candidate
+                                    break
                             except Exception as _e:
-                                logger.warning(f"Could not find fallback session: {_e}")
-
+                                logger.warning(f"Fallback restore failed for {candidate}: {_e}")
                         if phone_number:
-                            restored = await self.auth.restore_session(phone_number)
-                            if not restored:
-                                logger.warning("Fallback session also failed. Phone numbers will not be extracted.")
-                                return False
+                            await self._session_note(
+                                f"نشست {failed} کار نکرد — با شمارهٔ {phone_number} از حساب‌های خودتان ادامه می‌دهیم",
+                                level="warning", phone=phone_number)
                             self.active_phone = phone_number
                             logger.info(f"Session restored successfully using fallback: {phone_number}")
                         else:
-                            logger.warning("No valid session found. Phone numbers will not be extracted.")
-                            from app.services import job_log
-                            await job_log.record(
-                                self.current_job.job_id if self.current_job else None,
-                                job_log.SESSION,
-                                "هیچ نشست معتبر دیواری پیدا نشد — شمارهٔ تماس آگهی‌ها استخراج نمی‌شود",
-                                level="warning")
+                            logger.warning("No usable session of the owner's. Phone numbers will not be extracted.")
+                            await self._session_note(
+                                f"نشست {failed} کار نکرد و حساب دیوار دیگری به نام شما نیست — "
+                                "شمارهٔ تماس آگهی‌ها استخراج نمی‌شود. یک حساب دیوار به نام خودتان اضافه کنید.",
+                                level="error", phone=failed)
                             return False
                     else:
                         self.active_phone = phone_number
                         logger.info("Session restored successfully")
                 else:
-                    logger.warning("No Divar session configured — phone numbers will not be extracted.")
+                    logger.warning("No Divar session for this run — phone numbers will not be extracted.")
+                    await self._session_note(
+                        "هیچ نشست دیواری به نام شما نیست — شمارهٔ تماس آگهی‌ها استخراج نمی‌شود",
+                        level="warning")
 
             if self.context is None:
                 # The CONTEXT, not the browser: a persistent context leaves
@@ -2615,6 +2620,35 @@ class DivarScraper:
 
         return local_paths
     
+    async def _owned(self, phone: str) -> bool:
+        """Is this number one of the run's owner's? Digits compared, so
+        +98912…, 0098912… and 0912… are the same number."""
+        owner = getattr(self, "owner_user_id", None)
+        if not owner or not self.db_session:
+            return not owner
+        try:
+            from app.models.cookie import Cookie as CookieModel
+            from app.scraper.otp_store import _digits
+            rows = (await self.db_session.execute(
+                select(CookieModel.phone_number).where(CookieModel.owner_user_id == owner)
+            )).scalars().all()
+            return _digits(phone) in {_digits(r) for r in rows}
+        except Exception as e:
+            logger.warning(f"[session] could not check ownership of {phone}: {e}")
+            return False
+
+    async def _session_note(self, text: str, level: str = "info", phone: Optional[str] = None) -> None:
+        """A line in the run's own log about which session it is on. Never
+        raises: bookkeeping must not stop a scrape."""
+        job = getattr(self, "current_job", None)
+        if not job:
+            return
+        try:
+            from app.services import job_log
+            await job_log.record(job.job_id, job_log.SESSION, text, level=level, phone=phone)
+        except Exception as e:
+            logger.warning(f"[session] could not record the note: {e}")
+
     async def _load_rotation_pool(self) -> List[str]:
         """Valid saved Divar accounts, least-spent first — the rotation
         candidates, in the order they should be reached for."""
@@ -2631,11 +2665,13 @@ class DivarScraper:
             # Rotation must stay inside the pool the run's owner owns.
             # Without this it would log somebody else's number in and spend
             # their reveals — and a reveal is charged to the account, not to
-            # us. A run with no known owner keeps the old behaviour so an
-            # internally-started scrape does not lose its pool.
+            # us. A run with no known owner used to keep the whole table «so
+            # an internally-started scrape does not lose its pool» — which
+            # made every internal run a way onto everybody's numbers. It gets
+            # the numbers nobody owns, and nothing else.
             owner = getattr(self, "owner_user_id", None)
-            if owner:
-                query = query.where(CookieModel.owner_user_id == owner)
+            query = query.where(CookieModel.owner_user_id == owner if owner
+                                else CookieModel.owner_user_id.is_(None))
             rows = (await self.db_session.execute(
                 query.order_by(CookieModel.reveals.asc(),
                                CookieModel.last_used_at.asc().nullsfirst())
@@ -2682,8 +2718,8 @@ class DivarScraper:
             # Same pool rotation actually draws from, or the run absorbs
             # prompts for accounts it will never be allowed to reach.
             owner = getattr(self, "owner_user_id", None)
-            if owner:
-                q = q.where(Cookie.owner_user_id == owner)
+            q = q.where(Cookie.owner_user_id == owner if owner
+                        else Cookie.owner_user_id.is_(None))
             n = (await self.db_session.execute(q)).scalar() or 0
             return max(1, int(n))
         except Exception as e:

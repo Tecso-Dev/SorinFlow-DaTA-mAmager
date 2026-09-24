@@ -298,8 +298,12 @@ async def resume_scraping_job(
 
     cfg = dict(job.config)
     owner = cfg.pop("owner_user_id", None)
-    if owner and current_user and current_user.id != owner \
-            and (current_user.role or "") not in ("root", "super_admin"):
+    # The continued run is a new run started by the caller — on the caller's
+    # numbers, with the caller's prompts. root and super_admin used to be
+    # exempt here, which meant root pressing «ادامه» on a colleague's job
+    # started that job on root's own Divar numbers. Continuing a run is using
+    # a number, not managing the pool; only the person whose run it is does it.
+    if owner and current_user and current_user.id != owner:
         raise HTTPException(status_code=403, detail="این اسکرپ را کاربر دیگری شروع کرده است")
 
     config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
