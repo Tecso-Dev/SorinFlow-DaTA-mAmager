@@ -1,9 +1,9 @@
 """
 SorinFlow Divar Scraper - Authentication API Routes
 """
-import logging
 from datetime import datetime
 from fastapi import Request, APIRouter, Depends, HTTPException
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -23,8 +23,6 @@ from app.schemas import (
     CookieStatusResponse,
     AuthResponse
 )
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 settings = get_settings()

@@ -99,6 +99,17 @@ class TestRequestIdPatcher:
         assert rec["extra"]["request_id"] == "-"
 
 
+def test_no_app_module_logs_through_std_logging():
+    """auth.py used std logging.getLogger(__name__), so its lines — including
+    the [audit] ones — bypassed loguru and the redaction filter entirely: a
+    Divar session or a phone number logged there was never masked."""
+    import pathlib
+    app_dir = pathlib.Path(__file__).resolve().parent.parent / "app"
+    offenders = [str(p) for p in app_dir.rglob("*.py")
+                if "logging.getLogger" in p.read_text(encoding="utf-8")]
+    assert not offenders, f"still logging through std logging: {offenders}"
+
+
 def test_both_sinks_are_filtered():
     """A sink added without the filter is a hole in the only defence there is."""
     import re
