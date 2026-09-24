@@ -13,8 +13,10 @@ re-running after a restart adds nothing twice.
 Usage (inside the backend container):
     docker compose -f docker-compose.local.yml exec backend python scripts/seed_local.py
 
-Everything here is obviously fake: Persian placeholder names, 0912000xxxx
-numbers, dummy cookie JSON. No real customer data.
+Everything here is fake: Persian placeholder names, 0912xxxxxxx-shaped
+numbers nothing in the local stack ever contacts, dummy cookie JSON. No
+real customer data. It refuses any database whose name does not end in
+_local: it writes admin accounts with a committed password.
 """
 import asyncio
 import sys
@@ -27,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import select  # noqa: E402
 
 from app.config import CITIES, CATEGORIES  # noqa: E402
-from app.database import async_session_maker  # noqa: E402
+from app.database import async_session_maker, engine  # noqa: E402
 from app.auth.jwt import get_password_hash  # noqa: E402
 from app.auth.permissions import ALL_PERMISSIONS, DEFAULT_ADMIN_PERMISSIONS, ROLE_ROOT, ROLE_SUPER_ADMIN  # noqa: E402
 from app.models.user import User  # noqa: E402
@@ -251,7 +253,18 @@ async def seed_jobs(db, users):
     print("scrape jobs: created 2")
 
 
+def _refuse_unless_local():
+    # DATABASE_URL is read from the environment or ./.env; pointed at a real
+    # database, the staff accounts (one an admin with every permission, all
+    # with the password in this file) would commit before anything else ran.
+    name = engine.url.database or ""
+    if not name.endswith("_local"):
+        sys.exit(f"refusing to seed {name!r}: only a database whose name ends "
+                 "in _local (docker-compose.local.yml's divar_scraper_local)")
+
+
 async def main():
+    _refuse_unless_local()
     async with async_session_maker() as db:
         users = await seed_staff(db)
         await db.commit()
