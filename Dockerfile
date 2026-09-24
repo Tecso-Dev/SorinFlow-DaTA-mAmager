@@ -27,4 +27,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# X-Forwarded-For is believed only from inside the cluster (k3s's pod network,
+# where Traefik runs). With "*" uvicorn took the leftmost entry — whatever the
+# caller typed — as the client; now it takes the rightmost address not in this
+# range, which is the one Traefik wrote.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "10.42.0.0/16"]

@@ -946,6 +946,15 @@ async def permissions_catalog(_: User = _super_admin):
             "defaults": DEFAULT_ADMIN_PERMISSIONS}
 
 
+@router.get("/me/ip")
+async def get_my_ip(request: Request, current_user: User = Depends(get_current_user)):
+    """The address the server sees you coming from. How to check, without a
+    shell on the server, that the per-address limits see real callers — before
+    externalTrafficPolicy: Local every request came from k3s's own 10.42.x.x."""
+    from app.services.verification import client_ip
+    return {"ip": client_ip(request)}
+
+
 @router.get("/me/totp/status")
 async def totp_status(current_user: User = Depends(get_current_user)):
     return {"enabled": bool(current_user.totp_enabled)}

@@ -21,3 +21,11 @@ spec:
       web:
         redirectTo:
           port: websecure
+    # Local: k3s's ServiceLB hands Traefik the caller's own address instead of
+    # rewriting every request to an internal one — otherwise every per-address
+    # limit in the app (logins, SMS codes) was one limit for the whole world.
+    # Single node, so no traffic is lost. Needs k3s without node-external-ip
+    # (new_server.sh does not set it).
+    service:
+      spec:
+        externalTrafficPolicy: Local

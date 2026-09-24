@@ -794,6 +794,8 @@ function pfRender(me) {
     const fa = d => new Date(d).toLocaleDateString('fa-IR');
     set('pf-since', me.created_at ? fa(me.created_at) : '—');
     set('pf-last', me.last_login ? fa(me.last_login) : '—');
+    // a 10.42.x.x here means the cluster is still hiding callers' addresses
+    apiCall('/users/me/ip').then(r => set('pf-ip', r.ip)).catch(() => {});
     const pres = document.getElementById('pf-presence');
     if (pres) pres.value = me.presence || 'available';
 
