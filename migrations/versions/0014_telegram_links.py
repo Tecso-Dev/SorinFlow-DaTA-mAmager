@@ -34,6 +34,7 @@ def upgrade() -> None:
         sa.Column("telegram_user_id", sa.BigInteger(), nullable=False, unique=True),
         sa.Column("telegram_username", sa.String(64)),
         sa.Column("linked_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("token_version", sa.Integer(), nullable=False, server_default="0"),
     )
     op.create_index("ix_telegram_links_id", TABLE, ["id"])
 

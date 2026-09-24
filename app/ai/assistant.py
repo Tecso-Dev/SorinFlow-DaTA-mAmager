@@ -104,8 +104,12 @@ def may_ask(user) -> bool:
 
 async def linked_user(db, telegram_user_id) -> Optional[User]:
     """The panel user this Telegram account is linked to, if they may ask."""
+    # the link counts only while the account's token_version is the one it
+    # was made under: a password change or «خروج از همه‌جا» signs it out too
     user = (await db.execute(select(User).join(TelegramLink, TelegramLink.user_id == User.id)
-                             .where(TelegramLink.telegram_user_id == int(telegram_user_id)))).scalars().first()
+                             .where(TelegramLink.telegram_user_id == int(telegram_user_id),
+                                    TelegramLink.token_version == func.coalesce(User.token_version, 0))
+                             )).scalars().first()
     return user if may_ask(user) else None
 
 
@@ -206,7 +210,8 @@ async def _redeem(db, code: str, sender: Dict[str, Any]) -> Optional[str]:
     await db.execute(delete(TelegramLink).where(
         or_(TelegramLink.user_id == user.id, TelegramLink.telegram_user_id == tid)))
     db.add(TelegramLink(user_id=user.id, telegram_user_id=tid,
-                        telegram_username=(sender.get("username") or "")[:64] or None))
+                        telegram_username=(sender.get("username") or "")[:64] or None,
+                        token_version=int(user.token_version or 0)))
     await db.commit()
     logger.info(f"[assistant] telegram account {tid} linked to {user.username}")
     from app.services import audit

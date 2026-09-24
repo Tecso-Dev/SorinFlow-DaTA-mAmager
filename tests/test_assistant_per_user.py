@@ -356,6 +356,24 @@ class TestWhoMayAsk:
                 return await assistant.answer(db, "صف تماس؟", user=world["users"]["gone"])
         assert asyncio.run(ask())["text"] == assistant.NO_ACCESS, "and no model call (it would raise)"
 
+    def test_a_password_change_signs_the_telegram_link_out_too(self, world):
+        """A link is a signed-in device. A password change, «خروج از همه‌جا»
+        or an admin's reset bumps token_version and signs every device out —
+        a Telegram account linked with a stolen session must not outlive it."""
+        _link(world, "mina", 111)
+        world["sent"].clear()
+        assert _tg(world, "/help", tid=111) == assistant.HELP
+
+        async def bump():
+            async with world["maker"]() as db:
+                u = await db.get(type(world["users"]["mina"]), world["users"]["mina"].id)
+                u.token_version = (u.token_version or 0) + 1
+                await db.commit()
+        asyncio.run(bump())
+        world["sent"].clear()
+        assert _tg(world, "/help", tid=111) is None
+        assert world["sent"] == [], "silent, like any unlinked chat"
+
     def test_the_bot_listens_with_no_backup_chat_configured(self, world):
         _link(world, "mina", 111)
         world["updates"].append({"update_id": 5, "message": {

@@ -25,7 +25,11 @@ router = APIRouter()
 @router.get("/me/telegram")
 async def my_telegram(db: AsyncSession = Depends(get_db), user: User = Depends(get_staff_user)):
     link = (await db.execute(select(TelegramLink).where(TelegramLink.user_id == user.id))).scalar_one_or_none()
-    return link.to_dict() if link else {"linked": False}
+    # a link made before the last password change / sign-out-everywhere is
+    # one the bot no longer honours (assistant.linked_user) — say so here too
+    if link and link.token_version == int(user.token_version or 0):
+        return link.to_dict()
+    return {"linked": False}
 
 
 @router.post("/me/telegram/link-code")

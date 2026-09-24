@@ -23,6 +23,10 @@ class TelegramLink(Base):
     telegram_user_id = Column(BigInteger, nullable=False, unique=True)   # Telegram's from.id
     telegram_username = Column(String(64))                               # @name, if the account has one
     linked_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # users.token_version when the link was made. A password change, «خروج از
+    # همه‌جا» or an admin's reset bumps it and signs every device out — the
+    # link is one of those devices, so a different value means no link.
+    token_version = Column(Integer, nullable=False, server_default="0")
 
     def to_dict(self):
         return {
