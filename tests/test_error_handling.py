@@ -126,6 +126,13 @@ class TestInternalErrorHandler:
         assert "text/html" in r.headers["content-type"]
 
     def test_exactly_one_traceback_is_logged_with_the_ref(self, tmp_path):
+        # app.main's own module-level logger.remove()/logger.add() calls run
+        # once, on this process's first import of it — which would otherwise
+        # wipe the sink this test adds below if that first import happened to
+        # land inside the try block (e.g. this test running standalone,
+        # before anything else in the suite has imported app.main). Forcing
+        # the import here first makes it a cached no-op there instead.
+        import app.main            # noqa: F401
         from loguru import logger
         seen = []
         sink_id = logger.add(lambda m: seen.append(m), level="ERROR")
