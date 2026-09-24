@@ -36,7 +36,7 @@ from app.auth.jwt import (
 from app.auth.dependencies import get_current_user, _role_dep
 from app.auth.permissions import (
     PERMISSIONS, ALL_PERMISSIONS, ROLE_ROOT, ASSIGNABLE_BY_SUPER_ADMIN,
-    DEFAULT_ADMIN_PERMISSIONS, normalize_permissions, user_permissions,
+    DEFAULT_ADMIN_PERMISSIONS, STAFF_ROLES, normalize_permissions, user_permissions,
 )
 from app.services import audit
 from app.schemas import (
@@ -747,6 +747,9 @@ async def update_me(data: ProfileUpdate,
                                    User.id != current_user.id))).scalars().first()
             if clash:
                 raise HTTPException(409, "این نام کاربری قبلاً گرفته شده است")
+            # the username is the owner-name of anyone without a full_name,
+            # so it must not be another account's full name either
+            await _guard_name_is_free(db, u, exclude_id=current_user.id)
             logger.warning(f"[profile] {current_user.username} renamed to {u}")
             current_user.username = u
             renamed = True
@@ -1265,6 +1268,10 @@ async def update_user(
     if data.full_name is not None:
         await _guard_name_is_free(db, data.full_name, exclude_id=user.id)
         user.full_name = data.full_name
+    elif data.role in STAFF_ROLES and user.role not in STAFF_ROLES:
+        # a visitor made staff joins the name-based ownership rules with the
+        # name they picked at sign-up — the same check as the portal ticket
+        await _guard_name_is_free(db, user.full_name or user.username, exclude_id=user.id)
     if data.role is not None:
         user.role = data.role
     if data.is_active is not None:

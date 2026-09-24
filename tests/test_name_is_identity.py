@@ -80,3 +80,58 @@ def test_the_owners_editor_refuses_it_too():
     with pytest.raises(HTTPException) as e:
         _run(_go())
     assert e.value.status_code == 409
+
+
+def test_a_username_cannot_become_a_colleagues_full_name():
+    """Someone without a full name is known by their username, so renaming
+    the username to a colleague's (Latin) full name was the side door."""
+    from app.api.routes.users import update_me
+    from app.database import async_session_maker
+    from app.models.user import User
+    from app.schemas import ProfileUpdate
+
+    async def _go():
+        from app.database import engine
+        from app.models.audit_event import AuditEvent
+        async with engine.begin() as conn:
+            for tbl in (User, AuditEvent):
+                await conn.run_sync(tbl.__table__.create, checkfirst=True)
+        ns = uuid.uuid4().hex[:6]
+        async with async_session_maker() as db:
+            sara = User(username=f"s{ns}", full_name=f"sara.k{ns}", hashed_password="x", role="admin", is_active=True)
+            bob = User(username=f"b{ns}", full_name=None, hashed_password="x", role="admin", is_active=True)
+            db.add_all([sara, bob])
+            await db.commit()
+            return bob.id, ns
+
+    bob_id, ns = _run(_go())
+
+    async def _rename():
+        async with async_session_maker() as db:
+            me = await db.get(User, bob_id)
+            return await update_me(ProfileUpdate(username=f"sara.k{ns}"), current_user=me, db=db)
+
+    with pytest.raises(HTTPException) as e:
+        _run(_rename())
+    assert e.value.status_code == 409
+
+
+def test_making_a_visitor_staff_checks_the_name_they_signed_up_with():
+    from app.api.routes.users import update_user
+    from app.database import async_session_maker
+    from app.models.user import User
+    from app.schemas import UserUpdate
+    mina_id, reza_id, boss_id, NS = _run(_users())
+
+    async def _go():
+        async with async_session_maker() as db:
+            visitor = User(username=f"v{NS}", full_name=f"مینا کاظمی {NS}", hashed_password="x",
+                           role="visitor", is_active=True)
+            db.add(visitor)
+            await db.commit()
+            boss = await db.get(User, boss_id)
+            return await update_user(visitor.id, UserUpdate(role="admin"), actor=boss, db=db)
+
+    with pytest.raises(HTTPException) as e:
+        _run(_go())
+    assert e.value.status_code == 409
