@@ -65,12 +65,25 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        # requirements-dev.txt pulls requirements.txt plus the test-only
-        # packages, so this gate installs exactly what a developer installs —
-        # a hand-kept list here would drift from what the app actually needs.
+        # requirements-dev.lock is compiled (pip-compile/uv pip compile
+        # --generate-hashes) from requirements-dev.txt, which itself pulls
+        # requirements.txt plus the test-only packages — so this gate installs
+        # exactly the hash-pinned closure a developer installs, not a
+        # hand-kept list that could drift from what the app actually needs.
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          pip install --require-hashes -r requirements-dev.lock
+
+      - name: Audit locked dependencies for known vulnerabilities
+        # ecdsa's PYSEC-2026-1325 (Minerva timing attack recovering the nonce
+        # from ECDSA P-256 signing) has no upstream fix — the maintainers
+        # consider side-channel attacks out of scope. python-jose pulls ecdsa
+        # unconditionally, but app/auth/jwt.py signs and verifies every token
+        # with HS256 (HMAC), never calling into ecdsa's signing path, so it is
+        # ignored here instead of leaving the gate permanently red.
+        run: |
+          pip install pip-audit==2.10.1
+          pip-audit -r requirements-dev.lock --ignore-vuln PYSEC-2026-1325
 
       - name: Run tests
         env:
@@ -98,7 +111,7 @@ jobs:
     needs: test
     # Never from a pull request: building would push an image to the registry
     # tagged with a SHA that may never reach main.
-    if: github.event_name != 'pull_request' 
+    if: github.event_name != 'pull_request'
     permissions:
       contents: read
       packages: write
@@ -149,7 +162,7 @@ jobs:
   deploy:
     runs-on: [self-hosted, sorinflow]
     needs: build
-    if: github.event_name != 'pull_request' 
+    if: github.event_name != 'pull_request'
     permissions:
       contents: read
       packages: read
