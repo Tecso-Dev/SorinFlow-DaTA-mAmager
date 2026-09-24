@@ -7998,38 +7998,68 @@ function _matchCriteria(intent) {
     return bits.join(' • ');
 }
 
+/** Renders the fetched match list into the modal body. `emptyMsg` is only
+ *  given on the first load — a background re-check (see _pollMatchReasons)
+ *  that comes back with nothing new leaves whatever is already on screen. */
+function _renderMatchModal(data, emptyMsg) {
+    const items = data.items || [];
+    const criteria = _matchCriteria(data.intent);
+    if (!items.length) {
+        if (!emptyMsg) return;
+        // an empty list is almost always a criterion that is too narrow,
+        // so show what was searched for instead of a bare "not found"
+        document.getElementById('match-modal-body').innerHTML = `
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-search" style="font-size:2rem"></i>
+                <p class="mt-3">${emptyMsg}</p>
+                ${criteria ? `<p class="small">جستجو بر اساس: ${criteria}<br>
+                    اگر انتظار نتیجه داشتید، این معیارها را در پروندهٔ مشتری بازبینی کنید.</p>` : ''}
+            </div>`;
+        return;
+    }
+    const src = data.source?.title || data.source?.name || '';
+    const s0 = data.source || {};
+    const money = s0.listing_type === 'rent'
+        ? (s0.deposit || s0.rent_price ? `ودیعه ${s0.deposit ? formatPrice(s0.deposit) : '—'} · اجاره ${s0.rent_price ? formatPrice(s0.rent_price) : 'ندارد'}${s0.comparable ? ` — رهن کامل ≈ ${formatPrice(s0.comparable)}` : ''}` : '')
+        : (s0.price ? `قیمت ${formatPrice(s0.price)}` : '');
+    document.getElementById('match-modal-body').innerHTML = `
+        ${src ? `<div class="match-source">مبنای تطابق: <b>${esc(src)}</b> — ${formatNumber(items.length)} مورد یافت شد
+            ${money ? `<div class="small mt-1 match-source-money">${money}${s0.listing_type === 'rent' ? ' <span class="text-muted">· اختلاف قیمت‌ها روی رهن کامل حساب می‌شود</span>' : ''}</div>` : ''}
+            ${criteria ? `<div class="small mt-1">${criteria}</div>` : ''}</div>` : ''}
+        ${_matchGroups(items, data.source)}`;
+}
+
+/** The Persian reason for each row is written by the model in the background
+ *  (app/services/match_service.py _attach_reasons) — a page never waits the
+ *  up to 90 s that can take. `reasons_pending` means it is still being
+ *  written; a few light re-checks pick it up with no spinner that never
+ *  ends, and give up quietly if it is still not ready — the ranking already
+ *  showed without it. Stops on its own if a different card was opened
+ *  meanwhile (modalEl.dataset.matchUrl no longer matches `url`). */
+function _pollMatchReasons(url, modalEl, triesLeft) {
+    if (triesLeft <= 0) return;
+    setTimeout(async () => {
+        if (modalEl.dataset.matchUrl !== url) return;
+        try {
+            const data = await apiCall(url);
+            if (modalEl.dataset.matchUrl !== url) return;
+            _renderMatchModal(data, null);
+            if (data.reasons_pending) _pollMatchReasons(url, modalEl, triesLeft - 1);
+        } catch (e) { /* quietly give up — the ranking already showed without it */ }
+    }, 4000);
+}
+
 async function _openMatchModal(title, url, emptyMsg) {
     const modalEl = document.getElementById('matchModal');
+    modalEl.dataset.matchUrl = url;
     document.getElementById('match-modal-title').innerHTML = title;
     document.getElementById('match-modal-body').innerHTML =
         '<div class="text-center py-5 text-muted"><span class="spinner-border"></span><p class="mt-3">در حال یافتن بهترین موارد...</p></div>';
     new bootstrap.Modal(modalEl).show();
     try {
         const data = await apiCall(url);
-        const items = data.items || [];
-        const criteria = _matchCriteria(data.intent);
-        if (!items.length) {
-            // an empty list is almost always a criterion that is too narrow,
-            // so show what was searched for instead of a bare "not found"
-            document.getElementById('match-modal-body').innerHTML = `
-                <div class="text-center py-5 text-muted">
-                    <i class="bi bi-search" style="font-size:2rem"></i>
-                    <p class="mt-3">${emptyMsg}</p>
-                    ${criteria ? `<p class="small">جستجو بر اساس: ${criteria}<br>
-                        اگر انتظار نتیجه داشتید، این معیارها را در پروندهٔ مشتری بازبینی کنید.</p>` : ''}
-                </div>`;
-            return;
-        }
-        const src = data.source?.title || data.source?.name || '';
-        const s0 = data.source || {};
-        const money = s0.listing_type === 'rent'
-            ? (s0.deposit || s0.rent_price ? `ودیعه ${s0.deposit ? formatPrice(s0.deposit) : '—'} · اجاره ${s0.rent_price ? formatPrice(s0.rent_price) : 'ندارد'}${s0.comparable ? ` — رهن کامل ≈ ${formatPrice(s0.comparable)}` : ''}` : '')
-            : (s0.price ? `قیمت ${formatPrice(s0.price)}` : '');
-        document.getElementById('match-modal-body').innerHTML = `
-            ${src ? `<div class="match-source">مبنای تطابق: <b>${esc(src)}</b> — ${formatNumber(items.length)} مورد یافت شد
-                ${money ? `<div class="small mt-1 match-source-money">${money}${s0.listing_type === 'rent' ? ' <span class="text-muted">· اختلاف قیمت‌ها روی رهن کامل حساب می‌شود</span>' : ''}</div>` : ''}
-                ${criteria ? `<div class="small mt-1">${criteria}</div>` : ''}</div>` : ''}
-            ${_matchGroups(items, data.source)}`;
+        _renderMatchModal(data, emptyMsg);
+        if (data.reasons_pending) _pollMatchReasons(url, modalEl, 3);
     } catch (e) {
         document.getElementById('match-modal-body').innerHTML =
             `<div class="alert alert-danger">خطا در تطابق‌سازی: ${esc(e.message)}</div>`;

@@ -312,11 +312,17 @@ class TestThePortal:
         assert asyncio.run(need.enrich_request(object(), _req())) is None
         assert not calls
 
-    def test_the_model_failing_is_not_the_visitors_problem(self, configured, monkeypatch):
+    def test_the_model_failing_raises_for_the_background_pass_to_judge(self, configured, monkeypatch):
+        """enrich_request runs in the background now (portal_bridge.enrich_needs),
+        never on the visitor's request — so it raises instead of swallowing, and
+        the caller decides what a real failure costs versus a gateway-state one
+        (see test_portal_bridge.py for that policy)."""
         _gateway(monkeypatch, lambda r: httpx.Response(500, text="down"))
-        assert asyncio.run(need.enrich_request(object(), _req(description="طبقهٔ اول نباشه"))) is None
+        with pytest.raises(llm.LLMError):
+            asyncio.run(need.enrich_request(object(), _req(description="طبقهٔ اول نباشه")))
         monkeypatch.setattr(llm.settings, "llm_api_key", "", raising=False)
-        assert asyncio.run(need.enrich_request(object(), _req(description="طبقهٔ اول نباشه"))) is None
+        with pytest.raises(llm.NotConfigured):
+            asyncio.run(need.enrich_request(object(), _req(description="طبقهٔ اول نباشه")))
 
     def test_the_hint_is_the_form(self, configured, monkeypatch):
         seen = []

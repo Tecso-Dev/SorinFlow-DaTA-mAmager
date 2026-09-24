@@ -1257,9 +1257,9 @@ async def match_similar_properties(
     prop = (await db.execute(select(Property).where(Property.id == property_id))).scalar_one_or_none()
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
-    items = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
+    items, pending = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
     return {"items": items, "total": len(items),
-            "source": _match_source(prop)}
+            "source": _match_source(prop), "reasons_pending": pending}
 
 
 def _match_source(prop) -> dict:
@@ -1289,9 +1289,9 @@ async def match_similar_for_lead(
     prop = (await db.execute(select(Property).where(Property.id == lead.property_id))).scalar_one_or_none()
     if not prop:
         raise HTTPException(status_code=404, detail="Linked property not found")
-    items = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
+    items, pending = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
     return {"items": items, "total": len(items),
-            "source": _match_source(prop)}
+            "source": _match_source(prop), "reasons_pending": pending}
 
 
 @router.get("/match/customer/{customer_id}")
@@ -1312,10 +1312,10 @@ async def match_properties_for_customer(
     customer = (await db.execute(select(Customer).where(Customer.id == customer_id))).scalar_one_or_none()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
-    items = await matches_for_customer(db, customer, limit=limit, use_llm=use_llm, city=city)
+    items, pending = await matches_for_customer(db, customer, limit=limit, use_llm=use_llm, city=city)
     return {"items": items, "total": len(items),
             "source": {"id": customer.id, "name": customer.full_name},
-            "intent": customer_intent(customer)}
+            "intent": customer_intent(customer), "reasons_pending": pending}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -10,7 +10,10 @@ LLM key is configured the top candidates are additionally re-ranked and
 given a Persian reason, but the local order is what ships if the LLM is
 unavailable — the feature never breaks because of a missing key.
 """
-from typing import Any, Dict, List, Optional
+import asyncio
+import hashlib
+import json
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from loguru import logger
@@ -416,6 +419,142 @@ async def _llm_rerank(prompt_items: List[Dict[str, Any]], context: str) -> Dict[
         return {}
 
 
+# ── reasons and semantic candidates: cached, never inline ───────────────────
+# A model call can take up to 90 s (app/services/llm.py, reasoning models), so
+# a page must never wait on one. What each depends on is fingerprinted into
+# the Redis key; a miss schedules the one call that will fill it — behind a
+# short lock, so a burst of page loads for the same row set costs one call —
+# and the request answers with the deterministic ranking right away. A Redis
+# outage is treated exactly like a model outage: quietly nothing extra, ever.
+REASON_CACHE_TTL = 7 * 24 * 3600      # a week — candidates turn over faster than this
+SEMANTIC_CACHE_TTL = 7 * 24 * 3600
+LOCK_TTL = 200                        # a reasoning model's 90s, twice (chat()'s one retry on a malformed answer)
+
+_background_tasks: set = set()
+
+
+def _spawn(coro) -> None:
+    """Fire-and-forget on the running loop, with a strong reference — an
+    asyncio task nothing holds can be garbage-collected mid-flight."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def _fingerprint(*parts: Any) -> str:
+    """One short key for whatever a cached answer depends on. Any change of
+    any part invalidates it instead of serving a stale sentence."""
+    return hashlib.sha256("|".join(str(p) for p in parts).encode("utf-8")).hexdigest()[:24]
+
+
+async def _compute_and_cache_reasons(key: str, lock_key: str,
+                                     prompt_items: List[Dict[str, Any]], context: str) -> None:
+    from app.database import get_redis
+    try:
+        reasons = await _llm_rerank(prompt_items, context)
+        if reasons:
+            r = await get_redis()
+            await r.set(key, json.dumps(reasons), ex=REASON_CACHE_TTL)
+    except Exception as e:
+        logger.warning(f"[match] background re-rank failed: {type(e).__name__}: {e}")
+    finally:
+        try:
+            r = await get_redis()
+            await r.delete(lock_key)
+        except Exception:
+            pass   # the lock's own TTL clears it either way
+
+
+async def _attach_reasons(kind: str, source_id: int, results: List[Dict[str, Any]], context: str) -> bool:
+    """Fill `ai_reason` on `results` from the cache. On a miss, schedule the
+    one model call that will fill it and report the rows as pending — never
+    raises, so a Redis outage costs the reasons, not the ranking."""
+    if not results:
+        return False
+    fp = _fingerprint(context, *(f"{row['id']}:{row['score']}:{row.get('price')}" for row in results))
+    key = f"match:reason:{kind}:{source_id}:{fp}"
+    try:
+        from app.database import get_redis
+        r = await get_redis()
+        cached = await r.get(key)
+    except Exception as e:
+        logger.info(f"[match] reason cache unavailable: {type(e).__name__}: {e}")
+        return False
+    if cached:
+        try:
+            reasons = {int(k): v for k, v in json.loads(cached).items()}
+        except Exception:
+            reasons = {}
+        for row in results:
+            if reasons.get(row["id"]):
+                row["ai_reason"] = reasons[row["id"]]
+        return False
+    lock_key = f"match:reason:lock:{kind}:{source_id}:{fp}"
+    try:
+        got_lock = await r.set(lock_key, "1", nx=True, ex=LOCK_TTL)
+    except Exception:
+        got_lock = False
+    if got_lock:
+        prompt_items = [{"id": row["id"], "title": row["title"], "area": row["area"], "rooms": row["rooms"],
+                         "price": row["price"], "district": row["district"], "city": row["city_name"],
+                         "score": row["score"]} for row in results]
+        _spawn(_compute_and_cache_reasons(key, lock_key, prompt_items, context))
+    return True
+
+
+async def _compute_and_cache_semantic(key: str, lock_key: str, need: str,
+                                      city: Optional[str], listing_type: Optional[str]) -> None:
+    from app.database import async_session_maker, get_redis
+    from app.ai import embeddings as _emb
+    from app.services import llm as _llm
+    try:
+        async with async_session_maker() as session:
+            pairs = list(await _emb.semantic_candidates(
+                session, need, city=city, listing_type=listing_type, limit=SEMANTIC_EXTRA))
+        r = await get_redis()
+        await r.set(key, json.dumps(pairs), ex=SEMANTIC_CACHE_TTL)
+    except _llm.LLMError as e:
+        logger.info(f"[match] semantic candidates skipped: {e}")
+    except Exception as e:
+        logger.warning(f"[match] semantic candidates failed: {type(e).__name__}: {e}")
+    finally:
+        try:
+            r = await get_redis()
+            await r.delete(lock_key)
+        except Exception:
+            pass
+
+
+async def _cached_semantic_candidates(need: str, city: Optional[str],
+                                      listing_type: Optional[str]) -> Dict[int, float]:
+    """The cached id→score map for this need text, or {} while a background
+    call fills it (a fresh session of its own — the request's is gone by
+    then). Never raises: a Redis outage just means no extras this pass, the
+    same as an LLM outage today."""
+    fp = _fingerprint(need, city, listing_type)
+    key = f"match:semantic:{fp}"
+    try:
+        from app.database import get_redis
+        r = await get_redis()
+        cached = await r.get(key)
+    except Exception as e:
+        logger.info(f"[match] semantic cache unavailable: {type(e).__name__}: {e}")
+        return {}
+    if cached is not None:
+        try:
+            return {int(pid): score for pid, score in json.loads(cached)}
+        except Exception:
+            return {}
+    lock_key = f"match:semantic:lock:{fp}"
+    try:
+        got_lock = await r.set(lock_key, "1", nx=True, ex=LOCK_TTL)
+    except Exception:
+        got_lock = False
+    if got_lock:
+        _spawn(_compute_and_cache_semantic(key, lock_key, need, city, listing_type))
+    return {}
+
+
 def _brief(p: Property, score: int, reasons: List[str]) -> Dict[str, Any]:
     return {
         "id": p.id,
@@ -505,9 +644,13 @@ def rank_similar(prop: Property, cands, limit: int = 12) -> List[Dict[str, Any]]
 
 
 async def similar_to_property(db: AsyncSession, prop: Property, limit: int = 12,
-                              use_llm: bool = True) -> List[Dict[str, Any]]:
+                              use_llm: bool = True) -> Tuple[List[Dict[str, Any]], bool]:
     """Listings most like `prop`: same city, same deal type, same
-    neighbourhood first, price within a tight band."""
+    neighbourhood first, price within a tight band.
+
+    Returns (results, reasons_pending) — pending is true when a background
+    call was just scheduled to fill `ai_reason` on some rows; the ranking
+    itself never waits on it."""
     q = select(Property).where(
         Property.is_active == True,
         Property.id != prop.id,
@@ -526,27 +669,22 @@ async def similar_to_property(db: AsyncSession, prop: Property, limit: int = 12,
     cands = (await db.execute(q.limit(SIMILAR_POOL))).scalars().all()
     results = rank_similar(prop, cands, limit)
 
+    pending = False
     if use_llm and results:
         from app.services import llm as _llm
         ctx = (f"ملکی مشابه این: {_llm.mask_pii(prop.title)} — {prop.area or '?'} متر، "
                f"{prop.rooms if prop.rooms is not None else '?'} خواب، "
                f"{_price_of(prop) or '?'} تومان، منطقه {prop.district or prop.city_name or '-'}")
-        reasons = await _llm_rerank(
-            [{"id": r["id"], "title": r["title"], "area": r["area"], "rooms": r["rooms"],
-              "price": r["price"], "district": r["district"], "city": r["city_name"],
-              "score": r["score"]} for r in results],
-            ctx,
-        )
-        for r in results:
-            if r["id"] in reasons and reasons[r["id"]]:
-                r["ai_reason"] = reasons[r["id"]]
-    return results
+        pending = await _attach_reasons("property", prop.id, results, ctx)
+    return results, pending
 
 
 async def matches_for_customer(db: AsyncSession, customer, limit: int = 12,
                                use_llm: bool = True, city: Optional[str] = None
-                               ) -> List[Dict[str, Any]]:
-    """Listings that fit a customer's budget / district / specs."""
+                               ) -> Tuple[List[Dict[str, Any]], bool]:
+    """Listings that fit a customer's budget / district / specs.
+
+    Returns (results, reasons_pending) — see similar_to_property."""
     intent = customer_intent(customer)
     q = select(Property).where(
         Property.is_active == True,
@@ -571,15 +709,7 @@ async def matches_for_customer(db: AsyncSession, customer, limit: int = 12,
         need = " ".join(filter(None, (customer.desired_specs, customer.desired_district,
                                       getattr(customer, "notes", None)))).strip()
         if need:
-            from app.ai import embeddings as _emb
-            from app.services import llm as _llm
-            try:
-                sem = dict(await _emb.semantic_candidates(
-                    db, need, city=city, listing_type=intent["listing_type"], limit=SEMANTIC_EXTRA))
-            except _llm.LLMError as e:
-                logger.info(f"[match] semantic candidates skipped: {e}")
-            except Exception as e:
-                logger.warning(f"[match] semantic candidates failed: {type(e).__name__}: {e}")
+            sem = await _cached_semantic_candidates(need, city, intent["listing_type"])
             have = {c.id for c in cands}
             missing = [pid for pid in sem if pid not in have]
             if missing:
@@ -600,6 +730,7 @@ async def matches_for_customer(db: AsyncSession, customer, limit: int = 12,
     top = scored[:limit]
     results = [_brief(c, sc, rs) for sc, rs, c in top]
 
+    pending = False
     if use_llm and results:
         # the customer's own words go to a third party masked — their name is
         # never sent at all, only what they are looking for
@@ -607,16 +738,8 @@ async def matches_for_customer(db: AsyncSession, customer, limit: int = 12,
         ctx = (f"مشتری با بودجه {customer.budget_max or '?'} تومان، منطقه درخواستی "
                f"{_llm.mask_pii(customer.desired_district) or '-'}، مشخصات {_llm.mask_pii(customer.desired_specs) or '-'}"
                + (f"، نمی‌خواهد: {_llm.mask_pii(customer.red_lines)}" if customer.red_lines else ""))
-        reasons = await _llm_rerank(
-            [{"id": r["id"], "title": r["title"], "area": r["area"], "rooms": r["rooms"],
-              "price": r["price"], "district": r["district"], "city": r["city_name"],
-              "score": r["score"]} for r in results],
-            ctx,
-        )
-        for r in results:
-            if r["id"] in reasons and reasons[r["id"]]:
-                r["ai_reason"] = reasons[r["id"]]
-    return results
+        pending = await _attach_reasons("customer", customer.id, results, ctx)
+    return results, pending
 
 
 async def customers_for_property(db: AsyncSession, prop: Property, limit: int = 12,

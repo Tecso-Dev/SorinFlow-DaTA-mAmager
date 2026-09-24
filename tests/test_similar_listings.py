@@ -124,7 +124,10 @@ class TestTheQueryAndThePanel:
         assert "m.same_district" in fn and "مناطق دیگر" in fn
         assert "price_gap_pct" in js and "گران‌تر" in js and "ارزان‌تر" in js
         crm = Path("app/api/routes/crm.py").read_text(encoding="utf-8")
-        assert crm.count('"source": _match_source(prop)}') == 3
+        assert crm.count('"source": _match_source(prop)') == 3, \
+            "property, lead and the reverse-direction (customers-for-a-property) endpoint all use it"
+        assert crm.count('"reasons_pending": pending') == 3, \
+            "property, lead and customer matches; the reverse direction never calls the model"
         src = crm[crm.index("def _match_source"):crm.index('@router.get("/match/lead/{lead_id}")')]
         assert '"comparable": _comparable(prop)' in src and '"deposit": prop.deposit' in src
 
@@ -165,7 +168,7 @@ class TestARentalIsAShapeAsWellAsATotal:
         js = Path("frontend/js/app.js").read_text(encoding="utf-8")
         fn = js[js.index("function _matchMoney"):js.index("function _matchCard")]
         assert "ودیعه" in fn and "اجاره" in fn and "رهن کامل" in fn and "m.comparable" in fn
-        modal = js[js.index("async function _openMatchModal"):js.index("function showSimilarForLead")]
+        modal = js[js.index("function _renderMatchModal"):js.index("function showSimilarForLead")]
         assert "s0.comparable" in modal and "اختلاف قیمت‌ها روی رهن کامل حساب می‌شود" in modal
 
     def test_a_modal_opened_from_a_modal_comes_out_on_top(self):
@@ -174,3 +177,34 @@ class TestARentalIsAShapeAsWellAsATotal:
         assert "show.bs.modal" in blk and "1055 + 10 * open" in blk
         assert "shown.bs.modal" in blk and ".modal-backdrop" in blk
         assert "hidden.bs.modal" in blk and "classList.add('modal-open')" in blk
+
+
+class TestReasonsPendingInThePanel:
+    """`ai_reason` can arrive after the modal is already open — the endpoint
+    answers with the ranking at once and a `reasons_pending` flag (see
+    app/services/match_service.py _attach_reasons); the panel checks back a
+    few times rather than showing a spinner that waits for the model."""
+
+    def test_a_pending_answer_schedules_a_light_recheck(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        assert "function _pollMatchReasons" in js and "function _renderMatchModal" in js
+        openfn = js[js.index("async function _openMatchModal"):js.index("function showSimilarForLead")]
+        assert "data.reasons_pending" in openfn and "_pollMatchReasons(url, modalEl, 3)" in openfn
+        assert "modalEl.dataset.matchUrl = url" in openfn, "so a stale poll can tell it opened a different card"
+
+    def test_the_recheck_is_light_and_gives_up(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        fn = js[js.index("function _pollMatchReasons"):js.index("async function _openMatchModal")]
+        assert "if (triesLeft <= 0) return" in fn, "at most 3 tries, then it stops on its own"
+        assert "setTimeout(" in fn and "4000)" in fn, "~4s between checks — no spinner, no tight loop"
+        assert "modalEl.dataset.matchUrl !== url" in fn, "stops if a different card was opened meanwhile"
+        assert "_renderMatchModal(data, null)" in fn, "shows the reasons when they arrive"
+        assert "_pollMatchReasons(url, modalEl, triesLeft - 1)" in fn
+
+    def test_every_new_value_still_goes_through_esc(self):
+        js = Path("frontend/js/app.js").read_text(encoding="utf-8")
+        render = js[js.index("function _renderMatchModal"):js.index("function _pollMatchReasons")]
+        assert "esc(src)" in render, "the same escaping as before the refactor — nothing raw was added"
+        # _matchCard (unchanged by this stream) is what actually prints ai_reason
+        card = js[js.index("function _matchCard"):js.index("const MATCH_TYPE_FA")]
+        assert "esc(m.ai_reason)" in card
