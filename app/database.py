@@ -124,6 +124,7 @@ async def init_db():
                  _migrate_contact_channel,
                  _migrate_cookie_owner,
                  _migrate_identity_required,
+                 _migrate_cookie_enabled,
                  _backfill_cookie_owner,
                  _backfill_forwarder_permission,
                  _migrate_profile,
@@ -349,6 +350,16 @@ async def _migrate_identity_required(conn):
             "ALTER TABLE cookies ADD COLUMN IF NOT EXISTS identity_required_at TIMESTAMPTZ"))
     except Exception as e:
         print(f"identity_required migration skipped: {e}")
+
+
+async def _migrate_cookie_enabled(conn):
+    """The owner's off switch for a Divar number (app/models/cookie.py)."""
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE cookies ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE"))
+    except Exception as e:
+        print(f"cookie enabled migration skipped: {e}")
 
 
 async def _migrate_cookie_owner(conn):

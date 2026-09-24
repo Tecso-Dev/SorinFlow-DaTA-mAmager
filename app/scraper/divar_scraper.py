@@ -2661,7 +2661,11 @@ class DivarScraper:
                      # An account Divar wants identified is not a candidate.
                      # Handing it back would spend a reveal to hit the same
                      # wall and re-alarm the panel.
-                     .where(CookieModel.identity_required_at.is_(None)))
+                     .where(CookieModel.identity_required_at.is_(None))
+                     # Nor one its owner switched off: the phone is in a
+                     # drawer, and a code texted to it parks the run for the
+                     # whole window.
+                     .where(CookieModel.enabled.isnot(False)))
             # Rotation must stay inside the pool the run's owner owns.
             # Without this it would log somebody else's number in and spend
             # their reveals — and a reveal is charged to the account, not to
@@ -2714,7 +2718,8 @@ class DivarScraper:
             from app.models.cookie import Cookie
             from sqlalchemy import func, select as _select
             q = (_select(func.count()).select_from(Cookie)
-                 .where(Cookie.is_valid == True))  # noqa: E712
+                 .where(Cookie.is_valid == True)  # noqa: E712
+                 .where(Cookie.enabled.isnot(False)))
             # Same pool rotation actually draws from, or the run absorbs
             # prompts for accounts it will never be allowed to reach.
             owner = getattr(self, "owner_user_id", None)

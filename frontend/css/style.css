@@ -4090,3 +4090,19 @@ body.palette-open { overflow: hidden; }
 .scraper-more.has-filters > summary { border-color: var(--accent); color: var(--text); }
 #scraper-more-count { color: var(--accent2); font-size: .78rem; }
 .scraper-more-body { padding-top: .85rem; }
+
+
+/* ── your Divar numbers, each with its own off switch (scraper form) ───────── */
+.acct-list { display: flex; flex-direction: column; gap: .35rem; margin-top: .5rem; }
+.acct-row {
+  display: flex; align-items: center; gap: .7rem;
+  padding: .45rem .7rem; margin: 0;
+  background: var(--input-bg-solid); border: 1px solid var(--border);
+  border-radius: var(--r-sm, 8px); cursor: pointer;
+  font-size: .82rem; color: var(--text-dim);
+}
+.acct-row .acct-phone { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.acct-row .acct-state { flex: 1; color: var(--text-muted); font-size: .75rem; }
+.acct-row.off { opacity: .6; }
+.acct-row.off .acct-phone { text-decoration: line-through; text-decoration-color: var(--text-muted); }
+.acct-row .form-check-input { cursor: pointer; }

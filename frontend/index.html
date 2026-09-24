@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260923r">
+    <link rel="stylesheet" href="css/style.css?v=20260924a">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -844,6 +844,11 @@
                                             <option value="">خودکار — کم‌مصرف‌ترین</option>
                                         </select>
                                         <div id="scraper-account-note" class="form-text small"></div>
+                                        <!-- Each of your numbers with its own off switch. A number
+                                             whose phone is in a drawer stays yours and stays valid;
+                                             off just keeps it out of «خودکار», rotation, and the
+                                             mid-run switch, so no code is texted to nobody. -->
+                                        <div id="scraper-account-list" class="acct-list"></div>
                                     </div>
 
                                     <!-- فیلتر قیمت خرید -->
@@ -5170,12 +5175,12 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260923r"></script>
+<script src="js/app.js?v=20260924a"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
-<script src="js/ai/reader.js?v=20260923r"></script>
-<script src="js/ai/embed.js?v=20260923r"></script>
-<script src="js/ai/photo.js?v=20260923r"></script>
-<script src="js/ai/need.js?v=20260923r"></script>
+<script src="js/ai/reader.js?v=20260924a"></script>
+<script src="js/ai/embed.js?v=20260924a"></script>
+<script src="js/ai/photo.js?v=20260924a"></script>
+<script src="js/ai/need.js?v=20260924a"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

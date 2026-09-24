@@ -186,10 +186,9 @@ class TestThePanel:
         assert "/identity-cleared`, { method: 'POST' }" in APP_JS[i:i + 900]
 
     def test_the_picker_refuses_the_number(self):
-        i = APP_JS.index("async function loadScraperAccounts()")
-        block = APP_JS[i:i + 1600]
-        assert "احراز هویت لازم" in block
-        assert "const usable = c.is_valid && !c.identity_required_at;" in block
+        """Not usable while Divar wants it identified — and not usable while
+        its owner has switched it off, which joined the same line."""
+        assert "const usable = c.is_valid && !c.identity_required_at && c.enabled !== false;" in APP_JS
 
     def test_the_account_list_shows_it_with_a_way_out(self):
         i = APP_JS.index("async function loadCookies()")

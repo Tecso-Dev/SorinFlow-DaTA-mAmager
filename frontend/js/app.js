@@ -3248,15 +3248,58 @@ async function loadScraperAccounts() {
                 if (!c.is_valid) bits.push('نامعتبر');
                 if (c.identity_required_at) bits.push('احراز هویت لازم');
                 else if (c.challenged_at) bits.push('اخیراً کد خواسته');
-                const usable = c.is_valid && !c.identity_required_at;
+                if (c.enabled === false) bits.push('خاموش');
+                const usable = c.is_valid && !c.identity_required_at && c.enabled !== false;
                 return `<option value="${esc(c.phone_number)}"${usable ? '' : ' disabled'}>`
                      + `${esc(c.phone_number)} — ${esc(bits.join('، '))}</option>`;
             }).join('');
         if (chosen) sel.value = chosen;
+        _renderAccountList(rows);
         onScraperAccountChange();
     } catch (_) {
         // The form still works on «خودکار»; a picker that failed to load is
         // not a reason to block a scrape.
+    }
+}
+
+// Your numbers, each with its own switch. The dropdown picks one for a run;
+// this is where a number whose phone is in a drawer is taken out of the
+// running — for «خودکار», for rotation, and for the mid-run switch — without
+// deleting the session.
+function _renderAccountList(rows) {
+    const box = document.getElementById('scraper-account-list');
+    if (!box) return;
+    if (!rows.length) { box.innerHTML = ''; return; }
+    box.innerHTML = rows.map(c => {
+        const on = c.enabled !== false;
+        const state = !c.is_valid ? 'نامعتبر'
+                    : c.identity_required_at ? 'احراز هویت لازم'
+                    : on ? `${formatNumber(c.reveals || 0)} افشا` : 'خاموش — در چرخش نیست';
+        return `<label class="acct-row${on ? '' : ' off'}">
+            <span class="acct-phone" dir="ltr">${esc(c.phone_number)}</span>
+            <span class="acct-state">${esc(state)}</span>
+            <span class="form-check form-switch m-0">
+                <input class="form-check-input" type="checkbox" role="switch" ${on ? 'checked' : ''}
+                       onchange="toggleCookieEnabled(${c.id}, this.checked, this)"
+                       title="${on ? 'خاموش کردن — از چرخش خارج می‌شود' : 'روشن کردن'}">
+            </span>
+        </label>`;
+    }).join('');
+}
+
+async function toggleCookieEnabled(id, enabled, input) {
+    if (input) input.disabled = true;
+    try {
+        await apiCall(`/auth/cookies/${id}/enabled`, { method: 'PATCH', body: JSON.stringify({ enabled }) });
+        showToast(enabled ? 'روشن شد' : 'خاموش شد',
+                  enabled ? 'این شماره دوباره در چرخش است' : 'این شماره تا روشن‌شدن به هیچ اجرایی داده نمی‌شود',
+                  'success');
+        // both lists carry the switch
+        if (typeof loadScraperAccounts === 'function') loadScraperAccounts();
+        if (document.getElementById('cookies-list')) loadCookies();
+    } catch (e) {
+        if (input) { input.checked = !enabled; input.disabled = false; }
+        showToast('خطا', e.message, 'danger');
     }
 }
 
@@ -5537,9 +5580,15 @@ async function loadCookies() {
                             <button class="btn btn-sm btn-link p-0 ms-1 small" onclick="_identityCleared('${esc(cookie.phone_number)}')">انجام شد</button>
                         </div>` : ''}
                 </div>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${cookie.id})">
-                    <i class="bi bi-trash"></i>
-                </button>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="form-check form-switch m-0" title="${cookie.enabled === false ? 'خاموش — به هیچ اجرایی داده نمی‌شود' : 'روشن — در چرخش'}">
+                        <input class="form-check-input" type="checkbox" role="switch" ${cookie.enabled === false ? '' : 'checked'}
+                               onchange="toggleCookieEnabled(${cookie.id}, this.checked, this)">
+                    </span>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${cookie.id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
             </div>
         `).join('');
         

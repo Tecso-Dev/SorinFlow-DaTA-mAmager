@@ -390,6 +390,7 @@ async def list_cookies(
                 "last_used_at": c.last_used_at.isoformat() if c.last_used_at else None,
                 "owner_user_id": c.owner_user_id,
                 "identity_required_at": c.identity_required_at.isoformat() if c.identity_required_at else None,
+                "enabled": c.enabled is not False,
                 # Only filled for an admin — nobody else is shown a list that
                 # could include somebody else's row in the first place.
                 "owner_name": owners.get(c.owner_user_id),
@@ -541,6 +542,37 @@ async def identity_cleared(
     from app.scraper import otp_store
     otp_store.clear_identity_required(cookie.phone_number)
     return {"success": True, "phone_number": cookie.phone_number}
+
+
+class CookieEnabled(BaseModel):
+    enabled: bool
+
+
+@router.patch("/cookies/{cookie_id}/enabled")
+async def set_cookie_enabled(
+    cookie_id: int,
+    body: CookieEnabled,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Switch one of your own Divar numbers off, or back on.
+
+    Off: not auto-picked, not rotated to, not switched to mid-run, not usable
+    by name — the phone is in a drawer and a code texted to it is a run parked
+    for the full window. The session is kept exactly as it is. The owner's
+    switch only: root sees the pool, root does not decide whose phone is in a
+    drawer. Takes effect at the run's next reveal, because rotation re-reads
+    the pool every time.
+    """
+    cookie = (await db.execute(select(Cookie).where(Cookie.id == cookie_id))).scalar_one_or_none()
+    if not cookie or cookie.owner_user_id != user.id:
+        # the same answer as a row that does not exist: whether somebody
+        # else has this number is not the caller's business
+        raise HTTPException(status_code=404, detail="نشست پیدا نشد")
+    cookie.enabled = body.enabled
+    await db.commit()
+    logger.info(f"[auth] {cookie.phone_number} switched {'on' if body.enabled else 'off'} by {user.username}")
+    return {"success": True, "id": cookie.id, "enabled": body.enabled}
 
 
 @router.delete("/cookies/{cookie_id}")

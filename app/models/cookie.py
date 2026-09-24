@@ -50,6 +50,13 @@ class Cookie(Base):
     # human typing six digits: somebody has to log in on Divar and do it.
     # Rotation skips the account while this is set; the panel clears it.
     identity_required_at = Column(DateTime(timezone=True))
+    # Switched off by its owner. A number whose phone is in a drawer, on
+    # holiday, or with a colleague is still valid and still theirs — and
+    # rotation would still hand it a run, park on its code prompt for the full
+    # window, and text a SIM nobody is holding. Off means: not for auto-pick,
+    # not for rotation, not for a mid-run switch, not by name. The session is
+    # kept; the switch is the owner's and takes effect at the next reveal.
+    enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     
     def __repr__(self):
         return f"<Cookie(id={self.id}, phone={self.phone_number}, valid={self.is_valid})>"
@@ -68,4 +75,5 @@ class Cookie(Base):
             "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
             "owner_user_id": self.owner_user_id,
             "identity_required_at": self.identity_required_at.isoformat() if self.identity_required_at else None,
+            "enabled": bool(self.enabled) if self.enabled is not None else True,
         }

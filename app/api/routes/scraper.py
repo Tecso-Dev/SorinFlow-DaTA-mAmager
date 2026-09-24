@@ -358,11 +358,19 @@ async def _launch_job(
         owned = (await db.execute(
             select(_Cookie).where(_Cookie.owner_user_id == current_user.id)
         )).scalars().all()
-        if not any("".join(ch for ch in str(c.phone_number) if ch.isdigit()) == _digits
-                   for c in owned):
+        mine = [c for c in owned
+                if "".join(ch for ch in str(c.phone_number) if ch.isdigit()) == _digits]
+        if not mine:
             raise HTTPException(
                 status_code=403,
                 detail="این شمارهٔ دیوار به حساب کاربری شما تعلق ندارد")
+        # Yours, but switched off. Naming it does not switch it back on: the
+        # switch is there because the phone is not to hand, and a run on it
+        # would park on a code nobody can type.
+        if any(c.enabled is False for c in mine):
+            raise HTTPException(
+                status_code=409,
+                detail="این شماره را خاموش کرده‌اید — اول در فهرست شماره‌ها روشنش کنید")
 
     # Check for existing running jobs
     result = await db.execute(
