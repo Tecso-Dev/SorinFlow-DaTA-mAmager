@@ -1,0 +1,171 @@
+name: CI
+
+# Every branch push except main, and every pull request — main's own push is
+# covered by deploy.yml calling this workflow (`ci: uses:
+# ./.github/workflows/ci.yml`) before it builds and deploys, so the same gate
+# runs everywhere exactly once instead of a branch sitting ungated until
+# someone opens a PR against it.
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # ruff/mypy/eslint have hundreds of pre-existing findings on this codebase;
+  # scripts/lint_new_code.py only reports the ones on a line this change
+  # itself added or touched, so this can be a hard gate from day one without
+  # first clearing a backlog nobody here caused.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # The gate diffs against the base branch (git merge-base), which
+          # needs real history — the default single-commit shallow clone
+          # would make every line in the tree look "new".
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Lint changed lines (ruff, mypy, eslint)
+        # A pull request is judged against its real base — a PR stacked on
+        # another feature branch is only flagged for what it itself changed.
+        # Anything else (a plain branch push, or this job called from
+        # deploy.yml on a push to main) has no base_ref, so fall back to
+        # origin/main, same as the script's own default.
+        run: |
+          BASE="origin/main"
+          if [ -n "${{ github.base_ref }}" ]; then BASE="origin/${{ github.base_ref }}"; fi
+          python scripts/lint_new_code.py --base "$BASE"
+
+  # Nothing reaches the registry until the suite is green. Without this gate a
+  # parser regression or a broken auth dependency shipped straight to the
+  # scraper fleet on every push to main.
+  test:
+    runs-on: ubuntu-latest
+
+    # A real Postgres, not SQLite. The models are Postgres-specific — scraping_jobs
+    # .job_id is a postgresql UUID column — so a SQLite run either fails to build
+    # the schema or quietly exercises a different dialect than production. Redis
+    # is here for the same reason: verification codes and login throttling live in
+    # it, and a fake would not prove the real client works.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sorinflow
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: sorinflow_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        # requirements-dev.lock is compiled (pip-compile/uv pip compile
+        # --generate-hashes) from requirements-dev.txt, which itself pulls
+        # requirements.txt plus the test-only packages — so this gate installs
+        # exactly the hash-pinned closure a developer installs, not a
+        # hand-kept list that could drift from what the app actually needs.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock
+
+      - name: Audit locked dependencies for known vulnerabilities
+        # ecdsa's PYSEC-2026-1325 (Minerva timing attack recovering the nonce
+        # from ECDSA P-256 signing) has no upstream fix — the maintainers
+        # consider side-channel attacks out of scope. python-jose pulls ecdsa
+        # unconditionally, but app/auth/jwt.py signs and verifies every token
+        # with HS256 (HMAC), never calling into ecdsa's signing path, so it is
+        # ignored here instead of leaving the gate permanently red.
+        run: |
+          pip install pip-audit==2.10.1
+          pip-audit -r requirements-dev.lock --ignore-vuln PYSEC-2026-1325
+
+      - name: Install Playwright's Chromium
+        # tests/test_fingerprint.py launches the real Chromium the scraper
+        # launches and skips itself without it — install it here so those 6
+        # tests actually run in CI instead of silently skipping forever.
+        run: python -m playwright install --with-deps chromium
+
+      - name: Generate a per-run SECRET_KEY
+        # A fresh throwaway key every run, never a value anyone could find in
+        # a workflow file and reuse against a real deployment.
+        run: echo "SECRET_KEY=$(python -c 'import secrets;print(secrets.token_hex(32))')" >> "$GITHUB_ENV"
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_test
+          REDIS_URL: redis://localhost:6379/0
+          LOGS_PATH: /tmp
+          IMAGES_PATH: /tmp
+        run: pytest tests/ -q --cov=app --cov-report=xml --cov-report=term:skip-covered
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          retention-days: 30
+
+      # The Telegram relay Worker ships to Cloudflare by hand, not from here —
+      # which is exactly why its rules (key, bot allow-list, relay-specific
+      # errors) are checked on every push instead of on the day it is pasted.
+      - name: Test the Telegram relay Worker
+        working-directory: deploy/telegram-relay
+        run: node --test
+
+      - name: Verify the auth migration against a live Postgres
+        # Skipped without PG_TEST_URL, so it only runs where a database exists.
+        # This is the half SQLite can never cover: ALTER ... IF NOT EXISTS is a
+        # no-op there, so the DDL production runs would go untested.
+        env:
+          PG_TEST_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_test
+          LOGS_PATH: /tmp
+          IMAGES_PATH: /tmp
+        run: pytest tests/test_pg_migration.py -q
