@@ -78,8 +78,8 @@ def configured(monkeypatch):
     async def record(agent, job, model, usage, ms, ok, error=""):
         ledger.append({"agent": agent, "job": job, "model": model, "ok": ok, "cost": float(usage.get("cost") or 0)})
 
-    async def spent(_db):
-        return sum(r["cost"] for r in ledger)
+    async def spent(_db, agent=None):
+        return sum(r["cost"] for r in ledger if not agent or r["agent"] == agent)
 
     monkeypatch.setattr(llm, "_record", record)
     monkeypatch.setattr(llm, "spent_today", spent)
