@@ -31,9 +31,11 @@ ENV GIT_SHA=$GIT_SHA
 # Chromium's own sandbox needs a real unprivileged process to drop into, not
 # a root one pretending to be non-root. /app/data and /app/logs are the only
 # paths anything writes to at runtime — PYTHONDONTWRITEBYTECODE above means
-# no .pyc write either, so nothing else under /app needs to be writable.
+# no .pyc write either — so only those two change hands. The code stays
+# root's: the app cannot rewrite itself, and a `chown -R /app` would copy
+# every file into one more layer that each deploy pulls from ghcr to Iran.
 RUN mkdir -p /app/data/images /app/data/cookies /app/logs && \
-    chown -R pwuser:pwuser /app
+    chown -R pwuser:pwuser /app/data /app/logs
 USER pwuser
 
 EXPOSE 8000
