@@ -818,3 +818,105 @@ class TestTheReviewThroughTheApp:
         r = client.patch(f"/api/users/{people['third']}", json={"divar_phone": JAN_1},
                          headers=_tok(client, "np_root"))
         assert r.status_code == 403, r.text
+
+
+class TestRootsRegistry:
+    """«یک بخش فقط برای root که همهٔ شماره‌ها را با صاحبشان نشان دهد و بتوان
+    مالکیت را اصلاح کرد.» The boot-time backfill gave every unclaimed session
+    to the first super admin; this is where root puts each number back."""
+
+    MISFILED = "09146382477"
+
+    def _misfile(self, people):
+        """A colleague's number recorded under root, the colleague having
+        said it is theirs — and a run of root's on it right now."""
+        from app.models.cookie import Cookie
+        from app.models.user import User
+        from sqlalchemy import update
+
+        async def _go():
+            eng, maker = _engine()
+            try:
+                async with maker() as s:
+                    s.add(Cookie(phone_number=self.MISFILED, owner_user_id=people["root"],
+                                 cookies=[{"name": "sAccessToken", "value": "a.b.c"}]))
+                    await s.execute(update(User).where(User.id == people["jan"]).values(divar_phone=self.MISFILED))
+                    await s.execute(update(User).where(User.id == people["root"]).values(divar_phone=self.MISFILED))
+                    await s.commit()
+            finally:
+                await eng.dispose()
+        asyncio.run(_go())
+
+    def test_only_root_sees_it(self, client, people):
+        for who in ("np_jan", "np_third"):
+            assert client.get("/api/auth/registry", headers=_tok(client, who)).status_code == 403
+
+    def test_root_sees_every_number_with_its_owner_and_a_hint(self, client, people):
+        self._misfile(people)
+        _finish_all_runs()
+        d = client.get("/api/auth/registry", headers=_tok(client, "np_root")).json()
+        by = {r["phone_number"]: r for r in d["numbers"]}
+        assert by[ROOT_NUM]["owner_user_id"] == people["root"]
+        assert by[JAN_1]["owner_user_id"] == people["jan"]
+        row = by[self.MISFILED]
+        assert row["owner_user_id"] == people["root"]
+        assert row["suggested_owner"]["id"] == people["jan"] and row["suggested_owner"]["why"] == "divar_phone"
+        assert {u["id"] for u in d["users"]} >= {people["root"], people["jan"], people["third"]}
+
+    def test_root_gives_it_back_and_the_old_owner_lets_go(self, client, people):
+        from app.scraper import otp_store
+        from app.models.user import User
+        from sqlalchemy import select
+        job = _job(people["root"], phone=self.MISFILED)
+        rows = client.get("/api/auth/registry", headers=_tok(client, "np_root")).json()["numbers"]
+        cid = next(r["id"] for r in rows if r["phone_number"] == self.MISFILED)
+        # nobody else may
+        r = client.patch(f"/api/auth/registry/{cid}/owner", json={"owner_user_id": people["jan"]},
+                         headers=_tok(client, "np_jan"))
+        assert r.status_code == 403
+        r = client.patch(f"/api/auth/registry/{cid}/owner", json={"owner_user_id": people["jan"]},
+                         headers=_tok(client, "np_root"))
+        assert r.status_code == 200 and r.json()["changed"] is True, r.text
+        assert job in r.json()["moved_jobs"]
+        req = otp_store.take_switch(job)
+        assert req and req["from_phone"] == self.MISFILED
+        mine = client.get("/api/auth/cookies?mine=1", headers=_tok(client, "np_jan")).json()["cookies"]
+        assert self.MISFILED in {c["phone_number"] for c in mine}, "the colleague still cannot see their number"
+
+        async def _root_primary():
+            eng, maker = _engine()
+            try:
+                async with maker() as s:
+                    return (await s.execute(select(User.divar_phone).where(User.id == people["root"]))).scalar_one()
+            finally:
+                await eng.dispose()
+        assert asyncio.run(_root_primary()) is None, "root's primary still points at a number that is not theirs"
+        _finish_all_runs()
+
+    def test_not_to_a_portal_visitor(self, client, people):
+        from app.models.user import User
+        from app.auth.jwt import get_password_hash
+
+        async def _go():
+            eng, maker = _engine()
+            try:
+                async with maker() as s:
+                    v = User(username="np_visitor", role="visitor", hashed_password=get_password_hash("x"),
+                             is_active=True)
+                    s.add(v)
+                    await s.commit()
+                    return v.id
+            finally:
+                await eng.dispose()
+        vid = asyncio.run(_go())
+        cid = _cookie_id(JAN_1)
+        r = client.patch(f"/api/auth/registry/{cid}/owner", json={"owner_user_id": vid},
+                         headers=_tok(client, "np_root"))
+        assert r.status_code == 400
+
+    def test_the_panel_shows_it_to_root_only(self):
+        js, html = TestThePanel._js(), TestThePanel._html()
+        assert 'id="numbers-registry-card"' in html
+        fn = js[js.index("async function loadNumbersRegistry("):js.index("async function saveNumberOwner(")]
+        assert "_currentUser?.role !== 'root'" in fn and "esc(r.phone_number)" in fn
+        assert "loadNumbersRegistry();" in js[js.index("case 'auth':"):][:200]

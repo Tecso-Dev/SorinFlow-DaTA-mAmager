@@ -693,6 +693,130 @@ async def set_cookie_enabled(
             "is_enabled": cookie.is_enabled, "moved_jobs": moved}
 
 
+# ── root: every Divar number, and whose it is ────────────────────────────────
+#
+# «یک بخش فقط برای root اضافه کن که همهٔ شماره‌ها را با صاحبشان نشان دهد و
+# بتوان مالکیت را اصلاح کرد.»
+#
+# Ownership changes nowhere else — not by logging a number in, not by pasting
+# its cookies, not by registering it on a forwarder. That leaves exactly one
+# way to correct an attribution that was wrong from the start (the boot-time
+# backfill gave every unclaimed session to the first super admin), and it is
+# here: root, by hand, on the record.
+
+def _root_only(user: User) -> None:
+    if (getattr(user, "role", "") or "") != "root":
+        raise HTTPException(status_code=403, detail="این بخش فقط برای root است")
+
+
+@router.get("/registry")
+async def numbers_registry(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Every stored Divar number with its owner — and, where the rows disagree
+    with what people have said about themselves, whose it probably is.
+
+    `suggested_owner` is the user whose Divar number (users.divar_phone) or
+    SMS-forwarder SIM names this number, when that is somebody other than the
+    recorded owner. It is a hint for root to look at, never applied by itself.
+    """
+    _root_only(user)
+    from app.models.forwarder import ForwarderDevice
+    users = (await db.execute(select(User).order_by(User.id.asc()))).scalars().all()
+    by_id = {u.id: u for u in users}
+    rows = (await db.execute(select(Cookie).order_by(Cookie.phone_number.asc()))).scalars().all()
+    devices = (await db.execute(select(ForwarderDevice).where(
+        ForwarderDevice.is_active == True))).scalars().all()   # noqa: E712
+    from app.models.scraping_job import ScrapingJob
+    live = (await db.execute(select(ScrapingJob.divar_phone).where(
+        ScrapingJob.status.in_(("running", "paused"))))).scalars().all()
+    live = {_digits10(p) for p in live if p}
+
+    def _name(uid):
+        u = by_id.get(uid)
+        return (u.full_name or u.username) if u else None
+
+    out = []
+    for c in rows:
+        d = _digits10(c.phone_number)
+        says = [u.id for u in users if d and _digits10(u.divar_phone) == d]
+        sims = [dv.user_id for dv in devices if any(_digits10(p) == d for p in dv.sims())]
+        claimants = [uid for uid in dict.fromkeys(says + sims) if uid != c.owner_user_id]
+        out.append({
+            "id": c.id, "phone_number": c.phone_number,
+            "owner_user_id": c.owner_user_id, "owner_name": _name(c.owner_user_id),
+            "is_valid": bool(c.is_valid), "is_enabled": c.is_enabled is not False,
+            "reveals": c.reveals or 0,
+            "last_checked_at": c.last_checked_at.isoformat() if c.last_checked_at else None,
+            "identity_required_at": c.identity_required_at.isoformat() if c.identity_required_at else None,
+            "in_use": d in live,
+            "suggested_owner": ({"id": claimants[0], "name": _name(claimants[0]),
+                                 "why": "divar_phone" if claimants[0] in says else "forwarder"}
+                                if claimants else None),
+        })
+    return {
+        "numbers": out,
+        "users": [{"id": u.id, "name": u.full_name or u.username, "username": u.username,
+                   "role": u.role, "is_active": bool(u.is_active)}
+                  for u in users if (u.role or "") != "visitor"],
+    }
+
+
+class OwnerIn(BaseModel):
+    owner_user_id: int
+
+
+@router.patch("/registry/{cookie_id}/owner")
+async def set_number_owner(
+    cookie_id: int,
+    body: OwnerIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Give a Divar number to the person it belongs to. root only, audited.
+
+    A run of the previous owner that is on the number right now is asked to
+    move off it, and their «primary Divar number» stops pointing at it — the
+    number is no longer theirs to start from.
+    """
+    _root_only(user)
+    cookie = (await db.execute(select(Cookie).where(Cookie.id == cookie_id))).scalar_one_or_none()
+    if not cookie:
+        raise HTTPException(status_code=404, detail="نشست پیدا نشد")
+    new_owner = (await db.execute(select(User).where(User.id == body.owner_user_id))).scalar_one_or_none()
+    if not new_owner or (new_owner.role or "") == "visitor":
+        raise HTTPException(status_code=400, detail="این کاربر نمی‌تواند صاحب شمارهٔ دیوار باشد")
+    old = cookie.owner_user_id
+    if old == new_owner.id:
+        return {"success": True, "id": cookie.id, "owner_user_id": old, "changed": False}
+
+    cookie.owner_user_id = new_owner.id
+    moved = []
+    if old:
+        prev = (await db.execute(select(User).where(User.id == old))).scalar_one_or_none()
+        if prev and _digits10(prev.divar_phone) == _digits10(cookie.phone_number):
+            prev.divar_phone = None
+        from app.models.scraping_job import ScrapingJob
+        from app.scraper import otp_store
+        live = (await db.execute(select(ScrapingJob).where(
+            ScrapingJob.status.in_(("running", "paused", "pending"))))).scalars().all()
+        for j in live:
+            if (j.config or {}).get("owner_user_id") == old \
+                    and _digits10(j.divar_phone) == _digits10(cookie.phone_number):
+                otp_store.request_switch(str(j.job_id), None, by=user.id, reason="reassigned",
+                                         from_phone=cookie.phone_number)
+                moved.append(str(j.job_id))
+    await db.commit()
+    _ip = request.client.host if request.client else "?"
+    logger.warning(f"[audit] {user.username} (root) from {_ip} gave Divar number "
+                   f"{cookie.phone_number} to user {new_owner.id} (was {old or '—'})")
+    return {"success": True, "id": cookie.id, "owner_user_id": new_owner.id,
+            "owner_name": new_owner.full_name or new_owner.username,
+            "changed": True, "moved_jobs": moved}
+
+
 @router.post("/cookies/{cookie_id}/identity-cleared")
 async def identity_cleared(
     cookie_id: int,

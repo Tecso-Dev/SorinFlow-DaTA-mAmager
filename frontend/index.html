@@ -1191,6 +1191,32 @@
                         </div>
                     </div>
                 </div>
+                <!-- فقط root: همهٔ شماره‌های دیوار با صاحبشان، و اصلاح مالکیت -->
+                <div class="card mt-3 d-none" id="numbers-registry-card">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-diagram-3"></i> همهٔ شماره‌های دیوار و صاحبشان
+                        <span class="badge bg-dark">فقط root</span>
+                        <span class="small text-muted ms-auto" id="numbers-registry-summary"></span>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadNumbersRegistry()" title="بروزرسانی">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <p class="small text-muted px-3 pt-3 mb-2">
+                            هر شماره فقط در اختیار صاحبش است. اگر شماره‌ای به نام کاربر اشتباهی ثبت شده،
+                            صاحب درست را انتخاب و «ذخیره» را بزنید. ستون «پیشنهاد» کاربری را نشان می‌دهد که
+                            این شماره را شمارهٔ دیوار خود اعلام کرده یا سیم‌کارتش در گوشی اوست.
+                        </p>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0 registry-table">
+                                <thead><tr>
+                                    <th>شماره</th><th>صاحب</th><th>وضعیت</th><th>افشا</th><th>پیشنهاد</th><th></th>
+                                </tr></thead>
+                                <tbody id="numbers-registry"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- ═══ PROXIES ══════════════════════ -->

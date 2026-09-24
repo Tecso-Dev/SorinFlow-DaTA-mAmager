@@ -1698,7 +1698,7 @@ function showSection(sectionName) {
         case 'scraper':    loadJobs(); loadSchedules(); loadScraperAccounts(); _wireEstimateRefresh(); scheduleEstimate(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); checkPhoneGate();
                            _initScraperDatePicker(); refreshDivarSessionCount();
                            setTimeout(restoreScraperForm, 200); break;
-        case 'auth':       checkAuthStatus(); loadCookies(); checkPhoneGate(); break;
+        case 'auth':       checkAuthStatus(); loadCookies(); loadNumbersRegistry(); checkPhoneGate(); break;
         case 'forwarder':  loadForwarders(); loadForwarderLog(); checkPhoneGate(); break;
         case 'profile':    loadProfile(); break;
         case 'proxies':    loadProxies(); break;
@@ -3557,11 +3557,13 @@ async function switchJobAccount(jobId, currentPhone) {
     const choices = rows.filter(c => _divarUsable(c) && _digits(c.phone_number) !== cur)
         .sort((a, b) => (a.reveals || 0) - (b.reveals || 0));
     if (!choices.length) {
-        await askInfo({
+        const go = await askConfirm({
             icon: 'bi-sim-slash', title: 'شمارهٔ دیگری نیست',
-            body: 'شمارهٔ روشن و معتبر دیگری به نام شما ثبت نشده است.',
-            note: 'از «احراز هویت دیوار» یک شمارهٔ دیگر اضافه کنید، یا شمارهٔ خاموش را در فرم اسکرپر روشن کنید.',
+            body: 'فقط از شماره‌هایی که در پنل خودتان اضافه و تأیید شده‌اند می‌شود استفاده کرد، و شمارهٔ روشن و معتبر دیگری ندارید.',
+            note: 'برای شمارهٔ جدید، آن را در «احراز هویت دیوار» اضافه کنید و کد دیوار را وارد کنید؛ یا شمارهٔ خاموش را در فرم اسکرپر روشن کنید.',
+            okLabel: 'رفتن به احراز هویت دیوار', cancelLabel: 'بستن',
         });
+        if (go) showSection('auth');
         return false;
     }
     const picked = await askText({
@@ -3570,7 +3572,8 @@ async function switchJobAccount(jobId, currentPhone) {
         body: currentPhone
             ? `اسکرپ الان روی <b dir="ltr">${esc(currentPhone)}</b> است. بدون توقف، با شمارهٔ دیگری از شماره‌های خودتان ادامه می‌دهد.`
             : 'بدون توقف، با شمارهٔ دیگری از شماره‌های خودتان ادامه می‌دهد.',
-        note: 'اگر گوشی این شماره در دسترس نیست، بهتر است آن را در فرم اسکرپر خاموش کنید تا دوباره انتخاب نشود.',
+        note: 'فقط شماره‌های تأییدشدهٔ خودتان در این فهرست‌اند؛ شمارهٔ جدید را از «احراز هویت دیوار» اضافه کنید. '
+            + 'اگر گوشی این شماره در دسترس نیست، بهتر است آن را در فرم اسکرپر خاموش کنید تا دوباره انتخاب نشود.',
         field: {
             label: 'شمارهٔ جدید', value: '',
             options: [['', 'خودکار — کم‌مصرف‌ترین شمارهٔ دیگر من'],
@@ -5911,6 +5914,83 @@ async function loadCookies() {
     } catch (error) {
         console.error('Failed to load cookies:', error);
     }
+}
+
+/* ── root: every Divar number and its owner ────────────────────────────────
+ *
+ * «یک بخش فقط برای root که همهٔ شماره‌ها را با صاحبشان نشان دهد و بتوان
+ * مالکیت را اصلاح کرد.» The only place ownership changes by hand; the server
+ * refuses everyone but root and writes each change to the audit log.     */
+let _registryUsers = [];
+
+async function loadNumbersRegistry() {
+    const card = document.getElementById('numbers-registry-card');
+    const tb = document.getElementById('numbers-registry');
+    if (!card || !tb) return;
+    if (_currentUser?.role !== 'root') { card.classList.add('d-none'); return; }
+    card.classList.remove('d-none');
+    tb.innerHTML = '<tr><td colspan="6" class="text-muted small p-3">در حال بارگذاری…</td></tr>';
+    try {
+        const d = await apiCall('/auth/registry');
+        _registryUsers = d.users || [];
+        const rows = d.numbers || [];
+        const off = rows.filter(r => r.suggested_owner).length;
+        document.getElementById('numbers-registry-summary').textContent =
+            `${formatNumber(rows.length)} شماره` + (off ? ` · ${formatNumber(off)} مورد برای بررسی` : '');
+        if (!rows.length) {
+            tb.innerHTML = '<tr><td colspan="6" class="text-muted small p-3">هیچ شمارهٔ دیواری ذخیره نشده است</td></tr>';
+            return;
+        }
+        const opts = sel => _registryUsers.map(u =>
+            `<option value="${Number(u.id)}"${u.id === sel ? ' selected' : ''}>${esc(u.name)}${u.is_active ? '' : ' (غیرفعال)'}</option>`).join('');
+        tb.innerHTML = rows.map(r => {
+            const state = [
+                r.is_valid ? '<span class="badge bg-success">معتبر</span>' : '<span class="badge bg-secondary">نامعتبر</span>',
+                r.is_enabled ? '' : '<span class="badge bg-dark">خاموش</span>',
+                r.identity_required_at ? '<span class="badge bg-danger">احراز هویت</span>' : '',
+                r.in_use ? '<span class="badge bg-info text-dark">در حال اسکرپ</span>' : '',
+            ].join(' ');
+            const hint = r.suggested_owner
+                ? `<button class="btn btn-sm btn-link p-0" onclick="document.getElementById('reg-owner-${Number(r.id)}').value='${Number(r.suggested_owner.id)}'"
+                           title="${r.suggested_owner.why === 'forwarder' ? 'سیم‌کارت این شماره در گوشی این کاربر است' : 'این کاربر این شماره را شمارهٔ دیوار خود اعلام کرده'}">
+                       ${esc(r.suggested_owner.name)} <i class="bi bi-arrow-return-left"></i></button>`
+                : '<span class="text-muted small">—</span>';
+            return `<tr class="${r.suggested_owner ? 'registry-flag' : ''}">
+                <td dir="ltr" class="fw-semibold">${esc(r.phone_number)}</td>
+                <td><select class="form-select form-select-sm" id="reg-owner-${Number(r.id)}">
+                    ${r.owner_user_id == null ? '<option value="" selected>— بدون صاحب —</option>' : ''}${opts(r.owner_user_id)}</select></td>
+                <td class="small">${state}</td>
+                <td class="small">${formatNumber(r.reveals || 0)}</td>
+                <td class="small">${hint}</td>
+                <td class="text-nowrap">
+                    <button class="btn btn-sm btn-primary" onclick="saveNumberOwner(${Number(r.id)}, '${esc(r.phone_number)}')">ذخیره</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${Number(r.id)}).then(loadNumbersRegistry)" title="حذف نشست">
+                        <i class="bi bi-trash"></i></button>
+                </td></tr>`;
+        }).join('');
+    } catch (e) {
+        tb.innerHTML = `<tr><td colspan="6" class="text-danger small p-3">${esc(e.message || 'خطا')}</td></tr>`;
+    }
+}
+
+async function saveNumberOwner(id, phone) {
+    const sel = document.getElementById(`reg-owner-${Number(id)}`);
+    const uid = parseInt(sel?.value || '', 10);
+    if (!uid) { showToast('توجه', 'صاحب شماره را انتخاب کنید', 'warning'); return; }
+    const who = (_registryUsers.find(u => u.id === uid) || {}).name || '';
+    if (!await askConfirm({ icon: 'bi-person-check', title: 'تغییر صاحب شماره', okLabel: 'ثبت',
+        body: `شمارهٔ <b dir="ltr">${esc(phone)}</b> از این پس فقط در اختیار <b>${esc(who)}</b> است.`,
+        note: 'اگر اسکرپی از صاحب قبلی روی این شماره در حال اجراست، به شمارهٔ دیگری از خودش منتقل می‌شود.' })) {
+        loadNumbersRegistry();
+        return;
+    }
+    try {
+        const r = await apiCall(`/auth/registry/${Number(id)}/owner`, {
+            method: 'PATCH', body: JSON.stringify({ owner_user_id: uid }) });
+        showToast('ثبت شد', r.changed ? `${phone} به ${r.owner_name} داده شد` : 'تغییری لازم نبود', 'success');
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+    loadNumbersRegistry();
+    loadCookies();
 }
 
 async function deleteCookie(id) {

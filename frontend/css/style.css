@@ -2061,6 +2061,9 @@ html:not([data-theme="light"]) .topbar {
 .acct-flag.warn { color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); }
 .acct-flag.bad  { color: var(--danger);  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); }
 .acct-empty { font-size: .74rem; color: var(--text-muted); }
+/* root's registry: rows whose owner disagrees with what people said */
+.registry-table select { min-width: 9rem; }
+.registry-table tr.registry-flag > td { background: color-mix(in srgb, var(--warning) 8%, transparent); }
 @media (max-width: 420px) {
   .otp2-box { width: 40px; height: 50px; font-size: 1.25rem; }
 }
