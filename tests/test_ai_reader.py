@@ -430,6 +430,18 @@ class TestStalenessAndTheAttemptCap:
 
         configured["rows"][llm.KEY_CAP] = "0"
         assert asyncio.run(check()) is False
+        configured["rows"].pop(llm.KEY_CAP, None)
+
+        # the reader's own cap, not only the shared one: otherwise every new
+        # listing sat out the engine's 30-minute wait while the reader idled
+        configured["rows"][llm.agent_cap_key("reader")] = "0"
+        assert asyncio.run(check()) is False
+        configured["rows"].pop(llm.agent_cap_key("reader"), None)
+        assert asyncio.run(check()) is True
+
+        # and an open breaker: nothing will be read until it closes
+        monkeypatch.setattr(llm, "breaker_status", lambda: {"state": "open", "until": "x"})
+        assert asyncio.run(check()) is False
 
 
 # ── the merge rule ───────────────────────────────────────────────────────────

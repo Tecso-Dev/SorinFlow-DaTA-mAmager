@@ -114,7 +114,7 @@ class TestReaderConfigured:
         monkeypatch.setattr(llm.settings, "llm_api_key", "k-test", raising=False)
         monkeypatch.setattr(llm.settings, "llm_base_url", "https://ai.liara.ir/api/x/v1", raising=False)
 
-        async def spent(_db):
+        async def spent(_db, agent=None):
             return 0.0
         monkeypatch.setattr(llm, "spent_today", spent)
 

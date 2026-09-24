@@ -403,16 +403,17 @@ def _pending():
 
 async def reader_will_run(db) -> bool:
     """True while the reader can plausibly still get to a listing: the
-    gateway is configured, both switches (global and «reader») are on, and
-    today's cap has room. False is the match engine's cue that waiting for
-    a read is pointless — mirrors llm._gate's own checks without reaching
-    into its private function."""
-    if not llm.configured():
+    gateway is configured, both switches are on, both caps (the shared one
+    and the reader's own) have room, and the breaker is not holding calls.
+    False is the match engine's cue that waiting for a read is pointless —
+    otherwise every new listing waits out the full READ_WAIT_TIMEOUT."""
+    if llm.breaker_status()["state"] == "open":
         return False
-    cfg = await llm.config(db)
-    if not cfg["enabled"] or not await llm.agent_enabled(db, "reader"):
+    try:
+        await llm._gate(db, agent="reader")     # the same checks a real call would meet
+    except llm.LLMError:
         return False
-    return await llm.spent_today(db) < cfg["cap_usd"]
+    return True
 
 
 async def _cursor(db) -> int:
@@ -446,9 +447,9 @@ async def run_once(db, *, limit: int = BATCH) -> Dict[str, Any]:
     No id lower bound: a listing behind the cursor whose content changed is
     exactly as due as a new one, so the query is _pending() alone — the
     cursor below is reporting only, not a filter (see the module's stored
-    KEY_CURSOR). The scan stays cheap because _pending() excludes the huge
-    majority (already read, unchanged) via the partial index on
-    ai_read_at IS NULL for the common case.
+    KEY_CURSOR). The scan is the whole active table in the worst case; the
+    plain index on ai_read_at (migration 0013) serves the never-read rows,
+    and at this table's size the rest is a sequential pass per tick.
 
     The stored cursor only moves past successes. From the first failure of
     a pass it stays put, so a listing the model could not read this time is
