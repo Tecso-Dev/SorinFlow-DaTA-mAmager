@@ -326,7 +326,7 @@ class TestTheAiScreen:
             assert f'"key": "{key}"' in cards, key
         assert cards.count('"where":') == 6, "each card says where in the panel it is used"
         assert "CRM ← ملک‌های مشابه" in cards and "فرم مشتری ← پر کردن از متن" in cards
-        assert "تلگرام (چت‌های بکاپ)" in cards and "هوش تصویری" in cards
+        assert "تلگرام (چت خصوصی کاربر وصل‌شده)" in cards and "هوش تصویری" in cards
 
     def test_one_request_draws_the_screen(self):
         src = (ROOT / "app/api/routes/ai.py").read_text(encoding="utf-8")
