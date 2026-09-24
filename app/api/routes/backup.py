@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -25,6 +25,7 @@ from app.auth.permissions import ROLE_ROOT, ROLE_SUPER_ADMIN
 from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
+from app.services import audit
 from app.services import backup_service as bk
 from app.services import secret_box
 
@@ -260,10 +261,14 @@ async def digest_send_now(db: AsyncSession = Depends(get_db), user: User = _supe
 
 
 @router.post("/run")
-async def run_backup_now(db: AsyncSession = Depends(get_db), user: User = _super_admin):
+async def run_backup_now(db: AsyncSession = Depends(get_db),
+                         user: User = _super_admin, request: Request = None):
     """A snapshot right now, shipped if Telegram is configured."""
     res = await bk.run_backup(db)
     logger.info(f"[backup] manual run by {user.username}: {res}")
+    await audit.record("backup_run", actor=user, summary=f"بکاپ دستی توسط «{user.username}»",
+                       detail={"file": res.get("file"), "telegram_sent": res.get("telegram_sent")},
+                       request=request)
     res["last_offsite"] = await bk.last_offsite(db)
     return res
 
@@ -297,7 +302,7 @@ async def dr_status(_: User = _super_admin):
 
 
 @router.post("/dr/run")
-async def dr_run_now(user: User = _super_admin):
+async def dr_run_now(user: User = _super_admin, request: Request = None):
     """«همین حالا»: drop the request file the host's dr-backup.path unit
     watches. The host builds and ships the bundle; this only asks."""
     from app.services import dr_backup as dr
@@ -306,6 +311,9 @@ async def dr_run_now(user: User = _super_admin):
     if not dr.request_run():
         raise HTTPException(503, "درخواست ثبت نشد — فضای داده در دسترس نیست")
     logger.info(f"[dr] full backup requested by {user.username}")
+    await audit.record("dr_run", actor=user,
+                       summary=f"اجرای بکاپ کامل (DR) توسط «{user.username}» درخواست شد",
+                       request=request)
     return {"requested": True}
 
 
