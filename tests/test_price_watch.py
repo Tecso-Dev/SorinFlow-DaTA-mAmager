@@ -58,8 +58,10 @@ class TestReadingTheTrail:
         assert pw.MIN_DROP_PCT == 3 and pw.TICK_SECONDS == 300
         src = (ROOT / "app/crm/price_watch.py").read_text(encoding="utf-8")
         assert "ZoneInfo" not in src
-        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
-        assert "price_task = asyncio.create_task(_price_loop())" in main and "price_task.cancel()" in main
+        import app.main as m
+        loops = {name: (fn, roles) for name, fn, _stall, roles in m._loops()}
+        assert loops["price_watch"][0] is pw.watch_loop
+        assert set(loops["price_watch"][1]) == {"all", "scheduler"}
 
     def test_the_panel_has_the_card(self):
         html = (ROOT / "frontend/index.html").read_text(encoding="utf-8")

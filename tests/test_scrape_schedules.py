@@ -161,9 +161,11 @@ class TestItIsWiredIn:
         assert "scrape_schedule" in Path("scripts/restore_backup.py").read_text(encoding="utf-8")
 
     def test_the_loop_starts_with_the_app(self):
-        src = Path("app/main.py").read_text(encoding="utf-8")
-        assert "schedule_task = asyncio.create_task(_sched())" in src
-        assert "schedule_task.cancel()" in src
+        import app.main as m
+        loops = {name: (fn, roles) for name, fn, _stall, roles in m._loops()}
+        assert loops["scrape_scheduler"][0] is sch.scheduler_loop
+        assert set(loops["scrape_scheduler"][1]) == {"all", "scheduler"}, \
+            "one process fires the schedules — two would launch every run twice"
 
     def test_the_routes_are_scoped_to_the_owner(self):
         src = Path("app/api/routes/scraper.py").read_text(encoding="utf-8")

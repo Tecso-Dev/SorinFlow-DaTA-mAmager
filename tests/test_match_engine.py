@@ -33,8 +33,11 @@ class TestTheShape:
         assert CustomerMatch.STATUSES == ("new", "contacted", "dismissed")
 
     def test_it_runs_off_the_request_path_and_can_be_switched_off(self):
-        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
-        assert "match_task = asyncio.create_task(_match_loop())" in main and "match_task.cancel()" in main
+        import app.main as m
+        from app.crm import match_engine
+        loops = {name: (fn, roles) for name, fn, _stall, roles in m._loops()}
+        assert loops["match_engine"][0] is match_engine.engine_loop
+        assert set(loops["match_engine"][1]) == {"all", "scheduler"}
         src = (ROOT / "app/crm/match_engine.py").read_text(encoding="utf-8")
         assert 'getattr(settings, "match_engine", True)' in src
         assert "MIN_SCORE = 55" in src and "TICK_SECONDS = 300" in src

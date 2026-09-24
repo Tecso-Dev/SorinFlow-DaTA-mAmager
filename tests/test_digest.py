@@ -26,8 +26,11 @@ HTML = (ROOT / "frontend/index.html").read_text(encoding="utf-8")
 class TestTheShape:
 
     def test_it_runs_off_the_request_path_and_can_be_switched_off(self):
-        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
-        assert "digest_task = asyncio.create_task(_digest_loop())" in main and "digest_task.cancel()" in main
+        import app.main as m
+        from app.crm import digest
+        loops = {name: (fn, roles) for name, fn, _stall, roles in m._loops()}
+        assert loops["digest"][0] is digest.digest_loop
+        assert set(loops["digest"][1]) == {"all", "scheduler"}, "sent from one process, once"
         src = (ROOT / "app/crm/digest.py").read_text(encoding="utf-8")
         assert 'getattr(settings, "match_engine", True)' in src and "HOUR < 0" in src
         cfg = (ROOT / "app/config.py").read_text(encoding="utf-8")

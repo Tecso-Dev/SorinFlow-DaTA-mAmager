@@ -259,3 +259,52 @@ class TestWhatThePageReads:
         assert sum("Redis unavailable" in m for m in logs) == 1, "said once per outage"
         await _stop(task)
 
+
+class TestTheHeartbeat:
+
+    async def test_it_writes_the_process_and_touches_the_file(self, redis, tmp_path, monkeypatch):
+        from app.scraper import stealth
+        from app.services import scrape_queue
+        monkeypatch.setattr(scrape_queue, "draining", False)     # an earlier app in this run drained
+        beat_file = tmp_path / "hb"
+        monkeypatch.setattr(sv.settings, "heartbeat_file", str(beat_file))
+        monkeypatch.setattr(sv, "HEARTBEAT_EVERY", 0.02)
+        monkeypatch.setattr(stealth, "sandbox_status", lambda: {"mode": "on"}, raising=False)
+        task = asyncio.create_task(sv.heartbeat_loop("worker"))
+        await _until(lambda: beat_file.exists())
+        await asyncio.sleep(0.05)
+        key = f"sf:proc:worker:{sv.HOST}"
+        body = json.loads(await redis.get(key))
+        assert body["role"] == "worker" and body["pid"] == os.getpid() and body["host"] == sv.HOST
+        assert body["draining"] is False and body["running"] == []
+        assert body["sandbox"] == {"mode": "on"}
+        assert 0 < await redis.ttl(key) <= 60
+        first = beat_file.stat().st_mtime_ns
+        await _until(lambda: beat_file.stat().st_mtime_ns != first)
+        await _stop(task)
+
+    async def test_an_api_process_reports_no_browser(self, redis, tmp_path, monkeypatch):
+        from app.scraper import stealth
+        monkeypatch.setattr(sv.settings, "heartbeat_file", str(tmp_path / "hb"))
+        monkeypatch.setattr(stealth, "sandbox_status", lambda: {"mode": "on"}, raising=False)
+        task = asyncio.create_task(sv.heartbeat_loop("api"))
+        await _until(lambda: (tmp_path / "hb").exists())
+        await asyncio.sleep(0.05)
+        body = json.loads(await redis.get(f"sf:proc:api:{sv.HOST}"))
+        assert "sandbox" not in body
+        await _stop(task)
+
+    async def test_redis_down_the_file_is_still_touched(self, tmp_path, monkeypatch):
+        """The kubelet reads the file. A Redis outage must not look like a
+        dead worker and get it killed mid-scrape."""
+        async def _down():
+            raise ConnectionError("redis is down")
+        monkeypatch.setattr(database, "get_redis", _down)
+        monkeypatch.setattr(sv.settings, "heartbeat_file", str(tmp_path / "hb"))
+        monkeypatch.setattr(sv, "HEARTBEAT_EVERY", 0.02)
+        task = asyncio.create_task(sv.heartbeat_loop("scheduler"))
+        await _until(lambda: (tmp_path / "hb").exists())
+        first = (tmp_path / "hb").stat().st_mtime_ns
+        await _until(lambda: (tmp_path / "hb").stat().st_mtime_ns != first)
+        assert not task.done()
+        await _stop(task)

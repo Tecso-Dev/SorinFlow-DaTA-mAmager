@@ -148,3 +148,13 @@ class TestTheStartupHookIsWiredCorrectly:
                 return
         pytest.fail("lifespan is not a module-level function")
 
+    def test_the_helpers_above_it_carry_no_decorator(self):
+        import ast
+        import app.main as m
+        tree = ast.parse(open(m.__file__, encoding="utf-8-sig").read())
+        helpers = {node.name: node for node in tree.body
+                   if getattr(node, "name", None) in ("_loops", "_start_background")}
+        assert set(helpers) == {"_loops", "_start_background"}
+        for name, node in helpers.items():
+            assert node.decorator_list == [], (
+                f"a decorator on {name} means it was inserted above the wrong def")
