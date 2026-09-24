@@ -75,6 +75,30 @@ class TestFilterBehaviour:
         assert redact(once) == once
 
 
+class TestTracebacks:
+
+    def test_an_exceptions_own_text_is_redacted_on_its_way_to_a_sink(self):
+        """opt(exception=…) and logger.exception() print the exception's text
+        from the exception object, which the message filter never saw — a
+        driver error's [parameters: …] would land in the log verbatim."""
+        from loguru import logger
+        seen = []
+        sink = logger.add(lambda m: seen.append(str(m)), level="ERROR", filter=redact_filter,
+                          format="{message}", backtrace=False, diagnose=False)
+        try:
+            try:
+                raise ValueError("insert failed [parameters: ('09141234567', "
+                                 "'Bearer abcdefghijklmnopqrstuvwxyz0123456789')]")
+            except ValueError as e:
+                logger.opt(exception=e).error("request broke")
+        finally:
+            logger.remove(sink)
+        out = "".join(seen)
+        assert "request broke" in out and "ValueError" in out and "Traceback" in out
+        assert "09141234567" not in out
+        assert "abcdefghijklmnopqrstuvwxyz0123456789" not in out
+
+
 class TestRequestIdPatcher:
     def test_default_outside_a_request_is_a_dash(self):
         rec = {"extra": {}}

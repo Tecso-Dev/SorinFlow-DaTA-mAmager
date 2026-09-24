@@ -68,6 +68,16 @@ def redact_filter(record: dict) -> bool:
     what was masked.
     """
     try:
+        exc = record.get("exception")
+        if exc is not None and exc.type is not None:
+            # A sink prints the traceback — the exception's own text included,
+            # a driver error's [parameters: …] with it — from the exception
+            # object, past this filter. Folded into the message it is redacted
+            # like the rest; still no local variables, as with diagnose=False.
+            import traceback
+            tb = "".join(traceback.format_exception(exc.type, exc.value, exc.traceback))
+            record["message"] = f"{record['message']}\n{tb.rstrip()}"
+            record["exception"] = None
         record["message"] = redact(record["message"])
     except Exception:
         # A logging path that can raise is worse than one that leaks: this runs
