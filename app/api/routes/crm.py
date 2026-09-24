@@ -25,6 +25,10 @@ from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
 from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
+# who sees which match and which task: shared with the assistant
+from app.auth.visibility import (actor as _agent_name, actor as _task_actor,
+                                 matches_visible_to as _matches_visible_to,
+                                 tasks_visible_to as _tasks_visible_to)
 from app.services.dpa_service import record_activity, record_lead_status
 from app.services.excel_export import xlsx_response, fa_date
 from app.services.match_service import (
@@ -584,10 +588,6 @@ class CallOutcomeIn(_BaseModel):
     visit_at: Optional[datetime] = None
 
 
-def _agent_name(user) -> Optional[str]:
-    return (getattr(user, "full_name", None) or getattr(user, "username", None)) if user else None
-
-
 def _now_utc() -> datetime:
     from datetime import timezone as _tz
     return datetime.now(_tz.utc)
@@ -730,15 +730,8 @@ async def calls_summary(days: int = Query(1, ge=1, le=90),
 
 # ── تطبیق خودکار — the engine's matches, on the call queue ────────────────────
 # A consultant sees the matches for their own customers (and for customers
-# nobody is assigned to); root and super_admin see everybody's.
-
-def _matches_visible_to(query, user):
-    if getattr(user, "role", None) in ("root", "super_admin"):
-        return query
-    agent = _agent_name(user)
-    return query.where(or_(CustomerMatch.consultant.is_(None), CustomerMatch.consultant == "",
-                           CustomerMatch.consultant == agent))
-
+# nobody is assigned to); root and super_admin see everybody's
+# (_matches_visible_to, app/auth/visibility.py).
 
 class MatchDecisionIn(_BaseModel):
     status: str
@@ -1901,27 +1894,9 @@ async def delete_note(note_id: int, db: AsyncSession = Depends(get_db)):
 # TASKS
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── وظایف: who may see which task ───────────────────────────────────────
-def _task_actor(user) -> Optional[str]:
-    """The name tasks are assigned under — the same string the task form puts
-    in assigned_to."""
-    return getattr(user, "full_name", None) or getattr(user, "username", None)
-
-
-def _tasks_visible_to(query, user):
-    """A super_admin sees the whole board; everyone else sees only their own.
-
-    Tasks with no assignee stay visible to all, because they predate this rule
-    and hiding them would orphan them — new tasks are stamped with their
-    creator on the way in, so the unassigned set only ever shrinks.
-    """
-    if getattr(user, "role", None) in ("root", "super_admin"):
-        return query
-    actor = _task_actor(user)
-    if not actor:
-        return query.where(Task.assigned_to.is_(None))
-    return query.where(or_(Task.assigned_to.is_(None), Task.assigned_to == actor))
-
+# ── وظایف: who may see which task — _tasks_visible_to, app/auth/visibility.py.
+# _task_actor is the name tasks are assigned under, the same string the task
+# form puts in assigned_to.
 
 @router.get("/tasks")
 async def list_tasks(

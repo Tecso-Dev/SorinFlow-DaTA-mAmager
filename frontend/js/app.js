@@ -822,6 +822,7 @@ function pfRender(me) {
         document.getElementById('pf-email-btn').textContent = me.email && !ok ? 'ارسال کد' : 'تغییر ایمیل';
     }
     pfLoadDivarAccounts();
+    pfLoadTelegram();
 
     // the sidebar card follows
     if (_currentUser) { Object.assign(_currentUser, me); applyRoleUI(); }
@@ -950,6 +951,80 @@ async function pfChangePassword(ev) {
         out.textContent = e.message || 'خطا'; out.className = 'small mt-2 text-danger';
     }
     return false;
+}
+
+// ── «سورین» in Telegram: my own account, linked with a one-time code ──
+let _pfTgTimer = null;
+
+async function pfLoadTelegram() {
+    const st = document.getElementById('pf-tg-status');
+    if (!st) return null;
+    try {
+        const d = await apiCall('/users/me/telegram');
+        st.innerHTML = d.linked
+            ? html`<span class="badge bg-success">وصل</span>
+                   <span dir="ltr">${d.telegram_username ? '@' + d.telegram_username : ''}</span>
+                   ${d.linked_at ? 'از ' + new Date(d.linked_at).toLocaleDateString('fa-IR') : ''}`
+            : '<span class="badge bg-secondary">وصل نیست</span>';
+        document.getElementById('pf-tg-unlink')?.classList.toggle('d-none', !d.linked);
+        return d;
+    } catch (e) {
+        st.textContent = e.message || 'خطا';
+        return null;
+    }
+}
+
+async function pfTelegramCode() {
+    let d;
+    try { d = await apiCall('/users/me/telegram/link-code', { method: 'POST' }); }
+    catch (e) { showToast('خطا', e.message, 'danger'); return; }
+    // a link made with THIS code, not the one that may already be there
+    const before = (await pfLoadTelegram())?.linked_at || null;
+    const box = document.getElementById('pf-tg-code-wrap');
+    const open = d.deep_link
+        ? html`<a class="btn btn-primary btn-sm mt-2" href="${raw(safeUrl(d.deep_link))}" target="_blank" rel="noopener">
+                 <i class="bi bi-telegram"></i> باز کردن ربات در تلگرام</a>`
+        : '';
+    box.innerHTML = html`
+        <input class="form-control form-control-sm otp-input" dir="ltr" readonly value="${d.code}" aria-label="کد اتصال">
+        <div class="pf-note mt-2">در چت خصوصی با ربات دفتر بفرستید: <b dir="ltr">${d.command}</b></div>
+        ${raw(open)}
+        <div class="pf-note mt-1" id="pf-tg-timer"></div>`;
+    box.classList.remove('d-none');
+    const until = Date.now() + d.expires_in * 1000;
+    let ticks = 0;
+    clearInterval(_pfTgTimer);
+    const tick = async () => {
+        const left = Math.max(0, Math.round((until - Date.now()) / 1000));
+        const timer = document.getElementById('pf-tg-timer');
+        if (!timer) { clearInterval(_pfTgTimer); return; }
+        if (!left) {
+            clearInterval(_pfTgTimer);
+            box.innerHTML = '<div class="pf-note">کد منقضی شد — «دریافت کد اتصال» را دوباره بزنید.</div>';
+            return;
+        }
+        timer.innerHTML = html`اعتبار کد: <span dir="ltr">${formatNumber(Math.floor(left / 60))}:${formatNumber(left % 60).padStart(2, '۰')}</span>`;
+        if (++ticks % 5) return;
+        const now = await pfLoadTelegram();
+        if (now && now.linked && now.linked_at !== before) {
+            clearInterval(_pfTgTimer);
+            box.classList.add('d-none');
+            box.innerHTML = '';
+            showToast('وصل شد', 'سورین حالا در تلگرام به شما جواب می‌دهد', 'success');
+        }
+    };
+    tick();
+    _pfTgTimer = setInterval(tick, 1000);
+}
+
+async function pfTelegramUnlink() {
+    if (!await askConfirm({ icon: 'bi-telegram', title: 'قطع اتصال تلگرام', tone: 'danger', okLabel: 'قطع اتصال',
+                            body: 'سورین دیگر در تلگرام به این حساب جواب نمی‌دهد، تا دوباره وصلش کنید.' })) return;
+    try {
+        await apiCall('/users/me/telegram', { method: 'DELETE' });
+        showToast('اتصال قطع شد', '', 'success');
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+    pfLoadTelegram();
 }
 
 // ── my Divar accounts: as many numbers as I have logged in ──
@@ -4366,7 +4441,7 @@ function _aiAgentState(a) {
         if (st.skipped) bits.push(`بدون عکس: ${formatNumber(st.skipped)}`);
         if (st.behind != null) bits.push(`در نوبت: ${formatNumber(st.behind)}`);
     } else if (a.key === 'assistant') {
-        bits.push(`${formatNumber((st.allowed_chats || []).length)} چت مجاز`);
+        bits.push(`${formatNumber((st.linked_users || []).length)} کاربر وصل`);
         bits.push(`امروز ${formatNumber(st.questions_today || 0)} سؤال`);
         if (!st.telegram_configured) bits.push('<span class="text-warning">تلگرام تنظیم نشده</span>');
     } else {
@@ -4534,9 +4609,9 @@ async function _aiAssistantStatus() {
         if (sw) sw.checked = !!s.enabled;
         const last = document.getElementById('ai-assistant-last');
         if (last) {
-            last.textContent = !s.telegram_configured ? 'تا تلگرام (کارت بکاپ) تنظیم نشود، جواب نمی‌دهد'
+            last.textContent = !s.telegram_configured ? 'تا ربات تلگرام (کارت بکاپ) تنظیم نشود، جواب نمی‌دهد'
                 : !s.configured ? 'تا هوش مصنوعی وصل نشود، جواب نمی‌دهد'
-                : `${formatNumber(s.allowed_chats.length)} چت مجاز · امروز ${formatNumber(s.questions_today)} سؤال${s.last ? ' · آخری: «' + (s.last.question || '').slice(0, 40) + '»' : ''}`;
+                : `${formatNumber((s.linked_users || []).length)} کاربر وصل · امروز ${formatNumber(s.questions_today)} سؤال${s.last ? ' · آخری: «' + (s.last.question || '').slice(0, 40) + '»' : ''}`;
         }
     } catch (_) {}
 }
@@ -4544,7 +4619,7 @@ async function _aiAssistantStatus() {
 async function aiAssistantToggle(on) {
     try {
         await apiCall('/ai/assistant/settings', { method: 'PUT', body: JSON.stringify({ enabled: !!on }) });
-        showToast(on ? 'روشن شد' : 'خاموش شد', on ? 'سورین به چت‌های مجاز جواب می‌دهد' : 'سورین دیگر جواب نمی‌دهد', 'success');
+        showToast(on ? 'روشن شد' : 'خاموش شد', on ? 'سورین به کاربرهای وصل‌شده جواب می‌دهد' : 'سورین دیگر جواب نمی‌دهد', 'success');
         _aiAssistantStatus();
     } catch (e) { showToast('خطا', e.message, 'danger'); _aiAssistantStatus(); }
 }
