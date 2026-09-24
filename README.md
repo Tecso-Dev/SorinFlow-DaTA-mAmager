@@ -362,7 +362,7 @@ Rules:
 
 | Layer | Technology |
 |---|---|
-| API | FastAPI 0.109, Uvicorn 0.27, Pydantic 2.5 |
+| API | FastAPI 0.141, Starlette 1.7, Uvicorn 0.53, Pydantic 2.9 |
 | Persistence | PostgreSQL 15, SQLAlchemy async 2.0, asyncpg |
 | Cache | Redis 7 |
 | Collection | Playwright 1.41, Beautiful Soup 4.12, HTTPX, aiohttp |
@@ -370,9 +370,15 @@ Rules:
 | Authentication | JWT/HS256, bcrypt, optional TOTP via PyOTP |
 | Frontend | Static HTML, CSS, and JavaScript; Bootstrap RTL and Chart.js |
 | Operations | Docker Compose, Nginx, k3s/Kubernetes, GitHub Actions |
-| Tests | pytest and pytest-asyncio |
+| Dependencies | `requirements.txt` in, hash-locked `requirements.lock` / `requirements-dev.lock` out (uv, universal); Docker and CI install with `--require-hashes`, CI runs `pip-audit` |
+| Tests | pytest and pytest-asyncio; `node --test` for the Telegram relay Worker and the panel's escaping helpers |
 
-The source uses Python 3.10+ syntax. No authoritative Python version file is checked in, so Docker is the canonical runtime.
+The Docker image (the Playwright base) runs Python 3.10, which is why the locks are compiled for 3.10; development uses 3.11 from the same lock. Regenerate a lock after editing `requirements.txt`:
+
+```bash
+uv pip compile requirements.txt --universal --generate-hashes --python-version 3.10 -o requirements.lock
+uv pip compile requirements-dev.txt --universal --generate-hashes --python-version 3.10 -o requirements-dev.lock
+```
 
 ## Quick start
 
@@ -397,6 +403,24 @@ log instead of sent by SMS (refused when `ENVIRONMENT=production`):
 ```bash
 grep sms:console local/server.log | tail -1
 ```
+
+### Local development with Docker
+
+`docker-compose.local.yml` runs the real backend with hot reload next to its own
+PostgreSQL 16 and Redis, and `scripts/local_up.sh` brings it up and seeds fake
+data — users of every role, Divar numbers, listings, leads, customers and
+finished scrape jobs:
+
+```bash
+scripts/local_up.sh                                  # http://localhost:8000/dashboard/
+docker compose -f docker-compose.local.yml down      # stop (add -v to drop the data)
+```
+
+Ports listen on `127.0.0.1` only: PostgreSQL 5433, Redis 6380, the app 8000. The
+seeded logins (`root`, `owner`, `manager1`, `agent1`, `agent2`) all use the
+throwaway password in `.env.local.example`. The seeder refuses any database whose
+name does not end in `_local`, and the local stack never talks to Divar on its own
+(`DIVAR_SESSION_CHECK_MINUTES=0`, `APK_MIRROR_HOURS=0`).
 
 ### Requirements for the Docker path
 
@@ -500,6 +524,27 @@ Three separate authentication paths:
 Dashboard JWTs last 24 hours and carry a `typ` claim. Only a finished access
 token authenticates: the half-token issued between password and TOTP is
 refused, so the second factor cannot be skipped.
+
+### Login protection
+
+- Password and second-factor attempts are counted in Redis per account and per
+  client address, before the check runs; over the limit is a 429 with
+  `Retry-After` and a Persian message. What a person types is hashed into the key,
+  so it can never collide with an account's own budget or grow a key.
+- A TOTP code finishes one login only: the last accepted time-step is stored
+  (`users.totp_last_step`) and set with a conditional update.
+- A name that does not exist costs the same bcrypt round as one that does.
+- In production the app refuses to start on a `SECRET_KEY` published in this
+  repository or shorter than 32 characters, and on the placeholder seed password
+  when it would actually be used.
+- The client address is real and unforgeable: Traefik's Service uses
+  `externalTrafficPolicy: Local`, uvicorn trusts `X-Forwarded-For` only from the
+  pod network (`10.42.0.0/16`), and the backend is a `ClusterIP` reachable only
+  through Traefik. `GET /api/users/me/ip` (shown on the profile) says what the
+  server sees.
+- Verification-code SMS are capped per Tehran day across all callers
+  (`AUTH_SMS_DAILY_CAP`, default 200); past it a code goes by email when an
+  address is known, and one Telegram alert is sent.
 
 ### Roles
 
@@ -691,6 +736,8 @@ The short version:
 | Which variables exist, and what they mean | `.env.example` — names and comments only | yes |
 | Non-secret settings (timeouts, limits, flags) | `k8s/04-backend.yaml` as plain `env:` | yes |
 | Local development values | `local/local.env` — git-ignored | **never** |
+| `DR_BACKUP_PASSPHRASE` (encrypts the full backup) | GitHub Actions secret, copied into `sorinflow-secrets` by the deploy — **keep a copy off the server**, no bundle opens without it | **never** |
+| Telegram relay key | Cloudflare Worker secret `RELAY_KEY`, and the same value encrypted in the panel | **never** |
 
 Adding a new secret is four steps — declare the name in `.env.example`, read it
 in `app/config.py` with an **empty** default, put the real value in the cluster
@@ -819,7 +866,11 @@ closed.
 ### Tests
 
 ```bash
-DATABASE_URL=postgresql+asyncpg://user@host/db pytest tests/ -q
+uv venv --python 3.11 ~/.venvs/sorinflow-v2
+uv pip install --python ~/.venvs/sorinflow-v2/bin/python --require-hashes -r requirements-dev.lock
+DATABASE_URL=postgresql+asyncpg://user@host/db REDIS_URL=redis://localhost:6379/9 \
+  ~/.venvs/sorinflow-v2/bin/python -m pytest tests/ -q
+(cd deploy/telegram-relay && node --test)
 ```
 
 The suite needs PostgreSQL: `scraping_jobs.job_id` is a `postgresql.UUID`
@@ -967,6 +1018,32 @@ python scripts/restore_backup.py data/backups/sorinflow-backup-YYYYMMDD-HHMM.jso
 ```
 
 The restore script creates tables, inserts rows in foreign-key-safe order, and advances PostgreSQL sequences. Test restoration regularly; a backup is not proven until it has been restored.
+
+### Full backup for disaster recovery
+
+The nightly JSON snapshot carries the tables; it cannot rebuild a lost server. The
+**full bundle** can, without asking any provider for a new key:
+
+- **What:** `pg_dump` and `pg_dumpall --globals-only` with per-table row counts,
+  the whole `sorinflow-secrets` Secret, the data volume (Divar cookies, browser
+  profiles, avatars — not listing photos, Chromium caches, the APK mirror or the
+  JSON snapshots) and Traefik's `acme.json`.
+- **How:** [`scripts/dr_backup.sh`](scripts/dr_backup.sh) runs **on the host** as a
+  systemd timer at 04:00 Tehran, or when the panel's «همین حالا» on the «بکاپ کامل»
+  card drops `data/dr-request`. It encrypts with `gpg` under `DR_BACKUP_PASSPHRASE`,
+  splits into 45 MB parts with a sha256 manifest, and hands them to the pod, which
+  sends them to the backup chats. A failure before shipping sends an alert and shows
+  on the card. [`scripts/install_dr_backup.sh`](scripts/install_dr_backup.sh) installs
+  the units (the deploy runs it every time).
+- **Restore:** download every part and the manifest into one folder, then
+  `scripts/dr_restore.sh <folder>` checks each part's sha256, refuses anything not
+  encrypted with the passphrase, unpacks the bundle and prints the
+  `new_server.sh` command. Step by step, in Persian: [`docs/DR.fa.md`](docs/DR.fa.md).
+
+Telegram is tried directly from the server first, then through the Cloudflare
+relay ([`deploy/telegram-relay/`](deploy/telegram-relay/README.fa.md) — a Worker
+that needs `X-Relay-Key` and serves only the allowed bot), then through the
+dashboard's proxies. «تست همهٔ راه‌ها» on the card tries each on its own.
 
 ### Kubernetes deployment
 
