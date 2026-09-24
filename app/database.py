@@ -350,9 +350,12 @@ async def _migrate_properties_ai_pipeline(conn):
         print(f"ai pipeline migration skipped: {e}")
 
 
-# One boot's worth, like _ADVERTISER_BACKFILL_BATCH: small enough a rollout
-# never waits on it, large enough that a few thousand rows converge fast.
-_AI_FP_BACKFILL_BATCH = 5000
+# Rows per UPDATE batch. Unlike _ADVERTISER_BACKFILL_BATCH this one does not
+# stop after a batch: every row must be done before the loops start (below).
+_AI_FP_BACKFILL_BATCH = 2000
+# The ceiling on one boot's share. A few thousand rows take seconds; a table
+# far past that finishes on the next boot — and says so in the log.
+_AI_FP_BACKFILL_SECONDS = 120
 
 
 async def _backfill_ai_pipeline_fingerprints(conn):
@@ -360,32 +363,23 @@ async def _backfill_ai_pipeline_fingerprints(conn):
     row that existed before this deploy), and — the part that actually
     matters — the per-stage "fp at last pass" columns for whatever each
     stage had ALREADY finished, so nothing already read, embedded or judged
-    looks freshly stale the moment this lands. Skipping this would re-open
-    every listing in the table on the reader and the embedder at once,
-    which is exactly the gateway flood the staleness columns exist to avoid.
+    looks freshly stale the moment this lands.
 
-    Driven off ai_content_fp IS NULL, so it converges over a boot or two and
-    then costs one indexed count forever after — same shape as
-    _backfill_advertiser_signals.
+    All of the table, not one batch per boot: the listener stamps
+    ai_content_fp on ANY write to a row, so a row left for a later boot
+    turns stale the first time anything touches it — the re-embed this
+    release starts writes to every row — and the reader re-reads it (money)
+    and the engine re-judges and re-announces it (Telegram). Batches keep
+    each statement small; the time ceiling keeps a huge table from holding
+    the boot, and the rest converges on the next one.
     """
     try:
+        import json
+        import time
+        from datetime import datetime, timezone
         from sqlalchemy import text
         from app.models.property import content_fingerprint
-
-        rows = (await conn.execute(text(
-            "SELECT id, title, description, property_type, category_name, listing_type, "
-            "area, rooms, floor, total_floors, year_built, district, neighborhood, city_name, "
-            "has_elevator, has_parking, has_storage, has_balcony, document_type, unit_status, "
-            "corner_type, frontage, building_direction, "
-            "ai_read_at, ai_facts, ai_embed_version, ai_embedded_at "
-            "FROM properties WHERE ai_content_fp IS NULL LIMIT :n"
-        ), {"n": _AI_FP_BACKFILL_BATCH})).all()
-        if not rows:
-            return
-
-        # PROMPT_VERSION/EMBED_VERSION live in the AI modules, not here; a
-        # plain int import, never a DB call, so no risk of importing the
-        # heavier app.ai.* modules into a boot-time migration step.
+        # plain ints from the AI modules, never a DB call
         from app.ai.listing_reader import PROMPT_VERSION as READER_VERSION
         from app.ai.embeddings import EMBED_VERSION
 
@@ -396,27 +390,52 @@ async def _backfill_ai_pipeline_fingerprints(conn):
         except (TypeError, ValueError):
             match_cursor = None
 
-        from datetime import datetime, timezone
+        update = text(
+            "UPDATE properties SET ai_content_fp = :fp, "
+            "ai_read_fp = CASE WHEN :read THEN :fp ELSE ai_read_fp END, "
+            "ai_embed_fp = CASE WHEN :embed THEN :fp ELSE ai_embed_fp END, "
+            "ai_matched_at = CASE WHEN :matched THEN COALESCE(ai_matched_at, :now) ELSE ai_matched_at END, "
+            "ai_match_fp = CASE WHEN :matched THEN :fp ELSE ai_match_fp END "
+            "WHERE id = :i")
         now = datetime.now(timezone.utc)
-        done = 0
-        for r in rows:
-            fp = content_fingerprint(r)
-            already_read = r.ai_read_at is not None and isinstance(r.ai_facts, dict) \
-                and r.ai_facts.get("prompt_version") == READER_VERSION
-            already_embedded = r.ai_embedded_at is not None and r.ai_embed_version == EMBED_VERSION
-            already_matched = match_cursor is not None and r.id <= match_cursor
-            await conn.execute(text(
-                "UPDATE properties SET ai_content_fp = :fp, "
-                "ai_read_fp = CASE WHEN :read THEN :fp ELSE ai_read_fp END, "
-                "ai_embed_fp = CASE WHEN :embed THEN :fp ELSE ai_embed_fp END, "
-                "ai_matched_at = CASE WHEN :matched THEN COALESCE(ai_matched_at, :now) ELSE ai_matched_at END, "
-                "ai_match_fp = CASE WHEN :matched THEN :fp ELSE ai_match_fp END "
-                "WHERE id = :i"
-            ), {"fp": fp, "read": already_read, "embed": already_embedded,
-                "matched": already_matched, "now": now, "i": r.id})
-            done += 1
-        print(f"ai pipeline backfill: {done} rows fingerprinted "
-              f"(cursor {match_cursor if match_cursor is not None else 'unknown'})")
+        deadline = time.monotonic() + _AI_FP_BACKFILL_SECONDS
+        done, last_id = 0, 0
+        while time.monotonic() < deadline:
+            rows = (await conn.execute(text(
+                "SELECT id, title, description, property_type, category_name, listing_type, "
+                "area, rooms, floor, total_floors, year_built, district, neighborhood, city_name, "
+                "has_elevator, has_parking, has_storage, has_balcony, document_type, unit_status, "
+                "corner_type, frontage, building_direction, "
+                "ai_read_at, ai_facts, ai_embed_version, ai_embedded_at "
+                "FROM properties WHERE ai_content_fp IS NULL AND id > :after ORDER BY id LIMIT :n"
+            ), {"after": last_id, "n": _AI_FP_BACKFILL_BATCH})).all()
+            if not rows:
+                break
+            batch = []
+            for r in rows:
+                fp = content_fingerprint(r)
+                # a JSON column through a raw text() query can come back as
+                # the string itself, depending on the driver's codecs
+                facts = r.ai_facts
+                if isinstance(facts, str):
+                    try:
+                        facts = json.loads(facts)
+                    except ValueError:
+                        facts = None
+                already_read = r.ai_read_at is not None and isinstance(facts, dict) \
+                    and facts.get("prompt_version") == READER_VERSION
+                already_embedded = r.ai_embedded_at is not None and r.ai_embed_version == EMBED_VERSION
+                already_matched = match_cursor is not None and r.id <= match_cursor
+                batch.append({"fp": fp, "read": already_read, "embed": already_embedded,
+                              "matched": already_matched, "now": now, "i": r.id})
+            await conn.execute(update, batch)
+            done += len(batch)
+            last_id = rows[-1].id
+        if done:
+            left = (await conn.execute(text(
+                "SELECT count(*) FROM properties WHERE ai_content_fp IS NULL"))).scalar()
+            print(f"ai pipeline backfill: {done} rows fingerprinted, {left} left for the next boot "
+                  f"(match cursor {match_cursor if match_cursor is not None else 'unknown'})")
     except Exception as e:
         print(f"ai pipeline backfill skipped: {e}")
 
