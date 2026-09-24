@@ -21,7 +21,7 @@ from loguru import logger
 import sys
 
 from app.config import get_settings
-from app.database import init_db, close_db, close_redis
+from app.database import init_db, close_db, close_redis, assert_schema_current
 from app.api.routes import router as api_router
 from app.services.supervisor import beat
 
@@ -222,9 +222,16 @@ async def lifespan(app: FastAPI):
     if not settings.metrics_token:
         logger.info("METRICS_TOKEN is not set — /metrics is disabled and answers 404")
 
-    # Initialize database
-    await init_db()
-    logger.info("Database initialized")
+    if settings.db_migrate_on_boot:
+        await init_db()
+        logger.info("Database initialized")
+    else:
+        # One of several processes: `python -m app.migrate`, run once before
+        # the rollout, owns the schema. A database that is not at this image's
+        # head means that step did not run or failed — refusing to start is
+        # what halts the rollout with the previous pods still serving.
+        await assert_schema_current()
+        logger.info("Database schema is at this image's Alembic head")
 
     # A scrape lives in an asyncio task inside this process. When the process
     # goes — a deploy, a restart, the node rebooting — the task dies and the
