@@ -25,7 +25,8 @@ from app.models.crm_models import (
 from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
-from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
+from app.auth.dependencies import (get_current_user, get_current_user_optional, require_authenticated,
+                                   require_super_admin)
 # who sees which match and which task: shared with the assistant
 from app.auth.visibility import (actor as _agent_name, assign_owner, stamp_actor, is_super,
                                  call_queue_for, matches_visible_to as _matches_visible_to,
@@ -1667,14 +1668,13 @@ class CustomerIn(_BaseModel):
 
 
 @router.post("/customers")
-async def create_customer(data: CustomerIn, db: AsyncSession = Depends(get_db),
-                          current_user: User = Depends(get_current_user)):
+async def create_customer(data: CustomerIn, db: AsyncSession = Depends(get_db)):
     data = data.model_dump(exclude_unset=True)
     if not str(data.get("full_name") or "").strip():
         raise HTTPException(status_code=400, detail="full_name is required")
     customer = Customer(full_name=str(data["full_name"]).strip())
     _apply_customer_payload(customer, data)
-    await assign_owner(db, customer, customer.consultant_name, by=current_user)
+    await assign_owner(db, customer, customer.consultant_name)
     db.add(customer)
     await db.commit()
     await db.refresh(customer)
@@ -1691,15 +1691,14 @@ async def get_customer(customer_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/customers/{customer_id}")
-async def update_customer(customer_id: int, data: CustomerIn, db: AsyncSession = Depends(get_db),
-                          current_user: User = Depends(get_current_user)):
+async def update_customer(customer_id: int, data: CustomerIn, db: AsyncSession = Depends(get_db)):
     data = data.model_dump(exclude_unset=True)
     result = await db.execute(select(Customer).where(Customer.id == customer_id))
     customer = result.scalar_one_or_none()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     _apply_customer_payload(customer, data)
-    await assign_owner(db, customer, customer.consultant_name, by=current_user)
+    await assign_owner(db, customer, customer.consultant_name)
     customer.updated_at = datetime.now()
     await db.commit()
     await db.refresh(customer)
@@ -1994,11 +1993,11 @@ class TaskStatusIn(_BaseModel):
 
 @router.post("/tasks")
 async def create_task(
-    data: TaskIn,
+    payload: TaskIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    data = data.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True)
     due = None
     if data.get("due_date"):
         try:
@@ -2050,11 +2049,11 @@ async def get_task(
 @router.put("/tasks/{task_id}")
 async def update_task(
     task_id: int,
-    data: TaskIn,
+    payload: TaskIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    data = data.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True)
     task = await _own_task_or_404(task_id, db, current_user)
     for field in ("title", "description", "priority", "status", "contact_id", "deal_id"):
         if field in data:
@@ -2649,7 +2648,7 @@ async def list_calendar(
     assigned_to: Optional[str] = None,
     include_overlay: bool = True,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = require_authenticated,
 ):
     """Events (plus tasks/reminders) in a date window — what a grid page needs."""
     try:
@@ -2668,7 +2667,7 @@ async def upcoming_events(
     days: int = Query(7, ge=1, le=90),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = require_authenticated,
 ):
     """Next appointments from now — the dashboard strip and the «قرارهای پیشِ رو» box."""
     now = datetime.now()

@@ -147,11 +147,11 @@ class CabinetIn(_BaseModel):
 
 @router.post("/cabinets")
 async def create_cabinet(
-    data: CabinetIn,
+    payload: CabinetIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    data = data.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True)
     name = (data.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="نام کمد الزامی است")
@@ -175,11 +175,11 @@ async def create_cabinet(
 @router.patch("/cabinets/{cabinet_id}")
 async def update_cabinet(
     cabinet_id: int,
-    data: CabinetIn,
+    payload: CabinetIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    data = data.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True)
     cabinet = (await db.execute(_cabinets_visible_to(
         select(Cabinet).where(Cabinet.id == cabinet_id), current_user))).scalar_one_or_none()
     if not cabinet:

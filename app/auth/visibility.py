@@ -74,7 +74,7 @@ def display_name(full_name, username):
     return func.coalesce(func.nullif(full_name, ""), username)
 
 
-def stamp_owner(row, name: Optional[str], user_id: Optional[int]) -> None:
+def stamp_owner(row, name, user_id) -> None:
     """Write both halves of a row's owner, and the name the account is for."""
     name_col, id_col = OWNERSHIP[row.__tablename__]
     setattr(row, name_col, name)
@@ -87,7 +87,7 @@ def stamp_actor(row, user) -> None:
     stamp_owner(row, actor(user), getattr(user, "id", None))
 
 
-async def owner_id_for(db, name: Optional[str]) -> Optional[int]:
+async def owner_id_for(db, name) -> Optional[int]:
     """The one staff account that goes by `name`, or None when nobody or
     more than one does. Staff only: a visitor never reaches these rows, and
     their names must not make a colleague's ambiguous."""
@@ -99,7 +99,7 @@ async def owner_id_for(db, name: Optional[str]) -> Optional[int]:
     return ids[0] if len(ids) == 1 else None
 
 
-async def assign_owner(db, row, name: Optional[str], by=None) -> None:
+async def assign_owner(db, row, name, by=None) -> None:
     """A name typed into a form. Resolved to an account only when it is a
     different name: a form sends back the name it showed, and a renamed
     owner must keep the row. The person saving is who they name as
