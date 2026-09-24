@@ -133,20 +133,24 @@ def _backfill_one(bind, table, raw, norm) -> None:
     """
     from app.models.phone import normalize_phone
 
+    # Walk by id, not by "still NULL": a raw value with no digits («مخفی», an
+    # empty string) normalizes to NULL again, so the same rows would come back
+    # on every select — two thousand of them and the loop never ends, the
+    # boot never finishes, and the deploy rolls back.
+    last_id = 0
     while True:
         rows = bind.execute(sa.text(
             f"SELECT id, {raw} FROM {table} "
-            f"WHERE {norm} IS NULL AND {raw} IS NOT NULL "
+            f"WHERE {norm} IS NULL AND {raw} IS NOT NULL AND id > :after "
             f"ORDER BY id LIMIT :n"
-        ), {"n": _BACKFILL_BATCH}).fetchall()
+        ), {"after": last_id, "n": _BACKFILL_BATCH}).fetchall()
         if not rows:
             break
         bind.execute(
             sa.text(f"UPDATE {table} SET {norm} = :norm WHERE id = :id"),
             [{"id": r[0], "norm": normalize_phone(r[1])} for r in rows],
         )
-        if len(rows) < _BACKFILL_BATCH:
-            break
+        last_id = rows[-1][0]
 
 
 def _existing_index_names(bind) -> set:

@@ -301,3 +301,40 @@ class TestConvertLeadToDealReusesTheContactByNormalizedPhone:
                     return (await s.execute(select(func.count(Contact.id)).where(
                         Contact.phone_normalized == "9141234590"))).scalar()
             assert asyncio.run(_count_matching_contacts()) == 1, "no duplicate contact was created"
+
+
+# ── migration 0012's backfill walks the table once ────────────────────────────
+
+def test_the_0012_backfill_finishes_when_raw_values_have_no_digits():
+    """A raw «مخفی» or "" normalizes to NULL, so a loop that re-selects
+    "still NULL" rows gets the same rows back forever — with enough of them
+    the migration, the boot and the deploy never finish. It walks by id."""
+    import importlib.util
+    import sqlalchemy as sa
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec = importlib.util.spec_from_file_location(
+        "m0012", os.path.join(root, "migrations", "versions", "0012_phone_normalization_and_search.py"))
+    m0012 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m0012)
+    m0012._BACKFILL_BATCH = 2
+
+    class Bounded:
+        """The connection, refusing to run forever."""
+        def __init__(self, conn):
+            self.conn, self.calls = conn, 0
+
+        def execute(self, *a, **kw):
+            self.calls += 1
+            assert self.calls < 50, "the backfill kept selecting the same rows"
+            return self.conn.execute(*a, **kw)
+
+    eng = sa.create_engine("sqlite://")
+    with eng.begin() as c:
+        c.execute(sa.text("CREATE TABLE leads (id INTEGER PRIMARY KEY, phone_number TEXT, "
+                          "phone_number_normalized TEXT)"))
+        c.execute(sa.text("INSERT INTO leads (id, phone_number) VALUES (:i, :p)"),
+                  [{"i": 1, "p": ""}, {"i": 2, "p": "مخفی"}, {"i": 3, "p": ""},
+                   {"i": 4, "p": "۰۹۱۴ ۰۰۰ ۱۲۳۴"}, {"i": 5, "p": "+989140001235"}, {"i": 6, "p": "—"}])
+        m0012._backfill_one(Bounded(c), "leads", "phone_number", "phone_number_normalized")
+        got = dict(c.execute(sa.text("SELECT id, phone_number_normalized FROM leads")).all())
+    assert got == {1: None, 2: None, 3: None, 4: "9140001234", 5: "9140001235", 6: None}
