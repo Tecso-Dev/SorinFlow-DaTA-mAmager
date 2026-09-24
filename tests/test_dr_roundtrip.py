@@ -29,7 +29,8 @@ import sys
 import tarfile
 import threading
 import time
-from base64 import b64encode
+import re
+from base64 import b64decode, b64encode
 from email import policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -224,6 +225,8 @@ def pipeline(tmp_path_factory):
         "DR_BACKUP_PASSPHRASE": passphrase,
         "TELEGRAM_BOT_TOKEN": "123456:FAKE-BOT-TOKEN-FOR-TESTS",
         "TELEGRAM_CHAT_ID": "999999",
+        # more than one line, as a PEM key or a service account's JSON is
+        "GCP_SERVICE_ACCOUNT_JSON": '{\n  "type": "service_account",\n  "client_email": "x@y.iam"\n}\n',
     }
     secret_json = base / "secret.json"
     secret_json.write_text(json.dumps({
@@ -351,6 +354,9 @@ class TestRestore:
         assert r.returncode == 0, f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"
         assert "sha256 OK" in r.stdout
         assert "scripts/new_server.sh" in r.stdout
+        # and names what the env file cannot carry, and how it comes back
+        assert "GCP_SERVICE_ACCOUNT_JSON" in r.stdout
+        assert f"kubectl apply -f {pipeline['outdir'] / 'k8s' / 'sorinflow-secrets.json'}" in r.stdout
 
     def test_restored_bundle_has_what_new_server_sh_requires(self, pipeline):
         outdir = pipeline["outdir"]
@@ -367,12 +373,23 @@ class TestRestore:
             assert counts.get(table) == str(n), counts
 
     def test_secrets_env_round_trips_exactly(self, pipeline):
+        """Every one-line value, exactly, and every line one KEY=value — what
+        `kubectl create secret --from-env-file` (new_server.sh) reads. A value
+        with a newline in it would keep its first line there and turn the
+        others into keys, so it is left to the JSON below."""
         outdir = pipeline["outdir"]
-        restored = dict(
-            line.split("=", 1) for line in (outdir / "k8s" / "sorinflow-secrets.env").read_text().splitlines()
-            if "=" in line
-        )
-        assert restored == pipeline["plain_secret"]
+        lines = (outdir / "k8s" / "sorinflow-secrets.env").read_text().splitlines()
+        assert all(re.fullmatch(r"[-._a-zA-Z0-9]+=.*", line) for line in lines), lines
+        restored = dict(line.split("=", 1) for line in lines)
+        one_line = {k: v for k, v in pipeline["plain_secret"].items() if "\n" not in v}
+        assert restored == one_line and "GCP_SERVICE_ACCOUNT_JSON" not in restored
+
+    def test_the_secret_json_carries_every_value_exactly(self, pipeline):
+        manifest = json.loads((pipeline["outdir"] / "k8s" / "sorinflow-secrets.json").read_text())
+        assert (manifest["kind"], manifest["metadata"]) == (
+            "Secret", {"name": "sorinflow-secrets", "namespace": "sorinflow"})
+        decoded = {k: b64decode(v).decode() for k, v in manifest["data"].items()}
+        assert decoded == pipeline["plain_secret"]
 
     def test_traefik_acme_json_round_trips(self, pipeline):
         original = (pipeline["base"] / "traefik" / "acme.json").read_text()
@@ -494,6 +511,32 @@ class TestTamperIsRefused:
         assert "MISSING part" in r.stderr
         assert missing_name in r.stderr
         assert not (copy_dir / f"restored-{manifest['stamp']}").exists()
+
+
+class TestTheDataVolume:
+
+    def test_two_data_volumes_stop_the_run_loudly(self, tmp_path):
+        """An old volume left beside the new one: the run refuses to guess
+        which is the office's, alerts through the pod, and touches neither."""
+        storage, fakebin, log = tmp_path / "storage", tmp_path / "bin", tmp_path / "kubectl.log"
+        for pvc in ("pvc-aaa_sorinflow_data-pvc", "pvc-bbb_sorinflow_data-pvc"):
+            (storage / pvc).mkdir(parents=True)
+            (storage / pvc / "dr-request").write_text("")
+        fakebin.mkdir()
+        (fakebin / "kubectl").write_text(f'#!/usr/bin/env bash\necho "$*" >> "{log}"\n')
+        (fakebin / "kubectl").chmod(0o755)
+        (tmp_path / "work").mkdir()
+        env = {k: v for k, v in os.environ.items() if k != "DR_DATA_DIR"}
+        env.update(PATH=f"{fakebin}{os.pathsep}{os.environ['PATH']}", DR_STORAGE_DIR=str(storage),
+                   DR_WORK_DIR=str(tmp_path / "work"), KUBECONFIG="/dev/null")
+        r = subprocess.run(["bash", str(REPO / "scripts" / "dr_backup.sh")],
+                           env=env, capture_output=True, text=True, timeout=60)
+        assert r.returncode != 0
+        assert "pvc-aaa_sorinflow_data-pvc" in r.stderr and "pvc-bbb_sorinflow_data-pvc" in r.stderr
+        assert "dr_backup alert" in log.read_text(), "the office hears about it"
+        for pvc in storage.iterdir():
+            assert sorted(x.name for x in pvc.iterdir()) == ["dr-request"], "neither volume was touched"
+        assert list((tmp_path / "work").iterdir()) == [], "and the work directory is cleaned up"
 
 
 class TestInstall:

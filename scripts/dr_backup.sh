@@ -31,8 +31,21 @@ export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
 # Overridable so the round-trip test can point this at a fixture tree
 # instead of real k3s storage paths.
-DDIR="${DR_DATA_DIR:-$(ls -d /var/lib/rancher/k3s/storage/*_"${NAMESPACE}"_data-pvc 2>/dev/null | head -1 || true)}"
-TDIR="${DR_TRAEFIK_DIR:-$(ls -d /var/lib/rancher/k3s/storage/*_kube-system_traefik 2>/dev/null | head -1 || true)}"
+STORAGE="${DR_STORAGE_DIR:-/var/lib/rancher/k3s/storage}"
+# Every data volume by this namespace's name. More than one — an old volume
+# left behind when the claim was made again — is a person's question, not
+# `head -1`'s: a bundle of the stale one would look like a good night's
+# backup. Checked below, once fail() can say so.
+DATA_DIRS=()
+if [ -n "${DR_DATA_DIR:-}" ]; then
+  DATA_DIRS=("$DR_DATA_DIR")
+else
+  for d in "$STORAGE"/*_"${NAMESPACE}"_data-pvc; do
+    if [ -d "$d" ]; then DATA_DIRS+=("$d"); fi
+  done
+fi
+DDIR="${DATA_DIRS[0]:-}"
+TDIR="${DR_TRAEFIK_DIR:-$(ls -d "$STORAGE"/*_kube-system_traefik 2>/dev/null | head -1 || true)}"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 WORK="$(mktemp -d "${DR_WORK_DIR:-/root}/.sorinflow-dr-work.XXXXXX" 2>/dev/null || mktemp -d)"
@@ -60,6 +73,7 @@ fail() {
 }
 trap 'fail "خطای غیرمنتظره"' ERR
 
+[ "${#DATA_DIRS[@]}" -le 1 ] || fail "بیش از یک پوشهٔ data-pvc روی هاست هست — کهنه را کنار بگذارید: ${DATA_DIRS[*]}"
 [ -n "$DDIR" ] || fail "پوشهٔ data-pvc روی هاست پیدا نشد"
 mkdir -p "$BUNDLE/db" "$BUNDLE/k8s"
 
@@ -78,12 +92,18 @@ chmod 600 "$PASS_FILE"
 printf '%s' "$PASSPHRASE" > "$PASS_FILE"
 unset PASSPHRASE
 
-# ── 2. the whole Secret, as the env file new_server.sh restores from ───────
+# ── 2. the whole Secret: as the env file new_server.sh restores from, and ──
+#       as a manifest, which keeps a value that holds a newline (dr_restore.sh)
 STAGE="خواندن Secret سرور"
-kubectl -n "$NAMESPACE" get secret "$SECRET_NAME" -o json \
-  | jq -r '.data | to_entries[] | "\(.key)=\(.value | @base64d)"' \
+kubectl -n "$NAMESPACE" get secret "$SECRET_NAME" -o json > "$WORK/secret.json"
+jq --arg name "$SECRET_NAME" --arg ns "$NAMESPACE" \
+  '{apiVersion: "v1", kind: "Secret", type: (.type // "Opaque"),
+    metadata: {name: $name, namespace: $ns}, data: .data}' \
+  "$WORK/secret.json" > "$BUNDLE/k8s/sorinflow-secrets.json"
+jq -r '.data | to_entries[] | "\(.key)=\(.value | @base64d)"' "$WORK/secret.json" \
   > "$BUNDLE/k8s/sorinflow-secrets.env"
-chmod 600 "$BUNDLE/k8s/sorinflow-secrets.env"
+rm -f "$WORK/secret.json"
+chmod 600 "$BUNDLE/k8s/sorinflow-secrets.env" "$BUNDLE/k8s/sorinflow-secrets.json"
 
 DBU="$(grep '^POSTGRES_USER=' "$BUNDLE/k8s/sorinflow-secrets.env" | cut -d= -f2-)"
 DBN="$(grep '^POSTGRES_DB=' "$BUNDLE/k8s/sorinflow-secrets.env" | cut -d= -f2-)"
