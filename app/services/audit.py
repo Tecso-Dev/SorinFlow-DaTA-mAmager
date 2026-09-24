@@ -114,4 +114,13 @@ ACTIONS = {
     "dr_run": "اجرای دستی بکاپ کامل (DR)",
     "sms_settings_save": "ذخیرهٔ تنظیمات پیامک",
     "email_settings_save": "ذخیرهٔ تنظیمات ایمیل",
+    "ai_settings_save": "ذخیرهٔ تنظیمات هوش مصنوعی",
+    "ai_agent_toggle": "روشن/خاموش کردن ایجنت هوش مصنوعی",
+    "ai_agent_cap_set": "تغییر سقف هزینهٔ ایجنت",
+    "telegram_link": "اتصال حساب تلگرام به سورین",
+    "telegram_unlink": "قطع اتصال تلگرام از سورین",
+    "crm_export": "خروجی گرفتن از CRM",
+    "crm_delete": "حذف در CRM",
+    "leads_bulk": "تغییر یا حذف گروهی لیدها",
+    "portal_ticket_decide": "تصمیم دربارهٔ درخواست ارتقای پرتال",
 }

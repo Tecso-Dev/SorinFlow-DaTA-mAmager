@@ -7,7 +7,7 @@ From then on the assistant answers that Telegram account with this panel
 user's rights, and nobody else's. Staff only, like the rest of the panel: a
 visitor has no panel data for the assistant to read.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,7 @@ from app.auth.dependencies import get_staff_user
 from app.database import get_db
 from app.models.telegram_link import TelegramLink
 from app.models.user import User
+from app.services import audit
 
 router = APIRouter()
 
@@ -41,8 +42,11 @@ async def my_telegram_code(db: AsyncSession = Depends(get_db), user: User = Depe
 
 
 @router.delete("/me/telegram")
-async def my_telegram_unlink(db: AsyncSession = Depends(get_db), user: User = Depends(get_staff_user)):
+async def my_telegram_unlink(db: AsyncSession = Depends(get_db), user: User = Depends(get_staff_user),
+                             request: Request = None):
     await db.execute(delete(TelegramLink).where(TelegramLink.user_id == user.id))
     await db.commit()
     logger.info(f"[telegram-link] {user.username} unlinked their Telegram account")
+    await audit.record("telegram_unlink", actor=user, target_type="telegram",
+                       summary=f"{user.username} اتصال تلگرام خود را قطع کرد", request=request)
     return {"linked": False}

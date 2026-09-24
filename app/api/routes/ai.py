@@ -11,7 +11,7 @@ switching the agents off are not an admin's to do.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import _role_dep
 from app.database import get_db
 from app.models.user import User
-from app.services import llm, secret_box
+from app.services import audit, llm, secret_box
 
 router = APIRouter()
 _super_admin = Depends(_role_dep("root", "super_admin"))
@@ -196,7 +196,8 @@ class AgentSwitchIn(BaseModel):
 
 @router.put("/agents/{key}")
 async def ai_agent_switch(key: str, payload: AgentSwitchIn,
-                          db: AsyncSession = Depends(get_db), user: User = _super_admin):
+                          db: AsyncSession = Depends(get_db), user: User = _super_admin,
+                          request: Request = None):
     """One agent on or off, without touching the others."""
     if key not in llm.AGENTS:
         raise HTTPException(status_code=404, detail="چنین ایجنتی وجود ندارد")
@@ -206,6 +207,8 @@ async def ai_agent_switch(key: str, payload: AgentSwitchIn,
         from app.ai import assistant as _assistant
         await secret_box.put(db, _assistant.KEY_ENABLED, "true" if payload.enabled else "false", user.username)
     logger.info(f"[ai] agent {key} switched {'on' if payload.enabled else 'off'} by {user.username}")
+    await audit.record("ai_agent_toggle", actor=user, target_type="ai_agent", target_id=key,
+                       summary=f"ایجنت {key} {'روشن' if payload.enabled else 'خاموش'} شد", request=request)
     return {"key": key, "enabled": payload.enabled}
 
 
@@ -215,12 +218,16 @@ class AgentCapIn(BaseModel):
 
 @router.put("/agents/{key}/cap")
 async def ai_agent_cap(key: str, payload: AgentCapIn,
-                       db: AsyncSession = Depends(get_db), user: User = _super_admin):
+                       db: AsyncSession = Depends(get_db), user: User = _super_admin,
+                       request: Request = None):
     """One agent's own daily ceiling — the shared cap still applies on top."""
     if key not in llm.AGENTS:
         raise HTTPException(status_code=404, detail="چنین ایجنتی وجود ندارد")
     await secret_box.put(db, llm.agent_cap_key(key), f"{payload.cap_usd:.4f}", user.username)
     logger.info(f"[ai] agent {key} cap set to ${payload.cap_usd:.2f} by {user.username}")
+    await audit.record("ai_agent_cap_set", actor=user, target_type="ai_agent", target_id=key,
+                       summary=f"سقف روزانهٔ ایجنت {key}: {payload.cap_usd:.2f} دلار",
+                       detail={"cap_usd": payload.cap_usd}, request=request)
     return {"key": key, "cap_usd": payload.cap_usd}
 
 
@@ -243,7 +250,8 @@ async def ai_log(agent: Optional[str] = Query(None), failed_only: bool = False,
 @router.put("/settings")
 async def put_ai_settings(payload: AiSettingsIn,
                           db: AsyncSession = Depends(get_db),
-                          user: User = _super_admin):
+                          user: User = _super_admin,
+                          request: Request = None):
     """The knobs that live in the panel. An empty model falls back to the
     environment's; the key and the URL are not settable here on purpose."""
     actor = user.username
@@ -258,6 +266,11 @@ async def put_ai_settings(payload: AiSettingsIn,
                        ("vision", payload.model_vision), ("embed", payload.model_embed)):
         if value is not None:
             await secret_box.put(db, llm.KEY_MODELS[job], value.strip() or None, actor)
+    # which knobs moved, not the office notes' text
+    await audit.record("ai_settings_save", actor=user, target_type="ai_settings",
+                       summary="ذخیرهٔ تنظیمات هوش مصنوعی",
+                       detail={"changed": sorted(k for k, v in payload.model_dump().items() if v is not None)},
+                       request=request)
     return await llm.config(db)
 
 

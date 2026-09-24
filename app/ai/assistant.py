@@ -209,6 +209,10 @@ async def _redeem(db, code: str, sender: Dict[str, Any]) -> Optional[str]:
                         telegram_username=(sender.get("username") or "")[:64] or None))
     await db.commit()
     logger.info(f"[assistant] telegram account {tid} linked to {user.username}")
+    from app.services import audit
+    await audit.record("telegram_link", actor=user, target_type="telegram", target_id=tid,
+                       summary=f"حساب تلگرام {tid} به {user.username} وصل شد",
+                       detail={"telegram_username": sender.get("username") or None})
     return f"حساب شما به {user.full_name or user.username} وصل شد"
 
 
