@@ -187,3 +187,35 @@ class TestTheLockIsHeldBeforeCleaningUpSingletonFiles:
         # the loop itself, not the comment above it that also names the file
         cleanup_at = src.index('for stale in ("SingletonLock"')
         assert lock_at < cleanup_at
+
+
+class TestDivarAuthAlwaysReleases:
+    """DivarAuth.close_browser() is how a login browser ends. It used to close
+    the page first, and a page that was already gone (a crashed browser)
+    raised there — before close_context() could release the lock, which the
+    refresher then kept alive for the life of the process."""
+
+    async def test_a_page_that_fails_to_close_still_releases_the_lock(self, _redis):
+        from app.scraper.auth import DivarAuth
+
+        rkey, token, fallback = await st._acquire_profile_lock("09120005555")
+
+        class _Page:
+            async def close(self):
+                raise RuntimeError("Target page, context or browser has been closed")
+
+        class _Context:
+            async def close(self):
+                pass
+
+        ctx = _Context()
+        ctx._sorinflow_profile_key = str(st.profile_dir("09120005555"))
+        ctx._sorinflow_lock = (rkey, token, fallback)
+        auth = DivarAuth.__new__(DivarAuth)      # no cookies dir, no DB — just the close path
+        auth.page, auth.context, auth.browser = _Page(), ctx, None
+
+        await auth.close_browser()
+
+        assert rkey not in st._profile_locks
+        rkey2, token2, _ = await st._acquire_profile_lock("09120005555")   # must not raise
+        await st._release_profile_lock(str(st.profile_dir("09120005555")), rkey2, token2, False)

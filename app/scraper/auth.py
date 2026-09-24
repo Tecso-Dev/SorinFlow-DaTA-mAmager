@@ -70,10 +70,16 @@ class DivarAuth:
 
     async def close_browser(self):
         """Close browser and cleanup"""
-        if self.page:
-            await self.page.close()
-        if self.context:
-            await self.context.close()
+        # close_context() must run however the page goes: it is what releases
+        # the account's profile lock, and the lock's refresher keeps an
+        # unreleased one alive for as long as this process lives — the number
+        # would read «already open» to every later login and scrape. A page
+        # that is already closed (the browser crashed) raises here.
+        try:
+            if self.page:
+                await self.page.close()
+        except Exception as e:
+            logger.warning(f"[auth] page close failed, closing the context anyway: {e}")
         # Closing the context closes the browser: a persistent context owns
         # it, and context.browser is None, so closing "the browser" would be
         # a call on None.
