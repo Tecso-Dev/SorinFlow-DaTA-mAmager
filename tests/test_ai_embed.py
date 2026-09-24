@@ -181,6 +181,13 @@ class TestText:
         assert "مناسب کافه، مهدکودک" in t
         bare = SimpleNamespace(**base, ai_facts={"kind": "apartment"})
         assert emb.text_of(bare).splitlines()[-1] == "آپارتمان", "no summary, no suitable_for: just the one word"
+        # the amenities a search names, and the red flags that are part of what the listing is
+        equipped = SimpleNamespace(**base, ai_facts={
+            "kind": "apartment", "has_elevator": True, "has_parking": True, "has_storage": False,
+            "has_balcony": None, "red_flags": ["سند مشاع", "در رهن بانک"]})
+        t = emb.text_of(equipped)
+        assert "آپارتمان، آسانسور، پارکینگ" in t and "انباری" not in t and "بالکن" not in t
+        assert t.splitlines()[-1] == "سند مشاع، در رهن بانک"
 
     def test_it_masks_nothing_itself_because_the_door_does(self, configured, monkeypatch, maker):
         p = P(3, "آپارتمان", description="تماس 09143495300")

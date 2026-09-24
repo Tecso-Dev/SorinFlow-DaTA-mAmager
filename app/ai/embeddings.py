@@ -119,7 +119,10 @@ def text_of(prop) -> str:
             if facts.get(key):
                 words.append(str(facts[key]))
         for key, fa in (("convertible", "قابل تبدیل"), ("exchange", "معاوضه"),
-                        ("vacant", "تخلیه"), ("negotiable", "قابل مذاکره")):
+                        ("vacant", "تخلیه"), ("negotiable", "قابل مذاکره"),
+                        # what a person searches with: «با آسانسور و پارکینگ»
+                        ("has_elevator", "آسانسور"), ("has_parking", "پارکینگ"),
+                        ("has_storage", "انباری"), ("has_balcony", "بالکن")):
             if facts.get(key):
                 words.append(fa)
         if words:
@@ -127,6 +130,11 @@ def text_of(prop) -> str:
         suitable = facts.get("suitable_for")
         if isinstance(suitable, (list, tuple)) and suitable:
             lines.append("مناسب " + "، ".join(str(s) for s in suitable))
+        # a flag is part of what the listing is (a shared deed, a bank lien),
+        # so two ads of one flat read alike and a search for it finds it
+        flags = facts.get("red_flags")
+        if isinstance(flags, (list, tuple)) and flags:
+            lines.append("، ".join(str(f) for f in flags))
     return "\n".join(x for x in lines if x)[:MAX_CHARS]
 
 
