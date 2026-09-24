@@ -547,3 +547,72 @@ class TestTheRelaysOwnRefusals:
         rows = asyncio.run(bk.diagnose("1:x", bk._route("relay", [], "https://tg.example", "wrong")))
         relay = next(r for r in rows if r["route"] == "relay")
         assert relay["ok"] is False and "X-Relay-Key" in relay["error"]
+
+
+class TestEveryWayOut:
+    """«تست همهٔ راه‌ها» tries every way the server knows of, whichever mode
+    is in effect: straight, the relay, and each proxy on its own."""
+
+    def test_it_gathers_the_relay_and_every_proxy_once(self, store, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_api_base", "", raising=False)
+        monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
+        store.rows[bk.KEY_PROXY_MODE] = "manual"            # the mode does not narrow it
+        store.rows[bk.KEY_RELAY] = "https://tg.example"
+        store.rows[bk.KEY_RELAY_KEY] = secret_box.encrypt("k3y")
+        store.rows[bk.KEY_PROXY] = secret_box.encrypt("socks5://a:1")
+
+        async def pool(_db, spec):
+            return ["http://b:2", "socks5://a:1"]
+        monkeypatch.setattr(bk, "_pool_urls", pool)
+        route = asyncio.run(bk.every_way_out(store))
+        assert route == {"mode": "relay", "proxies": ["socks5://a:1", "http://b:2"],
+                         "api_base": "https://tg.example", "relay_key": "k3y"}
+        legs = [leg[0] for leg in bk._legs(route, direct=True)]
+        assert legs == ["direct", "relay", "socks5://a:1", "http://b:2"]
+
+
+class TestTheFullBackupCard:
+    """The panel's card for the host's nightly disaster-recovery bundle."""
+
+    @pytest.fixture
+    def dr(self, tmp_path, monkeypatch):
+        from app.services import dr_backup as dr
+        monkeypatch.setattr(dr, "STATUS", tmp_path / "dr-status.json")
+        monkeypatch.setattr(dr, "REQUEST", tmp_path / "dr-request")
+        monkeypatch.setattr(dr, "OUTBOX", tmp_path / "dr-outbox")
+        return dr
+
+    def _user(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(username="root", role="root")
+
+    def test_now_asks_the_host_once(self, dr):
+        from fastapi import HTTPException
+        from app.api.routes import backup as routes
+        assert asyncio.run(routes.dr_run_now(self._user())) == {"requested": True}
+        assert dr.REQUEST.exists()
+        with pytest.raises(HTTPException) as e:
+            asyncio.run(routes.dr_run_now(self._user()))
+        assert e.value.status_code == 409
+        assert asyncio.run(routes.dr_status(self._user()))["requested"] is True
+
+    def test_a_run_that_died_before_shipping_shows_on_the_card(self, dr, monkeypatch):
+        from app.api.routes import backup as routes
+        dr._write_status({"stamp": "20260923-040000", "sent": {"ok": True}})
+        # no Telegram configured: the alert cannot be sent, but it is recorded
+        monkeypatch.setattr(bk, "resolve_telegram", lambda db: _async({"token": "", "chat_id": ""}))
+        asyncio.run(dr.alert("🛑 بکاپ فاجعه شکست خورد — مرحله: pg_dump"))
+        st = asyncio.run(routes.dr_status(self._user()))
+        assert st["last_run"]["stamp"] == "20260923-040000"
+        assert "pg_dump" in st["last_alert"]["text"]
+
+    def test_the_three_routes_are_root_or_super_admin_only(self):
+        from app.api.routes import backup as routes
+        role_dep = routes._super_admin.dependency
+        for r in routes.router.routes:
+            if r.path in ("/diagnose", "/dr", "/dr/run"):
+                assert role_dep in [d.call for d in r.dependant.dependencies], r.path
+
+
+async def _async(v):
+    return v

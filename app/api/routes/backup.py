@@ -256,3 +256,44 @@ async def run_backup_now(db: AsyncSession = Depends(get_db), user: User = _super
     logger.info(f"[backup] manual run by {user.username}: {res}")
     res["last_offsite"] = await bk.last_offsite(db)
     return res
+
+
+@router.post("/diagnose")
+async def diagnose_routes(db: AsyncSession = Depends(get_db), _: User = _super_admin):
+    """«تست همهٔ راه‌ها»: getMe straight to Telegram, through the relay, and
+    through each proxy, one at a time — which of them works today, and how
+    fast. Uses the saved token."""
+    tok = (await bk.resolve_telegram(db))["token"]
+    if not tok:
+        raise HTTPException(400, "ابتدا توکن ربات را ذخیره کنید")
+    return {"rows": await bk.diagnose(tok, await bk.every_way_out(db))}
+
+
+@router.get("/dr")
+async def dr_status(_: User = _super_admin):
+    """The full disaster-recovery bundle, built on the host every night at
+    04:00 Tehran (scripts/dr_backup.sh): the last run, the last failure, and
+    whether a «همین حالا» request is waiting for the host to pick it up."""
+    from app.services import dr_backup as dr
+    st = dr.read_status()
+    return {
+        "last_run": st.get("last_run"),
+        "history": (st.get("history") or [])[:5],
+        "last_alert": st.get("last_alert"),
+        "requested": dr.REQUEST.exists(),
+        "undelivered": sorted(d.name for d in dr.OUTBOX.glob("*") if d.is_dir()),
+        "schedule_fa": "هر شب ۰۴:۰۰ به وقت تهران",
+    }
+
+
+@router.post("/dr/run")
+async def dr_run_now(user: User = _super_admin):
+    """«همین حالا»: drop the request file the host's dr-backup.path unit
+    watches. The host builds and ships the bundle; this only asks."""
+    from app.services import dr_backup as dr
+    if dr.REQUEST.exists():
+        raise HTTPException(409, "درخواست قبلی هنوز منتظر سرور است — چند دقیقه بعد وضعیت را ببینید")
+    if not dr.request_run():
+        raise HTTPException(503, "درخواست ثبت نشد — فضای داده در دسترس نیست")
+    logger.info(f"[dr] full backup requested by {user.username}")
+    return {"requested": True}

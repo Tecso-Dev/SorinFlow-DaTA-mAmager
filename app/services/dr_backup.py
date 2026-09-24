@@ -64,6 +64,10 @@ def _write_status(update: dict) -> dict:
         last = {}
     last.update(update)
     cur["last_run"] = last
+    return _save(cur)
+
+
+def _save(cur: dict) -> dict:
     try:
         STATUS.parent.mkdir(parents=True, exist_ok=True)
         tmp = STATUS.with_suffix(".tmp")
@@ -193,6 +197,11 @@ async def ship(bundle_dir: Path, db=None) -> dict:
 async def alert(text: str) -> bool:
     """One Telegram line from the host script (a run that could not even be
     built — no passphrase, no disk). Never raises."""
+    # The panel's card reads the status file; without this a run that died
+    # before shipping left yesterday's success on it as if all were well.
+    cur = read_status()
+    cur["last_alert"] = {"text": text[:500], "at": datetime.now().isoformat(timespec="seconds")}
+    _save(cur)
     from app.database import async_session_maker
     from app.services import backup_service as bk
     try:

@@ -207,6 +207,31 @@ async def resolve_route(db=None) -> dict:
     return _route("manual", [secret_box.decrypt(raw).strip()] if raw else [])
 
 
+async def every_way_out(db) -> dict:
+    """Every way to Telegram this server knows of, whichever mode is in
+    effect — the relay if one is set, the manual proxy, and each proxy the
+    pool names — so «تست همهٔ راه‌ها» can try each of them on its own."""
+    env_relay = (getattr(settings, "telegram_api_base", "") or "").strip()
+    env_proxy = (settings.telegram_proxy or "").strip()
+    v = {}
+    try:
+        v = await secret_box.get_many(db, (KEY_PROXY, KEY_PROXY_POOL, KEY_RELAY, KEY_RELAY_KEY))
+    except Exception as e:
+        logger.warning(f"[backup] saved telegram route unreadable: {e}")
+    relay = env_relay or (v.get(KEY_RELAY) or "").strip()
+    key = ((getattr(settings, "telegram_relay_key", "") or "").strip() if env_relay else
+           secret_box.decrypt(v[KEY_RELAY_KEY]).strip() if v.get(KEY_RELAY_KEY) else "")
+    proxies = [env_proxy] if env_proxy else []
+    if v.get(KEY_PROXY):
+        proxies.append(secret_box.decrypt(v[KEY_PROXY]).strip())
+    try:
+        proxies += await _pool_urls(db, v.get(KEY_PROXY_POOL) or "*")
+    except Exception as e:
+        logger.warning(f"[backup] proxy pool unreadable: {e}")
+    proxies = [p for p in dict.fromkeys(proxies) if p]
+    return _route("relay" if relay else "manual", proxies, relay, key)
+
+
 async def resolve_proxy(db=None) -> str:
     """The first proxy of the route, or '' — for the panel and for callers that
     want one address. The engines and the shipment use the whole route."""
