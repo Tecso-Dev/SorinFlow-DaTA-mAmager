@@ -29,8 +29,10 @@ from app.api.routes import crm  # noqa: E402
 
 
 def params(fn):
+    # what FastAPI injects, not what the screen filters by — the request is
+    # there for the audit trail's address (app/services/audit.py)
     return [p for p in inspect.signature(fn).parameters
-            if p not in ("db", "current_user", "_")]
+            if p not in ("db", "current_user", "_", "request")]
 
 
 class TestCustomers:
