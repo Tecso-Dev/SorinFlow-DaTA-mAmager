@@ -20,6 +20,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
+# The commit this image was built from — deploy.yml passes it as a build-arg
+# so /health can report it. Declared after COPY so a changed commit (every
+# build) never invalidates the pip install layer above it.
+ARG GIT_SHA=""
+ENV GIT_SHA=$GIT_SHA
+
 RUN mkdir -p /app/data/images /app/data/cookies /app/logs
 
 EXPOSE 8000
