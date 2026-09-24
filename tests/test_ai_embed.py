@@ -108,6 +108,19 @@ def maker(tmp_path):
     asyncio.run(eng.dispose())
 
 
+@pytest.fixture(autouse=True)
+def _reset_matrix_cache():
+    """emb._cache/_generation are module-level (one process-wide cache by
+    design — see the ponytail: note on _cache), but every test here gets its
+    own fresh sqlite file with its own id sequence. Without this, a cache
+    entry a test populates for (city, listing_type) could be handed to a
+    later test whose database has different rows under the same ids."""
+    emb._cache.clear()
+    emb._generation = 0
+    yield
+    emb._cache.clear()
+
+
 def P(i, title, *, district="خیابان گلها", city="ارومیه", listing_type="buy", price=4_000_000_000,
       area=100, rooms=2, description="", kind="آپارتمان", **kw):
     return Property(tag_number=f"e-{i}", divar_id=f"e-{i}", url=f"https://divar.ir/v/e-{i}", title=title,
@@ -521,8 +534,6 @@ class TestTheMatrixIsBuiltOnce:
     def test_semantic_candidates_reuses_the_cached_matrix_within_the_ttl(self, configured, monkeypatch, maker):
         _gateway(monkeypatch, _embeddings([]))
         asyncio.run(_add(maker, [_vec(P(1, "آپارتمان ۱۰۰ متری خیابان گلها"), U)]))
-        emb._cache.clear()
-        emb._generation = 0
         loads = []
         real = emb.load_index
 
@@ -542,8 +553,6 @@ class TestTheMatrixIsBuiltOnce:
     def test_an_embed_pass_bumps_the_generation_and_invalidates_the_cache(self, configured, monkeypatch, maker):
         _gateway(monkeypatch, _embeddings([]))
         asyncio.run(_add(maker, [_vec(P(1, "آپارتمان یک"), U)]))
-        emb._cache.clear()
-        emb._generation = 0
 
         async def _go():
             async with maker() as s:
