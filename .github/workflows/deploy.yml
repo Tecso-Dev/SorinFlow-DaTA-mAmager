@@ -4,14 +4,6 @@ on:
   push:
     branches:
       - main
-  # Run the gate on pull requests too. Without this a PR got no checks at all
-  # and the suite only ran after merging — which is the one moment it is too
-  # late to learn something is broken. build and deploy stay push-only below,
-  # so a pull request is tested and never shipped.
-  # No branch filter: stacked PRs target another PR's branch rather than main,
-  # and those are exactly the ones that most need testing before they are
-  # chained together.
-  pull_request:
   workflow_dispatch:
 
 env:
@@ -19,103 +11,27 @@ env:
   IMAGE_NAME: tecso-dev/sorinflow-data-manager
 
 jobs:
-  # Nothing reaches the registry until the suite is green. Without this gate a
-  # parser regression or a broken auth dependency shipped straight to the
-  # scraper fleet on every push to main.
-  test:
-    runs-on: ubuntu-latest
+  # Lint + the full test suite (Postgres, Redis, pip-audit, the Telegram relay
+  # Worker, the live-Postgres migration check) — moved to its own workflow so
+  # a push or a pull request gets exactly the same gate without also being
+  # able to build or deploy. Called here too so main's own push runs it one
+  # more time before build even though ci.yml already ran it for the PR that
+  # merged into main.
+  ci:
+    uses: ./.github/workflows/ci.yml
 
-    # A real Postgres, not SQLite. The models are Postgres-specific — scraping_jobs
-    # .job_id is a postgresql UUID column — so a SQLite run either fails to build
-    # the schema or quietly exercises a different dialect than production. Redis
-    # is here for the same reason: verification codes and login throttling live in
-    # it, and a fake would not prove the real client works.
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: sorinflow
-          POSTGRES_PASSWORD: ci-only-password
-          POSTGRES_DB: sorinflow_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
+  # Owned by another stream — see .github/workflows/e2e.yml.
+  e2e:
+    uses: ./.github/workflows/e2e.yml
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
-        # requirements-dev.lock is compiled (pip-compile/uv pip compile
-        # --generate-hashes) from requirements-dev.txt, which itself pulls
-        # requirements.txt plus the test-only packages — so this gate installs
-        # exactly the hash-pinned closure a developer installs, not a
-        # hand-kept list that could drift from what the app actually needs.
-        run: |
-          python -m pip install --upgrade pip
-          pip install --require-hashes -r requirements-dev.lock
-
-      - name: Audit locked dependencies for known vulnerabilities
-        # ecdsa's PYSEC-2026-1325 (Minerva timing attack recovering the nonce
-        # from ECDSA P-256 signing) has no upstream fix — the maintainers
-        # consider side-channel attacks out of scope. python-jose pulls ecdsa
-        # unconditionally, but app/auth/jwt.py signs and verifies every token
-        # with HS256 (HMAC), never calling into ecdsa's signing path, so it is
-        # ignored here instead of leaving the gate permanently red.
-        run: |
-          pip install pip-audit==2.10.1
-          pip-audit -r requirements-dev.lock --ignore-vuln PYSEC-2026-1325
-
-      - name: Run tests
-        env:
-          DATABASE_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_test
-          REDIS_URL: redis://localhost:6379/0
-          SECRET_KEY: ci-only-not-a-real-secret-0123456789
-          LOGS_PATH: /tmp
-          IMAGES_PATH: /tmp
-        run: pytest tests/ -q
-
-      # The Telegram relay Worker ships to Cloudflare by hand, not from here —
-      # which is exactly why its rules (key, bot allow-list, relay-specific
-      # errors) are checked on every push instead of on the day it is pasted.
-      - name: Test the Telegram relay Worker
-        working-directory: deploy/telegram-relay
-        run: node --test
-
-      - name: Verify the auth migration against a live Postgres
-        # Skipped without PG_TEST_URL, so it only runs where a database exists.
-        # This is the half SQLite can never cover: ALTER ... IF NOT EXISTS is a
-        # no-op there, so the DDL production runs would go untested.
-        env:
-          PG_TEST_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_test
-          SECRET_KEY: ci-only-not-a-real-secret-0123456789
-          LOGS_PATH: /tmp
-          IMAGES_PATH: /tmp
-        run: pytest tests/test_pg_migration.py -q
+  # Owned by another stream — see .github/workflows/k8s.yml.
+  k8s:
+    uses: ./.github/workflows/k8s.yml
 
   # Build on a GitHub-hosted runner (plenty of RAM, outbound to ghcr works).
   build:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [ci, e2e, k8s]
     # Never from a pull request: building would push an image to the registry
     # tagged with a SHA that may never reach main. Never from any other
     # branch either: a workflow_dispatch run on a feature branch used to
