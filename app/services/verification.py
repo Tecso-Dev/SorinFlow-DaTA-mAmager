@@ -12,6 +12,7 @@ should not hand over a live credential.
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import secrets
 from dataclasses import dataclass
 
@@ -370,6 +371,76 @@ async def spend_ip_budget(request, bucket: str) -> None:
         pipe = r.pipeline()
         pipe.incr(key)
         pipe.expire(key, IP_WINDOW)
+        await pipe.execute()
+    except Exception:
+        pass
+
+
+# Failed staff logins per address. check_login_rate stops one account being
+# guessed; this stops one host trying a common password on many. A fixed
+# quarter of an hour from the first failure, not pushed back by later ones:
+# an office behind one NAT does not mistype twenty times in it, and a spray is
+# held to about two thousand guesses a day per address.
+LOGIN_IP_LIMIT = 20
+LOGIN_IP_WINDOW = 900
+
+
+def login_ip(request) -> str | None:
+    """The address a failed login is charged to, or None when there is none.
+
+    Only a globally routable one. Production has so far seen every request
+    arrive from 10.42.x.x — k3s's klipper-lb masquerades the client before
+    Traefik appends it to X-Forwarded-For — and a lock keyed on that would be
+    one lock for the whole office, handed to whoever sends twenty wrong
+    passwords. IPv6 is charged per /64, the block one subscriber is given, or
+    a single host could rotate through it.
+    """
+    try:
+        addr = ipaddress.ip_address(client_ip(request))
+    except ValueError:
+        return None
+    if not addr.is_global:
+        return None
+    if addr.version == 6:
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
+
+
+async def check_login_ip(request) -> None:
+    """Raise VerificationError once this address has spent its failures.
+
+    Fails open when Redis is unavailable, like check_login_rate.
+    """
+    ip = login_ip(request)
+    if not ip:
+        return
+    key = f"{_NS}:ip:login:{ip}"
+    try:
+        r = await get_redis()
+        fails = int(await r.get(key) or 0)
+        ttl = await r.ttl(key) if fails >= LOGIN_IP_LIMIT else 0
+    except Exception as e:
+        logger.warning(f"[verification] login ip throttle unavailable, allowing: {e}")
+        return
+    if fails >= LOGIN_IP_LIMIT:
+        raise VerificationError(
+            "تلاش‌های ناموفق از این دستگاه بیش از حد مجاز است. "
+            f"{max(ttl // 60, 1)} دقیقهٔ دیگر تلاش کنید",
+            retry_after=max(ttl, 1))
+
+
+async def record_login_ip_failure(request) -> None:
+    ip = login_ip(request)
+    if not ip:
+        return
+    key = f"{_NS}:ip:login:{ip}"
+    try:
+        r = await get_redis()
+        pipe = r.pipeline()
+        # One transaction: the window starts with the first failure and a
+        # key can never be left counting with no expiry.
+        pipe.set(key, 0, ex=LOGIN_IP_WINDOW, nx=True)
+        pipe.incr(key)
         await pipe.execute()
     except Exception:
         pass

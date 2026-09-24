@@ -117,6 +117,34 @@ async def _claim_totp_step(db: AsyncSession, user: User, step: int) -> bool:
 TOTP_REUSED = "این کد قبلاً استفاده شده است — کد بعدی برنامه را وارد کنید"
 
 
+def _account_key(user: User) -> str:
+    # The key portal_login charges too: one budget per account, whichever
+    # door and whichever spelling (username or email) is tried.
+    return f"uid:{user.id}"
+
+
+async def _login_allowed(request: Request, key: str) -> None:
+    """429 once this address or this account has failed too often.
+
+    Asked before the password or code is looked at, so the right one is
+    refused as well until the window passes — otherwise the lock would only
+    slow a guesser down. Redis down: allowed, with a warning (verification.py).
+    """
+    from app.services.verification import check_login_ip, check_login_rate, VerificationError
+    try:
+        await check_login_ip(request)
+        await check_login_rate(key)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message,
+                            headers={"Retry-After": str(e.retry_after)})
+
+
+async def _login_failed(request: Request, key: str) -> None:
+    from app.services.verification import record_login_failure, record_login_ip_failure
+    await record_login_ip_failure(request)
+    await record_login_failure(key)
+
+
 def _mask_email(addr: str) -> str:
     """s***n@gmail.com — enough to know which inbox, not enough to read out."""
     addr = (addr or "").strip()
@@ -130,6 +158,7 @@ def _mask_email(addr: str) -> str:
 
 @router.post("/token", response_model=TokenResponse)
 async def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -154,7 +183,13 @@ async def login(
         )).limit(1)
     )).scalars().first()
 
+    # A name that does not exist is charged to what was typed, so it runs out
+    # exactly like one that does and the 429 says nothing about which is real.
+    key = _account_key(user) if user else ident
+    await _login_allowed(request, key)
+
     if not user or not verify_password(form.password, user.hashed_password):
+        await _login_failed(request, key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="نام کاربری یا رمز عبور اشتباه است",
@@ -209,6 +244,10 @@ async def login(
         )
         return TokenResponse(requires_totp=True, totp_session=totp_session)
 
+    # Cleared only once no second factor is owed. Clearing on the password
+    # alone would let whoever holds it reset the count between code guesses.
+    from app.services.verification import clear_login_failures
+    await clear_login_failures(key)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
 
@@ -240,7 +279,7 @@ async def verify_email_login(
     from app.auth.jwt import decode_token
     from app.services.verification import (
         verify_code, VerificationError, check_ip_budget, spend_ip_budget,
-        IP_VERIFY_LIMIT)
+        IP_VERIFY_LIMIT, clear_login_failures)
 
     try:
         await check_ip_budget(request, "verify", IP_VERIFY_LIMIT)
@@ -258,14 +297,18 @@ async def verify_email_login(
     user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="حساب کاربری در دسترس نیست")
+    key = _account_key(user)
+    await _login_allowed(request, key)
 
     try:
         await verify_code(PURPOSE_EMAIL_2FA, username, data.code)
     except VerificationError as e:
         # A wrong guess is the thing the budget exists to count.
         await spend_ip_budget(request, "verify")
+        await _login_failed(request, key)
         raise HTTPException(status_code=400, detail=e.message)
 
+    await clear_login_failures(key)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     return TokenResponse(
@@ -393,6 +436,7 @@ async def password_reset_confirm(
 @router.post("/token/verify-totp", response_model=TokenResponse)
 async def verify_totp_login(
     data: TotpLoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     from jose import JWTError
@@ -409,13 +453,21 @@ async def verify_totp_login(
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="کاربر یافت نشد")
+    # The session lives five minutes and takes any number of codes; this is
+    # what stops it being a million-guess ticket.
+    key = _account_key(user)
+    await _login_allowed(request, key)
 
     step = _totp_step(user.totp_secret, data.code) if user.totp_secret else None
     if step is None:
+        await _login_failed(request, key)
         raise HTTPException(status_code=401, detail="کد احراز هویت اشتباه است")
     if not await _claim_totp_step(db, user, step):
+        await _login_failed(request, key)
         raise HTTPException(status_code=401, detail=TOTP_REUSED)
 
+    from app.services.verification import clear_login_failures
+    await clear_login_failures(key)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
 

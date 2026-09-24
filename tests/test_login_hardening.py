@@ -5,6 +5,10 @@ operator would get locked out if it were wrong.
   * users.totp_last_step: Alembic 0010 and the boot-time ALTER, on Postgres.
   * a TOTP code is accepted once — also when the same code arrives twice at
     the same moment.
+  * failed logins are limited per account and per address, the right
+    password is refused while locked, a forged X-Forwarded-For neither dodges
+    the address limit nor spends somebody else's, and an address that is not
+    a real client's (production's 10.42.x.x) is never locked at all.
 """
 import asyncio
 import os
@@ -95,13 +99,23 @@ def test_0010_upgrades_downgrades_and_the_boot_builds_the_column_anyway():
 # ── the app, on Postgres, with a fake Redis ───────────────────────────────────
 
 @pytest.fixture(scope="module")
-def fake():
-    import fakeredis.aioredis
-    return fakeredis.aioredis.FakeRedis(decode_responses=True)
+def server():
+    import fakeredis
+    return fakeredis.FakeServer()
 
 
 @pytest.fixture(scope="module")
-def client(fake):
+def redis_view(server):
+    """The app's fake Redis, read from this thread: a synchronous client on the
+    same server, rather than the async one pinned to the app's event loop."""
+    import fakeredis
+    return fakeredis.FakeRedis(server=server, decode_responses=True)
+
+
+@pytest.fixture(scope="module")
+def client(server):
+    import fakeredis.aioredis
+    fake = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
     import app.database as db
     import app.services.verification as v
     from app.config import get_settings
@@ -218,3 +232,108 @@ def test_the_code_that_switched_totp_on_does_not_also_finish_a_login(client):
     r = client.post("/api/users/token/verify-totp",
                     json={"totp_session": _half(client, "lh_totp_enable"), "code": code})
     assert r.status_code == 401
+
+
+# ── failed logins: per account, per address ───────────────────────────────────
+
+def _max():
+    from app.config import get_settings
+    return get_settings().auth_login_max_attempts
+
+
+def test_an_account_locks_and_the_right_password_waits_out_the_window(client, redis_view):
+    uid = _mk_user("lh_lock")
+    for _ in range(_max()):
+        assert _login(client, "lh_lock", "wrong-guess").status_code == 401
+
+    r = _login(client, "lh_lock")                  # the right one, too early
+    assert r.status_code == 429
+    assert 0 < int(r.headers["Retry-After"]) <= 900
+    assert "تلاش" in r.json()["detail"]
+    # the account, not the spelling: its email would have been a second budget
+    assert redis_view.get(f"sf:auth:login:uid:{uid}") == str(_max())
+
+    redis_view.expire(f"sf:auth:login:uid:{uid}", 1)   # the window passes
+    time.sleep(1.2)
+    assert _login(client, "lh_lock").status_code == 200
+
+
+def test_a_name_that_does_not_exist_locks_the_same_way(client):
+    """Otherwise the 429 itself would say which names are real."""
+    codes = [_login(client, "lh_nobody_at_all", "x").status_code for _ in range(_max() + 1)]
+    assert codes == [401] * _max() + [429]
+
+
+def test_a_finished_login_clears_the_account_count(client):
+    _mk_user("lh_clears")
+    for _ in range(2):
+        assert [_login(client, "lh_clears", "typo").status_code
+                for _ in range(_max() - 1)] == [401] * (_max() - 1)
+        assert _login(client, "lh_clears").status_code == 200
+
+
+def test_totp_guesses_count_and_the_right_code_waits_too(client):
+    """The password is not the only thing guessed: a five-minute session used
+    to take any number of codes."""
+    totp = _totp_user("lh_totp_guess")
+    half = _half(client, "lh_totp_guess")
+    right = totp.now()
+    wrong = f"{(int(right) + 1) % 1_000_000:06d}"
+    for _ in range(_max()):
+        r = client.post("/api/users/token/verify-totp", json={"totp_session": half, "code": wrong})
+        assert r.status_code == 401
+    r = client.post("/api/users/token/verify-totp", json={"totp_session": half, "code": right})
+    assert r.status_code == 429 and int(r.headers["Retry-After"]) > 0
+
+
+def test_one_address_spraying_many_names_is_stopped(client):
+    from app.services.verification import LOGIN_IP_LIMIT
+    _mk_user("lh_spray_target")
+    for i in range(LOGIN_IP_LIMIT):
+        assert _login(client, f"lh_spray_{i}", "Password1", xff="9.9.9.9").status_code == 401
+
+    # a real account, the right password, from the same host: refused
+    r = _login(client, "lh_spray_target", xff="9.9.9.9")
+    assert r.status_code == 429
+    assert 0 < int(r.headers["Retry-After"]) <= 900
+    # the same account from anywhere else is untouched
+    assert _login(client, "lh_spray_target", xff="149.154.167.99").status_code == 200
+
+
+def test_a_forged_forwarded_for_neither_dodges_nor_frames(client):
+    """Traefik appends the peer it saw, so the rightmost entry is ours and the
+    rest is whatever the caller typed. Rotating the typed part must not reset
+    the budget, and typing the victim's address must not spend theirs."""
+    from app.services.verification import LOGIN_IP_LIMIT
+    victim, attacker = "185.143.232.10", "5.200.14.77"
+    _mk_user("lh_victim")
+    for i in range(LOGIN_IP_LIMIT):
+        forged = f"{victim}, 1.2.3.{i}"                 # a fresh lie every time
+        r = _login(client, f"lh_forge_{i}", "x", xff=f"{forged}, {attacker}")
+        assert r.status_code == 401
+    assert _login(client, "lh_forge_new", "x",
+                  xff=f"8.8.8.8, {attacker}").status_code == 429
+    assert _login(client, "lh_victim", xff=victim).status_code == 200
+
+
+def test_an_address_that_is_not_a_clients_is_never_locked(client):
+    """Production sees every request as 10.42.x.x (klipper-lb masquerades the
+    client before Traefik). Locking that would lock the whole office."""
+    from app.services.verification import LOGIN_IP_LIMIT
+    _mk_user("lh_office")
+    for i in range(LOGIN_IP_LIMIT + 5):
+        _login(client, f"lh_cluster_{i}", "x", xff="10.42.0.7")
+    assert _login(client, "lh_office", xff="10.42.0.7").status_code == 200
+
+
+def test_without_redis_login_still_works(client, monkeypatch):
+    """Fail open: a Redis blip must not lock the office out of the panel.
+    /ready already takes the pod out of service if Redis stays down."""
+    import app.services.verification as v
+
+    async def _down():
+        raise ConnectionError("redis is down")
+    monkeypatch.setattr(v, "get_redis", _down)
+    _mk_user("lh_no_redis")
+    assert _login(client, "lh_no_redis", "wrong", xff="9.9.9.10").status_code == 401
+    assert _login(client, "lh_no_redis", xff="9.9.9.10").status_code == 200
