@@ -50,7 +50,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24  # 24 hours — re-login daily
 
     # CORS
-    cors_origins: str = Field(default="*", env="CORS_ORIGINS")
+    # empty: same origin only (app/main.py says why)
+    cors_origins: str = Field(default="", env="CORS_ORIGINS")
     
     # Scraper Settings
     scraper_headless: bool = Field(default=True, env="SCRAPER_HEADLESS")

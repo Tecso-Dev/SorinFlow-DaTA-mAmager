@@ -14,10 +14,10 @@ class TestSettings:
         assert s.environment == "production"
         assert s.debug is False
 
-    def test_cors_origins_default_is_wildcard(self):
+    def test_cors_origins_default_is_same_origin_only(self):
         from app.config import Settings
         s = Settings()
-        assert s.cors_origins == "*"
+        assert s.cors_origins == ""
 
     def test_api_key_is_a_string(self):
         from app.config import Settings
