@@ -1,0 +1,84 @@
+# Local Docker dev stack (sorinflow-v2). Standalone from docker-compose.yml —
+# same three services, non-conflicting host ports, no nginx.
+#
+# Host ports are 5433/6380, not 5432/6379: this Mac already runs Postgres and
+# Redis from brew on the standard ports. Backend defaults to 8000; override
+# with BACKEND_PORT in .env.local if that is also taken (it was, by an
+# unrelated docker-compose.yml stack already running on this machine). The
+# backend builds from
+# Dockerfile.local — see that file's own comment on why (Docker Hub is
+# unreachable from this network, so it starts from the Playwright image
+# that's already local instead of python:3.11-slim).
+#
+#   cp .env.local.example .env.local
+#   docker compose --env-file .env.local -f docker-compose.local.yml up -d --build
+#   docker compose -f docker-compose.local.yml exec backend python scripts/seed_local.py
+#
+# --env-file is what makes ${POSTGRES_PASSWORD} etc. below resolve from
+# .env.local instead of compose's default (a bare ".env", which this repo
+# already uses for something else). The backend's own env_file: line loads
+# the same file again, for the app's settings rather than compose's.
+#
+# app/, frontend/, migrations/, scripts/ and alembic.ini are bind-mounted so
+# edits hot-reload under --reload; everything else (installed deps, data/,
+# logs/) stays inside the image/container. The app migrates itself on boot
+# (app/database.py:init_db — create_all, the boot-time ALTERs, then
+# `alembic upgrade head`), so a fresh `db` volume ends up fully migrated the
+# first time uvicorn starts; nothing extra to run before it.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sorinflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.local}
+      POSTGRES_DB: ${POSTGRES_DB:-divar_scraper_local}
+    ports:
+      - "5433:5432"
+    volumes:
+      - sorinflow_local_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sorinflow} -d ${POSTGRES_DB:-divar_scraper_local}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.local}
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.local}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    env_file:
+      - .env.local
+    volumes:
+      - ./app:/app/app
+      - ./frontend:/app/frontend
+      - ./migrations:/app/migrations
+      - ./scripts:/app/scripts
+      - ./alembic.ini:/app/alembic.ini
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  sorinflow_local_pgdata:
