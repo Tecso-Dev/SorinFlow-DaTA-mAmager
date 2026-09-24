@@ -17,7 +17,15 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
-RUN mkdir -p /app/data/images /app/data/cookies /app/logs
+# Same non-root user as the production Dockerfile (see its comment) — local
+# should catch a permission problem before production does, not the other
+# way round. docker-compose.local.yml bind-mounts app/, frontend/,
+# migrations/, scripts/, deploy/ and alembic.ini over parts of this, which
+# keeps its host ownership either way; only /app/data and /app/logs, which
+# stay inside the image's own layer, need the chown below.
+RUN mkdir -p /app/data/images /app/data/cookies /app/logs && \
+    chown -R pwuser:pwuser /app
+USER pwuser
 
 EXPOSE 8000
 

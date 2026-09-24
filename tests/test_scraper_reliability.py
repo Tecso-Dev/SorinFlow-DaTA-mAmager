@@ -597,47 +597,53 @@ class TestTheNodeBudgetIsSane:
         return "\n".join(l for l in lines if not l.strip().startswith("#"))
 
     def test_postgres_is_not_besteffort(self):
-        y = self._yaml("k8s/02-postgres.yaml")
+        y = self._yaml("k8s/base/postgres.yaml")
         assert "resources:" in y and "requests:" in y, \
             "the database is first in the eviction queue again"
         assert 'memory: "1Gi"' in y
 
     def test_redis_is_not_besteffort(self):
-        y = self._yaml("k8s/03-redis.yaml")
+        y = self._yaml("k8s/base/redis.yaml")
         assert "resources:" in y and "requests:" in y
         assert 'memory: "256Mi"' in y
 
     def test_redis_will_not_silently_drop_a_login_code(self):
         """allkeys-lru would evict verification codes under pressure and it
         would look exactly like an SMS that never arrived."""
-        y = self._yaml("k8s/03-redis.yaml")
+        y = self._yaml("k8s/base/redis.yaml")
         assert "--maxmemory" in y
         assert "noeviction" in y
         assert "allkeys-lru" not in y
 
     def test_the_backend_limit_and_the_neighbours_fit_the_node(self):
-        """Requests are the reservation that must fit; limits may oversubscribe."""
+        """Requests are the reservation that must fit; limits may oversubscribe.
+        The one process this used to be is now api (x2 replicas) + worker +
+        scheduler (see k8s/base/backend.yaml's node-budget comment) — the sum
+        of every role's request must still leave the ~6200Mi the 8GB node
+        actually has free once k3s, containerd, the CI runner, Traefik and
+        coredns are accounted for."""
         import re
-        def req_mem(path):
-            """The CONTAINER's memory request.
+        def req_mem(path, replicas=1):
+            """The CONTAINER's memory request, times its replica count.
 
             Anchored on the requests: block that actually has a memory key —
-            04-backend.yaml opens with a PersistentVolumeClaim whose own
-            requests: block asks for storage, and reading that one finds no
-            memory at all.
+            data-pvc.yaml, for instance, has its own requests: block asking
+            for storage, and reading that one finds no memory at all.
             """
             y = self._yaml(path)
             for m in re.finditer(r"requests:", y):
                 mm = re.search(r'memory:\s*"(\d+)(Mi|Gi)"', y[m.end():m.end() + 200])
                 if mm:
                     n, unit = int(mm.group(1)), mm.group(2)
-                    return n * (1024 if unit == "Gi" else 1)
+                    return n * (1024 if unit == "Gi" else 1) * replicas
             raise AssertionError(f"{path} declares no memory request")
 
-        total = (req_mem("k8s/04-backend.yaml")
-                 + req_mem("k8s/02-postgres.yaml")
-                 + req_mem("k8s/03-redis.yaml"))
-        assert total < 3072, f"requests total {total}Mi — too close to a 4Gi node"
+        total = (req_mem("k8s/base/backend.yaml", replicas=2)
+                 + req_mem("k8s/base/worker.yaml")
+                 + req_mem("k8s/base/scheduler.yaml")
+                 + req_mem("k8s/base/postgres.yaml")
+                 + req_mem("k8s/base/redis.yaml"))
+        assert total < 3000, f"requests total {total}Mi — too close to the ~6200Mi an 8GB node actually has free"
 
 
 class TestCiAppliesWhatTheBudgetAssumes:
@@ -655,15 +661,27 @@ class TestCiAppliesWhatTheBudgetAssumes:
         from pathlib import Path
         return Path(".github/workflows/deploy.yml").read_text(encoding="utf-8")
 
+    def test_the_deploy_job_runs_the_script_that_applies_everything(self):
+        assert "bash scripts/deploy_k8s.sh" in self._workflow()
+
     @pytest.mark.parametrize("manifest", [
-        "k8s/02-postgres.yaml",
-        "k8s/03-redis.yaml",
-        "k8s/04-backend.yaml",
-        "k8s/05-ingress.yaml",
+        "postgres.yaml",
+        "redis.yaml",
+        "backend.yaml",
+        "worker.yaml",
+        "scheduler.yaml",
+        "ingress.yaml",
     ])
     def test_every_manifest_the_budget_depends_on_is_applied(self, manifest):
-        assert manifest in self._workflow(), \
-            f"{manifest} is in git but CI never applies it — it will drift silently"
+        # scripts/deploy_k8s.sh applies whatever `kubectl kustomize k8s/base`
+        # renders, so "is it applied" is really "is it in the kustomization" —
+        # a file sitting in k8s/base/ but missing from resources: is in git
+        # and never reaches the cluster, same failure mode this test always
+        # guarded against.
+        from pathlib import Path
+        base = Path("k8s/base/kustomization.yaml").read_text(encoding="utf-8")
+        assert manifest in base, \
+            f"{manifest} is in k8s/base but not in kustomization.yaml — it will drift silently"
 
     def test_the_workflow_still_parses(self):
         import yaml
@@ -712,18 +730,22 @@ class TestTheHostSetupIsInTheRepository:
         assert setting.lower() in self._script().lower()
 
     def test_it_checks_the_node_is_the_size_the_manifests_assume(self):
-        """The memory budget in k8s/04-backend.yaml is sized for ~8GB. On a
-        different machine those numbers stop meaning anything, silently."""
+        """The memory budget across k8s/base/{backend,worker,scheduler}.yaml
+        is sized for ~8GB (see the accounting comment in backend.yaml). On a
+        different machine those numbers stop meaning anything, silently.
+        worker's 3072Mi is the biggest single share and the one most worth
+        naming here — it is the one that holds Chromium."""
         s = self._script()
         assert "MemTotal" in s
-        assert "4096Mi" in s, "the script does not name the limit it is validating"
+        assert "3072Mi" in s, "the script does not name the limit it is validating"
 
     def test_the_backend_limit_matches_what_the_script_expects(self):
-        """Two places state the budget; they must not drift apart."""
+        """Two places state worker's share of the budget; they must not drift
+        apart."""
         from pathlib import Path
-        manifest = Path("k8s/04-backend.yaml").read_text(encoding="utf-8")
-        assert 'memory: "4096Mi"' in manifest
-        assert "4096Mi" in self._script()
+        manifest = Path("k8s/base/worker.yaml").read_text(encoding="utf-8")
+        assert 'memory: "3072Mi"' in manifest
+        assert "3072Mi" in self._script()
 
 
 class TestNoTransactionSurvivesTheSlowWork:

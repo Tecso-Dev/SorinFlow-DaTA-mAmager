@@ -1,0 +1,145 @@
+# The worker role: consumes the scrape queue (sf:scrape:queue in Redis),
+# drives Chromium to talk to Divar, and is the only role the Ingress sends the
+# Divar-login HTTP routes to (see ingress.yaml) — those need the same
+# Chromium/cookie machinery this role already holds, and api never launches
+# a browser at all.
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker
+  labels:
+    app: worker
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  selector:
+    app: worker
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app: worker
+    app.kubernetes.io/component: worker
+    sorinflow.com/inject-app-env: "true"
+spec:
+  replicas: 1
+  # RollingUpdate, even at 1 replica — deliberately, unlike the old single
+  # pod (see backend.yaml). On SIGTERM this role drains: it stops taking new
+  # scrape jobs, lets whatever it is running finish, then exits, so the old
+  # and new pod overlapping briefly means two workers each on a DIFFERENT
+  # job, not two processes fighting over the same one. The cross-process
+  # Chromium profile lock (sf:profile:{account} in Redis) is what actually
+  # keeps two workers off the same Divar account's cookies at once — not the
+  # deployment strategy.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+        app.kubernetes.io/part-of: sorinflow
+        app.kubernetes.io/component: worker
+        sorinflow.com/egress: app
+      annotations:
+        sorinflow.com/synced-secrets: "unsynced"
+    spec:
+      # A running scrape job (Chromium mid-page-load, a login waiting on an
+      # SMS code) can legitimately take a while to reach a safe stopping
+      # point. 2 hours is generous on purpose: the drain logic above means
+      # this pod is doing real, finishing work for the whole window, not
+      # hanging.
+      terminationGracePeriodSeconds: 7200
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000    # pwuser in the Playwright base image
+        runAsGroup: 1000
+        fsGroup: 1000
+        # Chromium's own sandbox needs a handful of syscalls
+        # RuntimeDefault blocks (unshare/clone with CLONE_NEWUSER, mainly) —
+        # see deploy/seccomp/sorinflow-chromium.json for exactly which ones
+        # and where it comes from. Without this profile CHROMIUM_SANDBOX=auto
+        # falls back to running without a sandbox at all, loudly.
+        seccompProfile:
+          type: Localhost
+          localhostProfile: profiles/sorinflow-chromium.json
+      containers:
+        - name: worker
+          image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          ports:
+            - containerPort: 8000
+          env:
+            - name: SORINFLOW_ROLE
+              value: "worker"
+            - name: DB_MIGRATE_ON_BOOT
+              value: "false"
+            # DATABASE_URL, SECRET_KEY, the optional provider keys, etc. come
+            # from the shared-app-env patch — see backend.yaml's comment and
+            # shared-app-env.patch.yaml for the full list.
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs
+            # Chromium (as pwuser, not root) writes its cache and config under
+            # $HOME. readOnlyRootFilesystem means that has to be a real
+            # writable mount, not whatever the image's /home/pwuser resolves
+            # to on the base image layer.
+            - name: home
+              mountPath: /home/pwuser
+          # See backend.yaml for the full node-budget accounting. This is the
+          # one role that holds Chromium, which is where almost all of it
+          # goes.
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              memory: "3072Mi"
+          # No HTTP health endpoint worth trusting here — the process can be
+          # correctly busy inside a page load for a while. Both probes instead
+          # check a heartbeat file the process itself touches every <=15s
+          # (HEARTBEAT_FILE, default /tmp/sorinflow-heartbeat); a stuck event
+          # loop stops updating it and the pod is restarted.
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "test -f /tmp/sorinflow-heartbeat"]
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test $(( $(date +%s) - $(stat -c %Y /tmp/sorinflow-heartbeat) )) -lt 90
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: app-data
+          persistentVolumeClaim:
+            claimName: data-pvc
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+        - name: home
+          emptyDir: {}

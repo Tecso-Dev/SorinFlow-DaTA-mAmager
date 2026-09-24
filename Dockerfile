@@ -26,7 +26,15 @@ COPY . .
 ARG GIT_SHA=""
 ENV GIT_SHA=$GIT_SHA
 
-RUN mkdir -p /app/data/images /app/data/cookies /app/logs
+# pwuser (uid/gid 1000, already in this base image) instead of root: every
+# role runs as runAsNonRoot in k8s now (k8s/base/backend.yaml etc.), and
+# Chromium's own sandbox needs a real unprivileged process to drop into, not
+# a root one pretending to be non-root. /app/data and /app/logs are the only
+# paths anything writes to at runtime — PYTHONDONTWRITEBYTECODE above means
+# no .pyc write either, so nothing else under /app needs to be writable.
+RUN mkdir -p /app/data/images /app/data/cookies /app/logs && \
+    chown -R pwuser:pwuser /app
+USER pwuser
 
 EXPOSE 8000
 

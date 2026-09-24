@@ -1,0 +1,59 @@
+# One-off (but idempotent) fixup for data-pvc's ownership. local-path
+# PVCs are plain hostPath volumes under the hood, and Kubernetes explicitly
+# does not apply a pod's fsGroup to hostPath-backed volumes — so switching
+# api/worker/scheduler from root to uid 1000 (see backend.yaml) would
+# otherwise leave them unable to read or write files the old root-run
+# container already created there. This Job runs as root for exactly that one
+# purpose, with only the three capabilities chown needs, and nothing else.
+#
+# scripts/deploy_k8s.sh runs it on every deploy — the find is a no-op once
+# everything already belongs to 1000:1000 — and, the first time (the live
+# backend Deployment still has no runAsUser), only after scaling the old
+# image's pods to zero so nothing is writing new root-owned files while or
+# after it runs.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-ownership
+  labels:
+    app: data-ownership
+    app.kubernetes.io/component: data-ownership
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: data-ownership
+        app.kubernetes.io/part-of: sorinflow
+        app.kubernetes.io/component: data-ownership
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: chown
+          image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - 'find /app/data \( ! -user 1000 -o ! -group 1000 \) -exec chown -h 1000:1000 {} +'
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "FOWNER", "DAC_READ_SEARCH"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+      volumes:
+        - name: app-data
+          persistentVolumeClaim:
+            claimName: data-pvc

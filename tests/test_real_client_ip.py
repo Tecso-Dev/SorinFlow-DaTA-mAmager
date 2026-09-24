@@ -58,12 +58,12 @@ class TestTheAppSeesTheRealCaller:
 class TestTheClusterHandsItOver:
 
     def test_traefik_keeps_the_callers_address(self):
-        doc = yaml.safe_load((ROOT / "k8s/06-traefik-acme.yaml").read_text())
+        doc = yaml.safe_load((ROOT / "k8s/overlays/production/traefik-acme.yaml").read_text())
         values = yaml.safe_load(doc["spec"]["valuesContent"])
         assert values["service"]["spec"]["externalTrafficPolicy"] == "Local"
 
     def test_the_backend_is_reachable_only_through_traefik(self):
-        docs = [d for d in yaml.safe_load_all((ROOT / "k8s/04-backend.yaml").read_text()) if d]
+        docs = [d for d in yaml.safe_load_all((ROOT / "k8s/base/backend.yaml").read_text()) if d]
         svc = next(d for d in docs if d["kind"] == "Service")
         assert svc["spec"]["type"] == "ClusterIP"
         assert all("nodePort" not in p for p in svc["spec"]["ports"])

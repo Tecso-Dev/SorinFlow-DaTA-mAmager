@@ -63,7 +63,7 @@ Read this before changing anything. Where this section and the rest of the READM
 
 Ordering is the tuple; idempotence is each step's own job. A new schema change is an Alembic revision, not a new step: change the model, `alembic revision --autogenerate -m "add x"`, read the file, commit it — the next deploy applies it under the same `lock_timeout` guard. `alembic check` must stay clean (`tests/test_pg_migration.py` enforces it on Postgres), which is why the models declare exactly the constraints the steps create (the partial `ix_users_phone_unique`, `fk_cookies_owner`, `ix_crm_sms_logs_campaign_sent`).
 
-**Single replica, ReadWriteOnce, `strategy: Recreate`.** Three PVCs, all RWO, one backend pod (`k8s/04-backend.yaml:19-37`). Two overlapping pods would fight over the data volume and deadlock on migration locks, so deploys use `Recreate` — every deploy is a few seconds of real downtime, accepted deliberately. The consequence to keep in mind: a pod that fails startup is now a full outage, not a failed deploy that leaves the old pod serving. Comments in `app/database.py:740-742` and `SECRETS.md:245-248` still assume the old behaviour; they are wrong.
+**Phase 3: split into three roles, no longer one pod.** `SORINFLOW_ROLE` picks `api` (`k8s/base/backend.yaml`, 2 replicas, `RollingUpdate`, data-pvc mounted read-only, no migrations on boot), `worker` (`k8s/base/worker.yaml`, 1 replica, `RollingUpdate` with a 2-hour drain, data-pvc read-write, the only role that runs Chromium) or `scheduler` (`k8s/base/scheduler.yaml`, 1 replica, still `strategy: Recreate`, data-pvc read-write) — see each file's own comments for why. Three PVCs, all RWO (`k8s/base/data-pvc.yaml`, `postgres.yaml`, `redis.yaml`). A migrate Job runs the schema forward before any of the three roll out, so the single-pod deadlock this paragraph used to describe (two pods racing the same migration lock) no longer applies to `api`; `scheduler` keeps `Recreate` for a different reason — see its own comment. Whether the in-process state this section goes on to describe (running scrape tasks, Divar login sessions, OTP suppression) still lives exactly where the rest of this section says is a phase 3 runtime-stream question, not a k8s one — verify it against whichever role actually holds that code before trusting the rest of this paragraph. Comments in `app/database.py:740-742` and `SECRETS.md:245-248` still assume the old, single-pod behaviour; they were already wrong before this phase.
 
 State that lives in the process, not the database, and therefore dies with the pod: running scrape tasks, Divar login sessions (`auth_instances`, `app/api/routes/auth.py:31`), and OTP suppression. A scrape runs in whichever process has the worker role: `_launch_job` writes the row and queues its id in Redis, a worker claims it (`sf:scrape:running:{job_id}`, TTL 90 s, refreshed while it runs) and runs it. The worker's sweep fails a `running` or `paused` row only when nobody holds its claim, so it is safe while other processes live (`app/services/scrape_queue.py`).
 
@@ -173,7 +173,7 @@ Starlette runs the **last-registered** middleware first, so the registration ord
 
 ```mermaid
 flowchart TD
-    B["Browser"] --> TR["Traefik ingress<br/>k8s/05-ingress.yaml"]
+    B["Browser"] --> TR["Traefik ingress<br/>k8s/base/ingress.yaml"]
     TR --> ST["StaticFiles mounts<br/>/dashboard, /images<br/>main.py:885"]
     TR --> MET
 
@@ -244,7 +244,7 @@ flowchart TD
     JOB --> ORPH["Startup sweep marks<br/>orphaned running jobs failed<br/>main.py:70, called at :147"]
 ```
 
-The scrape lives inside the web process, which is why `strategy: Recreate` (`k8s/04-backend.yaml:36`) plus the orphan sweep exist: a deploy kills the task, and without the sweep the row says «در حال اجرا» forever.
+Historically the scrape lived inside the same web process that answered HTTP requests, which is why `strategy: Recreate` plus the orphan sweep existed together: a deploy killed the task, and without the sweep the row said «در حال اجرا» forever. Phase 3 gives the scrape its own `worker` role (`k8s/base/worker.yaml`) with a 2-hour drain on `RollingUpdate` instead — check where the orphan sweep and `auth_instances` actually run now before assuming this paragraph's reasoning still applies unchanged.
 
 ### 3. Sign-up and verification
 
@@ -297,7 +297,7 @@ sequenceDiagram
 | **Add a scraper filter** | `app/scraper/divar_scraper.py` (the listing loop and the pre-contact skip at `:1383`); `app/scraper/parsers.py` for anything derived from listing text | Add the field to `ScrapingJobConfig` in `app/schemas/`, to the scraper form in `frontend/index.html`, and to the job payload in `app.js`. If it is persisted on the job, that is a column — see the migration row. Timing knobs are `SCRAPER_DELAY_MIN`/`MAX` in `app/config.py`, read by `StealthConfig.__post_init__`. Defaults 2–5s, heavy-tailed, with exponential backoff on any refusal — do not tighten them to go faster; the old 0.35–0.9s is what was getting the accounts blocked. |
 | **Change a role or permission** | `app/auth/permissions.py:37-49` (the key → Persian label dict) and one `_perm("key")` line in `app/api/routes/__init__.py` | Keys deliberately match router names — a dict entry plus a gate is the whole backend job. Frontend: `NAV_PERMISSION`/`SECTION_PERMISSION` in `app.js:614-633`. Existing accounts do not gain a new key automatically; either add it to `DEFAULT_ADMIN_PERMISSIONS` (`permissions.py:54`) or backfill in a migration. Role tiers themselves (`STAFF_ROLES`, `FULL_ACCESS_ROLES`, `ASSIGNABLE_BY_SUPER_ADMIN`) are at `permissions.py:17-32`; `require_permission` and `_staff_check` are at `app/auth/dependencies.py:86-117`. |
 | **Add a notification template** | Email: `app/services/email_templates.py`, then reference it from the caller (`routes/portal.py`, `routes/public_auth.py`, `services/verification.py`). SMS: `app/services/sms_service.py` | Email templates are listed by `GET /api/email/templates` and previewed by `/api/email/preview/{name}` — a new one shows up in the panel automatically. Kavenegar template names are stored in `app_settings`, not env: `KEY_OTP_TEMPLATE` in `sms_service.py:58`, edited from the SMS settings screen. Note `send_verify()` (`sms_service.py:260`) has no callers — codes currently go out over `send_sms()`. |
-| **Change or add a secret** | `.env.example` (name and comment, **no value**); `app/config.py` (the `Field(..., env="NAME")`); `k8s/04-backend.yaml` (an `env:` entry with a `secretKeyRef`, `optional: true` unless the pod must not boot without it) | **All three, or it silently does nothing.** A key added to the Kubernetes Secret with no matching `env:` entry never reaches the process, so `kubectl patch secret` is a no-op — this is exactly how eleven keys sat dead for weeks. Panel-saved credentials (SMTP password, Kavenegar key) are Fernet-encrypted under a key derived from `SECRET_KEY` (`app/services/secret_box.py:25-28`): rotating `SECRET_KEY` makes them unreadable and they must be re-entered. Env always wins over the panel value. |
+| **Change or add a secret** | `.env.example` (name and comment, **no value**); `app/config.py` (the `Field(..., env="NAME")`); `k8s/base/shared-app-env.patch.yaml` (an `env:` entry with a `secretKeyRef`, `optional: true` unless the pod must not boot without it) | **All three, or it silently does nothing.** A key added to the Kubernetes Secret with no matching `env:` entry never reaches the process, so `kubectl patch secret` is a no-op — this is exactly how eleven keys sat dead for weeks. Panel-saved credentials (SMTP password, Kavenegar key) are Fernet-encrypted under a key derived from `SECRET_KEY` (`app/services/secret_box.py:25-28`): rotating `SECRET_KEY` makes them unreadable and they must be re-entered. Env always wins over the panel value. |
 | **Add a background task** | `app/main.py` lifespan (`:147-180`) | Create the task **and** cancel it in the shutdown block. Insert it outside the `@asynccontextmanager` / `async def lifespan` pair — putting a helper between the decorator and the function detaches the decorator and the app fails to start. |
 | **Change what the maintenance page lets through** | `app/services/maintenance.py:186-199` (`OPEN_PREFIXES`) and `app/main.py:297-334` (`_maintenance_allows`) | `_maintenance_allows` is currently **defined twice**, byte-identical, at `main.py:258` and `:297`. The second wins; edit that one. |
 
@@ -734,14 +734,14 @@ The short version:
 | TLS certificate and private key | Traefik's ACME store on the server | **never** |
 | Divar session cookies | the `data-pvc` volume (`/app/data/cookies`) | **never** |
 | Which variables exist, and what they mean | `.env.example` — names and comments only | yes |
-| Non-secret settings (timeouts, limits, flags) | `k8s/04-backend.yaml` as plain `env:` | yes |
+| Non-secret settings (timeouts, limits, flags) | `k8s/base/backend.yaml` (per-role) or `k8s/base/shared-app-env.patch.yaml` (shared) as plain `env:` | yes |
 | Local development values | `local/local.env` — git-ignored | **never** |
 | `DR_BACKUP_PASSPHRASE` (encrypts the full backup) | GitHub Actions secret, copied into `sorinflow-secrets` by the deploy — **keep a copy off the server**, no bundle opens without it | **never** |
 | Telegram relay key | Cloudflare Worker secret `RELAY_KEY`, and the same value encrypted in the panel | **never** |
 
 Adding a new secret is four steps — declare the name in `.env.example`, read it
 in `app/config.py` with an **empty** default, put the real value in the cluster
-with `kubectl patch secret`, then reference it from `k8s/04-backend.yaml` via
+with `kubectl patch secret`, then reference it from `k8s/base/shared-app-env.patch.yaml` via
 `secretKeyRef`. Never default a setting to a working credential: a real-looking
 fallback makes a misconfigured deploy look healthy instead of failing loudly.
 

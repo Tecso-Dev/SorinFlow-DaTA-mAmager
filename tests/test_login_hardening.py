@@ -528,9 +528,10 @@ def test_every_secret_key_printed_in_the_repository_is_refused():
 
 
 def test_the_live_pods_config_starts(client, monkeypatch):
-    """What production has (k8s/04-backend.yaml and the Secret): ENVIRONMENT
-    production, a 64-character SECRET_KEY, no SUPER_ADMIN_PASSWORD at all —
-    so the placeholder — and a users table with rows. It must boot."""
+    """What production has (k8s/base/shared-app-env.patch.yaml and the
+    Secret): ENVIRONMENT production, a 64-character SECRET_KEY, no
+    SUPER_ADMIN_PASSWORD at all — so the placeholder — and a users table with
+    rows. It must boot."""
     import secrets
     import app.main as m
     monkeypatch.setattr(m.settings, "environment", "production")

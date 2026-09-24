@@ -7,25 +7,33 @@
 #   ssh root@NEW 'tar -xf /root/sorinflow-backup-<date>.tar -C /root'
 #   ssh root@NEW 'bash -s' < scripts/new_server.sh /root/sorinflow-backup-<date>
 #
+# Optional env: IMAGE=ghcr.io/tecso-dev/sorinflow-data-manager:<sha> to bring
+# api/worker/scheduler up for real at the end (step 5) instead of leaving
+# that for the next deploy.yml run.
+#
 # What it does, in the order that matters:
-#   1. base OS: firewall, timezone, password SSH kept ON (house rule), swap
-#   2. k3s, pinned to the version the old box ran
+#   1. base OS: firewall (6443 open only to the cluster's own pod/service
+#      networks, never the world), timezone, password SSH kept ON (house
+#      rule), swap
+#   2. k3s, pinned to the version the old box ran, and the seccomp profile
+#      worker's Chromium sandbox needs
 #   3. Traefik with Let's Encrypt — and the OLD certificate dropped in first,
 #      so the site answers HTTPS the moment DNS moves, no re-issue needed
 #   4. the app's namespace, secrets (unchanged: same SECRET_KEY, same DB
 #      password, same OTP secret — every token, phone and session keeps working)
 #   5. Postgres restored BEFORE the app ever starts, so nothing races the
 #      migrations; the data volume (images, Chromium profiles, Divar cookies)
-#      restored the same way
+#      restored the same way; then scripts/deploy_k8s.sh if IMAGE is set
 #   6. the GitHub Actions runner, when a registration token is given —
-#      the deploy job then pulls the image and rolls out exactly as it does
-#      today. Nothing is deployed by hand.
+#      from here on, the deploy job pulls each new image and rolls out
+#      exactly as it does today. Nothing is deployed by hand.
 #
 # Idempotent where it can be: rerunning after a failure is safe.
 set -euo pipefail
 
 BUNDLE=${1:?usage: new_server.sh /root/sorinflow-backup-<date> [runner-registration-token]}
 RUNNER_TOKEN=${2:-}
+IMAGE=${IMAGE:-}
 K3S_VERSION=${K3S_VERSION:-v1.36.2+k3s1}
 REPO=https://github.com/Tecso-Dev/SorinFlow-DaTA-mAmager.git
 SRC=/root/SorinFlow-DaTA-mAmager
@@ -42,7 +50,13 @@ need "$BUNDLE/data-pvc.tar"
 say "base packages, firewall, time"
 apt-get update -y -qq && apt-get install -y -qq ufw curl git jq python3 >/dev/null
 timedatectl set-timezone Asia/Tehran || true
-for p in 22 80 443 6443; do ufw allow "$p/tcp" >/dev/null; done
+for p in 22 80 443; do ufw allow "$p/tcp" >/dev/null; done
+# 6443 (the k8s API server) is NOT opened to the world — only to the
+# cluster's own pod and service networks. kubectl from this box still works
+# (it talks to 127.0.0.1 via the kubeconfig, not through the firewall at
+# all); nothing outside the node has ever needed it.
+ufw allow from 10.42.0.0/16 to any port 6443 proto tcp comment 'k8s API - pod network' >/dev/null
+ufw allow from 10.43.0.0/16 to any port 6443 proto tcp comment 'k8s API - service network' >/dev/null
 ufw --force enable >/dev/null
 # Password login stays on. Cloud images ship a drop-in that turns it off.
 for f in /etc/ssh/sshd_config.d/*.conf; do
@@ -69,8 +83,17 @@ if [ -d "$SRC/.git" ]; then git -C "$SRC" pull -q; else git clone -q "$REPO" "$S
 say "host provisioning"
 bash "$SRC/scripts/provision-host.sh" | sed 's/^/   /'
 
+# worker's Chromium sandbox needs this (deploy/seccomp/sorinflow-chromium.json;
+# see its own comment and k8s/base/worker.yaml). k3s's kubelet root-dir
+# defaults to /var/lib/kubelet; the seccomp/ subdirectory does not exist on a
+# fresh box.
+say "seccomp profile"
+install -d -m 0755 /var/lib/kubelet/seccomp/profiles
+install -m 0644 "$SRC/deploy/seccomp/sorinflow-chromium.json" \
+  /var/lib/kubelet/seccomp/profiles/sorinflow-chromium.json
+
 say "traefik + the old certificate"
-kubectl apply -f "$SRC/k8s/06-traefik-acme.yaml" >/dev/null
+kubectl apply -f "$SRC/k8s/overlays/production/traefik-acme.yaml" >/dev/null
 # Traefik restarts with persistence; wait for its volume to exist, then put
 # the Let's Encrypt account + certificate from the old box in place so HTTPS
 # works the moment DNS points here — no waiting on a fresh issuance.
@@ -92,11 +115,16 @@ if [ -f "$BUNDLE/k8s/traefik-acme.json" ]; then
 fi
 
 say "namespace, secrets, postgres, redis"
-kubectl apply -f "$SRC/k8s/00-namespace.yaml" >/dev/null
+kubectl apply -f "$SRC/k8s/overlays/production/namespace.yaml" >/dev/null
 kubectl -n sorinflow create secret generic sorinflow-secrets \
   --from-env-file="$BUNDLE/k8s/sorinflow-secrets.env" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-kubectl apply -f "$SRC/k8s/02b-postgres-init-configmap.yaml" -f "$SRC/k8s/02-postgres.yaml" -f "$SRC/k8s/03-redis.yaml" >/dev/null
+# The base files directly, with -n: they carry no namespace of their own (see
+# k8s/base/kustomization.yaml), and neither postgres nor redis has anything
+# overlay-specific to patch — the full kustomize build is what
+# scripts/deploy_k8s.sh renders later, once the restore below has happened.
+kubectl apply -n sorinflow -f "$SRC/k8s/base/postgres-init-configmap.yaml" \
+  -f "$SRC/k8s/base/postgres.yaml" -f "$SRC/k8s/base/redis.yaml" >/dev/null
 kubectl -n sorinflow rollout status sts/postgres --timeout=300s >/dev/null
 kubectl -n sorinflow rollout status sts/redis --timeout=120s >/dev/null
 until kubectl -n sorinflow exec postgres-0 -- pg_isready -U sorinflow >/dev/null 2>&1; do sleep 2; done
@@ -114,20 +142,39 @@ echo "rows on the old box were:"; sed 's/^/   /' "$BUNDLE/db/row-counts.txt"
 
 # ── 5. the data volume ───────────────────────────────────────────────────────
 say "data volume (images, profiles, cookies)"
-# The volume is created when a backend pod is first scheduled. The image is
-# private and not pulled yet, so that pod cannot start — which is fine: the
-# volume gets provisioned all the same, and the pod is scaled away before
-# anything could write to it.
-kubectl apply -f "$SRC/k8s/04-backend.yaml" >/dev/null
+kubectl apply -n sorinflow -f "$SRC/k8s/base/data-pvc.yaml" >/dev/null
+# local-path's PVCs bind on first consumer, so nothing is actually
+# provisioned on disk until a pod that mounts it gets scheduled. The
+# data-ownership Job is that pod: harmless to run against an empty volume
+# (its chown is a no-op with nothing to chown yet) and, unlike scheduling the
+# real app before the restore below, it cannot serve a request or touch
+# Divar with the wrong data.
+kubectl apply -n sorinflow -f "$SRC/k8s/base/ownership-job.yaml" >/dev/null
 for i in $(seq 1 60); do
   DDIR=$(ls -d /var/lib/rancher/k3s/storage/*_sorinflow_data-pvc 2>/dev/null | head -1 || true)
   [ -n "$DDIR" ] && break; sleep 5
 done
 [ -n "${DDIR:-}" ] || { echo "data volume never appeared"; exit 1; }
-kubectl -n sorinflow scale deploy backend --replicas=0 >/dev/null
+kubectl -n sorinflow delete job data-ownership --ignore-not-found >/dev/null
 tar -xf "$BUNDLE/data-pvc.tar" -C "$DDIR"
 echo "restored into $DDIR:"; du -sh "$DDIR"/* | sed 's/^/   /'
-kubectl apply -f "$SRC/k8s/05-ingress.yaml" >/dev/null
+
+if [ -n "$IMAGE" ]; then
+  # Known image tag given (e.g. the one the old box was last running) —
+  # bring the app up for real, the same way every ordinary deploy does:
+  # migrate against the now-restored database, fix data-pvc's ownership for
+  # real (idempotent after the no-op run above), then api/worker/scheduler,
+  # the ingress and the NetworkPolicies.
+  say "deploying $IMAGE"
+  OVERLAY=production IMAGE="$IMAGE" SECRETS_HASH=unsynced \
+    bash "$SRC/scripts/deploy_k8s.sh"
+else
+  # No image given: just the ingress, so HTTPS answers the moment DNS moves
+  # here. api/worker/scheduler and the NetworkPolicies are left for the next
+  # deploy.yml run (see "next", below) — it already knows the image tag and
+  # runs the exact same scripts/deploy_k8s.sh.
+  kubectl apply -n sorinflow -f "$SRC/k8s/base/ingress.yaml" >/dev/null
+fi
 
 # ── 6. the runner — the deploy job does the rest ─────────────────────────────
 if [ -n "$RUNNER_TOKEN" ]; then
