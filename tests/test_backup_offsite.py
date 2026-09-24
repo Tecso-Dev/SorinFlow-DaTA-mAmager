@@ -654,3 +654,23 @@ class TestTheFullBackupCard:
 
 async def _async(v):
     return v
+
+
+class TestTheRelayTestUsesTheSavedKey:
+    """The key field says «saved — empty means unchanged». The route test sent
+    no key when it was empty, the Worker refused, and the panel reported a bad
+    bot token while the nightly backup went through the same relay."""
+
+    def test_an_empty_field_tests_with_the_saved_key(self, store):
+        from app.api.routes import backup as routes
+        store.rows[bk.KEY_RELAY_KEY] = secret_box.encrypt("s4ved-k3y")
+        route = asyncio.run(routes._route_for(
+            routes.ProbeIn(proxy_mode="relay", relay="https://tg.example"), store))
+        assert route["relay_key"] == "s4ved-k3y"
+
+    def test_a_typed_key_still_wins(self, store):
+        from app.api.routes import backup as routes
+        store.rows[bk.KEY_RELAY_KEY] = secret_box.encrypt("s4ved-k3y")
+        route = asyncio.run(routes._route_for(
+            routes.ProbeIn(proxy_mode="relay", relay="https://tg.example", relay_key="typed"), store))
+        assert route["relay_key"] == "typed"

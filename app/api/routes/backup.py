@@ -71,7 +71,15 @@ async def _route_for(payload, db) -> dict:
         base = (payload.relay or "").strip()
         if not bk.valid_relay(base):
             raise HTTPException(400, "آدرس رله باید https و بدون مسیر باشد (مثل https://tg.example.com)")
-        return bk._route("relay", [], base, (payload.relay_key or "").strip())
+        key = (payload.relay_key or "").strip()
+        if not key:
+            # The field reads «کلید ذخیره شده — خالی یعنی بدون تغییر». Testing
+            # with it empty sent no key at all: the Worker refused, and the
+            # panel said the bot token was wrong while backups went through.
+            saved = await secret_box.get_many(db, (bk.KEY_RELAY_KEY,))
+            if saved.get(bk.KEY_RELAY_KEY):
+                key = secret_box.decrypt(saved[bk.KEY_RELAY_KEY]).strip()
+        return bk._route("relay", [], base, key)
     if mode == "pool":
         urls = await bk._pool_urls(db, (payload.proxy_pool or "*").strip())
         if not urls:
