@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, func
+from sqlalchemy import select, update, or_, func
 from typing import Optional
 
 from loguru import logger
@@ -29,7 +29,7 @@ from app.database import get_db
 from app.models.user import User
 from app.auth.jwt import (
     verify_password, get_password_hash, create_access_token, decode_token,
-    access_claims,
+    access_claims, DUMMY_PASSWORD_HASH,
     TOKEN_TOTP_PENDING,
     TOKEN_SMS_PENDING,
 )
@@ -83,6 +83,73 @@ PURPOSE_PHONE = "phone_verify"
 PURPOSE_EMAIL = "email_verify"
 
 
+def _totp_step(secret: str, code: str) -> int | None:
+    """The 30-second step `code` belongs to, or None.
+
+    Its own step or one either side, for a phone clock that drifts — the
+    same leeway valid_window=1 gave. The step, not a yes, because the caller
+    has to record which one was spent.
+    """
+    totp = pyotp.TOTP(secret)
+    now = totp.timecode(datetime.now(timezone.utc))
+    for step in (now - 1, now, now + 1):
+        if pyotp.utils.strings_equal(str(code or ""), totp.generate_otp(step)):
+            return step
+    return None
+
+
+async def _claim_totp_step(db: AsyncSession, user: User, step: int) -> bool:
+    """Spend `step` for this account; False if it, or a later one, already was.
+
+    One conditional UPDATE rather than read-then-write, so two requests racing
+    with the same code cannot both see «not used yet»: the second waits on the
+    first's row lock and then matches nothing.
+    """
+    res = await db.execute(
+        update(User)
+        .where(User.id == user.id,
+               or_(User.totp_last_step.is_(None), User.totp_last_step < step))
+        .values(totp_last_step=step)
+        .execution_options(synchronize_session=False))
+    return res.rowcount == 1
+
+
+TOTP_REUSED = "این کد قبلاً استفاده شده است — کد بعدی برنامه را وارد کنید"
+
+
+def _account_key(user: User) -> str:
+    # The key portal_login charges too: one budget per account, whichever
+    # door and whichever spelling (username or email) is tried.
+    return f"uid:{user.id}"
+
+
+async def _login_attempt(request: Request, key: str) -> None:
+    """Count this attempt, or 429 once this address or account has spent its.
+
+    Before the password or code is looked at, so the right one is refused as
+    well until the window passes — otherwise the lock would only slow a
+    guesser down. A wrong answer is already counted; a right one calls
+    _login_passed. Redis down: allowed, with a warning (verification.py).
+    """
+    from app.services.verification import take_login_attempt, VerificationError
+    try:
+        await take_login_attempt(request, key)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message,
+                            headers={"Retry-After": str(e.retry_after)})
+
+
+async def _login_passed(request: Request, key: str, done: bool) -> None:
+    """The answer was right: the address gets its attempt back. `done` once a
+    token is issued: only then is the account's count cleared — clearing it on
+    the password alone would let whoever holds it reset the count between
+    code guesses."""
+    from app.services.verification import login_attempt_passed, clear_login_failures
+    await login_attempt_passed(request)
+    if done:
+        await clear_login_failures(key)
+
+
 def _mask_email(addr: str) -> str:
     """s***n@gmail.com — enough to know which inbox, not enough to read out."""
     addr = (addr or "").strip()
@@ -96,6 +163,7 @@ def _mask_email(addr: str) -> str:
 
 @router.post("/token", response_model=TokenResponse)
 async def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -120,12 +188,24 @@ async def login(
         )).limit(1)
     )).scalars().first()
 
-    if not user or not verify_password(form.password, user.hashed_password):
+    # A name that does not exist is charged to what was typed, so it runs out
+    # exactly like one that does and the 429 says nothing about which is real.
+    # Prefixed, or typing «uid:1» would spend account 1's budget: every
+    # account locked without knowing a single username.
+    key = _account_key(user) if user else f"name:{ident}"
+    await _login_attempt(request, key)
+
+    # One bcrypt round whether or not the name exists. An inactive account
+    # is checked in full too; it is only told so after its password is right.
+    ok = verify_password(form.password,
+                         user.hashed_password if user else DUMMY_PASSWORD_HASH)
+    if not user or not ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="نام کاربری یا رمز عبور اشتباه است",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    await _login_passed(request, key, done=False)
     if not user.is_active:
         raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال است")
 
@@ -175,6 +255,9 @@ async def login(
         )
         return TokenResponse(requires_totp=True, totp_session=totp_session)
 
+    # no second factor owed: the login is done
+    from app.services.verification import clear_login_failures
+    await clear_login_failures(key)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
 
@@ -224,6 +307,8 @@ async def verify_email_login(
     user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="حساب کاربری در دسترس نیست")
+    key = _account_key(user)
+    await _login_attempt(request, key)
 
     try:
         await verify_code(PURPOSE_EMAIL_2FA, username, data.code)
@@ -232,6 +317,7 @@ async def verify_email_login(
         await spend_ip_budget(request, "verify")
         raise HTTPException(status_code=400, detail=e.message)
 
+    await _login_passed(request, key, done=True)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     return TokenResponse(
@@ -359,6 +445,7 @@ async def password_reset_confirm(
 @router.post("/token/verify-totp", response_model=TokenResponse)
 async def verify_totp_login(
     data: TotpLoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     from jose import JWTError
@@ -375,10 +462,18 @@ async def verify_totp_login(
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="کاربر یافت نشد")
+    # The session lives five minutes and takes any number of codes; this is
+    # what stops it being a million-guess ticket.
+    key = _account_key(user)
+    await _login_attempt(request, key)
 
-    if not user.totp_secret or not pyotp.TOTP(user.totp_secret).verify(data.code, valid_window=1):
+    step = _totp_step(user.totp_secret, data.code) if user.totp_secret else None
+    if step is None:
         raise HTTPException(status_code=401, detail="کد احراز هویت اشتباه است")
+    if not await _claim_totp_step(db, user, step):
+        raise HTTPException(status_code=401, detail=TOTP_REUSED)
 
+    await _login_passed(request, key, done=True)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
 
@@ -436,6 +531,19 @@ async def register_user(
 
 # ── Authenticated ─────────────────────────────────────────────────────────────
 
+@router.get("/me/phone-gate")
+async def my_phone_gate(current_user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
+    """Whether the actions that lean on my number are closed to me until I
+    verify it — the same answer those actions would give, asked up front, so
+    the panel can open the verification popup on arrival instead of after a
+    refused click."""
+    from app.auth.dependencies import phone_gate_reason
+    why = await phone_gate_reason(current_user, db)
+    return {"required": bool(why), "message": why, "phone": current_user.phone or None,
+            "phone_verified": bool(current_user.phone_verified)}
+
+
 @router.post("/me/phone/request")
 async def request_phone_code(data: PhoneChangeRequest,
                              current_user: User = Depends(get_current_user),
@@ -454,6 +562,8 @@ async def request_phone_code(data: PhoneChangeRequest,
     from app.api.routes.sms import normalize_mobile
     from app.services.verification import issue_code, VerificationError
 
+    target = (current_user.phone or "").strip()
+    changing = False
     if data.phone:
         number = normalize_mobile(data.phone)
         if not number:
@@ -465,20 +575,25 @@ async def request_phone_code(data: PhoneChangeRequest,
         )).scalars().first()
         if clash:
             raise HTTPException(409, "این شماره قبلاً برای حساب دیگری ثبت شده است")
-        if number != (current_user.phone or ""):
-            current_user.phone = number
-            current_user.phone_verified = False
-            await db.commit()
+        changing = number != target
+        target = number
 
-    if not (current_user.phone or "").strip():
+    if not target:
         raise HTTPException(400, "ابتدا شمارهٔ موبایل خود را وارد کنید")
-    if current_user.phone_verified:
+    if current_user.phone_verified and not changing:
         return {"sent": False, "verified": True,
                 "message": "این شماره قبلاً تأیید شده است"}
 
+    # The number changes only once a code has actually gone to it.
+    #
+    # It used to be saved first and the code sent after. Inside the resend
+    # cooldown the send was refused — but the new number was already on the
+    # row, and the code still waiting was the one texted to the OLD number.
+    # Typing that code «verified» a number that had never received anything,
+    # and the phone gate now leans on that tick.
     try:
         issued = await issue_code(
-            PURPOSE_PHONE, current_user.username, current_user.phone,
+            PURPOSE_PHONE, current_user.username, target,
             message_template="کد تأیید شمارهٔ شما در سورین‌فلو: {code}",
             channel="sms", db=db)
     except VerificationError as e:
@@ -491,6 +606,11 @@ async def request_phone_code(data: PhoneChangeRequest,
         raise HTTPException(
             status_code=503,
             detail="پیامک ارسال نشد — تنظیمات پیامک را در پنل بررسی کنید")
+
+    if changing:
+        current_user.phone = target
+        current_user.phone_verified = False
+        await db.commit()
 
     return {"sent": True, "verified": False, "phone": current_user.phone,
             "message": "کد تأیید پیامک شد"}
@@ -615,11 +735,11 @@ async def change_my_password(data: PasswordChangeRequest,
     # must not get unlimited guesses at the one thing that would let them
     # keep it.
     try:
-        await check_login_rate(current_user.username)
+        await check_login_rate(f"name:{current_user.username}")
     except VerificationError as e:
         raise HTTPException(status_code=429, detail=e.message)
     if not verify_password(data.current_password, current_user.hashed_password):
-        await record_login_failure(current_user.username)
+        await record_login_failure(f"name:{current_user.username}")
         raise HTTPException(400, "رمز فعلی درست نیست")
     if data.new_password == data.current_password:
         raise HTTPException(400, "رمز تازه نباید با رمز فعلی یکی باشد")
@@ -628,7 +748,7 @@ async def change_my_password(data: PasswordChangeRequest,
     current_user.token_version = (current_user.token_version or 0) + 1
     await db.commit()
     await db.refresh(current_user)
-    await clear_login_failures(current_user.username)
+    await clear_login_failures(f"name:{current_user.username}")
     logger.warning(f"[profile] {current_user.username} changed their password; "
                    f"other sessions signed out")
     return {"success": True,
@@ -826,6 +946,15 @@ async def permissions_catalog(_: User = _super_admin):
             "defaults": DEFAULT_ADMIN_PERMISSIONS}
 
 
+@router.get("/me/ip")
+async def get_my_ip(request: Request, current_user: User = Depends(get_current_user)):
+    """The address the server sees you coming from. How to check, without a
+    shell on the server, that the per-address limits see real callers — before
+    externalTrafficPolicy: Local every request came from k3s's own 10.42.x.x."""
+    from app.services.verification import client_ip
+    return {"ip": client_ip(request)}
+
+
 @router.get("/me/totp/status")
 async def totp_status(current_user: User = Depends(get_current_user)):
     return {"enabled": bool(current_user.totp_enabled)}
@@ -861,17 +990,26 @@ async def totp_enable(
 ):
     if not current_user.totp_secret:
         raise HTTPException(status_code=400, detail="ابتدا TOTP را راه‌اندازی کنید")
-    if not pyotp.TOTP(current_user.totp_secret).verify(data.code, valid_window=1):
+    # Spent here too: otherwise the code that switched TOTP on also finishes
+    # the next login, for the same minute and a half.
+    step = _totp_step(current_user.totp_secret, data.code)
+    if step is None:
         raise HTTPException(status_code=400, detail="کد احراز هویت اشتباه است")
+    if not await _claim_totp_step(db, current_user, step):
+        raise HTTPException(status_code=400, detail=TOTP_REUSED)
 
     current_user.totp_enabled = True
     await db.commit()
     return {"success": True, "message": "احراز هویت دو مرحله‌ای فعال شد"}
 
 
+class Email2faIn(BaseModel):
+    enabled: bool = False
+
+
 @router.post("/me/email-2fa")
 async def set_email_2fa(
-    data: dict,
+    data: Email2faIn,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -881,7 +1019,7 @@ async def set_email_2fa(
     out of its own panel, and the only way back would be the database — which
     is precisely the hole this feature exists to close.
     """
-    want = bool(data.get("enabled"))
+    want = data.enabled
     if want and not (current_user.email or "").strip():
         raise HTTPException(
             status_code=400,
@@ -921,6 +1059,17 @@ async def update_my_divar_phone(
         phone = normalize_mobile(raw)
         if not phone:
             raise HTTPException(400, "شمارهٔ دیوار معتبر نیست (مثل 09123456789)")
+        # Not somebody else's. This field is «this number is mine», and the
+        # boot-time backfill hands an unowned session to whoever's field
+        # names it — so claiming a colleague's number here was a slow way of
+        # getting it.
+        from app.models.cookie import Cookie
+        want = "".join(ch for ch in phone if ch.isdigit())[-10:]
+        for ph, owner in (await db.execute(
+                select(Cookie.phone_number, Cookie.owner_user_id))).all():
+            if owner and owner != current_user.id \
+                    and "".join(ch for ch in str(ph) if ch.isdigit())[-10:] == want:
+                raise HTTPException(403, "این شمارهٔ دیوار متعلق به کاربر دیگری است")
     if phone != current_user.divar_phone:
         logger.info(f"[profile] {current_user.username} primary Divar number: "
                     f"{current_user.divar_phone or '—'} -> {phone or '—'}")
@@ -936,8 +1085,14 @@ async def totp_disable(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.services.verification import clear_login_failures
+
+    # On the budget «change password» uses (keyed on the username): a stolen
+    # session must not get unlimited guesses at the password here instead.
+    await _login_attempt(None, current_user.username)
     if not verify_password(data.password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="رمز عبور اشتباه است")
+    await clear_login_failures(f"name:{current_user.username}")
 
     current_user.totp_enabled = False
     current_user.totp_secret = None
@@ -1012,7 +1167,17 @@ async def update_user(
     _guard_role_assignment(_, data.role)
 
     if data.email is not None:
-        user.email = data.email
+        new_email = (data.email or "").strip() or None
+        if new_email and new_email.lower() != (user.email or "").lower():
+            clash = (await db.execute(select(User).where(
+                func.lower(User.email) == new_email.lower(), User.id != user.id))).scalars().first()
+            if clash:
+                raise HTTPException(409, "این ایمیل قبلاً برای حساب دیگری ثبت شده است")
+        # A different address is an unproven one. Keeping the tick would
+        # vouch for an inbox nobody has opened a code in.
+        if (new_email or "").lower() != (user.email or "").lower():
+            user.email_verified = False
+        user.email = new_email
     if data.full_name is not None:
         user.full_name = data.full_name
     if data.role is not None:
@@ -1020,14 +1185,93 @@ async def update_user(
     if data.is_active is not None:
         user.is_active = data.is_active
     if data.divar_phone is not None:
-        user.divar_phone = data.divar_phone or None
+        dp = (data.divar_phone or "").strip() or None
+        if dp:
+            # The boot backfill hands an unowned session to whoever's
+            # divar_phone names it; naming somebody else's number here was a
+            # slow way of moving it. Same rule as /me/divar-phone.
+            from app.models.cookie import Cookie
+            want = "".join(ch for ch in dp if ch.isdigit())[-10:]
+            for ph, owner in (await db.execute(
+                    select(Cookie.phone_number, Cookie.owner_user_id))).all():
+                if owner and owner != user.id \
+                        and "".join(ch for ch in str(ph) if ch.isdigit())[-10:] == want:
+                    raise HTTPException(403, "این شمارهٔ دیوار متعلق به کاربر دیگری است")
+        user.divar_phone = dp
     if data.phone is not None:
-        user.phone = data.phone or None
+        from app.api.routes.sms import normalize_mobile
+        raw = (data.phone or "").strip()
+        new_phone = normalize_mobile(raw) if raw else None
+        if raw and not new_phone:
+            raise HTTPException(400, "شمارهٔ موبایل معتبر نیست (مثل 09123456789)")
+        if new_phone and new_phone != user.phone:
+            # Unique index on the column: a clash is a 500 at flush time
+            # unless it is caught here.
+            clash = (await db.execute(select(User).where(
+                User.phone == new_phone, User.id != user.id))).scalars().first()
+            if clash:
+                raise HTTPException(409, "این شماره قبلاً برای حساب دیگری ثبت شده است")
+        # Same as the address: a changed number has not answered a code.
+        if new_phone != user.phone:
+            user.phone_verified = False
+        user.phone = new_phone
     if data.permissions is not None:
         user.permissions = normalize_permissions(data.permissions)
 
     await db.commit()
     await db.refresh(user)
+    return user
+
+
+class VerificationFlagsIn(BaseModel):
+    phone_verified: Optional[bool] = None
+    email_verified: Optional[bool] = None
+
+
+@router.patch("/{user_id}/verification", response_model=UserResponse)
+async def set_verification_flags(
+    user_id: int,
+    data: VerificationFlagsIn,
+    request: Request,
+    current_user: User = Depends(_role_dep(ROLE_ROOT)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a user's phone or email verified — or not — by hand.
+
+    «فقط اکانت root می‌تواند به صورت دستی و با تاگل، شماره و ایمیل کاربران را
+    تأیید کند.» root only; super_admin cannot, because a verified tick is a
+    statement the whole panel then relies on (the phone gate, SMS audiences,
+    «قابل بازیابی»), and it should have exactly one author besides the code
+    itself.
+
+    Only for something that exists: a tick next to an empty phone or address
+    would verify nothing. Every change is written to the log at WARNING —
+    who, from where, for whom — because it is the one way a tick appears
+    without a code being answered.
+    """
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    if data.phone_verified is None and data.email_verified is None:
+        raise HTTPException(status_code=400, detail="چیزی برای تغییر فرستاده نشد")
+    if data.phone_verified and not (user.phone or "").strip():
+        raise HTTPException(status_code=400, detail="این کاربر شمارهٔ موبایلی ثبت نکرده است")
+    if data.email_verified and not (user.email or "").strip():
+        raise HTTPException(status_code=400, detail="این کاربر ایمیلی ثبت نکرده است")
+
+    changes = []
+    if data.phone_verified is not None and bool(user.phone_verified) != data.phone_verified:
+        user.phone_verified = data.phone_verified
+        changes.append(f"phone {user.phone} -> {'verified' if data.phone_verified else 'unverified'}")
+    if data.email_verified is not None and bool(user.email_verified) != data.email_verified:
+        user.email_verified = data.email_verified
+        changes.append(f"email {user.email} -> {'verified' if data.email_verified else 'unverified'}")
+    await db.commit()
+    await db.refresh(user)
+    if changes:
+        _ip = request.client.host if request.client else "?"
+        logger.warning(f"[audit] {current_user.username} (root) from {_ip} set "
+                       f"{user.username}: {'; '.join(changes)}")
     return user
 
 

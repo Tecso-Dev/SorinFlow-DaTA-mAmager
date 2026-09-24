@@ -2043,6 +2043,27 @@ html:not([data-theme="light"]) .topbar {
 .otp2-actions { display: flex; flex-direction: column; gap: .5rem; }
 .otp2-submit { width: 100%; padding: .7rem; font-weight: 700; border-radius: 14px; }
 .otp2-skip { width: 100%; font-size: .78rem; border-radius: 14px; }
+.otp2-switch { width: 100%; font-size: .78rem; border-radius: 14px; }
+
+/* My Divar numbers in the scrape form, each with its own on/off.
+   Logical properties only — the panel is RTL. */
+.acct-list { display: flex; flex-direction: column; gap: .3rem; margin-top: .45rem; }
+.acct-row {
+  display: flex; align-items: center; gap: .55rem;
+  padding: .35rem .6rem; border-radius: 10px;
+  background: var(--surface2); border: 1px solid var(--border);
+  font-size: .76rem; transition: opacity .15s ease;
+}
+.acct-row.is-off { opacity: .55; }
+.acct-row .acct-phone { unicode-bidi: isolate; font-weight: 600; letter-spacing: 0; }
+.acct-row .acct-meta { color: var(--text-muted); margin-inline-start: auto; white-space: nowrap; }
+.acct-flag { font-size: .64rem; padding: .05rem .4rem; border-radius: 20px; white-space: nowrap; }
+.acct-flag.warn { color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); }
+.acct-flag.bad  { color: var(--danger);  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); }
+.acct-empty { font-size: .74rem; color: var(--text-muted); }
+/* root's registry: rows whose owner disagrees with what people said */
+.registry-table select { min-width: 9rem; }
+.registry-table tr.registry-flag > td { background: color-mix(in srgb, var(--warning) 8%, transparent); }
 @media (max-width: 420px) {
   .otp2-box { width: 40px; height: 50px; font-size: 1.25rem; }
 }
@@ -2544,6 +2565,14 @@ body.filing-dragging .ftree-node, body.filing-dragging .folder-chip { outline: 1
 .u-tick { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
 .u-tick.ok { background: var(--accent3); box-shadow: 0 0 0 3px rgba(16,185,129,.15); }
 .u-tick.no { background: var(--warning); box-shadow: 0 0 0 3px rgba(245,158,11,.15); }
+/* root's manual verify switch sits where the dot would, at the dot's scale */
+.u-verify { display: inline-flex; align-items: center; padding: 0; min-height: 0; }
+.u-verify .form-check-input { width: 1.9em; height: 1em; margin: 0; cursor: pointer; float: none; }
+/* the phone-verification popup reuses ask-card; only its link row is new */
+.pv-card .pv-links { display: flex; justify-content: center; gap: .75rem; margin-top: .35rem; }
+.pv-card .pv-links .btn-link { font-size: .74rem; text-decoration: none; }
+.pv-card .pv-intro { text-align: center; margin: .2rem 0 .6rem; }
+.pv-card .pv-number { font-size: 1.15rem; font-weight: 700; letter-spacing: .02em; unicode-bidi: isolate; }
 .u-divar .u-muted { font-size: .68rem; }
 .u-nudge { font-size: .72rem; }
 .badge.u-warn {

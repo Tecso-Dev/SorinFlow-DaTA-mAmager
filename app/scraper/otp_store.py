@@ -299,7 +299,47 @@ def clear_job(job_id: str) -> int:
     keys = [k for k in list(_store) if k.startswith(prefix)]
     for k in keys:
         _store.pop(k, None)
+    _switch.pop(str(job_id), None)
     return len(keys)
+
+
+# ── «use a different number» ─────────────────────────────────────────────
+#
+# A person watching a run can see what the scraper cannot: the phone behind
+# the current Divar number is off, or in somebody else's pocket, and every
+# code Divar sends it goes nowhere. They ask for another number from the
+# panel; the run picks the request up at its next safe point — between
+# listings, or at once if it is parked on a code prompt — and moves.
+#
+# One pending request per job; a newer one replaces an older one, because
+# the latest thing somebody asked for is what they want.
+
+_switch: Dict[str, dict] = {}
+
+
+def request_switch(job_id, phone: Optional[str] = None, *, by: Optional[int] = None,
+                   reason: str = "manual", from_phone: Optional[str] = None) -> None:
+    """Ask a running job to move to `phone` (or to its next own number).
+
+    `from_phone` makes it «move off this one»: dropped if, by the time the run
+    gets to it, it is already on a different number."""
+    if not job_id:
+        return
+    _switch[str(job_id)] = {"phone": phone or None, "by": by, "reason": reason,
+                            "from_phone": from_phone or None, "at": time.time()}
+
+
+def has_switch(job_id) -> bool:
+    """Whether a switch is waiting — for the OTP wait loop, which must stop
+    waiting on the old number without consuming the request."""
+    return bool(job_id) and str(job_id) in _switch
+
+
+def take_switch(job_id) -> Optional[dict]:
+    """Consume the pending switch for this job, if any."""
+    if not job_id:
+        return None
+    return _switch.pop(str(job_id), None)
 
 
 def cancel_all(job_id: Optional[str] = None) -> int:

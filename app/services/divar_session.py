@@ -446,21 +446,27 @@ async def check_and_record(db, row, *, confirm: bool = False) -> dict:
     return res
 
 
-async def sweep(reason: str = "") -> dict:
-    """Probe every stored session now, on its own DB session. Never raises.
+async def sweep(reason: str = "", owner_user_id=None) -> dict:
+    """Probe stored sessions now, on its own DB session. Never raises.
 
     Called at the start of a run so rotation begins from a pool Divar has
     just been asked about, not from is_valid flags that may be an hour old.
     Returns counts; the per-row verdicts are written to the rows.
+
+    `owner_user_id` narrows it to the numbers that run may use. Unscoped, every
+    run by anybody sent every colleague's token to Divar and could write their
+    sessions off — and the run's own log reported a pool («۳ نامشخص») that
+    was mostly other people's numbers.
     """
     from app.models.cookie import Cookie
 
     alive = dead = unknown = 0
     try:
         async with async_session_maker() as db:
-            rows = (await db.execute(
-                select(Cookie).order_by(Cookie.updated_at.desc().nullslast())
-            )).scalars().all()
+            q = select(Cookie).order_by(Cookie.updated_at.desc().nullslast())
+            if owner_user_id:
+                q = q.where(Cookie.owner_user_id == owner_user_id)
+            rows = (await db.execute(q)).scalars().all()
             seen = set()
             for row in rows:
                 if not row.phone_number or row.phone_number in seen:

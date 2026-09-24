@@ -21,10 +21,30 @@ Email is not a browser, and three constraints shape everything here:
     web and Apple Mail but not in Gmail's mobile apps, so every rule that
     matters is on the element.
 
+  * **Fluid, not fixed.** The card is `width="100%"` capped by `max-width:600px`,
+    with a 600px ghost table only Outlook sees. It used to be `width="600"`,
+    and on Android that broke: Gmail's app on a non-Google account ignores
+    max-width and every `<style>`, so the attribute won — a 600px card on a
+    360px screen, which the app either scrolled sideways or shrank until the
+    text was unreadable (Samsung Email's «fit to screen» does the same).
+  * **Direction lives on the content, not on `<body>`.** Gmail drops the
+    attributes of `<html>` and `<body>`, so `dir="rtl"` there alone let Android
+    lay Persian sentences out left-to-right: a full stop at the wrong end,
+    numbers hopping across words. Every table and text block carries its own.
+
+A small `<style>` block still ships, for the clients that keep one (Gmail
+with a Google account, Apple Mail, Samsung Email): on a narrow screen it
+trims the padding, shrinks the heading and the code, and makes the button
+full width. Nothing depends on it — the inline styles are already correct.
+
 Persian conventions follow the site: `dir="rtl"`, loose line-height (1.9), and
 anything Latin or numeric — a code, an email address, a URL — is wrapped back
 to `dir="ltr"` so it is not visually reversed.
+
+Everything a caller hands in is plain text and is escaped here: a visitor
+chooses their own name at sign-up, and it lands in these messages.
 """
+import html as _html
 from datetime import datetime, timezone
 
 BG = "#030305"
@@ -53,6 +73,37 @@ def _year() -> int:
     return datetime.now(timezone.utc).year
 
 
+def _esc(text) -> str:
+    """Plain text into HTML: escaped, and its line breaks kept."""
+    return _html.escape(str(text or ""), quote=True).replace("\r\n", "\n").replace("\n", "<br />")
+
+
+def _safe_url(url: str) -> str:
+    """Only a web link may become a button — never javascript: or data:."""
+    u = str(url or "").strip()
+    return _html.escape(u, quote=True) if u.lower().startswith(("https://", "http://")) else ""
+
+
+# For the clients that keep a <style>. Never load-bearing: every rule here
+# only improves what the inline styles already get right.
+_RESPONSIVE_CSS = """
+  body, table, td, a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+  table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+  a[x-apple-data-detectors] { color:inherit !important; text-decoration:none !important; }
+  @media only screen and (max-width:620px) {
+    .sf-outer { padding:14px 8px !important; }
+    .sf-card { border-radius:14px !important; }
+    .sf-pad { padding-left:18px !important; padding-right:18px !important; }
+    .sf-h1 { font-size:18px !important; }
+    .sf-text { font-size:14px !important; }
+    .sf-codebox { padding:14px 16px !important; }
+    .sf-code { font-size:26px !important; letter-spacing:6px !important; }
+    .sf-btn, .sf-btn td { width:100% !important; }
+    .sf-btn a { display:block !important; }
+  }
+"""
+
+
 def shell(*, title: str, preheader: str, body: str,
           accent: str = VIOLET) -> str:
     """The frame every message shares.
@@ -60,32 +111,44 @@ def shell(*, title: str, preheader: str, body: str,
     `preheader` is the grey line a client shows next to the subject in the
     inbox list. Left unset it fills itself with whatever HTML comes first,
     which is usually the word "سورین‌فلو" repeated — so it is set explicitly
-    and then hidden.
+    and then hidden, with a run of zero-width fillers after it so the body
+    does not leak into the preview behind it.
     """
+    title = _html.escape(str(title or ""))
+    preheader = _html.escape(str(preheader or ""))
+    filler = "&zwnj;&nbsp;" * 40
     return f"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="fa" dir="rtl">
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="x-apple-disable-message-reformatting" />
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
 <meta name="color-scheme" content="dark light" />
 <meta name="supported-color-schemes" content="dark light" />
 <title>{title}</title>
+<style type="text/css">{_RESPONSIVE_CSS}</style>
 </head>
-<body style="margin:0;padding:0;background-color:{BG};color:{TEXT};font-family:{FONT};direction:rtl;">
+<body style="margin:0;padding:0;width:100%;background-color:{BG};color:{TEXT};font-family:{FONT};direction:rtl;">
+<!-- Gmail strips <body>'s attributes: the direction and the ground are
+     repeated on a wrapper it keeps. -->
+<div dir="rtl" lang="fa" style="direction:rtl;background-color:{BG};margin:0;padding:0;width:100%;">
 
 <!-- inbox preview line, then hidden from the rendered message -->
-<div style="display:none;font-size:1px;color:{BG};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
-{preheader}
+<div style="display:none;font-size:1px;color:{BG};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">
+{preheader}{filler}
 </div>
 
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
-       style="background-color:{BG};margin:0;padding:0;">
+<table role="presentation" dir="rtl" cellpadding="0" cellspacing="0" border="0" width="100%"
+       bgcolor="{BG}" style="width:100%;background-color:{BG};margin:0;padding:0;">
   <tr>
-    <td align="center" style="padding:32px 16px;">
+    <td align="center" class="sf-outer" style="padding:28px 12px;">
 
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600"
-             style="width:600px;max-width:100%;background-color:{CARD};
-                    border:1px solid {LINE};border-radius:20px;overflow:hidden;">
+      <!--[if mso]><table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" width="600"><tr><td><![endif]-->
+      <table role="presentation" dir="rtl" class="sf-card" cellpadding="0" cellspacing="0" border="0" width="100%"
+             bgcolor="{CARD}"
+             style="width:100%;max-width:600px;margin:0 auto;background-color:{CARD};
+                    border:1px solid {LINE};border-radius:18px;overflow:hidden;">
 
         <!-- the gradient rule: solid colour first so Outlook shows violet
              rather than nothing, gradient layered on for everyone else -->
@@ -95,36 +158,47 @@ def shell(*, title: str, preheader: str, body: str,
         </tr>
 
         <tr>
-          <td align="center" style="padding:28px 32px 4px 32px;">
+          <td align="center" class="sf-pad" dir="rtl" style="padding:26px 28px 2px 28px;">
             <span style="font-family:{FONT};font-size:19px;font-weight:800;
                          color:{accent};letter-spacing:-0.2px;">{BRAND}</span>
+            <div style="font-family:{FONT};font-size:11px;color:{DIM};margin-top:2px;">املاک سورین</div>
           </td>
         </tr>
 
         <tr>
-          <td style="padding:8px 32px 32px 32px;font-family:{FONT};
-                     font-size:15px;line-height:1.9;color:{TEXT};text-align:right;">
+          <td class="sf-pad sf-text" dir="rtl"
+              style="padding:14px 28px 30px 28px;font-family:{FONT};
+                     font-size:15px;line-height:1.9;color:{TEXT};text-align:right;
+                     direction:rtl;word-break:break-word;overflow-wrap:anywhere;">
 {body}
           </td>
         </tr>
 
         <tr>
-          <td style="padding:20px 32px 26px 32px;border-top:1px solid {LINE};
+          <td class="sf-pad" dir="rtl"
+              style="padding:18px 28px 24px 28px;border-top:1px solid {LINE};
                      font-family:{FONT};font-size:12px;line-height:1.9;
-                     color:{DIM};text-align:center;">
+                     color:{DIM};text-align:center;direction:rtl;">
             این ایمیل از سوی <a href="{SITE_URL}" style="color:{VIOLET};text-decoration:none;">سورین‌فلو</a> ارسال شده است.<br />
             اگر این درخواست از طرف شما نبوده، این پیام را نادیده بگیرید.
-            <div style="margin-top:12px;color:#565c6b;font-size:11px;">
+            <div style="margin-top:10px;">
+              <a href="{SITE_URL}/portal" style="color:{DIM};text-decoration:none;">پورتال مشتریان</a>
+              <span style="color:#3a3f4b;">&nbsp;·&nbsp;</span>
+              <a href="{SITE_URL}/dashboard/" style="color:{DIM};text-decoration:none;">پنل</a>
+            </div>
+            <div style="margin-top:10px;color:#565c6b;font-size:11px;">
               © {_year()} املاک سورین — سورین‌فلو
             </div>
           </td>
         </tr>
 
       </table>
+      <!--[if mso]></td></tr></table><![endif]-->
 
     </td>
   </tr>
 </table>
+</div>
 </body>
 </html>"""
 
@@ -133,16 +207,20 @@ def _button(label: str, url: str, colour: str = VIOLET) -> str:
     """A bulletproof-ish CTA.
 
     A padded table cell rather than a styled <a>: Outlook ignores padding on
-    inline elements, which collapses a button into bare underlined text.
+    inline elements, which collapses a button into bare underlined text. On a
+    narrow screen the stylesheet makes it full width, a thumb's target.
     """
+    href = _safe_url(url)
+    if not href:
+        return ""
     return f"""
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:22px auto 6px auto;">
+<table role="presentation" class="sf-btn" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:22px auto 6px auto;">
   <tr>
-    <td align="center" bgcolor="{colour}" style="border-radius:12px;">
-      <a href="{url}" target="_blank"
+    <td align="center" bgcolor="{colour}" style="border-radius:12px;background-color:{colour};">
+      <a href="{href}" target="_blank"
          style="display:inline-block;padding:13px 30px;font-family:{FONT};
-                font-size:14px;font-weight:700;color:#0a0a12;
-                text-decoration:none;border-radius:12px;">{label}</a>
+                font-size:14px;font-weight:700;color:#0a0a12;text-align:center;
+                text-decoration:none;border-radius:12px;">{_esc(label)}</a>
     </td>
   </tr>
 </table>"""
@@ -153,41 +231,42 @@ def _code_block(code: str) -> str:
 
     Deliberately Latin digits and `dir="ltr"`: the recipient retypes this into
     a field, and Persian numerals would have to be converted back in their
-    head. Letter-spacing is wide enough that 6 and 8 do not blur together.
+    head. Letter-spacing is wide enough that 6 and 8 do not blur together —
+    and small enough that eight digits still fit a 320px screen without the
+    stylesheet's help.
     """
     return f"""
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:24px auto;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:22px auto;">
   <tr>
-    <td align="center" bgcolor="#12121a"
-        style="border:1px solid {LINE};border-radius:14px;padding:18px 34px;">
-      <div dir="ltr" style="font-family:'Courier New',Consolas,monospace;
-                            font-size:32px;font-weight:700;color:{TEXT};
-                            letter-spacing:10px;line-height:1.2;">{code}</div>
+    <td align="center" bgcolor="#12121a" class="sf-codebox"
+        style="background-color:#12121a;border:1px solid {LINE};border-radius:14px;padding:16px 26px;">
+      <div dir="ltr" class="sf-code" style="font-family:'Courier New',Consolas,monospace;font-size:30px;
+           font-weight:700;color:{TEXT};direction:ltr;letter-spacing:8px;line-height:1.2;white-space:nowrap;">{_esc(code)}</div>
     </td>
   </tr>
 </table>"""
 
 
 def _muted(text: str) -> str:
-    return (f'<p style="margin:16px 0 0 0;font-family:{FONT};font-size:13px;'
-            f'line-height:1.9;color:{DIM};text-align:right;">{text}</p>')
+    return (f'<p dir="rtl" style="margin:16px 0 0 0;font-family:{FONT};font-size:13px;'
+            f'line-height:1.9;color:{DIM};text-align:right;direction:rtl;">{text}</p>')
 
 
 def _h(text: str) -> str:
-    return (f'<h1 style="margin:0 0 14px 0;font-family:{FONT};font-size:21px;'
-            f'font-weight:800;color:{TEXT};text-align:right;line-height:1.5;">{text}</h1>')
+    return (f'<h1 dir="rtl" class="sf-h1" style="margin:0 0 14px 0;font-family:{FONT};font-size:21px;'
+            f'font-weight:800;color:{TEXT};text-align:right;direction:rtl;line-height:1.5;">{text}</h1>')
 
 
 def _p(text: str) -> str:
-    return (f'<p style="margin:0 0 12px 0;font-family:{FONT};font-size:15px;'
-            f'line-height:1.9;color:{TEXT};text-align:right;">{text}</p>')
+    return (f'<p dir="rtl" class="sf-text" style="margin:0 0 12px 0;font-family:{FONT};font-size:15px;'
+            f'line-height:1.9;color:{TEXT};text-align:right;direction:rtl;">{text}</p>')
 
 
 # ── the messages ────────────────────────────────────────────────────────────
 
 def login_code(code: str, *, minutes: int = 5, name: str = "") -> tuple:
     """(subject, html, text) for a sign-in / sign-up code."""
-    hello = f"{name} عزیز،" if name else "سلام،"
+    hello = f"{_esc(name)} عزیز،" if name else "سلام،"
     body = (
         _h("کد ورود شما")
         + _p(hello)
@@ -196,7 +275,7 @@ def login_code(code: str, *, minutes: int = 5, name: str = "") -> tuple:
         + _muted(f"این کد تا {minutes} دقیقهٔ دیگر معتبر است و تنها یک بار قابل استفاده است. "
                  "آن را با هیچ‌کس در میان نگذارید — همکاران سورین‌فلو هرگز این کد را از شما نمی‌پرسند.")
     )
-    text = (f"{hello}\n\nکد ورود شما به سورین‌فلو: {code}\n"
+    text = (f"{name + ' عزیز،' if name else 'سلام،'}\n\nکد ورود شما به سورین‌فلو: {code}\n"
             f"این کد تا {minutes} دقیقه معتبر است.\n\n"
             "اگر این درخواست از طرف شما نبوده، این پیام را نادیده بگیرید.")
     return ("کد ورود شما به سورین‌فلو", shell(
@@ -205,7 +284,7 @@ def login_code(code: str, *, minutes: int = 5, name: str = "") -> tuple:
 
 def verify_email_code(code: str, *, minutes: int = 5, name: str = "") -> tuple:
     """(subject, html, text) for proving an address from the profile page."""
-    hello = f"{name} عزیز،" if name else "سلام،"
+    hello = f"{_esc(name)} عزیز،" if name else "سلام،"
     body = (
         _h("تأیید ایمیل شما")
         + _p(hello)
@@ -214,7 +293,7 @@ def verify_email_code(code: str, *, minutes: int = 5, name: str = "") -> tuple:
         + _muted(f"این کد تا {minutes} دقیقهٔ دیگر معتبر است و تنها یک بار قابل استفاده است. "
                  "اگر شما این درخواست را نداده‌اید، این پیام را نادیده بگیرید.")
     )
-    text = (f"{hello}\n\nکد تأیید ایمیل شما در سورین‌فلو: {code}\n"
+    text = (f"{name + ' عزیز،' if name else 'سلام،'}\n\nکد تأیید ایمیل شما در سورین‌فلو: {code}\n"
             f"این کد تا {minutes} دقیقه معتبر است.\n\n"
             "اگر این درخواست از طرف شما نبوده، این پیام را نادیده بگیرید.")
     return ("تأیید ایمیل شما در سورین‌فلو", shell(
@@ -223,7 +302,7 @@ def verify_email_code(code: str, *, minutes: int = 5, name: str = "") -> tuple:
 
 def welcome(name: str, *, portal_url: str = f"{SITE_URL}/portal") -> tuple:
     body = (
-        _h(f"{name} عزیز، خوش آمدید 👋")
+        _h(f"{_esc(name)} عزیز، خوش آمدید 👋")
         + _p("حساب شما در سورین‌فلو ساخته شد.")
         + _p("سورین‌فلو ملک‌هایی را که دنبالشان هستید پیدا می‌کند: کافی است "
              "درخواست خود را ثبت کنید تا مشاوران ما گزینه‌های منطبق را برایتان بفرستند.")
@@ -242,9 +321,9 @@ def ticket_decision(name: str, approved: bool, note: str = "") -> tuple:
     if approved:
         body = (
             _h("درخواست شما تایید شد ✅")
-            + _p(f"{name} عزیز، درخواست دسترسی شما به پنل سورین‌فلو تایید شد.")
+            + _p(f"{_esc(name)} عزیز، درخواست دسترسی شما به پنل سورین‌فلو تایید شد.")
             + _p("از این پس می‌توانید با همان ایمیل یا شمارهٔ خود وارد پنل شوید.")
-            + (_muted(f"یادداشت مدیر: {note}") if note else "")
+            + (_muted(f"یادداشت مدیر: {_esc(note)}") if note else "")
             + _button("ورود به پنل", f"{SITE_URL}/dashboard/", SUCCESS)
         )
         subject = "درخواست دسترسی شما تایید شد"
@@ -253,8 +332,8 @@ def ticket_decision(name: str, approved: bool, note: str = "") -> tuple:
     else:
         body = (
             _h("درخواست شما پذیرفته نشد")
-            + _p(f"{name} عزیز، درخواست دسترسی شما به پنل در این مرحله پذیرفته نشد.")
-            + (_muted(f"دلیل: {note}") if note else "")
+            + _p(f"{_esc(name)} عزیز، درخواست دسترسی شما به پنل در این مرحله پذیرفته نشد.")
+            + (_muted(f"دلیل: {_esc(note)}") if note else "")
             + _muted("می‌توانید بعداً دوباره درخواست دهید یا برای توضیح بیشتر با ما تماس بگیرید.")
         )
         subject = "نتیجهٔ درخواست دسترسی شما"
@@ -266,12 +345,12 @@ def ticket_decision(name: str, approved: bool, note: str = "") -> tuple:
 def request_received(name: str, summary: str) -> tuple:
     body = (
         _h("درخواست شما ثبت شد")
-        + _p(f"{name} عزیز، درخواست ملک شما ثبت شد و در حال بررسی است.")
+        + _p(f"{_esc(name)} عزیز، درخواست ملک شما ثبت شد و در حال بررسی است.")
         + f"""
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
-       style="margin:18px 0;background-color:#12121a;border:1px solid {LINE};border-radius:14px;">
-  <tr><td style="padding:16px 18px;font-family:{FONT};font-size:14px;
-                 line-height:1.9;color:{DIM};text-align:right;">{summary}</td></tr>
+<table role="presentation" dir="rtl" cellpadding="0" cellspacing="0" border="0" width="100%"
+       style="width:100%;margin:18px 0;background-color:#12121a;border:1px solid {LINE};border-radius:14px;">
+  <tr><td dir="rtl" style="padding:14px 16px;font-family:{FONT};font-size:14px;direction:rtl;
+                 line-height:1.9;color:{DIM};text-align:right;">{_esc(summary)}</td></tr>
 </table>"""
         + _muted("به‌محض پیدا شدن گزینهٔ مناسب، از همین طریق به شما اطلاع می‌دهیم.")
     )
@@ -283,8 +362,13 @@ def request_received(name: str, summary: str) -> tuple:
 
 def notification(title: str, message: str, *, cta_label: str = "",
                  cta_url: str = "", accent: str = VIOLET) -> tuple:
-    """The generic one, for anything without a dedicated template."""
-    body = _h(title) + _p(message) + (
+    """The generic one, for anything without a dedicated template.
+
+    `message` is plain text, and its line breaks are kept: the identity-check
+    and forwarder alerts are numbered steps, and they used to arrive run
+    together into one paragraph.
+    """
+    body = _h(_esc(title)) + _p(_esc(message)) + (
         _button(cta_label, cta_url, accent) if cta_label and cta_url else "")
     text = f"{title}\n\n{message}" + (f"\n\n{cta_url}" if cta_url else "")
     return (title, shell(title=title, preheader=message[:120],

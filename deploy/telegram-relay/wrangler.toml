@@ -1,0 +1,14 @@
+name = "sorinflow-telegram-relay"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# Non-secret variables. ALLOWED_BOTS is a comma-separated list of bot ids —
+# the part of a bot token before the ":" (never the token itself). Set the
+# real value by hand (dashboard: Settings → Variables, or edit this file and
+# redeploy) — the placeholder below matches nothing.
+[vars]
+ALLOWED_BOTS = ""
+
+# RELAY_KEY is a secret and must NOT be set here. Create it by hand with:
+#   wrangler secret put RELAY_KEY
+# or dashboard: Settings → Variables and Secrets → Add → mark it "Secret".

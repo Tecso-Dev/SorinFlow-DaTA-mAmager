@@ -423,7 +423,7 @@ def test_boot_verification_rejects_a_half_applied_migration():
             # and passes once they are present
             for c in ("phone TEXT", "phone_verified BOOLEAN",
                       "email_verified BOOLEAN", "email_2fa_enabled BOOLEAN",
-                      "marketing_opt_in BOOLEAN", "permissions TEXT"):
+                      "marketing_opt_in BOOLEAN", "permissions TEXT", "totp_last_step BIGINT"):
                 await conn.execute(text(f"ALTER TABLE users ADD COLUMN {c}"))
             await _verify_auth_v2(conn)
         await eng.dispose()
@@ -676,19 +676,25 @@ class TestPerIpThrottling:
         assert client_ip(None) == "unknown"
 
     @pytest.mark.asyncio
-    async def test_the_budget_refuses_once_spent(self):
+    async def test_the_budget_refuses_once_spent(self, monkeypatch):
+        import fakeredis.aioredis
         import app.services.verification as v
+
+        # Its own store, made on this test's event loop. The module's client
+        # fixture swaps in a FakeRedis bound to the TestClient's loop, so
+        # borrowing that one raised here and the test skipped itself — in CI
+        # too, leaving the signup lockout untested.
+        fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+
+        async def _get_redis():
+            return fake
+        monkeypatch.setattr(v, "get_redis", _get_redis)
 
         class Req:
             headers = {"x-forwarded-for": "198.51.100.77"}
             client = type("C", (), {"host": "10.0.0.1"})()
 
         req = Req()
-        try:
-            r = await v.get_redis()
-            await r.delete(f"{v._NS}:ip:signup:198.51.100.77")
-        except Exception:
-            pytest.skip("redis unavailable")
 
         for _ in range(v.IP_SIGNUP_LIMIT):
             await v.check_ip_budget(req, "signup", v.IP_SIGNUP_LIMIT)

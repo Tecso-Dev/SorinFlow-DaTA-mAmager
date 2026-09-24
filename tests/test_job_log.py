@@ -103,7 +103,8 @@ class TestTheScraperActuallyReports:
         import inspect
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper)
-        assert "job_log.SESSION" in src
+        assert "_jl.SESSION" in src
+        assert "هیچ نشست معتبر دیواری از شماره‌های خودتان پیدا نشد" in src
 
     def test_events_are_pruned_so_the_table_cannot_grow_without_bound(self):
         import inspect
@@ -114,8 +115,13 @@ class TestTheScraperActuallyReports:
 class TestTheEndpoint:
 
     def test_it_is_registered(self):
+        # fastapi>=0.141 nests an included router's routes behind a lazy
+        # _IncludedRouter wrapper, so app.routes no longer holds flattened
+        # APIRoute objects with a usable .path — iter_route_contexts resolves
+        # the wrapper down to the real registered routes.
+        from fastapi.routing import iter_route_contexts
         from app.main import app
-        paths = {getattr(r, "path", "") for r in app.routes}
+        paths = {rc.path for rc in iter_route_contexts(app.routes)}
         assert "/api/scraper/jobs/{job_id}/events" in paths
 
     def test_it_accepts_both_id_forms(self):

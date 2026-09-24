@@ -312,7 +312,9 @@ class TestItIsReachableInProduction:
     def test_otp_pending_carries_the_forwarder_map(self):
         import inspect
         src = inspect.getsource(R.get_otp_pending)
-        assert "list_forwarders" in src
+        # the caller's own phones — list_forwarders() narrowed by _my_forwarders
+        assert "_my_forwarders(db, current_user)" in src
+        assert "list_forwarders()" in inspect.getsource(R._my_forwarders)
 
     def test_the_readme_documents_it(self):
         text = open("README.md", encoding="utf-8").read()

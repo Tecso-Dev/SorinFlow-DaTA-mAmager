@@ -5,6 +5,11 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# ENVIRONMENT defaults to production, where the app refuses to seed the first
+# account with the published placeholder — which is what the suite's first
+# boot on an empty database would do. A throwaway of the suite's own instead.
+os.environ.setdefault("SUPER_ADMIN_PASSWORD", "test-suite-only-not-a-real-password")
+
 
 @pytest.fixture
 def sample_html_property():

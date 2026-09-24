@@ -294,8 +294,13 @@ class TestPanelWiring:
         called = set()
         for match in re.finditer(r"apiCall\(\s*[`'\"](/email/[^`'\"?$]+)", js):
             called.add(match.group(1).rstrip("/"))
-        served = {r.path[len("/api"):] for r in m.app.routes
-                  if getattr(r, "path", "").startswith("/api/email")}
+        # fastapi>=0.141 nests an included router's routes behind a lazy
+        # _IncludedRouter wrapper, so app.routes no longer holds flattened
+        # APIRoute objects with a usable .path — iter_route_contexts resolves
+        # the wrapper down to the real registered routes.
+        from fastapi.routing import iter_route_contexts
+        served = {rc.path[len("/api"):] for rc in iter_route_contexts(m.app.routes)
+                  if (rc.path or "").startswith("/api/email")}
         # the preview route is templated in the UI, so compare its prefix
         missing = {c for c in called
                    if c not in served and not c.startswith("/email/preview")}
@@ -393,3 +398,69 @@ class TestSetupGuidanceIsNotAPermanentWarning:
         i = html.index('id="em-apppw-hint"')
         assert "d-none" in html[i - 120:i]
         assert "em-apppw-hint" in js and "!!d.configured" in js
+
+
+class TestItFitsAPhone:
+    """«دیروز در یک گوشی اندرویدی به مشکل خورده بودیم»
+
+    The card was `width="600"`. Gmail's Android app on a non-Google account
+    ignores max-width and every <style>, so the attribute won: a 600px card on
+    a 360px screen. And Gmail drops <html>/<body> attributes, so `dir="rtl"`
+    only there let Android lay Persian out left-to-right.
+    """
+
+    @staticmethod
+    def _outside_mso(html):
+        import re
+        return re.sub(r"<!--\[if mso\]>.*?<!\[endif\]-->", "", html, flags=re.S)
+
+    def test_the_card_is_fluid_outside_outlook(self):
+        from app.api.routes.email import _SAMPLES
+        for name, make in _SAMPLES.items():
+            _, html, _t = make()
+            bare = self._outside_mso(html)
+            import re
+            assert 'width="600"' not in bare, name
+            assert not re.search(r"(?<!max-)width:600px", bare), name
+            assert "max-width:600px" in html, name
+        # …and Outlook, which ignores max-width, still gets its 600px
+        _, html, _t = _SAMPLES["welcome"]()
+        assert '<!--[if mso]><table role="presentation" align="center"' in html
+
+    def test_direction_survives_gmail_dropping_the_body(self):
+        from app.api.routes.email import _SAMPLES
+        import re
+        _, html, _t = _SAMPLES["notification"]()
+        stripped = re.sub(r"<(html|body)[^>]*>", r"<\1>", html)
+        assert '<div dir="rtl" lang="fa"' in stripped
+        assert stripped.count('dir="rtl"') >= 6, "every table and text block carries its own"
+
+    def test_a_narrow_screen_stylesheet_ships_but_nothing_needs_it(self):
+        from app.api.routes.email import _SAMPLES
+        _, html, _t = _SAMPLES["login_code"]()
+        assert "@media only screen and (max-width:620px)" in html
+        assert 'content="width=device-width, initial-scale=1.0"' in html
+        assert "format-detection" in html
+
+    def test_line_breaks_in_a_notification_are_kept(self):
+        """The identity-check alert is numbered steps; they arrived as one line."""
+        from app.services import email_templates as t
+        _, html, _t = t.notification("x", "یک\n۱) دو\n۲) سه")
+        assert "یک<br />۱) دو<br />۲) سه" in html
+
+    def test_what_callers_pass_in_is_escaped(self):
+        """A visitor picks their own name at sign-up, and it lands here."""
+        from app.services import email_templates as t
+        evil = '<a href="https://evil.example">اینجا</a>'
+        for html in (t.welcome(evil)[1], t.request_received(evil, evil)[1],
+                     t.login_code("123456", name=evil)[1],
+                     t.notification(evil, evil)[1]):
+            assert "https://evil.example" not in html.replace("&quot;https://evil.example&quot;", "")
+            assert '<a href="https://evil.example">' not in html
+
+    def test_only_a_web_link_becomes_a_button(self):
+        from app.services import email_templates as t
+        _, html, _t = t.notification("x", "y", cta_label="برو", cta_url="javascript:alert(1)")
+        assert "javascript:" not in html and "برو" not in html
+        _, html, _t = t.notification("x", "y", cta_label="برو", cta_url="https://sorinflow.com/x")
+        assert 'href="https://sorinflow.com/x"' in html

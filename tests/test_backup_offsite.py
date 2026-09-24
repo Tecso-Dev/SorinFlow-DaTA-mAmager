@@ -241,6 +241,8 @@ class TestTheProxy:
             assert not bk.valid_proxy(bad), bad
 
     def test_every_call_is_made_through_it(self, monkeypatch):
+        # the fallback leg on its own — direct-first is TestDirectFirst's
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "0", raising=False)
         seen = []
         real = httpx.AsyncClient
 
@@ -352,6 +354,7 @@ class TestTheThreeWaysOut:
         assert bk.valid_relay("https://tg.sorinflow.example") and not bk.valid_relay("http://x") and not bk.valid_relay("https://x/path")
 
     def test_the_pool_rotates_and_fails_over(self, store, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "0", raising=False)
         monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
         monkeypatch.setattr(bk.settings, "telegram_api_base", "", raising=False)
         store.rows[bk.KEY_PROXY_MODE] = "pool"
@@ -384,6 +387,7 @@ class TestTheThreeWaysOut:
         assert resp.status_code == 200 and used == "http://b:2" and tried == ["http://a:1", "http://b:2"]
 
     def test_the_relay_key_travels_as_a_header(self, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "0", raising=False)
         seen = {}
         real = httpx.AsyncClient
 
@@ -405,7 +409,268 @@ class TestTheThreeWaysOut:
         for v in ("manual", "pool", "relay"):
             assert f'name="bk-mode" value="{v}"' in html
         assert 'id="bk-pool-list"' in html and 'id="bk-relay"' in html and 'id="bk-relay-code"' in html
-        assert "https://api.telegram.org" in html[html.index('id="bk-relay-code"'):html.index('id="bk-relay-code"') + 900]
+        # the Worker is not copied into the page: it is fetched from the one
+        # deploy/telegram-relay tests (see TestTheFullBackupCard)
+        assert "apiCall('/backup/relay-worker', { raw: true })" in js
         assert "apiCall('/proxies?active_only=true')" in js and "function _bkRouteBody" in js
         src = Path("app/api/routes/backup.py").read_text(encoding="utf-8")
         assert 'if route["mode"] == "pool":' in src and '"results": results' in src, "the pool is tested one proxy at a time"
+
+
+class TestDirectFirst:
+    """«راه اول برای ارسال به تلگرام از سرور ایرانی باید باشد و پراکسی راه
+    جایگزین آن است.» api.telegram.org straight from the server first; the
+    relay or the proxies only when that does not connect."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        monkeypatch.setattr(bk, "_direct_down_until", 0.0)
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "1", raising=False)
+
+    def _fake(self, monkeypatch, direct_works):
+        calls = []
+        real = httpx.AsyncClient
+
+        class Fake(real):
+            def __init__(self, *a, **kw):
+                self._p = kw.pop("proxy", None)
+                def handler(req):
+                    calls.append((str(req.url).split("/bot")[0], self._p, req.headers.get("X-Relay-Key")))
+                    if str(req.url).startswith(bk.TELEGRAM_API) and self._p is None and not direct_works:
+                        raise httpx.ConnectTimeout("filtered")
+                    return httpx.Response(200, json={"ok": True, "result": {"username": "b"}})
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(*a, **kw)
+        monkeypatch.setattr(bk.httpx, "AsyncClient", Fake)
+        return calls
+
+    def test_direct_is_tried_first_and_used_when_it_works(self, monkeypatch):
+        calls = self._fake(monkeypatch, direct_works=True)
+        resp, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("relay", [], "https://tg.example", "k")))
+        assert used == "direct" and calls == [(bk.TELEGRAM_API, None, None)]
+
+    def test_the_relay_is_the_fallback(self, monkeypatch):
+        calls = self._fake(monkeypatch, direct_works=False)
+        resp, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("relay", [], "https://tg.example", "k")))
+        assert used == "relay"
+        assert calls == [(bk.TELEGRAM_API, None, None), ("https://tg.example", None, "k")]
+
+    def test_proxies_are_the_fallback_too(self, monkeypatch):
+        calls = self._fake(monkeypatch, direct_works=False)
+        resp, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("pool", ["http://a:1"])))
+        assert used == "http://a:1" and [c[1] for c in calls] == [None, "http://a:1"]
+
+    def test_a_failed_direct_is_rested_so_polling_does_not_pay_it_every_time(self, monkeypatch):
+        calls = self._fake(monkeypatch, direct_works=False)
+        route = bk._route("relay", [], "https://tg.example", "")
+        asyncio.run(bk.tg_request("1:x", "getMe", route))
+        asyncio.run(bk.tg_request("1:x", "getMe", route))
+        assert [c[0] for c in calls] == [bk.TELEGRAM_API, "https://tg.example", "https://tg.example"]
+
+    def test_direct_connects_with_a_short_timeout(self):
+        import inspect
+        src = inspect.getsource(bk.tg_request)
+        assert "connect=DIRECT_CONNECT_TIMEOUT" in src and bk.DIRECT_CONNECT_TIMEOUT <= 10
+
+    def test_it_can_be_switched_off(self, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "0", raising=False)
+        calls = self._fake(monkeypatch, direct_works=True)
+        _r, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("relay", [], "https://tg.example", "")))
+        assert used == "relay" and len(calls) == 1
+
+    def test_with_nothing_configured_direct_is_the_only_way(self, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "0", raising=False)
+        calls = self._fake(monkeypatch, direct_works=True)
+        _r, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("manual", [])))
+        assert used == "direct" and len(calls) == 1
+
+    def test_diagnose_reports_every_way_separately(self, monkeypatch):
+        self._fake(monkeypatch, direct_works=False)
+        rows = asyncio.run(bk.diagnose("1:x", bk._route("relay", [], "https://tg.example", "k")))
+        assert [r["route"] for r in rows] == ["direct", "relay"]
+        assert rows[0]["ok"] is False and rows[0]["error"] == "ConnectTimeout"
+        assert rows[1]["ok"] is True and rows[1]["http"] == 200
+
+
+class TestTheRelaysOwnRefusals:
+    """The Worker answers a wrong key, a bot it does not serve, or a Telegram
+    it cannot reach with its own JSON ({"ok": false, "relay": ...}). Those
+    used to come back as Telegram's own 401/403/502: no proxy was tried and
+    the panel said «HTTP 401» as if the bot token were wrong."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        monkeypatch.setattr(bk, "_direct_down_until", 0.0)
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "1", raising=False)
+
+    def _fake(self, monkeypatch, relay_answer):
+        used = []
+        real = httpx.AsyncClient
+
+        class Fake(real):
+            def __init__(self, *a, **kw):
+                proxy = kw.pop("proxy", None)
+
+                def handler(req):
+                    url = str(req.url)
+                    if url.startswith(bk.TELEGRAM_API) and proxy is None:
+                        raise httpx.ConnectTimeout("filtered")
+                    used.append(proxy or url.split("/bot")[0])
+                    if url.startswith("https://tg.example"):
+                        return relay_answer
+                    return httpx.Response(200, json={"ok": True, "result": {"username": "b"}})
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(*a, **kw)
+        monkeypatch.setattr(bk.httpx, "AsyncClient", Fake)
+        return used
+
+    def test_a_refusal_falls_through_to_the_proxies(self, monkeypatch):
+        used = self._fake(monkeypatch, httpx.Response(401, json={"ok": False, "relay": "unauthorized"}))
+        route = bk._route("relay", ["http://a:1"], "https://tg.example", "wrong")
+        resp, via = asyncio.run(bk.tg_request("1:x", "getMe", route))
+        assert via == "http://a:1" and resp.status_code == 200
+        assert used == ["https://tg.example", "http://a:1"]
+
+    def test_with_nowhere_left_it_says_what_the_relay_said(self, monkeypatch):
+        self._fake(monkeypatch, httpx.Response(403, json={"ok": False, "relay": "forbidden_bot"}))
+        route = bk._route("relay", [], "https://tg.example", "k")
+        with pytest.raises(bk.RelayError, match="ALLOWED_BOTS"):
+            asyncio.run(bk.tg_request("1:x", "getMe", route))
+
+    def test_telegrams_own_401_still_reaches_the_caller(self, monkeypatch):
+        tg401 = httpx.Response(401, json={"ok": False, "error_code": 401, "description": "Unauthorized"})
+        self._fake(monkeypatch, tg401)
+        route = bk._route("relay", ["http://a:1"], "https://tg.example", "k")
+        resp, via = asyncio.run(bk.tg_request("1:x", "getMe", route))
+        assert via == "relay" and resp.status_code == 401
+
+    def test_the_route_test_names_the_relays_reason(self, monkeypatch):
+        self._fake(monkeypatch, httpx.Response(401, json={"ok": False, "relay": "unauthorized"}))
+        rows = asyncio.run(bk.diagnose("1:x", bk._route("relay", [], "https://tg.example", "wrong")))
+        relay = next(r for r in rows if r["route"] == "relay")
+        assert relay["ok"] is False and "X-Relay-Key" in relay["error"]
+
+
+class TestEveryWayOut:
+    """«تست همهٔ راه‌ها» tries every way the server knows of, whichever mode
+    is in effect: straight, the relay, and each proxy on its own."""
+
+    def test_it_gathers_the_relay_and_every_proxy_once(self, store, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_api_base", "", raising=False)
+        monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
+        store.rows[bk.KEY_PROXY_MODE] = "manual"            # the mode does not narrow it
+        store.rows[bk.KEY_RELAY] = "https://tg.example"
+        store.rows[bk.KEY_RELAY_KEY] = secret_box.encrypt("k3y")
+        store.rows[bk.KEY_PROXY] = secret_box.encrypt("socks5://a:1")
+
+        async def pool(_db, spec):
+            return ["http://b:2", "socks5://a:1"]
+        monkeypatch.setattr(bk, "_pool_urls", pool)
+        route = asyncio.run(bk.every_way_out(store))
+        assert route == {"mode": "relay", "proxies": ["socks5://a:1", "http://b:2"],
+                         "api_base": "https://tg.example", "relay_key": "k3y"}
+        legs = [leg[0] for leg in bk._legs(route, direct=True)]
+        assert legs == ["direct", "relay", "socks5://a:1", "http://b:2"]
+
+
+class TestTheFullBackupCard:
+    """The panel's card for the host's nightly disaster-recovery bundle."""
+
+    @pytest.fixture
+    def dr(self, tmp_path, monkeypatch):
+        from app.services import dr_backup as dr
+        monkeypatch.setattr(dr, "STATUS", tmp_path / "dr-status.json")
+        monkeypatch.setattr(dr, "REQUEST", tmp_path / "dr-request")
+        monkeypatch.setattr(dr, "OUTBOX", tmp_path / "dr-outbox")
+        return dr
+
+    def _user(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(username="root", role="root")
+
+    def test_now_asks_the_host_once(self, dr):
+        from fastapi import HTTPException
+        from app.api.routes import backup as routes
+        assert asyncio.run(routes.dr_run_now(self._user())) == {"requested": True}
+        assert dr.REQUEST.exists()
+        with pytest.raises(HTTPException) as e:
+            asyncio.run(routes.dr_run_now(self._user()))
+        assert e.value.status_code == 409
+        assert asyncio.run(routes.dr_status(self._user()))["requested"] is True
+
+    def test_a_run_that_died_before_shipping_shows_on_the_card(self, dr, monkeypatch):
+        from app.api.routes import backup as routes
+        dr._write_status({"stamp": "20260923-040000", "sent": {"ok": True}})
+        # no Telegram configured: the alert cannot be sent, but it is recorded
+        monkeypatch.setattr(bk, "resolve_telegram", lambda db: _async({"token": "", "chat_id": ""}))
+        asyncio.run(dr.alert("🛑 بکاپ فاجعه شکست خورد — مرحله: pg_dump"))
+        st = asyncio.run(routes.dr_status(self._user()))
+        assert st["last_run"]["stamp"] == "20260923-040000"
+        assert "pg_dump" in st["last_alert"]["text"]
+        # with its offset: the container's bare clock is UTC, and the panel's
+        # browser would have shown it as Tehran time, 3½ hours early
+        assert st["last_alert"]["at"].endswith("+00:00")
+
+    def test_the_new_routes_are_root_or_super_admin_only(self):
+        from app.api.routes import backup as routes
+        role_dep = routes._super_admin.dependency
+        seen = set()
+        for r in routes.router.routes:
+            if r.path in ("/diagnose", "/dr", "/dr/run", "/relay-worker"):
+                assert role_dep in [d.call for d in r.dependant.dependencies], r.path
+                seen.add(r.path)
+        assert len(seen) == 4
+
+    def test_the_panel_shows_the_worker_that_is_tested(self):
+        from app.api.routes import backup as routes
+        code = asyncio.run(routes.relay_worker_code(self._user()))
+        assert code == (Path(__file__).resolve().parent.parent / "deploy/telegram-relay/worker.js").read_text(encoding="utf-8")
+        assert "X-Relay-Key" in code and "ALLOWED_BOTS" in code
+
+    def test_a_proxy_is_recorded_without_its_password(self, dr, tmp_path, monkeypatch):
+        bundle = tmp_path / "20260924-040000"
+        bundle.mkdir()
+        (bundle / "part0000").write_bytes(b"x" * 10)
+        (bundle / "manifest.json").write_text(json.dumps(
+            {"stamp": "20260924-040000", "row_counts": "users 3", "parts": [{"name": "part0000", "size": 10}]}))
+        monkeypatch.setattr(bk, "resolve_telegram", lambda db: _async({"token": "1:x", "chat_id": "42"}))
+        monkeypatch.setattr(bk, "resolve_route", lambda db: _async(bk._route("manual", ["socks5://u:s3cret@h:1080"])))
+        monkeypatch.setattr(bk, "_direct_first", lambda: False)
+        real = httpx.AsyncClient
+
+        class Fake(real):                         # the proxy is recorded, not dialled
+            def __init__(self, *a, **kw):
+                kw.pop("proxy", None)
+                kw["transport"] = httpx.MockTransport(
+                    lambda req: httpx.Response(200, json={"ok": True, "result": {}}))
+                super().__init__(*a, **kw)
+        monkeypatch.setattr(bk.httpx, "AsyncClient", Fake)
+        res = asyncio.run(dr.ship(bundle, db=object()))
+        assert res["ok"] and not bundle.exists()
+        st = dr.read_status()["last_run"]
+        assert "s3cret" not in json.dumps(st)
+        assert st["parts"] == 1 and st["bytes"] == 10
+
+
+async def _async(v):
+    return v
+
+
+class TestTheRelayTestUsesTheSavedKey:
+    """The key field says «saved — empty means unchanged». The route test sent
+    no key when it was empty, the Worker refused, and the panel reported a bad
+    bot token while the nightly backup went through the same relay."""
+
+    def test_an_empty_field_tests_with_the_saved_key(self, store):
+        from app.api.routes import backup as routes
+        store.rows[bk.KEY_RELAY_KEY] = secret_box.encrypt("s4ved-k3y")
+        route = asyncio.run(routes._route_for(
+            routes.ProbeIn(proxy_mode="relay", relay="https://tg.example"), store))
+        assert route["relay_key"] == "s4ved-k3y"
+
+    def test_a_typed_key_still_wins(self, store):
+        from app.api.routes import backup as routes
+        store.rows[bk.KEY_RELAY_KEY] = secret_box.encrypt("s4ved-k3y")
+        route = asyncio.run(routes._route_for(
+            routes.ProbeIn(proxy_mode="relay", relay="https://tg.example", relay_key="typed"), store))
+        assert route["relay_key"] == "typed"

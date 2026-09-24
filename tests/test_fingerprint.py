@@ -250,7 +250,9 @@ class TestTheProfilePersists:
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper.maybe_rotate_account)
         blk = src[src.index("for offset in range"):]
-        assert "_open_browser_for(candidate" in blk
+        # the switch itself lives in _switch_to, shared with a manual switch
+        assert "self._switch_to(candidate" in blk
+        assert "_open_browser_for(candidate" in inspect.getsource(DivarScraper._switch_to)
 
     def test_opening_a_profile_releases_the_previous_one(self):
         import inspect

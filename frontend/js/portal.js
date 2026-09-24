@@ -379,18 +379,6 @@ function clearFieldErrs() {
   document.querySelectorAll('.fld').forEach(f => f.classList.remove('invalid'));
 }
 
-/** A problem plus the way out of it, rather than a bare statement of failure. */
-function showMsgFix(el, message, fix, kind) {
-  el.className = 'msg ' + (kind || 'err');
-  el.innerHTML = escapeHtml(message) + (fix ? '<span class="fix">' + escapeHtml(fix) + '</span>' : '');
-  show(el);
-}
-
-function escapeHtml(t) {
-  return String(t == null ? '' : t).replace(/[&<>"']/g,
-    c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-}
-
 // show / hide password — paste stays enabled, password managers depend on it
 document.addEventListener('click', e => {
   const b = e.target.closest('.pw-eye');

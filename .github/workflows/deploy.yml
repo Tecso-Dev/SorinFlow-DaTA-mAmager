@@ -65,12 +65,25 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        # requirements-dev.txt pulls requirements.txt plus the test-only
-        # packages, so this gate installs exactly what a developer installs —
-        # a hand-kept list here would drift from what the app actually needs.
+        # requirements-dev.lock is compiled (pip-compile/uv pip compile
+        # --generate-hashes) from requirements-dev.txt, which itself pulls
+        # requirements.txt plus the test-only packages — so this gate installs
+        # exactly the hash-pinned closure a developer installs, not a
+        # hand-kept list that could drift from what the app actually needs.
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          pip install --require-hashes -r requirements-dev.lock
+
+      - name: Audit locked dependencies for known vulnerabilities
+        # ecdsa's PYSEC-2026-1325 (Minerva timing attack recovering the nonce
+        # from ECDSA P-256 signing) has no upstream fix — the maintainers
+        # consider side-channel attacks out of scope. python-jose pulls ecdsa
+        # unconditionally, but app/auth/jwt.py signs and verifies every token
+        # with HS256 (HMAC), never calling into ecdsa's signing path, so it is
+        # ignored here instead of leaving the gate permanently red.
+        run: |
+          pip install pip-audit==2.10.1
+          pip-audit -r requirements-dev.lock --ignore-vuln PYSEC-2026-1325
 
       - name: Run tests
         env:
@@ -80,6 +93,13 @@ jobs:
           LOGS_PATH: /tmp
           IMAGES_PATH: /tmp
         run: pytest tests/ -q
+
+      # The Telegram relay Worker ships to Cloudflare by hand, not from here —
+      # which is exactly why its rules (key, bot allow-list, relay-specific
+      # errors) are checked on every push instead of on the day it is pasted.
+      - name: Test the Telegram relay Worker
+        working-directory: deploy/telegram-relay
+        run: node --test
 
       - name: Verify the auth migration against a live Postgres
         # Skipped without PG_TEST_URL, so it only runs where a database exists.
@@ -97,8 +117,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     # Never from a pull request: building would push an image to the registry
-    # tagged with a SHA that may never reach main.
-    if: github.event_name != 'pull_request' 
+    # tagged with a SHA that may never reach main. Never from any other
+    # branch either: a workflow_dispatch run on a feature branch used to
+    # reach this job and build+push+deploy that branch's code to production.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
@@ -149,7 +171,9 @@ jobs:
   deploy:
     runs-on: [self-hosted, sorinflow]
     needs: build
-    if: github.event_name != 'pull_request' 
+    # Same guard as build: without github.ref, a workflow_dispatch on any
+    # branch would roll that branch out to the production cluster.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: read
@@ -209,9 +233,10 @@ jobs:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LIARA_API_TOKEN: ${{ secrets.LIARA_API_TOKEN }}
+          DR_BACKUP_PASSPHRASE: ${{ secrets.DR_BACKUP_PASSPHRASE }}
         run: |
           set -euo pipefail
-          LIST="LLM_API_KEY LLM_BASE_URL LLM_MODEL LIARA_API_TOKEN"
+          LIST="LLM_API_KEY LLM_BASE_URL LLM_MODEL LIARA_API_TOKEN DR_BACKUP_PASSPHRASE"
           patch="{}"
           for name in $LIST; do
             val="${!name:-}"
@@ -357,4 +382,11 @@ jobs:
              FROM pg_stat_activity
              WHERE state <> 'idle' OR state = 'idle in transaction'
              ORDER BY state_change;" || true
-          echo "::endgroup::" 
+          echo "::endgroup::"
+
+      # Installs/refreshes the nightly disaster-recovery backup timer (and the
+      # panel's «همین حالا» watcher) on the host — idempotent, so an unchanged
+      # scripts/dr_backup.sh or deploy/systemd/* is a no-op here. Runs on the
+      # self-hosted runner itself, same as every other host command above.
+      - name: Install/refresh the disaster-recovery backup timer
+        run: bash scripts/install_dr_backup.sh

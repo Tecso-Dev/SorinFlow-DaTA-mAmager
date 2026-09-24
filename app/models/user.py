@@ -2,7 +2,7 @@
 SorinFlow — Dashboard User Model
 Roles: root | super_admin | admin | visitor  (see app/auth/permissions.py)
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, Text, Index, text
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, JSON, Text, Index, text
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -26,6 +26,11 @@ class User(Base):
     # Google Authenticator 2FA
     totp_secret = Column(String(64), nullable=True)
     totp_enabled = Column(Boolean, default=False, nullable=False)
+    # The 30-second step of the last code accepted. A code is honoured for its
+    # own step and one either side, so without this the same six digits log in
+    # again — from a second tab, or whoever read them over a shoulder — for
+    # the next minute and a half.
+    totp_last_step = Column(BigInteger, nullable=True)
     # A second factor that needs no app, no QR and no clock.
     #
     # TOTP asks someone to scan a code, keep a phone in sync and never lose the

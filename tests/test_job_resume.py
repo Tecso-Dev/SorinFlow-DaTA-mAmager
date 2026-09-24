@@ -64,7 +64,10 @@ class TestStartAndResumeShareOneLauncher:
 
     def test_resume_delegates(self):
         src = inspect.getsource(sr.resume_scraping_job)
-        assert "_launch_job(config, background_tasks, db, current_user" in src
+        # as the run's owner — root pressing «ادامه» on a colleague's run
+        # must not relaunch it on root's numbers
+        assert "_launch_job(config, background_tasks, db, run_as" in src
+        assert "run_as = current_user" in src
 
     def test_the_launcher_still_makes_the_ownership_check(self):
         src = inspect.getsource(sr._launch_job)

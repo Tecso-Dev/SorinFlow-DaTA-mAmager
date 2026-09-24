@@ -299,7 +299,24 @@ class DivarAuth:
         
         try:
             if not self.page:
-                await self.initialize_browser(headless=settings.scraper_headless)
+                # Its own profile, per number being logged in, and emptied
+                # first.
+                #
+                # This used to open the one shared «_anonymous» profile, which
+                # lives on the data volume and keeps whatever it was last
+                # given — including the live session of whoever pressed
+                # «refresh» or logged in before. submit_otp_code's «already
+                # authenticated» shortcut then saved THAT jar under the number
+                # just typed: one person's Divar session stored as somebody
+                # else's number. A login starts from nothing, so it can only
+                # ever save the session it created.
+                digits = "".join(ch for ch in str(phone_number) if ch.isdigit())
+                await self.initialize_browser(headless=settings.scraper_headless,
+                                              account=f"login{digits}")
+                try:
+                    await self.context.clear_cookies()
+                except Exception as e:
+                    logger.warning(f"could not clear the login profile's cookies: {e}")
             
             # Navigate to login page
             logger.info("Navigating to Divar login page...")
@@ -549,7 +566,7 @@ class DivarAuth:
                 result["success"] = True
                 result["message"] = "Login successful!"
                 result["cookies"] = pre_cookies
-                save_phone = phone_number or settings.divar_phone_number
+                save_phone = phone_number  # never a configured default: that is somebody else's number
                 if save_phone:
                     await self.save_cookies_to_file(save_phone, pre_cookies)
                     if self.db_session:
@@ -738,7 +755,7 @@ class DivarAuth:
                 result["cookies"] = cookies
                 
                 # Save cookies - use passed phone_number or fall back to settings
-                save_phone = phone_number or settings.divar_phone_number
+                save_phone = phone_number  # never a configured default: that is somebody else's number
                 if save_phone:
                     await self.save_cookies_to_file(save_phone, cookies)
                     if self.db_session:
@@ -760,7 +777,7 @@ class DivarAuth:
                     result["cookies"] = cookies
                     
                     # Save cookies anyway
-                    save_phone = phone_number or settings.divar_phone_number
+                    save_phone = phone_number  # never a configured default: that is somebody else's number
                     if save_phone:
                         await self.save_cookies_to_file(save_phone, cookies)
                         if self.db_session:
@@ -802,9 +819,13 @@ class DivarAuth:
                 logger.warning(f"Cookies expired for {phone_number}")
                 return False
             
-            # Initialize browser if needed
+            # Initialize browser if needed — as THIS account's device, in its
+            # own profile. With no account it opened the shared «_anonymous»
+            # profile and left this number's live session in it for the next
+            # login or ownerless run to pick up.
             if not self.page:
-                await self.initialize_browser(headless=settings.scraper_headless)
+                await self.initialize_browser(headless=settings.scraper_headless,
+                                              account=phone_number)
             
             if not self.browser_alive():
                 # Nothing below can succeed, and every step of it logs an error

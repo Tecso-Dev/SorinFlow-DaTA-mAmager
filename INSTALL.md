@@ -22,7 +22,7 @@ cp .env.example .env
 ```env
 SECRET_KEY=یک_رشته_تصادفی_بلند_بنویس
 API_KEY=                         # خالی بذار (اختیاری)
-DIVAR_PHONE_NUMBER=09xxxxxxxxx   # شماره دیوارت
+DIVAR_PHONE_NUMBER=               # فقط برای نصب تک‌نفره؛ اسکرپ‌های پنل همیشه با شماره‌های خود صاحبشان اجرا می‌شوند
 ```
 
 **۳. Build و اجرا:**

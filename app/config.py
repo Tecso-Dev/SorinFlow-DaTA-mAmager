@@ -247,6 +247,9 @@ class Settings(BaseSettings):
     # directly — Cloudflare answers from Iran — with an optional shared key
     telegram_api_base: str = Field(default="", env="TELEGRAM_API_BASE")
     telegram_relay_key: str = Field(default="", env="TELEGRAM_RELAY_KEY")
+    # Try api.telegram.org straight from the server before the relay/proxies.
+    # 0 for a server that is known never to reach it.
+    telegram_direct_first: str = Field(default="1", env="TELEGRAM_DIRECT_FIRST")
 
     # ── Public portal auth (visitor sign-up) ──────────────────────────────
     # OFF until the Iranian SMS panel is provisioned. While it is off the
@@ -262,6 +265,10 @@ class Settings(BaseSettings):
     auth_code_resend_cooldown: int = Field(default=90, env="AUTH_CODE_RESEND_COOLDOWN")
     auth_code_max_attempts: int = Field(default=5, env="AUTH_CODE_MAX_ATTEMPTS")
     auth_code_max_sends_per_hour: int = Field(default=5, env="AUTH_CODE_MAX_SENDS_PER_HOUR")
+    # Every verification code sent by SMS, all addresses together, per Tehran
+    # day. The per-address budgets only slow one address down; this is what
+    # stops many of them together from emptying the SMS credit. 0 = no cap.
+    auth_sms_daily_cap: int = Field(default=200, env="AUTH_SMS_DAILY_CAP")
     # Failed password attempts per identifier per 15 minutes before lockout.
     auth_login_max_attempts: int = Field(default=10, env="AUTH_LOGIN_MAX_ATTEMPTS")
 

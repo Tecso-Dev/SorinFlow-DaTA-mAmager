@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly SorinFlow disaster-recovery backup
+
+[Timer]
+# The container has no tzdata (fixed +03:30 by hand) but the HOST does — see
+# scripts/new_server.sh, which sets the host's timezone to Asia/Tehran.
+OnCalendar=*-*-* 04:00:00 Asia/Tehran
+Persistent=true
+Unit=dr-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -65,12 +65,18 @@ async def fire(schedule: ScrapeSchedule, db) -> dict:
     owner = (await db.execute(
         select(User).where(User.id == schedule.owner_user_id))).scalars().first()
     result: dict
+    from app.auth.dependencies import phone_gate_reason
+    gate = await phone_gate_reason(owner, db) if owner is not None else None
     if owner is None or not owner.is_active:
         result = {"status": "skipped", "detail": "صاحب زمان‌بندی غیرفعال است"}
+    elif gate:
+        # The same rule as starting by hand: a person whose own number is
+        # unverified does not scrape — at 8am any more than at noon.
+        result = {"status": "skipped", "detail": f"شمارهٔ موبایل صاحب زمان‌بندی تأیید نشده — {gate}"}
     else:
         try:
             job = await _launch_job(ScrapingJobCreate(**config_for_run(schedule.config)),
-                                    None, db, owner)
+                                    None, db, owner, interactive=False)
             schedule.last_job_id = str(job.job_id)
             result = {"status": "started", "detail": f"اسکرپ {str(job.job_id)[:8]} شروع شد"}
         except HTTPException as e:

@@ -97,10 +97,13 @@ class TestFiring:
     def test_it_launches_as_the_owner_through_the_real_launcher(self, monkeypatch):
         seen = {}
 
-        async def fake_launch(job_config, background_tasks, db, current_user, resumed_from=None):
+        async def fake_launch(job_config, background_tasks, db, current_user, resumed_from=None,
+                              interactive=True):
             seen["cfg"] = job_config.model_dump(exclude_none=True)
             seen["bg"] = background_tasks
             seen["user"] = current_user
+            # a schedule replays a saved form: nobody is there to pick again
+            seen["interactive"] = interactive
             return SimpleNamespace(job_id="1a5e5004-f416-4aaf-8ae7-45f8edc68804")
         import app.api.routes.scraper as routes
         monkeypatch.setattr(routes, "_launch_job", fake_launch)
@@ -111,6 +114,7 @@ class TestFiring:
         assert res["status"] == "started"
         assert seen["user"] is owner, "a schedule must run as its owner — their pool, their permissions"
         assert seen["bg"] is None, "no request, no BackgroundTasks"
+        assert seen["interactive"] is False, "a number switched off since must fall back, not fail daily"
         assert seen["cfg"]["max_age_hours"] == 24 and seen["cfg"]["city"] == "urmia"
         assert s.last_job_id.startswith("1a5e5004") and s.last_result["status"] == "started"
         assert s.next_run_at is not None and db.commits == 1
@@ -261,7 +265,8 @@ class TestThroughTheApp:
         # itself is replaced so no browser starts here
         seen = {}
 
-        async def fake_launch(job_config, background_tasks, db, current_user, resumed_from=None):
+        async def fake_launch(job_config, background_tasks, db, current_user, resumed_from=None,
+                              interactive=True):
             seen["user"] = current_user.username
             seen["cfg"] = job_config.model_dump(exclude_none=True)
             return SimpleNamespace(job_id="cafe0000-0000-0000-0000-000000000000")

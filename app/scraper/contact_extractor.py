@@ -71,7 +71,10 @@ class ContactExtractor:
     async def get_phone_number(self) -> Optional[str]:
         """Click the contact button and return the extracted phone number."""
         try:
-            login_phone = getattr(settings, 'divar_phone_number', None)
+            # The account logged in RIGHT NOW is the number Divar may echo on
+            # the page — not a configured default, which is empty on a shared
+            # install and names somebody else's number on a rotated run.
+            login_phone = self.account_phone or getattr(settings, 'divar_phone_number', None)
             normalized_login = re.sub(r"[^0-9]", "", str(login_phone)) if login_phone else None
 
             def _is_login_phone(num: str) -> bool:
@@ -571,8 +574,10 @@ class ContactExtractor:
                     from app.models.forwarder import ForwarderDevice as _FD
                     devs = (await db.execute(select(_FD).where(
                         _FD.is_active == True))).scalars().all()   # noqa: E712
+                    # Either SIM: a code for a dual-SIM phone's second number
+                    # was reported as «no phone registered for this number».
                     mine = [d for d in devs
-                            if _fw.same_phone(d.sim_phone, self.account_phone)]
+                            if any(_fw.same_phone(p, self.account_phone) for p in d.sims())]
                     if not mine:
                         fw_line = ("\n\nهیچ گوشی‌ای برای این شماره ثبت نشده — "
                                    "با ثبت آن در پنل، کدها خودکار وارد می‌شوند.")
@@ -922,6 +927,12 @@ class ContactExtractor:
             if otp_store.is_cancelled(self.otp_key):
                 logger.info("SMS-OTP suppressed for this job (dismissed earlier) — skipping phone")
                 return
+            # A different number has already been asked for. Typing this one
+            # into Divar's form would send a code to the phone the person just
+            # told us is out of reach.
+            if otp_store.has_switch(otp_store.job_of(self.otp_key)):
+                logger.info("SMS-OTP skipped — a switch to another Divar number is pending")
+                return
 
             if await self._modal_step(otp_input, modal_text) == "phone":
                 otp_input = await self._submit_phone_step(otp_input)
@@ -997,6 +1008,7 @@ class ContactExtractor:
                     logger.warning(f"on_pause callback failed: {e}")
 
             got_code = False
+            switched = False
             try:
                 # Wait in short slices so a user "close"/cancel is honored promptly
                 waited = 0.0
@@ -1040,6 +1052,16 @@ class ContactExtractor:
                         logger.info("SMS-OTP wait cancelled by user")
                         otp_store.clear(self.otp_key)
                         break
+                    # Somebody asked for a different number — usually because
+                    # this one's phone is not in anyone's hand, so no code is
+                    # coming. Stop waiting here; the scraper makes the switch
+                    # at the end of this listing. Peeked, not taken: the
+                    # request is the scraper's to consume.
+                    if otp_store.has_switch(otp_store.job_of(self.otp_key)):
+                        logger.info("SMS-OTP wait left — a different Divar number was asked for")
+                        otp_store.clear(self.otp_key)
+                        switched = True
+                        break
                     if self.should_cancel:
                         try:
                             if await self.should_cancel():
@@ -1064,7 +1086,10 @@ class ContactExtractor:
                                 and _wait_for_human):
                             _notified = True
                             await self._notify_code_needed(waited)
-                if not got_code and not otp_store.is_cancelled(self.otp_key):
+                # A switch is not an unanswered prompt: the person is right
+                # there, answering with a different number. Counting it as a
+                # strike would suppress codes on the number they moved to.
+                if not got_code and not switched and not otp_store.is_cancelled(self.otp_key):
                     logger.warning(f"SMS-OTP timeout — no code in {timeout}s")
                     otp_store.clear(self.otp_key)
 

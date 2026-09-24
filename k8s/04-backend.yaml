@@ -260,10 +260,12 @@ metadata:
   name: backend
   namespace: sorinflow
 spec:
-  type: NodePort
+  # ClusterIP: reachable only inside the cluster, i.e. through Traefik. As a
+  # NodePort (30080) anyone could reach the app directly, skip Traefik and
+  # write their own X-Forwarded-For.
+  type: ClusterIP
   selector:
     app: backend
   ports:
     - port: 8000
       targetPort: 8000
-      nodePort: 30080

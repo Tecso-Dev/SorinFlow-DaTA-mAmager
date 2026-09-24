@@ -22,6 +22,7 @@ from app.config import get_settings, CITIES, CATEGORIES
 from pydantic import BaseModel, Field
 from app.schemas import ScrapingJobCreate, ScrapingJobResponse, ScrapingJobList
 from app.auth.dependencies import get_current_user, get_current_user_optional
+from app.auth.dependencies import require_verified_phone
 from app.auth.permissions import FULL_ACCESS_ROLES
 from app.models.user import User
 
@@ -121,6 +122,9 @@ async def run_scraping_job(
                 headless=settings.scraper_headless
             )
             scraper.owner_user_id = owner_user_id
+            # So what initialize() says about the account it chose — or could
+            # not choose — lands in this run's log, not only the server's.
+            scraper._job_id_str = job_id
             
             logger.info(f"[{job_id}] Initializing Playwright browser (divar_phone={divar_phone or 'auto'})")
             # Ask Divar about every stored session before choosing one. The
@@ -129,7 +133,7 @@ async def run_scraping_job(
             # it — is one Divar accepted moments ago.
             try:
                 from app.services import divar_session as _ds
-                _sw = await _ds.sweep(reason="pre-run")
+                _sw = await _ds.sweep(reason="pre-run", owner_user_id=owner_user_id)
                 from app.services import job_log as _jl
                 await _jl.record(job_id, _jl.SESSION,
                                  f"بررسی نشست‌ها پیش از شروع: {_sw['alive']} فعال، "
@@ -245,6 +249,13 @@ async def run_scraping_job(
             except Exception as e:
                 logger.error(f"[{job_id}] Error disposing engine: {e}")
         
+        # A switch nobody got to belongs to a run that has ended.
+        try:
+            from app.scraper import otp_store as _os
+            _os.take_switch(job_id)
+        except Exception:
+            pass
+
         # Cleanup tracking
         if job_id in active_tasks:
             del active_tasks[job_id]
@@ -253,7 +264,7 @@ async def run_scraping_job(
         logger.info(f"[{job_id}] Background task completed")
 
 
-@router.post("/start", response_model=ScrapingJobResponse)
+@router.post("/start", response_model=ScrapingJobResponse, dependencies=[Depends(require_verified_phone)])
 async def start_scraping_job(
     job_config: ScrapingJobCreate,
     background_tasks: BackgroundTasks,
@@ -264,7 +275,7 @@ async def start_scraping_job(
     return await _launch_job(job_config, background_tasks, db, current_user)
 
 
-@router.post("/jobs/{job_id}/resume", response_model=ScrapingJobResponse)
+@router.post("/jobs/{job_id}/resume", response_model=ScrapingJobResponse, dependencies=[Depends(require_verified_phone)])
 async def resume_scraping_job(
     job_id: str,
     background_tasks: BackgroundTasks,
@@ -302,10 +313,26 @@ async def resume_scraping_job(
             and (current_user.role or "") not in ("root", "super_admin"):
         raise HTTPException(status_code=403, detail="این اسکرپ را کاربر دیگری شروع کرده است")
 
+    # The continuation runs AS the run's owner, like a schedule does. When
+    # root pressed «ادامه» on a colleague's run it relaunched as root — with
+    # root's numbers, and as root's run from then on.
+    run_as = current_user
+    if owner and current_user and current_user.id != owner:
+        run_as = (await db.execute(select(User).where(User.id == owner))).scalar_one_or_none()
+        if run_as is None or not run_as.is_active:
+            raise HTTPException(status_code=409,
+                                detail="صاحب این اسکرپ دیگر فعال نیست — ادامه ممکن نیست")
+        # The route checked the caller's number; the run is the owner's.
+        from app.auth.dependencies import phone_gate_reason
+        why = await phone_gate_reason(run_as, db)
+        if why:
+            raise HTTPException(status_code=409,
+                                detail=f"شمارهٔ موبایل صاحب این اسکرپ تأیید نشده است — {why}")
+
     config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
                                   if k in ScrapingJobCreate.model_fields})
-    resp = await _launch_job(config, background_tasks, db, current_user,
-                             resumed_from=job.job_id)
+    resp = await _launch_job(config, background_tasks, db, run_as,
+                             resumed_from=job.job_id, interactive=False)
     await job_log.record(
         resp.job_id, job_log.START,
         f"ادامهٔ اسکرپ {str(job.job_id)[:8]} — آگهی‌های ذخیره‌شدهٔ آن رد می‌شوند",
@@ -319,11 +346,18 @@ async def _launch_job(
     db: AsyncSession,
     current_user: Optional[User],
     resumed_from=None,
+    interactive: bool = True,
 ) -> ScrapingJobResponse:
     """Validate, record and start one run. Shared by start and resume so the
     two cannot drift — a resume that skipped a check the start makes would be
-    the side door."""
+    the side door.
+
+    `interactive` is somebody pressing «شروع» now. A resume or a schedule
+    replays a config saved earlier, and a number switched off since then
+    must not stop it at the door with «choose خودکار» that nobody can act on
+    — it falls back to «خودکار», and the run says so."""
     
+    fell_back_from = None
     active = {k: v for k, v in job_config.model_dump().items() if v is not None and k not in ('city', 'category', 'max_items', 'download_images', 'divar_phone')}
     logger.info(f"Scraping job request — city={job_config.city} category={job_config.category} max_items={job_config.max_items} images={job_config.download_images} filters={active}")
     
@@ -354,11 +388,23 @@ async def _launch_job(
         owned = (await db.execute(
             select(_Cookie).where(_Cookie.owner_user_id == current_user.id)
         )).scalars().all()
-        if not any("".join(ch for ch in str(c.phone_number) if ch.isdigit()) == _digits
-                   for c in owned):
+        mine = next((c for c in owned
+                     if "".join(ch for ch in str(c.phone_number) if ch.isdigit()) == _digits),
+                    None)
+        if mine is None:
             raise HTTPException(
                 status_code=403,
                 detail="این شمارهٔ دیوار به حساب کاربری شما تعلق ندارد")
+        # Yours, but switched off: the owner said this SIM is out of reach,
+        # and a run started on it would send its first code nowhere.
+        if mine.is_enabled is False:
+            if interactive:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"شمارهٔ {mine.phone_number} خاموش است — روشنش کنید یا «خودکار» را انتخاب کنید")
+            logger.info(f"[launch] saved number {mine.phone_number} is switched off — running on «خودکار»")
+            fell_back_from = mine.phone_number
+            job_config.divar_phone = None
 
     # Check for existing running jobs
     result = await db.execute(
@@ -397,6 +443,11 @@ async def _launch_job(
     # made on another one that is still running.
     from app.scraper import otp_store
     otp_store.reset_cancel(job_id)
+    if fell_back_from:
+        from app.services import job_log as _jl
+        await _jl.record(job_id, _jl.SESSION,
+                         f"شمارهٔ ذخیره‌شدهٔ {fell_back_from} خاموش است — اجرا با «خودکار» انجام می‌شود",
+                         level="warning", phone=fell_back_from)
 
     # Store a placeholder to track active jobs
     active_tasks[job_id] = {"status": "starting", "city": job_config.city, "category": job_config.category}
@@ -513,7 +564,7 @@ async def list_schedules(db: AsyncSession = Depends(get_db),
             "can_see_all": _sees_every_schedule(current_user)}
 
 
-@router.post("/schedules")
+@router.post("/schedules", dependencies=[Depends(require_verified_phone)])
 async def create_schedule(data: ScheduleIn, db: AsyncSession = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
     """Save the form as a daily run. Validated the way a run is: the config
@@ -569,7 +620,7 @@ async def delete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db),
     return {"success": True}
 
 
-@router.post("/schedules/{schedule_id}/run")
+@router.post("/schedules/{schedule_id}/run", dependencies=[Depends(require_verified_phone)])
 async def run_schedule_now(schedule_id: int, db: AsyncSession = Depends(get_db),
                            current_user: User = Depends(get_current_user)):
     """Fire it now, as its owner — the same path the clock takes, so what
@@ -823,9 +874,15 @@ _STATUS_FA = {"completed": "تکمیل شده", "cancelled": "لغو شده", "f
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_scraping_job(
     job_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """Cancel a scraping job that has not finished yet."""
+    """Cancel a scraping job that has not finished yet.
+
+    The run's owner, or root/super_admin — the same rule as deleting one.
+    It used to take anybody with the scraper permission, so one person could
+    stop every colleague's run from the list.
+    """
     result = await db.execute(
         select(ScrapingJob).where(ScrapingJob.job_id == job_id)
     )
@@ -833,6 +890,9 @@ async def cancel_scraping_job(
 
     if not job:
         raise HTTPException(status_code=404, detail="تسک یافت نشد")
+    owner = (job.config or {}).get("owner_user_id")
+    if user.role not in FULL_ACCESS_ROLES and owner not in (None, user.id):
+        raise HTTPException(status_code=403, detail="این تسک را کاربر دیگری اجرا کرده است")
 
     if job.status in _FINISHED_JOB_STATUSES:
         raise HTTPException(
@@ -857,6 +917,87 @@ async def cancel_scraping_job(
     logger.info(f"Job {job_id} marked for cancellation (was {was}, otp cleared={freed})")
 
     return {"message": "Job cancelled successfully", "was": was, "otp_cleared": freed}
+
+
+class SwitchAccountIn(BaseModel):
+    # A number of the run owner's, or empty for «the next one of mine».
+    phone: Optional[str] = Field(None, max_length=20)
+
+
+@router.post("/jobs/{job_id}/switch-account", dependencies=[Depends(require_verified_phone)])
+async def switch_job_account(
+    job_id: str,
+    body: SwitchAccountIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Move a running scrape onto another of its owner's Divar numbers.
+
+    «وقتی با یک شماره در حال اسکرپ به مشکل خورد، بتوان شماره را در حین
+    اسکرپ عوض کرد و ادامه را با شمارهٔ جدید ادامه داد.»
+
+    The run does not stop and nothing is lost. The request is picked up at
+    the next safe point — between listings, or at once if the run is parked
+    on a code prompt for the current number — and the run carries on with
+    the new number from there, OTP prompts re-enabled for it.
+
+    The run's owner only, and only onto the owner's own numbers: a number
+    is its owner's, and a run is its owner's, whoever is looking at it.
+    """
+    from app.models.cookie import Cookie
+    from app.scraper import otp_store
+    from app.services import job_log
+
+    job_uuid = await _job_uuid_from(job_id, db)
+    job = (await db.execute(
+        select(ScrapingJob).where(ScrapingJob.job_id == job_uuid))).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="تسک یافت نشد")
+    owner = (job.config or {}).get("owner_user_id")
+    if owner != user.id:
+        raise HTTPException(status_code=403,
+                            detail="فقط کسی که این اسکرپ را شروع کرده می‌تواند شماره‌اش را عوض کند")
+    if job.status not in ("running", "paused", "pending"):
+        raise HTTPException(status_code=409, detail="این اسکرپ در حال اجرا نیست")
+
+    _d = otp_store._digits
+    mine = [c for c in (await db.execute(
+        select(Cookie).where(Cookie.owner_user_id == user.id))).scalars().all()
+        if c.is_valid and c.is_enabled is not False and not c.identity_required_at]
+    current = _d(job.divar_phone)
+    target = None
+    if body.phone:
+        target = next((c for c in mine if _d(c.phone_number) == _d(body.phone)), None)
+        if target is None:
+            raise HTTPException(
+                status_code=403,
+                detail="این شماره از شماره‌های روشن و معتبر شما نیست")
+        if _d(target.phone_number) == current:
+            raise HTTPException(status_code=409, detail="اسکرپ همین حالا روی همین شماره است")
+        # One browser per number: a run already on it holds its profile, and
+        # the switch would fail with the old browser already closed.
+        busy = (await db.execute(select(ScrapingJob.job_id).where(
+            ScrapingJob.status.in_(("running", "paused")),
+            ScrapingJob.job_id != job.job_id,
+            ScrapingJob.divar_phone == target.phone_number))).first()
+        if busy:
+            raise HTTPException(
+                status_code=409,
+                detail=f"شمارهٔ {target.phone_number} همین حالا در اسکرپ دیگری ({str(busy[0])[:8]}) در حال استفاده است")
+    elif not any(_d(c.phone_number) != current for c in mine):
+        raise HTTPException(
+            status_code=409,
+            detail="شمارهٔ روشن و معتبر دیگری ندارید — اول یک شمارهٔ دیوار دیگر اضافه یا روشن کنید")
+
+    otp_store.request_switch(str(job.job_id), target.phone_number if target else None,
+                             by=user.id)
+    to = target.phone_number if target else "شمارهٔ بعدی شما"
+    await job_log.record(
+        str(job.job_id), job_log.SESSION,
+        f"درخواست تعویض شماره از {job.divar_phone or '—'} به {to} ثبت شد",
+        previous=job.divar_phone, requested=target.phone_number if target else None)
+    return {"success": True, "requested": target.phone_number if target else None,
+            "message": f"تعویض به {to} ثبت شد — در اولین فرصت انجام می‌شود"}
 
 
 @router.delete("/jobs/{job_id}")
@@ -1058,7 +1199,7 @@ async def get_otp_pending(
         # Accounts Divar wants identified — national ID, birth date. No
         # code answers it; the panel opens a dialog naming the number.
         otp_store.identity_required())
-    return {"forwarders": await list_forwarders(), "pending": pending,
+    return {"forwarders": await _my_forwarders(db, current_user), "pending": pending,
             "timeout": otp_store.wait_window(),
             "identity_required": identity}
 
@@ -1357,13 +1498,22 @@ async def forwarder_heartbeat(request: Request, db: AsyncSession = Depends(get_d
     acct = otp_store._digits(body.account)
     if not acct:
         raise HTTPException(status_code=422, detail="account is required")
+    # Every SIM in the phone is alive when the phone is. The app reports one
+    # account per heartbeat, so on a dual-SIM phone the second number was
+    # never marked online — its code prompt said «گوشی آفلاین» about a phone
+    # that had checked in seconds earlier.
+    accts = [acct]
+    if device is not None:
+        accts += [otp_store._digits(p) for p in device.sims()
+                  if otp_store._digits(p) and otp_store._digits(p) != acct]
     try:
         from app.database import get_redis
         r = await get_redis()
-        await r.set(f"forwarder:{acct}", json.dumps({
-            "account": acct, "battery": body.battery, "network": body.network,
-            "version": body.version, "last_seen": time.time(),
-        }), ex=_HB_TTL)
+        for a in accts:
+            await r.set(f"forwarder:{a}", json.dumps({
+                "account": a, "battery": body.battery, "network": body.network,
+                "version": body.version, "last_seen": time.time(),
+            }), ex=_HB_TTL)
     except Exception as e:
         logger.warning(f"[forwarder] heartbeat not stored: {e}")
         raise HTTPException(status_code=503, detail="store unavailable")
@@ -1389,18 +1539,54 @@ async def list_forwarders() -> dict:
     return out
 
 
+async def _my_forwarders(db, user) -> dict:
+    """list_forwarders(), narrowed to the numbers this person may see: the
+    SIMs of their own phones and their own Divar numbers. Everybody's phones —
+    number, battery, network — were on every panel."""
+    from app.scraper.otp_store import _digits
+    from app.models.forwarder import ForwarderDevice
+    from app.models.cookie import Cookie
+    alive = await list_forwarders()
+    if (user.role or "") in FULL_ACCESS_ROLES:
+        return alive
+    mine = set()
+    for d in (await db.execute(select(ForwarderDevice).where(
+            ForwarderDevice.user_id == user.id))).scalars().all():
+        mine |= {_digits(p) for p in d.sims()}
+    for (ph,) in (await db.execute(select(Cookie.phone_number).where(
+            Cookie.owner_user_id == user.id))).all():
+        mine.add(_digits(ph))
+    return {k: v for k, v in alive.items() if _digits(k) in mine}
+
+
 @router.get("/forwarders")
-async def get_forwarders():
-    """Which phones are forwarding, and whether each is alive."""
-    return {"forwarders": await list_forwarders(), "online_after_seconds": _HB_ONLINE}
+async def get_forwarders(db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """Which of MY phones are forwarding, and whether each is alive."""
+    return {"forwarders": await _my_forwarders(db, current_user),
+            "online_after_seconds": _HB_ONLINE}
 
 
 @router.get("/login-code/{account}")
-async def take_login_code(account: str):
+async def take_login_code(
+    account: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """A forwarded LOGIN code parked for this account, consumed on read, so
     the login form can fill itself in instead of the person re-typing what
-    the phone already sent. None if nothing arrived in the last 3 minutes."""
+    the phone already sent. None if nothing arrived in the last 3 minutes.
+
+    Only for a number that is not somebody else's. It used to hand the code
+    to anyone with the scraper permission — and a Divar login code for the
+    root account's number, forwarded by root's own phone, was then all a
+    colleague needed to log that number in as theirs.
+    """
     from app.scraper import otp_store
+    from app.api.routes.auth import number_owner
+    owner = await number_owner(db, account)
+    if owner is not None and owner != current_user.id:
+        return {"code": None}
     return {"code": otp_store.take_login_code(account)}
 
 
@@ -1471,7 +1657,7 @@ async def cancel_otp(
 class SingleScrapeRequest(BaseModel):
     url: str
 
-@router.post("/scrape-single")
+@router.post("/scrape-single", dependencies=[Depends(require_verified_phone)])
 async def scrape_single_property(
     request: SingleScrapeRequest,
     background_tasks: BackgroundTasks,
@@ -1504,7 +1690,7 @@ class RescrapeRequest(BaseModel):
     label: Optional[str] = None
 
 
-@router.post("/rescrape")
+@router.post("/rescrape", dependencies=[Depends(require_verified_phone)])
 async def rescrape_listings(
     body: RescrapeRequest,
     background_tasks: BackgroundTasks,

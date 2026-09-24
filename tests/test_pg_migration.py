@@ -58,6 +58,7 @@ def _run(coro):
 @pytest.fixture(scope="module")
 def migrated():
     """Apply the migration to a pre-migration table and hand back the rows."""
+    saved_url = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = PG_URL
     os.environ.setdefault("SECRET_KEY", "0123456789abcdef0123456789abcdef")
     os.environ.setdefault("LOGS_PATH", "/tmp")
@@ -93,7 +94,16 @@ def migrated():
         await eng.dispose()
         return rows, cols, idx, nulls
 
-    return _run(_go())
+    try:
+        return _run(_go())
+    finally:
+        # Later modules build their own engines from DATABASE_URL. Left
+        # pointing here, they seeded their users into this database while the
+        # app looked for them in the real one: 46 logins answered 401.
+        if saved_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = saved_url
 
 
 def test_columns_are_added(migrated):
@@ -394,3 +404,81 @@ def test_alembic_stamps_at_boot_and_models_match_the_schema():
 
     assert fresh == [head]
     assert established == [head]
+
+
+def test_a_second_0009_that_added_cookies_enabled_does_not_strand_is_enabled():
+    """Local main once held an unpushed revision «0009» that added
+    cookies.enabled; sorinflow-v2's 0009 adds cookies.is_enabled. Had the
+    first reached production, Alembic would read 0009 as applied and never
+    add is_enabled — every cookies query failing, /health still green. The
+    boot must build the column anyway."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    import app.database as db
+
+    saved_engine, saved_maker = db.engine, db.async_session_maker
+    db.engine = create_async_engine(PG_URL)
+    db.async_session_maker = async_sessionmaker(
+        db.engine, expire_on_commit=False, autocommit=False, autoflush=False)
+
+    async def _cols(eng):
+        async with eng.begin() as c:
+            return {r[0] for r in (await c.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='cookies' AND table_schema=current_schema()"))).all()}
+
+    async def _go():
+        await db.init_db()                    # a database at head
+        eng = create_async_engine(PG_URL)
+        async with eng.begin() as c:          # ...as the other 0009 would have left it
+            await c.execute(text("ALTER TABLE cookies DROP COLUMN IF EXISTS is_enabled"))
+            await c.execute(text(
+                "ALTER TABLE cookies ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE"))
+            await c.execute(text("UPDATE alembic_version SET version_num = '0009'"))
+        assert "is_enabled" not in await _cols(eng)
+        await eng.dispose()
+
+        await db.init_db()                    # sorinflow-v2 boots on it
+
+        eng = create_async_engine(PG_URL)
+        cols = await _cols(eng)
+        await eng.dispose()
+        return cols
+
+    try:
+        cols = _run(_go())
+    finally:
+        _run(db.engine.dispose())
+        db.engine, db.async_session_maker = saved_engine, saved_maker
+
+    assert "is_enabled" in cols
+
+
+def test_the_boot_refuses_a_users_table_without_totp_last_step():
+    """Were Alembic 0010 and its boot ALTER both to lose the lock race, every
+    user load would 500 on a pod reporting Ready. The boot check refuses, so
+    the deploy rolls back instead."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from app.database import _migrate_auth_v2, _verify_auth_v2
+
+    async def _go():
+        eng = create_async_engine(PG_URL)
+        try:
+            async with eng.begin() as c:
+                for stmt in OLD_SCHEMA.strip().split(";"):
+                    if stmt.strip():
+                        await c.execute(text(stmt))
+                await _migrate_auth_v2(c)
+                await c.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS totp_last_step"))
+                with pytest.raises(RuntimeError, match="totp_last_step"):
+                    await _verify_auth_v2(c)
+        finally:
+            # leave a users table later boots can migrate, as the test above does
+            async with eng.begin() as c:
+                for stmt in OLD_SCHEMA.strip().split(";"):
+                    if stmt.strip():
+                        await c.execute(text(stmt))
+            await eng.dispose()
+
+    _run(_go())

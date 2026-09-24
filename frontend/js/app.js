@@ -702,7 +702,7 @@ async function showTotpSetup() {
                 correctLevel: QRCode.CorrectLevel.M,
             });
         } else {
-            qrContainer.innerHTML = `<div class="small text-muted">${data.qr_uri}</div>`;
+            qrContainer.innerHTML = `<div class="small text-muted">${esc(data.qr_uri)}</div>`;
         }
     } catch(e) {
         showToast('خطا', 'خطا در دریافت اطلاعات 2FA', 'danger');
@@ -760,7 +760,7 @@ function avatarHtml(u, size = 34, cls = 'avatar', id = '') {
     const initial = name.trim().charAt(0) || '?';
     const presence = (u && u.presence) || 'available';
     const inner = (u && u.avatar_url)
-        ? `<img src="${esc(u.avatar_url)}" alt="${esc(name)}" loading="lazy">`
+        ? `<img src="${safeUrl(u.avatar_url)}" alt="${esc(name)}" loading="lazy">`
         : `<span class="av-initial">${esc(initial)}</span>`;
     return `<span class="${cls} av av-${presence}" ${id ? `id="${id}"` : ''}
                   style="--av:${size}px" title="${esc(name)} — ${PRESENCE_FA[presence] || ''}">${inner}<i class="av-dot"></i></span>`;
@@ -794,6 +794,8 @@ function pfRender(me) {
     const fa = d => new Date(d).toLocaleDateString('fa-IR');
     set('pf-since', me.created_at ? fa(me.created_at) : '—');
     set('pf-last', me.last_login ? fa(me.last_login) : '—');
+    // a 10.42.x.x here means the cluster is still hiding callers' addresses
+    apiCall('/users/me/ip').then(r => set('pf-ip', r.ip)).catch(() => {});
     const pres = document.getElementById('pf-presence');
     if (pres) pres.value = me.presence || 'available';
 
@@ -980,7 +982,7 @@ async function pfLoadDivarAccounts() {
                   <span class="pf-note">${formatNumber(c.reveals || 0)} شماره‌گیری</span>
                 </div>
                 <div class="pf-acct-actions">
-                  ${isPrimary ? '' : `<button class="btn btn-sm btn-outline-primary" onclick="pfSetPrimaryDivar('${esc(c.phone_number)}')" title="پیش‌فرض کن">پیش‌فرض</button>`}
+                  ${isPrimary ? '' : `<button class="btn btn-sm btn-outline-primary" onclick="pfSetPrimaryDivar(${jsArg(c.phone_number)})" title="پیش‌فرض کن">پیش‌فرض</button>`}
                   <button class="btn btn-sm btn-outline-danger" onclick="pfDeleteDivar(${esc(c.id)})" title="حذف نشست"><i class="bi bi-trash"></i></button>
                 </div>
             </div>`;
@@ -1018,6 +1020,25 @@ function pfAddDivarAccount() {
 }
 
 // Admin: ask a person to verify what is still unverified on their account.
+/** root only: tick a user's phone or email verified — or take it back. */
+async function setUserVerified(id, kind, value, input) {
+    if (input) input.disabled = true;
+    try {
+        const u = await apiCall(`/users/${Number(id)}/verification`, {
+            method: 'PATCH', body: JSON.stringify({ [`${kind}_verified`]: !!value }) });
+        if (_usersById && _usersById[id]) Object.assign(_usersById[id], u);
+        showToast(value ? 'تأیید شد' : 'تأیید برداشته شد',
+            `${kind === 'email' ? 'ایمیل' : 'شمارهٔ'} ${u.full_name || u.username} ${value ? 'تأییدشده' : 'تأییدنشده'} علامت خورد`,
+            value ? 'success' : 'warning');
+    } catch (e) {
+        if (input) input.checked = !value;
+        showToast('خطا', e.message, 'danger');
+    } finally {
+        if (input) input.disabled = false;
+        if (typeof loadUsers === 'function') loadUsers();
+    }
+}
+
 async function nudgeVerify(id) {
     const u = _usersById[id] || {};
     const what = [u.email && !u.email_verified ? 'ایمیل' : '', u.phone && !u.phone_verified ? 'شمارهٔ موبایل' : ''].filter(Boolean).join(' و ');
@@ -1676,11 +1697,11 @@ function showSection(sectionName) {
     switch (sectionName) {
         case 'dashboard':  loadDashboard(); break;
         case 'properties': loadProperties(); break;
-        case 'scraper':    loadJobs(); loadSchedules(); loadScraperAccounts(); _wireEstimateRefresh(); scheduleEstimate(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling();
+        case 'scraper':    loadJobs(); loadSchedules(); loadScraperAccounts(); _wireEstimateRefresh(); scheduleEstimate(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); checkPhoneGate();
                            _initScraperDatePicker(); refreshDivarSessionCount();
                            setTimeout(restoreScraperForm, 200); break;
-        case 'auth':       checkAuthStatus(); loadCookies(); break;
-        case 'forwarder':  loadForwarders(); loadForwarderLog(); break;
+        case 'auth':       checkAuthStatus(); loadCookies(); loadNumbersRegistry(); checkPhoneGate(); break;
+        case 'forwarder':  loadForwarders(); loadForwarderLog(); checkPhoneGate(); break;
         case 'profile':    loadProfile(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadCalls(); loadMatches(); loadPriceDrops(); break;
@@ -1714,14 +1735,26 @@ function showToast(title, message, type = 'info') {
 }
 
 
-// A URL from the database is not safe to put in href just because it is
+// A URL from the database is not safe to put in href/src just because it is
 // escaped: «javascript:alert(1)» contains nothing that needs escaping, and
-// clicking the link runs it in the panel's origin — where the token lives.
-// Only http(s) survives; anything else becomes an inert '#'.
+// clicking the link (or, for some tags, even loading it) runs it in the
+// panel's origin — where the token lives. Only http(s) and our own relative
+// paths survive; anything else becomes an inert '#'.
 function safeUrl(u) {
     const raw = String(u ?? '').trim();
-    if (!/^https?:\/\//i.test(raw)) return '#';
+    // "/\evil.com" is read by browsers as "//evil.com": another site
+    if (!/^https?:\/\//i.test(raw) && !/^\/(?![\/\\])/.test(raw)) return '#';
     return esc(raw);
+}
+
+// The manual lead photo is narrower still: it only ever needs to reproduce
+// exactly what POST /crm/upload-image hands back, so anything else —
+// including a path-traversal attempt riding along in the field — becomes
+// an empty (broken-image, harmless) src instead of '#'.
+const MANUAL_PHOTO_RE = /^\/images\/manual\/[0-9a-f]{32}\.jpg$/;
+function safeManualPhoto(u) {
+    const raw = String(u ?? '');
+    return MANUAL_PHOTO_RE.test(raw) ? raw : '';
 }
 
 // tel: has the same problem in a smaller way. Phone numbers here come from
@@ -1751,11 +1784,36 @@ function _tagList(tags) {
     return [];
 }
 
-// Escape user/scraped content before injecting into innerHTML templates
+// Escape user/scraped content before injecting into innerHTML templates.
+// Covers both text and attribute context (& < > " ') plus the backtick, so
+// an escaped value can never close out of either an HTML attribute or a
+// template literal it ends up quoted inside of.
 function esc(s) {
     if (s === null || s === undefined) return '';
-    return String(s).replace(/[&<>"']/g, m =>
-        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    return String(s).replace(/[&<>"'`]/g, m =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[m]));
+}
+
+// html`...` — a tagged template that escapes every interpolated value by
+// default, so a call site has to opt out on purpose instead of forgetting
+// to opt in. Existing code mostly calls esc() by hand inline; this is for
+// new/rewritten spots where that got missed often enough to matter. Wrap
+// markup that is already safe (built from esc()'d parts, or another html`` )
+// in raw(...) — that keeps the one opt-out greppable as `raw(`.
+// A value inside an inline handler — onclick="f(…)". The browser decodes the
+// attribute's entities before it runs the code, so esc() alone let a quote
+// through: a contact phone of  ');alert(1);('  broke out of quickSmsToContact.
+// JSON makes it a JS string literal; esc keeps it inside the attribute.
+function jsArg(v) { return esc(JSON.stringify(v == null ? '' : String(v))); }
+function raw(s) { return { __html: String(s ?? '') }; }
+function html(strings, ...values) {
+    let out = strings[0];
+    for (let i = 0; i < values.length; i++) {
+        const v = values[i];
+        out += (v && typeof v === 'object' && '__html' in v) ? v.__html : esc(v);
+        out += strings[i + 1];
+    }
+    return out;
 }
 
 // Format Price — keeps one decimal so ۳٫۵ میلیارد doesn't round to ۴
@@ -1772,50 +1830,249 @@ function formatPrice(price) {
 // API Helper
 async function apiCall(endpoint, options = {}) {
     try {
-        const token = getToken();
-        // `raw` returns the body as text instead of parsing JSON — the email
-        // template preview is an HTML document, and it still has to go through
-        // here so the Authorization header travels with it.
-        const { raw, ...fetchOptions } = options;
-        const response = await fetch(`${API_BASE}${endpoint}`, {
-            headers: {
-                'Content-Type': 'application/json',
-                ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-                ...options.headers
-            },
-            ...fetchOptions
-        });
-
-        if (response.status === 401) {
-            clearToken();
-            showLoginPage();
-            throw new Error('نشست منقضی شده. لطفاً دوباره وارد شوید.');
-        }
-
-        if (!response.ok) {
-            // An error body is not always JSON — an HTML endpoint that fails
-            // returns a page, and calling .json() on it throws a parse error
-            // that hides the real status.
-            let error = {};
-            try { error = await response.json(); } catch (_) { error = {}; }
-            let message = `Request failed (${response.status})`;
-            if (error.detail) {
-                if (typeof error.detail === 'string') {
-                    message = error.detail;
-                } else if (Array.isArray(error.detail)) {
-                    message = error.detail.map(e => e.msg || JSON.stringify(e)).join(' | ');
-                } else {
-                    message = JSON.stringify(error.detail);
-                }
-            }
-            throw new Error(message);
-        }
-
-        return raw ? await response.text() : await response.json();
+        return await _apiCallOnce(endpoint, options);
     } catch (error) {
+        // «شماره‌ات را تأیید کن»: the server refused an action that leans on
+        // the caller's own number. Open the verification popup — it sends the
+        // code itself — and, once the number is verified, do what was asked,
+        // so the click that was refused is the click that goes through.
+        if (error.code === 'phone_unverified' && !options._phoneGateRetried) {
+            const ok = await requirePhoneVerified(error.detail || {});
+            if (ok) return await apiCall(endpoint, { ...options, _phoneGateRetried: true });
+        }
         console.error('API Error:', error);
         throw error;
     }
+}
+
+async function _apiCallOnce(endpoint, options = {}) {
+    const token = getToken();
+    // `raw` returns the body as text instead of parsing JSON — the email
+    // template preview is an HTML document, and it still has to go through
+    // here so the Authorization header travels with it.
+    const { raw, _phoneGateRetried, ...fetchOptions } = options;
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            ...options.headers
+        },
+        ...fetchOptions
+    });
+
+    if (response.status === 401) {
+        clearToken();
+        showLoginPage();
+        throw new Error('نشست منقضی شده. لطفاً دوباره وارد شوید.');
+    }
+
+    if (!response.ok) {
+        // An error body is not always JSON — an HTML endpoint that fails
+        // returns a page, and calling .json() on it throws a parse error
+        // that hides the real status.
+        let error = {};
+        try { error = await response.json(); } catch (_) { error = {}; }
+        let message = `Request failed (${response.status})`;
+        if (error.detail) {
+            if (typeof error.detail === 'string') {
+                message = error.detail;
+            } else if (Array.isArray(error.detail)) {
+                message = error.detail.map(e => e.msg || JSON.stringify(e)).join(' | ');
+            } else if (error.detail.message) {
+                // A structured refusal: its sentence for people, its code
+                // for the panel.
+                message = error.detail.message;
+            } else {
+                message = JSON.stringify(error.detail);
+            }
+        }
+        const err = new Error(message);
+        err.status = response.status;
+        err.detail = error.detail;
+        err.code = error.detail && typeof error.detail === 'object' && !Array.isArray(error.detail)
+            ? error.detail.code : undefined;
+        throw err;
+    }
+
+    return raw ? await response.text() : await response.json();
+}
+
+/* ── the phone-verification popup ─────────────────────────────────────────
+ *
+ * «هر جایی که کاربر نیاز به استفاده از شماره را دارد و شماره‌اش را تأیید نکرده،
+ * جلوی فعالیتش را بگیر… ارور «شماره تأیید نشده و باید تأیید شود» بده و با زدن
+ * «تأیید شماره» کد برایش ارسال شود.» The server decides (require_verified_phone);
+ * this is the door it points at. It says what is wrong first; the code is
+ * texted only when they press «تأیید شماره» — never just for opening it.
+ * Resolves true once the number is verified, false if they leave.
+ * One popup at a time: two refused calls share the same answer.            */
+let _phoneGatePromise = null;
+
+function requirePhoneVerified(detail = {}) {
+    if (_phoneGatePromise) return _phoneGatePromise;
+    _phoneGatePromise = _openPhoneGate(detail).finally(() => { _phoneGatePromise = null; });
+    return _phoneGatePromise;
+}
+
+/** Ask the server up front, on arriving somewhere that needs a verified
+ *  number — once per page load, and never for root. */
+let _phoneGateChecked = false;
+async function checkPhoneGate() {
+    if (_phoneGateChecked || !_currentUser || _currentUser.role === 'root') return;
+    _phoneGateChecked = true;
+    try {
+        const g = await apiCall('/users/me/phone-gate');
+        if (g.required) await requirePhoneVerified(g);
+    } catch (_) { /* the action itself will still ask */ }
+}
+
+function _openPhoneGate(detail) {
+    return new Promise(resolve => {
+        const known = (detail.phone || _currentUser?.phone || '').trim();
+        const overlay = document.createElement('div');
+        overlay.className = 'ask-overlay';
+        overlay.innerHTML = `
+          <div class="ask-card is-warning pv-card" role="dialog" aria-modal="true" aria-label="تأیید شمارهٔ موبایل">
+            <div class="ask-ring"><i class="bi bi-phone-vibrate"></i></div>
+            <h5>تأیید شمارهٔ موبایل</h5>
+            <p class="ask-body">${esc(detail.message || 'شمارهٔ موبایل شما تأیید نشده است و برای ادامه باید تأیید شود.')}</p>
+            <div class="pv-intro d-none" id="pv-intro-step">
+                <div class="pv-number" dir="ltr">${esc(known)}</div>
+                <div class="ask-hint">با زدن «تأیید شماره» یک کد به همین شماره پیامک می‌شود.</div>
+            </div>
+            <div class="ask-field" id="pv-phone-step">
+                <label for="pv-phone">شمارهٔ موبایل شما</label>
+                <input id="pv-phone" type="tel" inputmode="tel" dir="ltr" placeholder="09123456789" value="${esc(known)}">
+                <div class="ask-hint">کد تأیید به همین شماره پیامک می‌شود.</div>
+            </div>
+            <div class="ask-field d-none" id="pv-code-step">
+                <label for="pv-code">کد تأیید پیامک‌شده</label>
+                <input id="pv-code" type="text" inputmode="numeric" dir="ltr" maxlength="8" autocomplete="one-time-code" placeholder="—————">
+                <div class="ask-hint" id="pv-hint"></div>
+            </div>
+            <div class="ask-error" id="pv-error"></div>
+            <div class="ask-actions">
+              <button class="ask-ok" id="pv-ok">ارسال کد</button>
+              <button class="ask-cancel" id="pv-cancel">بعداً</button>
+            </div>
+            <div class="pv-links d-none" id="pv-links">
+              <button type="button" class="btn btn-link btn-sm" id="pv-resend">ارسال دوباره کد</button>
+              <button type="button" class="btn btn-link btn-sm" id="pv-change">شمارهٔ دیگری دارم</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        const $ = id => overlay.querySelector('#' + id);
+        const err = $('pv-error'), ok = $('pv-ok');
+        let step = 'phone', busy = false;
+        const showIntro = () => {
+            step = 'intro';
+            $('pv-phone-step').classList.add('d-none');
+            $('pv-code-step').classList.add('d-none');
+            $('pv-intro-step').classList.remove('d-none');
+            $('pv-links').classList.remove('d-none');
+            $('pv-resend').classList.add('d-none');
+            ok.textContent = 'تأیید شماره';
+            setTimeout(() => ok.focus(), 30);
+        };
+
+        const close = value => {
+            if (overlay.dataset.closing) return;
+            overlay.dataset.closing = '1';
+            document.removeEventListener('keydown', onKey);
+            overlay.remove();
+            resolve(value);
+        };
+        const showCode = (hint) => {
+            step = 'code';
+            $('pv-intro-step').classList.add('d-none');
+            $('pv-phone-step').classList.add('d-none');
+            $('pv-code-step').classList.remove('d-none');
+            $('pv-links').classList.remove('d-none');
+            $('pv-resend').classList.remove('d-none');
+            ok.textContent = 'تأیید';
+            $('pv-hint').textContent = hint || '';
+            setTimeout(() => $('pv-code').focus(), 30);
+        };
+        const showPhone = () => {
+            step = 'phone';
+            $('pv-intro-step').classList.add('d-none');
+            $('pv-code-step').classList.add('d-none');
+            $('pv-links').classList.add('d-none');
+            $('pv-phone-step').classList.remove('d-none');
+            ok.textContent = 'ارسال کد';
+            err.textContent = '';
+            setTimeout(() => $('pv-phone').focus(), 30);
+        };
+        const send = async (phone) => {
+            err.textContent = '';
+            try {
+                const r = await apiCall('/users/me/phone/request', {
+                    method: 'POST', body: JSON.stringify(phone ? { phone } : {}) });
+                if (r.verified) { _markPhoneVerified(); close(true); return; }
+                if (_currentUser) { _currentUser.phone = r.phone || phone || _currentUser.phone; _currentUser.phone_verified = false; }
+                showCode(`کد به ${r.phone || phone || known} پیامک شد.`);
+            } catch (e) {
+                // 429 on a resend is the cooldown: a code went out moments ago
+                // and is still good — let them type it. On a NEW number it is
+                // not: nothing was sent there, and the number did not change.
+                if (e.status === 429 && !phone) {
+                    showCode(e.message);
+                } else {
+                    err.textContent = e.message;
+                    if (step === 'code') showPhone();
+                }
+            }
+        };
+        const submit = async () => {
+            if (busy) return;
+            busy = true; ok.disabled = true;
+            try {
+                if (step === 'intro') {
+                    await send(null);
+                } else if (step === 'phone') {
+                    const phone = _digitsOnly($('pv-phone').value);
+                    const norm = phone.startsWith('98') && phone.length === 12 ? '0' + phone.slice(2)
+                        : phone.length === 10 && phone.startsWith('9') ? '0' + phone : phone;
+                    if (!/^09\d{9}$/.test(norm)) { err.textContent = 'شماره را مثل 09123456789 بنویسید'; return; }
+                    await send(norm === _digitsOnly(known) ? null : norm);
+                } else {
+                    const code = _digitsOnly($('pv-code').value);
+                    if (code.length < 4) { err.textContent = 'کد کامل نیست'; return; }
+                    try {
+                        await apiCall('/users/me/phone/verify', { method: 'POST', body: JSON.stringify({ code }) });
+                        _markPhoneVerified();
+                        showToast('تأیید شد', 'شمارهٔ موبایل شما تأیید شد', 'success');
+                        close(true);
+                    } catch (e) { err.textContent = e.message; $('pv-code').select(); }
+                }
+            } finally { busy = false; ok.disabled = false; }
+        };
+        const onKey = e => {
+            if (e.key === 'Escape') close(false);
+            // Only from a field: Enter on «بعداً» must not send a code. (The
+            // intro's «تأیید شماره» is a button and answers its own click.)
+            if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT') submit();
+        };
+        ok.addEventListener('click', submit);
+        $('pv-cancel').addEventListener('click', () => close(false));
+        $('pv-change').addEventListener('click', showPhone);
+        $('pv-resend').addEventListener('click', async e => {
+            const b = e.currentTarget; b.disabled = true;
+            await send(null);
+            setTimeout(() => { b.disabled = false; }, 60000);
+        });
+        document.addEventListener('keydown', onKey);
+
+        // A number on file: say it is unverified and offer «تأیید شماره»;
+        // the SMS goes when they press it. No number: ask for one.
+        if (known) showIntro();
+        else setTimeout(() => $('pv-phone').focus(), 30);
+    });
+}
+
+function _markPhoneVerified() {
+    if (_currentUser) _currentUser.phone_verified = true;
+    if (typeof loadPhoneState === 'function') { try { loadPhoneState(); } catch (_) {} }
 }
 
 // ==================== Dashboard ====================
@@ -1952,7 +2209,7 @@ async function _loadDashboardWidgets() {
         try {
             const data = await apiCall('/crm/leads?limit=5');
             leadsEl.innerHTML = data.items.length ? data.items.map(l => {
-                const st = CRM_STATUS_LABELS[l.status] || { label: l.status, cls: 'bg-secondary' };
+                const st = CRM_STATUS_LABELS[l.status] || { label: esc(l.status), cls: 'bg-secondary' };
                 return `
                 <div class="mini-item" onclick="viewLead(${l.id})">
                     <div class="mi-ico"><i class="bi bi-person"></i></div>
@@ -2297,7 +2554,7 @@ async function viewProperty(id) {
                             <div class="carousel-inner">
                                 ${property.images.map((img, idx) => `
                                     <div class="carousel-item ${idx === 0 ? 'active' : ''}">
-                                        <img src="${img}" class="d-block w-100 rounded" alt="تصویر ${idx + 1}"
+                                        <img src="${safeUrl(img)}" class="d-block w-100 rounded" alt="تصویر ${idx + 1}"
                                              style="max-height: 400px; object-fit: cover;"
                                              onclick="openImageLightbox(this.src)" title="کلیک برای بزرگ‌نمایی">
                                     </div>
@@ -2542,8 +2799,8 @@ async function viewProperty(id) {
                             <div class="col-md-6">
                                 <label class="text-muted small">شماره تماس</label>
                                 <div class="h5 mb-0">
-                                    ${property.phone_number 
-                                        ? `<a href="tel:${safeTel(property.phone_number)}" class="text-success">${property.phone_number}</a>` 
+                                    ${property.phone_number
+                                        ? `<a href="tel:${safeTel(property.phone_number)}" class="text-success">${esc(property.phone_number)}</a>`
                                         : noPhoneCell(property)}
                                 </div>
                             </div>
@@ -3242,21 +3499,154 @@ async function loadScraperAccounts() {
         const d = await apiCall('/auth/cookies?mine=1');
         const rows = (d.cookies || []).slice().sort(
             (a, b) => (a.reveals || 0) - (b.reveals || 0));
+        _myDivarAccounts = rows;
         sel.innerHTML = '<option value="">خودکار — کم‌مصرف‌ترین</option>'
             + rows.map(c => {
                 const bits = [`${c.reveals || 0} افشا`];
+                if (c.is_enabled === false) bits.push('خاموش');
                 if (!c.is_valid) bits.push('نامعتبر');
                 if (c.identity_required_at) bits.push('احراز هویت لازم');
                 else if (c.challenged_at) bits.push('اخیراً کد خواسته');
-                const usable = c.is_valid && !c.identity_required_at;
-                return `<option value="${esc(c.phone_number)}"${usable ? '' : ' disabled'}>`
+                return `<option value="${esc(c.phone_number)}"${_divarUsable(c) ? '' : ' disabled'}>`
                      + `${esc(c.phone_number)} — ${esc(bits.join('، '))}</option>`;
             }).join('');
-        if (chosen) sel.value = chosen;
+        // A pick that has since been switched off or gone bad falls back to
+        // «خودکار» rather than quietly staying selected-but-disabled.
+        const keep = rows.find(c => c.phone_number === chosen);
+        sel.value = keep && _divarUsable(keep) ? chosen : '';
+        _renderScraperAccountList(rows);
         onScraperAccountChange();
     } catch (_) {
         // The form still works on «خودکار»; a picker that failed to load is
         // not a reason to block a scrape.
+    }
+}
+
+/* ── my Divar numbers, each with its own on/off ─────────────────────────
+ *
+ * «امکان فعال و غیرفعال کردن شماره با تاگل — شاید یک شماره در دسترس نباشد و
+ * در اسکرپ چرخشی به مشکل بخوریم: کد به آن شماره ارسال شود و آن شماره در
+ * دسترس نباشد.» Off = rotation, «خودکار» and the picker all pass it by, and
+ * a run that is on it right now moves to another of your numbers.        */
+let _myDivarAccounts = [];
+
+function _divarUsable(c) {
+    return !!c && c.is_valid && c.is_enabled !== false && !c.identity_required_at;
+}
+
+function _renderScraperAccountList(rows) {
+    const box = document.getElementById('scraper-account-list');
+    if (!box) return;
+    if (!rows.length) {
+        box.innerHTML = `<div class="acct-empty">هیچ شمارهٔ دیواری به نام شما ثبت نشده —
+            از <a href="#" onclick="showSection('auth');return false">احراز هویت دیوار</a> شمارهٔ خودتان را وارد کنید.</div>`;
+        return;
+    }
+    box.innerHTML = rows.map(c => {
+        const on = c.is_enabled !== false;
+        const state = !c.is_valid ? '<span class="acct-flag bad">نامعتبر</span>'
+            : c.identity_required_at ? '<span class="acct-flag warn">احراز هویت</span>'
+            : c.challenged_at ? '<span class="acct-flag warn" title="دیوار اخیراً برای این شماره کد خواسته">کد خواسته</span>'
+            : '';
+        // A div, not a <label>: switching a number off moves live runs, so
+        // only the switch itself may do it — not a tap on the number.
+        return `<div class="acct-row${on ? '' : ' is-off'}" title="${on ? 'روشن — در چرخش و «خودکار» استفاده می‌شود' : 'خاموش — هیچ اسکرپی از این شماره استفاده نمی‌کند'}">
+            <span class="form-check form-switch m-0">
+                <input class="form-check-input" type="checkbox" role="switch" ${on ? 'checked' : ''}
+                       onchange="toggleDivarNumber(${Number(c.id)}, this.checked, this)"
+                       aria-label="روشن/خاموش ${esc(c.phone_number)}">
+            </span>
+            <span class="acct-phone" dir="ltr">${esc(c.phone_number)}</span>
+            <span class="acct-meta">${formatNumber(c.reveals || 0)} افشا</span>
+            ${state}
+        </div>`;
+    }).join('');
+}
+
+async function toggleDivarNumber(id, enabled, input) {
+    if (input) input.disabled = true;
+    try {
+        const r = await apiCall(`/auth/cookies/${id}`, {
+            method: 'PATCH', body: JSON.stringify({ enabled }) });
+        const moved = (r.moved_jobs || []).length;
+        showToast(enabled ? 'روشن شد' : 'خاموش شد',
+            enabled ? `${r.phone_number} دوباره در چرخش است`
+                    : `${r.phone_number} دیگر استفاده نمی‌شود`
+                      + (moved ? ` — ${formatNumber(moved)} اسکرپ در حال اجرا به شمارهٔ دیگر شما منتقل می‌شود` : ''),
+            enabled ? 'success' : 'warning');
+        if (moved) loadJobs();
+    } catch (e) {
+        showToast('خطا', e.message, 'danger');
+    } finally {
+        loadScraperAccounts();
+        if (typeof checkCookieStatus === 'function') checkCookieStatus();
+    }
+}
+
+/* ── switching a running scrape onto another number ─────────────────────
+ *
+ * «وقتی با یک شماره در حال اسکرپ به مشکل خورد، بتوان شماره را در حین اسکرپ
+ * عوض کرد و ادامه را با شمارهٔ جدید ادامه داد.» The run does not stop: the
+ * switch is taken at its next listing, or at once if it is parked on a code
+ * prompt for the current number.                                         */
+async function switchJobAccount(jobId, currentPhone) {
+    let rows = [];
+    try { rows = (await apiCall('/auth/cookies?mine=1')).cookies || []; } catch (_) {}
+    const cur = _digits(currentPhone);
+    const choices = rows.filter(c => _divarUsable(c) && _digits(c.phone_number) !== cur)
+        .sort((a, b) => (a.reveals || 0) - (b.reveals || 0));
+    if (!choices.length) {
+        const go = await askConfirm({
+            icon: 'bi-sim-slash', title: 'شمارهٔ دیگری نیست',
+            body: 'فقط از شماره‌هایی که در پنل خودتان اضافه و تأیید شده‌اند می‌شود استفاده کرد، و شمارهٔ روشن و معتبر دیگری ندارید.',
+            note: 'برای شمارهٔ جدید، آن را در «احراز هویت دیوار» اضافه کنید و کد دیوار را وارد کنید؛ یا شمارهٔ خاموش را در فرم اسکرپر روشن کنید.',
+            okLabel: 'رفتن به احراز هویت دیوار', cancelLabel: 'بستن',
+        });
+        if (go) showSection('auth');
+        return false;
+    }
+    const picked = await askText({
+        icon: 'bi-arrow-left-right', title: 'تعویض شمارهٔ دیوار',
+        okLabel: 'تعویض و ادامه',
+        body: currentPhone
+            ? `اسکرپ الان روی <b dir="ltr">${esc(currentPhone)}</b> است. بدون توقف، با شمارهٔ دیگری از شماره‌های خودتان ادامه می‌دهد.`
+            : 'بدون توقف، با شمارهٔ دیگری از شماره‌های خودتان ادامه می‌دهد.',
+        note: 'فقط شماره‌های تأییدشدهٔ خودتان در این فهرست‌اند؛ شمارهٔ جدید را از «احراز هویت دیوار» اضافه کنید. '
+            + 'اگر گوشی این شماره در دسترس نیست، بهتر است آن را در فرم اسکرپر خاموش کنید تا دوباره انتخاب نشود.',
+        field: {
+            label: 'شمارهٔ جدید', value: '',
+            options: [['', 'خودکار — کم‌مصرف‌ترین شمارهٔ دیگر من'],
+                      ...choices.map(c => [c.phone_number, `${c.phone_number} — ${c.reveals || 0} افشا`])],
+        },
+    });
+    if (picked === null) return false;
+    try {
+        const r = await apiCall(`/scraper/jobs/${encodeURIComponent(jobId)}/switch-account`, {
+            method: 'POST', body: JSON.stringify(picked ? { phone: picked } : {}) });
+        showToast('ثبت شد', r.message || 'تعویض شماره ثبت شد', 'success');
+        loadJobs();
+        return true;
+    } catch (e) {
+        showToast('تعویض نشد', e.message, 'danger');
+        return false;
+    }
+}
+
+/** From the code prompt: the phone that should receive it is not in reach. */
+async function switchFromOtp() {
+    const key = document.getElementById('divar-otp-key')?.value || '';
+    const jobId = key ? key.split(':')[0] : '';
+    if (!jobId) return;
+    const phone = document.getElementById('otp2-phone')?.textContent || '';
+    const modalEl = document.getElementById('divarOtpModal');
+    // Out of the way while the picker asks; back if they change their mind.
+    bootstrap.Modal.getInstance(modalEl)?.hide();
+    const ok = await switchJobAccount(jobId, phone);
+    if (ok) {
+        _dismissedOtpKeys.add(key);          // this prompt is being abandoned
+        _otp2StopTimer();
+    } else {
+        new bootstrap.Modal(modalEl).show();
     }
 }
 
@@ -3698,10 +4088,12 @@ async function deleteSchedule(id) {
 
 async function executeBulkScraping(city, category, maxItems, downloadImages, filters = {}) {
     try {
-        // A number picked by hand wins; «خودکار» falls back to the active
-        // session, which is what this did before the picker existed.
+        // A number picked by hand wins. «خودکار» sends none, and the server
+        // picks the least-spent of YOUR switched-on numbers — which is what
+        // the option says. It used to send the primary/newest session, so
+        // «کم‌مصرف‌ترین» always meant the same number.
         const picked = document.getElementById('scraper-account')?.value || '';
-        const session = picked ? { phone_number: picked } : await _getActiveSession();
+        const session = picked ? { phone_number: picked } : null;
         // Strip null/undefined values so the API doesn't receive empty fields
         const cleanFilters = Object.fromEntries(
             Object.entries(filters).filter(([, v]) => v !== null && v !== undefined)
@@ -3998,7 +4390,7 @@ function _aiAgentCard(a) {
             </div>
             <div class="form-check form-switch m-0 ms-auto">
                 <input class="form-check-input" type="checkbox" id="ai-sw-${esc(a.key)}" ${a.enabled ? 'checked' : ''}
-                       onchange="aiAgentToggle('${esc(a.key)}', this.checked)">
+                       onchange="aiAgentToggle(${jsArg(a.key)}, this.checked)">
             </div>
         </div>
         <div class="ai-card-desc">${esc(a.desc)}</div>
@@ -4008,14 +4400,14 @@ function _aiAgentCard(a) {
             <span title="مدل این کار" dir="ltr">${esc(a.model || '—')}</span>
             <span>امروز: ${formatNumber(a.today.calls || 0)} فراخوانی · ${formatNumber(a.today.cost_toman || 0)} تومان</span>
             ${err ? `<button class="ai-err ${(a.today.ok_since_error || 0) >= 5 ? 'is-stale' : ''}"
-                onclick="aiShowErrors('${esc(a.key)}')"
+                onclick="aiShowErrors(${jsArg(a.key)})"
                 title="${esc(a.today.last_error || '')}">
                 ${formatNumber(err)} خطا${(a.today.ok_since_error || 0) >= 5
                     ? ` · از آن به بعد ${formatNumber(a.today.ok_since_error)} موفق`
                     : ''}${a.today.last_error_at ? ` · آخری ${esc(a.today.last_error_at.slice(11, 16))}` : ''}
             </button>` : ''}
             <span class="text-muted">ماه: ${formatNumber(a.month.calls || 0)} · ${formatNumber(a.month.cost_toman || 0)} تومان</span>
-            ${runnable ? `<button class="btn btn-sm btn-outline-primary ms-auto" onclick="aiRunAgent('${esc(a.key)}', this)">
+            ${runnable ? `<button class="btn btn-sm btn-outline-primary ms-auto" onclick="aiRunAgent(${jsArg(a.key)}, this)">
                 <i class="bi bi-play-fill"></i> اجرای یک دور</button>` : ''}
         </div>
     </div>`;
@@ -4255,6 +4647,91 @@ async function loadBackup() {
     } catch (e) {
         badge.textContent = 'نامشخص'; badge.className = 'badge bg-secondary';
     }
+    loadDr();
+}
+
+// ── the full bundle (بکاپ کامل): built and shipped by the host, not the pod ──
+const _drVia = v => v === 'direct' ? 'مستقیم' : v === 'relay' ? 'رله' : v;
+
+async function loadDr() {
+    const badge = document.getElementById('dr-badge');
+    if (!badge) return null;
+    let s;
+    try { s = await apiCall('/backup/dr'); }
+    catch (e) { badge.textContent = 'نامشخص'; badge.className = 'badge bg-secondary'; return null; }
+    const run = s.last_run || {}, sent = run.sent || {};
+    // a run that died before shipping only leaves an alert; newer than the
+    // last shipment means the last shipment is not the current state
+    const failed = s.last_alert && (!sent.at || s.last_alert.at > sent.at);
+    const last = document.getElementById('dr-last');
+    if (!sent.at) {
+        last.innerHTML = html`<span class="text-muted">هنوز اجرا نشده — ${s.schedule_fa}</span>`;
+    } else if (sent.ok) {
+        const size = run.bytes ? ` · ${formatNumber(Math.max(1, Math.round(run.bytes / 1048576)))} مگابایت در ${formatNumber(run.parts || 1)} تکه` : '';
+        last.innerHTML = html`<span class="text-success">✓ ${_bkWhen(sent.at)}</span> <span class="text-muted">· به ${formatNumber((sent.delivered || []).length)} چت · ${(sent.via || []).map(_drVia).join('، ')}${size}</span>`
+            + (sent.error ? html` <span class="text-warning">— نرسید: ${sent.error}</span>` : '');
+    } else {
+        last.innerHTML = html`<span class="text-danger">✗ ${_bkWhen(sent.at)} — ${sent.error || 'ارسال نشد'}</span>`;
+    }
+    const state = [];
+    if (failed) state.push(html`<div class="text-danger">✗ ${_bkWhen(s.last_alert.at)} — ${s.last_alert.text}</div>`);
+    if (s.requested) state.push('<div class="text-info">در صف — سرور تا چند دقیقهٔ دیگر شروع می‌کند</div>');
+    if ((s.undelivered || []).length) state.push(html`<div class="text-warning">${formatNumber(s.undelivered.length)} بستهٔ ارسال‌نشده منتظر تلاش بعدی</div>`);
+    document.getElementById('dr-state').innerHTML = state.join('')
+        || html`<span class="text-muted">${s.schedule_fa}</span>`;
+    const bad = failed || (sent.at && !sent.ok);
+    badge.textContent = bad ? 'ناموفق' : s.requested ? 'در صف' : sent.ok ? 'فعال' : 'در انتظار اولین اجرا';
+    badge.className = 'badge ' + (bad ? 'bg-danger' : s.requested ? 'bg-info text-dark' : sent.ok ? 'bg-success' : 'bg-secondary');
+    return s;
+}
+
+/** «همین حالا»: the pod only drops a request; the host's watcher builds the bundle. */
+async function drRunNow() {
+    const btn = document.getElementById('dr-run');
+    btn.disabled = true;
+    try {
+        await apiCall('/backup/dr/run', { method: 'POST' });
+        showToast('درخواست ثبت شد', 'سرور بکاپ کامل را می‌سازد و به تلگرام می‌فرستد — چند دقیقه طول می‌کشد', 'success');
+    } catch (e) {
+        showToast('ثبت نشد', e.message, 'warning');
+    }
+    btn.disabled = false;
+    // follow the host for a few minutes, until it has picked the request up
+    for (let i = 0; i < 12; i++) {
+        const s = await loadDr();
+        if (!s || !s.requested) break;
+        await new Promise(r => setTimeout(r, 15000));
+    }
+}
+
+/** «تست همهٔ راه‌ها»: getMe straight, through the relay, and through each proxy. */
+async function drDiagnose() {
+    const btn = document.getElementById('dr-diag');
+    const box = document.getElementById('dr-diag-rows');
+    btn.disabled = true;
+    box.innerHTML = '<span class="text-muted">هر راه جدا امتحان می‌شود…</span>';
+    try {
+        const r = await apiCall('/backup/diagnose', { method: 'POST' });
+        const name = { direct: 'مستقیم', relay: 'رله', proxy: 'پراکسی' };
+        box.innerHTML = (r.rows || []).map(x => html`<div class="${x.ok ? 'text-success' : 'text-danger'}">${x.ok ? '✓' : '✗'} ${name[x.route] || x.route} <span dir="ltr" class="text-muted">${x.target}</span> · ${formatNumber(x.ms)} ms${x.ok ? '' : ' — ' + (x.error || 'نرسید')}</div>`).join('')
+            || '<span class="text-muted">هیچ راهی تنظیم نشده است</span>';
+    } catch (e) {
+        box.innerHTML = html`<span class="text-danger">${e.message}</span>`;
+    }
+    btn.disabled = false;
+}
+
+/** The Worker's code, read from the one the repo tests (deploy/telegram-relay/worker.js). */
+async function bkToggleWorker() {
+    const pre = document.getElementById('bk-relay-code');
+    pre.classList.toggle('d-none');
+    if (pre.classList.contains('d-none') || pre.textContent) return;
+    pre.textContent = 'در حال خواندن…';
+    try {
+        pre.textContent = await apiCall('/backup/relay-worker', { raw: true });
+    } catch (e) {
+        pre.textContent = `کد Worker خوانده نشد: ${e.message}`;
+    }
 }
 
 // ── the morning digest ──
@@ -4435,7 +4912,7 @@ async function bkProbe() {
             return;
         }
         box.innerHTML = `<div class="small text-muted mb-1">ربات <b dir="ltr">@${esc(r.bot)}</b> — یکی را انتخاب کنید:</div>` +
-            r.chats.map(c => `<button class="btn btn-sm btn-outline-secondary me-1 mb-1" onclick="bkPickChat('${esc(c.id)}')">
+            r.chats.map(c => `<button class="btn btn-sm btn-outline-secondary me-1 mb-1" onclick="bkPickChat(${jsArg(c.id)})">
                 ${esc(c.name || c.id)} <span class="text-muted" dir="ltr">${esc(c.id)}</span></button>`).join('') +
             '<div class="small text-muted mt-1">هر کدام را بزنید به فهرست اضافه می‌شود؛ بعد «ذخیره».</div>';
     } catch (e) {
@@ -4723,7 +5200,8 @@ async function _getActiveSession() {
     // and read another user's number as «شمارهٔ فعال».
     try {
         const data = await apiCall('/auth/cookies?mine=1');
-        const valid = (data.cookies || []).filter(c => c.is_valid);
+        // Switched off, or waiting on Divar's identity check, is not «active».
+        const valid = (data.cookies || []).filter(_divarUsable);
         if (!valid.length) return null;
         const primary = _digits(_currentUser?.divar_phone);
         const mine = primary && valid.find(c => _digits(c.phone_number) === primary);
@@ -4791,7 +5269,7 @@ async function checkAuthStatus() {
             statusDiv.innerHTML = `
                 <i class="bi bi-check-circle"></i>
                 <strong>وضعیت: متصل</strong><br>
-                شماره فعال: <strong>${session.phone_number}</strong>
+                شماره فعال: <strong>${esc(session.phone_number)}</strong>
             `;
         } else {
             // check if any (expired) cookies exist
@@ -4901,8 +5379,8 @@ function _renderJobsTable(items) {
     };
     items.forEach(job => {
         const row = document.createElement('tr');
-        const statusClass = `status-${job.status}`;
-        const statusLabel = JOB_STATUS_FA[job.status] || job.status;
+        const statusClass = `status-${esc(job.status)}`;
+        const statusLabel = JOB_STATUS_FA[job.status] || esc(job.status);
         row.innerHTML = `
             <td><code class="job-id" title="${esc(job.job_id)}">${job.job_id.substring(0, 6)}</code></td>
             <td>${job.category_name ? `<span class="badge bg-primary">${esc(job.category_name)}</span>` : '—'}</td>
@@ -4961,6 +5439,13 @@ function _renderJobsTable(items) {
                         title="آگهی‌هایی که این اسکرپ ذخیره نکرد">
                     <i class="bi bi-slash-circle"></i>
                 </button>
+                ${['running', 'paused', 'pending'].includes(job.status)
+                  && job.owner_user_id != null && job.owner_user_id === _currentUser?.id ? `
+                    <button class="btn btn-sm btn-outline-warning" onclick="switchJobAccount('${job.job_id}', '${_digits(job.divar_phone)}')"
+                            title="تعویض شمارهٔ دیوار بدون توقف اسکرپ">
+                        <i class="bi bi-arrow-left-right"></i>
+                    </button>
+                ` : ''}
                 ${['running', 'paused', 'pending'].includes(job.status) ? `
                     <button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.job_id}')"
                             title="لغو تسک">
@@ -5300,7 +5785,7 @@ async function initiateLogin() {
                 verifyForm.insertBefore(el, verifyForm.firstChild);
                 return el;
             })();
-            waitMsg.innerHTML = `<i class="bi bi-phone"></i> کد تأیید به <strong>${phone}</strong> ارسال شد.<br>
+            waitMsg.innerHTML = `<i class="bi bi-phone"></i> کد تأیید به <strong>${esc(phone)}</strong> ارسال شد.<br>
                 <small class="text-muted">ممکن است تا ۳۰ ثانیه طول بکشد. منتظر SMS باشید.</small>`;
 
             _clearOtpBoxes();
@@ -5524,28 +6009,112 @@ async function loadCookies() {
         }
         
         container.innerHTML = data.cookies.map(cookie => `
-            <div class="d-flex justify-content-between align-items-center p-2 border-bottom">
+            <div class="d-flex justify-content-between align-items-center p-2 border-bottom${cookie.is_enabled === false ? ' opacity-50' : ''}">
                 <div>
-                    <strong>${cookie.phone_number}</strong>
+                    <strong dir="ltr">${esc(cookie.phone_number)}</strong>
                     <br>
-                    <small class="text-muted">${cookie.is_valid ? 'معتبر' : 'منقضی'}</small>
+                    <small class="text-muted">${cookie.is_valid ? 'معتبر' : 'منقضی'}${cookie.is_enabled === false ? ' · خاموش' : ''}</small>
                     ${cookie.identity_required_at ? `
                         <div class="mt-1">
                             <span class="badge bg-danger" title="دیوار برای این شماره احراز هویت با کد ملی می‌خواهد؛ تا انجام نشود در چرخش نیست">
                                 <i class="bi bi-person-badge"></i> احراز هویت لازم
                             </span>
-                            <button class="btn btn-sm btn-link p-0 ms-1 small" onclick="_identityCleared('${esc(cookie.phone_number)}')">انجام شد</button>
+                            <button class="btn btn-sm btn-link p-0 ms-1 small" onclick="_identityCleared(${jsArg(cookie.phone_number)})">انجام شد</button>
                         </div>` : ''}
                 </div>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${cookie.id})">
-                    <i class="bi bi-trash"></i>
-                </button>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="form-check form-switch m-0" title="روشن/خاموش برای اسکرپ — خاموش یعنی گوشی این شماره در دسترس نیست">
+                        <input class="form-check-input" type="checkbox" role="switch" ${cookie.is_enabled !== false ? 'checked' : ''}
+                               onchange="toggleDivarNumber(${Number(cookie.id)}, this.checked, this).then(loadCookies)"
+                               aria-label="روشن/خاموش ${esc(cookie.phone_number)}">
+                    </span>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${Number(cookie.id)})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
             </div>
         `).join('');
         
     } catch (error) {
         console.error('Failed to load cookies:', error);
     }
+}
+
+/* ── root: every Divar number and its owner ────────────────────────────────
+ *
+ * «یک بخش فقط برای root که همهٔ شماره‌ها را با صاحبشان نشان دهد و بتوان
+ * مالکیت را اصلاح کرد.» The only place ownership changes by hand; the server
+ * refuses everyone but root and writes each change to the audit log.     */
+let _registryUsers = [];
+
+async function loadNumbersRegistry() {
+    const card = document.getElementById('numbers-registry-card');
+    const tb = document.getElementById('numbers-registry');
+    if (!card || !tb) return;
+    if (_currentUser?.role !== 'root') { card.classList.add('d-none'); return; }
+    card.classList.remove('d-none');
+    tb.innerHTML = '<tr><td colspan="6" class="text-muted small p-3">در حال بارگذاری…</td></tr>';
+    try {
+        const d = await apiCall('/auth/registry');
+        _registryUsers = d.users || [];
+        const rows = d.numbers || [];
+        const off = rows.filter(r => r.suggested_owner).length;
+        document.getElementById('numbers-registry-summary').textContent =
+            `${formatNumber(rows.length)} شماره` + (off ? ` · ${formatNumber(off)} مورد برای بررسی` : '');
+        if (!rows.length) {
+            tb.innerHTML = '<tr><td colspan="6" class="text-muted small p-3">هیچ شمارهٔ دیواری ذخیره نشده است</td></tr>';
+            return;
+        }
+        const opts = sel => _registryUsers.map(u =>
+            `<option value="${Number(u.id)}"${u.id === sel ? ' selected' : ''}>${esc(u.name)}${u.is_active ? '' : ' (غیرفعال)'}</option>`).join('');
+        tb.innerHTML = rows.map(r => {
+            const state = [
+                r.is_valid ? '<span class="badge bg-success">معتبر</span>' : '<span class="badge bg-secondary">نامعتبر</span>',
+                r.is_enabled ? '' : '<span class="badge bg-dark">خاموش</span>',
+                r.identity_required_at ? '<span class="badge bg-danger">احراز هویت</span>' : '',
+                r.in_use ? '<span class="badge bg-info text-dark">در حال اسکرپ</span>' : '',
+            ].join(' ');
+            const hint = r.suggested_owner
+                ? `<button class="btn btn-sm btn-link p-0" onclick="document.getElementById('reg-owner-${Number(r.id)}').value='${Number(r.suggested_owner.id)}'"
+                           title="${r.suggested_owner.why === 'forwarder' ? 'سیم‌کارت این شماره در گوشی این کاربر است' : 'این کاربر این شماره را شمارهٔ دیوار خود اعلام کرده'}">
+                       ${esc(r.suggested_owner.name)} <i class="bi bi-arrow-return-left"></i></button>`
+                : '<span class="text-muted small">—</span>';
+            return `<tr class="${r.suggested_owner ? 'registry-flag' : ''}">
+                <td dir="ltr" class="fw-semibold">${esc(r.phone_number)}</td>
+                <td><select class="form-select form-select-sm" id="reg-owner-${Number(r.id)}">
+                    ${r.owner_user_id == null ? '<option value="" selected>— بدون صاحب —</option>' : ''}${opts(r.owner_user_id)}</select></td>
+                <td class="small">${state}</td>
+                <td class="small">${formatNumber(r.reveals || 0)}</td>
+                <td class="small">${hint}</td>
+                <td class="text-nowrap">
+                    <button class="btn btn-sm btn-primary" onclick="saveNumberOwner(${Number(r.id)}, ${jsArg(r.phone_number)})">ذخیره</button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${Number(r.id)}).then(loadNumbersRegistry)" title="حذف نشست">
+                        <i class="bi bi-trash"></i></button>
+                </td></tr>`;
+        }).join('');
+    } catch (e) {
+        tb.innerHTML = `<tr><td colspan="6" class="text-danger small p-3">${esc(e.message || 'خطا')}</td></tr>`;
+    }
+}
+
+async function saveNumberOwner(id, phone) {
+    const sel = document.getElementById(`reg-owner-${Number(id)}`);
+    const uid = parseInt(sel?.value || '', 10);
+    if (!uid) { showToast('توجه', 'صاحب شماره را انتخاب کنید', 'warning'); return; }
+    const who = (_registryUsers.find(u => u.id === uid) || {}).name || '';
+    if (!await askConfirm({ icon: 'bi-person-check', title: 'تغییر صاحب شماره', okLabel: 'ثبت',
+        body: `شمارهٔ <b dir="ltr">${esc(phone)}</b> از این پس فقط در اختیار <b>${esc(who)}</b> است.`,
+        note: 'اگر اسکرپی از صاحب قبلی روی این شماره در حال اجراست، به شمارهٔ دیگری از خودش منتقل می‌شود.' })) {
+        loadNumbersRegistry();
+        return;
+    }
+    try {
+        const r = await apiCall(`/auth/registry/${Number(id)}/owner`, {
+            method: 'PATCH', body: JSON.stringify({ owner_user_id: uid }) });
+        showToast('ثبت شد', r.changed ? `${phone} به ${r.owner_name} داده شد` : 'تغییری لازم نبود', 'success');
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+    loadNumbersRegistry();
+    loadCookies();
 }
 
 async function deleteCookie(id) {
@@ -6253,7 +6822,7 @@ async function loadProxies() {
         data.items.forEach(proxy => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${proxy.address}</td>
+                <td>${esc(proxy.address)}</td>
                 <td>${proxy.port}</td>
                 <td>
                     <span class="badge ${proxy.is_working ? 'bg-success' : 'bg-danger'}">
@@ -6481,7 +7050,7 @@ function _renderLeadPhotos() {
     if (!wrap) return;
     wrap.innerHTML = _leadPhotos.map((u, i) => `
         <div class="lead-photo-thumb">
-            <img src="${u}" alt="">
+            <img src="${safeManualPhoto(u)}" alt="">
             <button type="button" onclick="_removeLeadPhoto(${i})">✕</button>
         </div>`).join('');
 }
@@ -7086,7 +7655,7 @@ async function loadLeads() {
                 <td class="leads-spec">${_leadSpecChips(lead)}</td>
                 <td class="leads-phone">
                     ${lead.phone_number
-                        ? `<a href="tel:${safeTel(lead.phone_number)}" class="text-success fw-bold">${lead.phone_number}</a>`
+                        ? `<a href="tel:${safeTel(lead.phone_number)}" class="text-success fw-bold">${esc(lead.phone_number)}</a>`
                         : noPhoneCell(lead)}
                 </td>
                 <td>
@@ -7284,7 +7853,7 @@ function _renderPropertyDetails(p) {
                 <div class="lead-photo-strip">
                     ${p.images.map((img, i) => `
                         <div class="lead-photo-thumb" style="width:92px;height:92px;cursor:zoom-in">
-                            <img src="${img}" alt="تصویر ${i + 1}" onclick="openImageLightbox(this.src)">
+                            <img src="${safeUrl(img)}" alt="تصویر ${i + 1}" onclick="openImageLightbox(this.src)">
                         </div>`).join('')}
                 </div>
             </div>
@@ -7411,7 +7980,7 @@ function _matchCard(m) {
                 <i class="bi bi-eye"></i> جزئیات
             </button>
             ${m.phone_number ? `<a href="tel:${safeTel(m.phone_number)}" class="btn btn-sm btn-outline-success">
-                <i class="bi bi-telephone"></i> ${m.phone_number}</a>` : ''}
+                <i class="bi bi-telephone"></i> ${esc(m.phone_number)}</a>` : ''}
         </div>
     </div>`;
 }
@@ -7424,7 +7993,7 @@ const MATCH_TYPE_FA = { apartment: 'آپارتمان', house: 'ویلایی / خ
 function _matchCriteria(intent) {
     if (!intent) return '';
     const bits = [intent.listing_type === 'rent' ? 'رهن و اجاره' : 'خرید'];
-    if (intent.family) bits.push(MATCH_TYPE_FA[intent.family] || intent.family);
+    if (intent.family) bits.push(MATCH_TYPE_FA[intent.family] || esc(intent.family));
     if (intent.city) bits.push(esc(intent.city));
     return bits.join(' • ');
 }
@@ -7520,7 +8089,7 @@ async function viewLead(id) {
                     <label class="text-muted small">شماره تماس</label>
                     <div class="h5 text-success mb-0">
                         ${lead.phone_number
-                            ? `<a href="tel:${safeTel(lead.phone_number)}">${lead.phone_number}</a>`
+                            ? `<a href="tel:${safeTel(lead.phone_number)}">${esc(lead.phone_number)}</a>`
                             : '---'}
                     </div>
                 </div>
@@ -7530,7 +8099,7 @@ async function viewLead(id) {
                 </div>
                 <div class="col-md-4">
                     <label class="text-muted small">شهر</label>
-                    <div>${lead.city_name || '---'}</div>
+                    <div>${esc(lead.city_name) || '---'}</div>
                 </div>
                 <div class="col-md-4">
                     <label class="text-muted small">قیمت</label>
@@ -7548,7 +8117,7 @@ async function viewLead(id) {
                     <label class="text-muted small">اطلاع‌رسانی</label>
                     <div>
                         ${lead.notified
-                            ? `<span class="badge bg-success">بله (${lead.notification_channel})</span>`
+                            ? `<span class="badge bg-success">بله (${esc(lead.notification_channel)})</span>`
                             : '<span class="badge bg-secondary">خیر</span>'}
                     </div>
                 </div>
@@ -7575,7 +8144,7 @@ async function viewLead(id) {
                 <div class="col-md-6">
                     <label class="form-label">منطقه</label>
                     <input type="text" id="lead-edit-district" class="form-control"
-                           value="${lead.district || ''}" placeholder="مثلاً: خیابان کاشانی">
+                           value="${esc(lead.district || '')}" placeholder="مثلاً: خیابان کاشانی">
                 </div>
                 <div class="col-12">
                     <label class="form-label">یادداشت</label>
@@ -7757,9 +8326,9 @@ async function loadDpa() {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${d.id}</td>
-                <td>${d.date_jalali || '---'}</td>
+                <td>${esc(d.date_jalali) || '---'}</td>
                 <td class="fw-bold">${esc(d.agent_name)}</td>
-                <td>${DPA_ROLE_LABELS[d.role] || d.role || '---'}</td>
+                <td>${DPA_ROLE_LABELS[d.role] || esc(d.role) || '---'}</td>
                 <td>${d.base_score}</td>
                 <td class="text-info">+${formatNumber(d.activity_score ?? 0)}</td>
                 <td class="text-success">+${d.bonus_score}</td>
@@ -7949,7 +8518,7 @@ async function loadCustomers() {
         }
 
         data.items.forEach(c => {
-            const t = CUSTOMER_TEMP_LABELS[c.temperature] || { label: c.temperature || '---', cls: 'bg-secondary' };
+            const t = CUSTOMER_TEMP_LABELS[c.temperature] || { label: esc(c.temperature) || '---', cls: 'bg-secondary' };
             const nextFollowup = (c.followups && c.followups.length)
                 ? `${c.followups[0].date || ''} ${c.followups[0].time || ''}`.trim() || '---'
                 : '---';
@@ -7959,13 +8528,13 @@ async function loadCustomers() {
             row.innerHTML = `
                 <td>${c.id}</td>
                 <td class="fw-bold">${esc(c.full_name)}${isNew ? ' <span class="badge bg-success" style="font-size:.6rem;vertical-align:middle">جدید</span>' : ''}</td>
-                <td>${c.mobile1 ? `<a href="tel:${safeTel(c.mobile1)}" class="text-success">${c.mobile1}</a>` : '---'}</td>
+                <td>${c.mobile1 ? `<a href="tel:${safeTel(c.mobile1)}" class="text-success">${esc(c.mobile1)}</a>` : '---'}</td>
                 <td><span class="badge ${t.cls}">${t.label}</span></td>
                 <td>${CUSTOMER_SOURCE_LABELS[c.source] || '---'}</td>
                 <td>${c.budget_max ? formatPrice(c.budget_max) : '---'}</td>
-                <td>${c.desired_district || '---'}</td>
-                <td>${c.consultant_name || '---'}</td>
-                <td>${nextFollowup}</td>
+                <td>${esc(c.desired_district) || '---'}</td>
+                <td>${esc(c.consultant_name) || '---'}</td>
+                <td>${esc(nextFollowup)}</td>
                 <td>
                     <button class="btn btn-sm btn-match" onclick="showMatchesForCustomer(${c.id})" title="ملک‌های پیشنهادی">
                         <i class="bi bi-magic"></i>
@@ -7989,14 +8558,14 @@ function _custRemoveRow(btn) { btn.closest('tr').remove(); }
 function addShowingRow(data = {}) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-        <td><input type="text" class="form-control form-control-sm cust-sh-code" value="${data.file_code || ''}" placeholder="SF-..."></td>
-        <td><input type="text" class="form-control form-control-sm cust-sh-desc" value="${data.description || ''}" placeholder="شرح ملک"></td>
-        <td><input type="text" class="form-control form-control-sm cust-sh-feedback" value="${data.feedback || ''}" placeholder="بازخورد"></td>
+        <td><input type="text" class="form-control form-control-sm cust-sh-code" value="${esc(data.file_code || '')}" placeholder="SF-..."></td>
+        <td><input type="text" class="form-control form-control-sm cust-sh-desc" value="${esc(data.description || '')}" placeholder="شرح ملک"></td>
+        <td><input type="text" class="form-control form-control-sm cust-sh-feedback" value="${esc(data.feedback || '')}" placeholder="بازخورد"></td>
         <td>
             <select class="form-select form-select-sm cust-sh-step">
                 <option value="">---</option>
                 ${Object.entries(SHOWING_STEP_LABELS).map(([v, l]) =>
-                    `<option value="${v}" ${data.next_step === v ? 'selected' : ''}>${l}</option>`).join('')}
+                    `<option value="${esc(v)}" ${data.next_step === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
             </select>
         </td>
         <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="_custRemoveRow(this)"><i class="bi bi-x"></i></button></td>`;
@@ -8006,9 +8575,9 @@ function addShowingRow(data = {}) {
 function addFollowupRow(data = {}) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-        <td><input type="text" class="form-control form-control-sm cust-fu-date" value="${data.date || ''}" placeholder="۱۴۰۵/۰۵/۰۱"></td>
-        <td><input type="text" class="form-control form-control-sm cust-fu-time" value="${data.time || ''}" placeholder="۱۴:۳۰"></td>
-        <td><input type="text" class="form-control form-control-sm cust-fu-action" value="${data.action || ''}" placeholder="چه چیزی باید پیگیری یا ارائه شود؟"></td>
+        <td><input type="text" class="form-control form-control-sm cust-fu-date" value="${esc(data.date || '')}" placeholder="۱۴۰۵/۰۵/۰۱"></td>
+        <td><input type="text" class="form-control form-control-sm cust-fu-time" value="${esc(data.time || '')}" placeholder="۱۴:۳۰"></td>
+        <td><input type="text" class="form-control form-control-sm cust-fu-action" value="${esc(data.action || '')}" placeholder="چه چیزی باید پیگیری یا ارائه شود؟"></td>
         <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="_custRemoveRow(this)"><i class="bi bi-x"></i></button></td>`;
     document.getElementById('cust-followups-body').appendChild(tr);
 }
@@ -8305,10 +8874,21 @@ function _userRow(u) {
     // the phone, and until there is an SMS provider that is every code
     // we send. Someone about to ring this number needs to know which of
     // the two they are looking at, so each contact carries its own tick.
-    const tick = (val, ok, okText, noText) => !val ? '' :
-        `<div class="u-line"><i class="bi ${String(val).includes('@') ? 'bi-envelope' : 'bi-telephone'}"></i>
+    //
+    // root sees a switch instead of the dot: «فقط اکانت root می‌تواند به صورت
+    // دستی و با تاگل، شماره و ایمیل کاربران را تأیید کند». Everybody else
+    // still sees the dot — the server refuses the change for any other role.
+    const canVerify = _currentUser?.role === 'root';
+    const tick = (val, ok, okText, noText, kind) => !val ? '' :
+        `<div class="u-line"><i class="bi ${kind === 'email' ? 'bi-envelope' : 'bi-telephone'}"></i>
            <span dir="ltr" class="u-val">${esc(val)}</span>
-           <i class="u-tick ${ok ? 'ok' : 'no'}" title="${ok ? okText : noText}"></i>
+           ${canVerify
+             ? `<span class="form-check form-switch m-0 u-verify" title="${ok ? okText : noText} — تأیید دستی (فقط root)">
+                  <input class="form-check-input" type="checkbox" role="switch" ${ok ? 'checked' : ''}
+                         onchange="setUserVerified(${Number(u.id)}, '${kind === 'email' ? 'email' : 'phone'}', this.checked, this)"
+                         aria-label="${kind === 'email' ? 'تأیید ایمیل' : 'تأیید شماره'} ${esc(val)}">
+                </span>`
+             : `<i class="u-tick ${ok ? 'ok' : 'no'}" title="${ok ? okText : noText}"></i>`}
          </div>`;
     // Somebody with a stuck «!» can be asked to fix it from here — the
     // one screen where the person who notices is already looking.
@@ -8329,8 +8909,8 @@ function _userRow(u) {
     const privileged = ['root', 'super_admin', 'admin'].includes(u.role);
     const noRecovery = privileged && !(u.email || '').trim() && u.is_active;
     const contact =
-        (tick(u.phone, u.phone_verified, 'شماره با پیامک تأیید شده', 'شماره تأیید نشده — کدی با پیامک ارسال نشده است') +
-         tick(u.email, u.email_verified, 'ایمیل تأیید شده', 'ایمیل تأیید نشده') +
+        (tick(u.phone, u.phone_verified, 'شماره تأیید شده', 'شماره تأیید نشده — کدی با پیامک پاسخ داده نشده است', 'phone') +
+         tick(u.email, u.email_verified, 'ایمیل تأیید شده', 'ایمیل تأیید نشده', 'email') +
          (u.divar_phone ? `<div class="u-line u-divar" title="شماره‌ای که با آن در دیوار وارد می‌شود">
              <i class="bi bi-phone"></i><span dir="ltr" class="u-val">${esc(u.divar_phone)}</span><span class="u-muted">دیوار</span></div>` : ''))
         || '<span class="u-muted">—</span>';
@@ -8590,8 +9170,8 @@ async function loadTasks() {
         if (!tbody) return;
         if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">وظیفه‌ای یافت نشد</td></tr>'; return; }
         tbody.innerHTML = data.items.map(t => {
-            const p = TASK_PRIORITY_LABELS[t.priority] || { label: t.priority, cls: 'bg-secondary' };
-            const s = TASK_STATUS_LABELS[t.status] || { label: t.status, cls: 'bg-secondary' };
+            const p = TASK_PRIORITY_LABELS[t.priority] || { label: esc(t.priority), cls: 'bg-secondary' };
+            const s = TASK_STATUS_LABELS[t.status] || { label: esc(t.status), cls: 'bg-secondary' };
             const due = t.due_date ? new Date(t.due_date).toLocaleDateString('fa-IR') : '—';
             return `<tr>
                 <td>${esc(t.title)}</td>
@@ -8700,20 +9280,20 @@ async function loadContacts() {
         if (!tbody) return;
         if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">مخاطبی یافت نشد</td></tr>'; return; }
         tbody.innerHTML = data.items.map(c => {
-            const typeInfo = CONTACT_TYPE_LABELS[c.contact_type] || { label: c.contact_type, cls: 'bg-secondary' };
+            const typeInfo = CONTACT_TYPE_LABELS[c.contact_type] || { label: esc(c.contact_type), cls: 'bg-secondary' };
             const catCls = c.category === 'VIP' ? 'bg-warning text-dark' : c.category === 'cold' ? 'bg-secondary' : 'bg-info text-white';
             const tags = _tagList(c.tags).map(t => `<span class="badge bg-dark me-1">${esc(t)}</span>`).join('');
             return `<tr>
                 <td>${esc(c.name)}</td>
-                <td>${c.phone || '—'}</td>
+                <td>${esc(c.phone) || '—'}</td>
                 <td><span class="badge ${typeInfo.cls}">${typeInfo.label}</span></td>
-                <td><span class="badge ${catCls}">${c.category || 'عادی'}</span></td>
+                <td><span class="badge ${catCls}">${esc(c.category) || 'عادی'}</span></td>
                 <td>${esc(c.city) || '—'}</td>
                 <td>${tags || '—'}</td>
                 <td>
                     <button class="btn btn-xs btn-outline-primary" onclick="openContactModal(${c.id})"><i class="bi bi-pencil"></i></button>
                     <button class="btn btn-xs btn-outline-danger" onclick="deleteContact(${c.id})"><i class="bi bi-trash"></i></button>
-                    <button class="btn btn-xs btn-outline-info" onclick="quickSmsToContact('${c.phone || ''}')"><i class="bi bi-chat-dots"></i></button>
+                    <button class="btn btn-xs btn-outline-info" onclick="quickSmsToContact(${jsArg(c.phone || '')})"><i class="bi bi-chat-dots"></i></button>
                 </td>
             </tr>`;
         }).join('');
@@ -8827,8 +9407,8 @@ async function loadDeals() {
         if (!tbody) return;
         if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">معامله‌ای یافت نشد</td></tr>'; return; }
         tbody.innerHTML = data.items.map(d => {
-            const s = DEAL_STATUS_LABELS[d.status] || { label: d.status, cls: 'bg-secondary' };
-            const dealTypeLabel = { buy: 'خرید', rent: 'اجاره', lease: 'رهن' }[d.deal_type] || d.deal_type;
+            const s = DEAL_STATUS_LABELS[d.status] || { label: esc(d.status), cls: 'bg-secondary' };
+            const dealTypeLabel = { buy: 'خرید', rent: 'اجاره', lease: 'رهن' }[d.deal_type] || esc(d.deal_type);
             const amount = d.amount ? formatNumber(d.amount) + ' ت' : '—';
             const date = d.contract_date ? new Date(d.contract_date).toLocaleDateString('fa-IR') : '—';
             return `<tr>
@@ -9091,9 +9671,9 @@ async function loadSmsLogs() {
             const dt = s.sent_at ? new Date(s.sent_at).toLocaleString('fa-IR') : '—';
             const msg = s.message?.length > 50 ? s.message.slice(0, 50) + '…' : (s.message || '—');
             return `<tr>
-                <td>${s.to_number}</td>
+                <td>${esc(s.to_number)}</td>
                 <td>${providerLabel}</td>
-                <td title="${s.message || ''}">${msg}</td>
+                <td title="${esc(s.message || '')}">${esc(msg)}</td>
                 <td><span class="badge ${statusCls}">${statusLabel}</span></td>
                 <td>${dt}</td>
             </tr>`;
@@ -9362,7 +9942,7 @@ function _matchQueueCard(m) {
         .filter(Boolean).map(esc).join(' · ');
     const wants = [c.desired_district, c.desired_specs, c.budget_max ? 'تا ' + formatPrice(c.budget_max) : '']
         .filter(Boolean).map(esc).join(' · ');
-    const temp = { hot: ['bg-danger', 'داغ'], warm: ['bg-warning text-dark', 'گرم'], cold: ['bg-secondary', 'سرد'] }[c.temperature] || ['bg-secondary', c.temperature || ''];
+    const temp = { hot: ['bg-danger', 'داغ'], warm: ['bg-warning text-dark', 'گرم'], cold: ['bg-secondary', 'سرد'] }[c.temperature] || ['bg-secondary', esc(c.temperature || '')];
     const reasons = (m.reasons || []).map(r => `<span class="mq-reason">${esc(r)}</span>`).join('');
     return `<div class="cq-card mq-card" id="mq-${m.id}">
         <div class="cq-head">
@@ -10045,7 +10625,7 @@ async function sendEventSmsNow() {
     if (!_editingEventId) return;
     const to = _smsRecipients();
     if (!to.length) { showToast('خطا', 'هیچ شماره‌ای برای این قرار وارد نشده است', 'warning'); return; }
-    const who = to.map(r => `${r.role} (${r.phone})`).join('\n');
+    const who = to.map(r => `${r.role} (${esc(r.phone)})`).join('\n');
     if (!await askConfirm({ icon: 'bi-question-lg', title: 'تأیید', okLabel: 'تأیید', body: `پیامک مشخصات این قرار برای ${to.length} نفر ارسال شود؟\n\n${who}` })) return;
 
     const btn = document.getElementById('ev-sms-now-btn');
@@ -10310,7 +10890,7 @@ function _renderTree() {
     const on = id => (_activeBinder ? _activeBinder.id === id : id === null) && !_filingArchived;
     const node = (b, depth) => `
         <div class="ftree-node${on(b.id) ? ' active' : ''} depth-${depth}" data-drop="${b.id}"
-             style="--c:${b.color}" onclick="openBinder(${b.id})" title="${esc(b.name)}${b.description ? ' — ' + esc(b.description) : ''}">
+             style="--c:${esc(b.color)}" onclick="openBinder(${b.id})" title="${esc(b.name)}${b.description ? ' — ' + esc(b.description) : ''}">
             <i class="bi ${depth === 2 ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i>
             <span class="ftree-name">${esc(b.name)}</span>
             <span class="ftree-count">${formatNumber(b.file_count || 0)}</span>
@@ -10330,7 +10910,7 @@ function _renderTree() {
         return;
     }
     wrap.innerHTML = tray + _cabinets.map(cab => `
-        <div class="ftree-cabinet" style="--c:${cab.color}">
+        <div class="ftree-cabinet" style="--c:${esc(cab.color)}">
             <div class="ftree-cabinet-head">
                 <i class="bi ${esc(cab.icon) || 'bi-archive'}"></i>
                 <b>${esc(cab.name)}</b>
@@ -10354,9 +10934,9 @@ function _renderCrumb() {
     else if (!_activeBinder) parts.push('<span class="crumb-here"><i class="bi bi-inbox"></i> فایل‌های بدون زونکن</span>');
     else {
         const cab = _cabinetOf(_activeBinder), parent = _parentOf(_activeBinder);
-        if (cab) parts.push(`<span class="crumb-link" style="--c:${cab.color}"><i class="bi ${esc(cab.icon)}"></i> ${esc(cab.name)}</span>`);
+        if (cab) parts.push(`<span class="crumb-link" style="--c:${esc(cab.color)}"><i class="bi ${esc(cab.icon)}"></i> ${esc(cab.name)}</span>`);
         if (parent) parts.push(`<a href="#" class="crumb-link" onclick="event.preventDefault(); openBinder(${parent.id})"><i class="bi bi-journal-bookmark"></i> ${esc(parent.name)}</a>`);
-        parts.push(`<span class="crumb-here" style="--c:${_activeBinder.color}"><i class="bi ${parent ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i> ${esc(_activeBinder.name)}</span>`);
+        parts.push(`<span class="crumb-here" style="--c:${esc(_activeBinder.color)}"><i class="bi ${parent ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i> ${esc(_activeBinder.name)}</span>`);
     }
     nav.innerHTML = parts.join('<i class="bi bi-chevron-left crumb-sep"></i>');
     // «پوشهٔ جدید» only inside a binder (folders do not nest); «ویرایش» for any open box
@@ -10371,7 +10951,7 @@ function _renderFolders() {
     const folders = (!_filingArchived && _activeBinder && !_activeBinder.parent_id) ? (_activeBinder.folders || []) : [];
     box.classList.toggle('d-none', !folders.length);
     box.innerHTML = folders.map(f => `
-        <div class="folder-chip" data-drop="${f.id}" style="--c:${f.color}" onclick="openBinder(${f.id})" title="باز کردن پوشه">
+        <div class="folder-chip" data-drop="${f.id}" style="--c:${esc(f.color)}" onclick="openBinder(${f.id})" title="باز کردن پوشه">
             <i class="bi bi-folder-fill"></i> ${esc(f.name)} <span class="ftree-count">${formatNumber(f.file_count || 0)}</span>
         </div>`).join('') + (folders.length ? `
         <div class="folder-chip is-own" data-drop="${_activeBinder.id}" title="فایل‌هایی که مستقیم در زونکن‌اند">
@@ -10560,7 +11140,7 @@ function _fileCard(f) {
             ${f.district ? ' • ' + esc(f.district) : (f.city_name ? ' • ' + esc(f.city_name) : '')}
         </div>
         <div class="file-card-price">${price}</div>
-        ${where ? `<div class="file-where" style="--c:${where.color}"><i class="bi ${where.parent_id ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i> ${esc(where.name)}</div>` : ''}
+        ${where ? `<div class="file-where" style="--c:${esc(where.color)}"><i class="bi ${where.parent_id ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i> ${esc(where.name)}</div>` : ''}
         ${tags ? `<div class="file-tags">${tags}</div>` : ''}
         <div class="file-card-actions" onclick="event.stopPropagation()">
             <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${f.id})" title="جزئیات"><i class="bi bi-eye"></i></button>
@@ -10966,7 +11546,7 @@ async function shareFile(propertyId) {
         const strip = document.getElementById('share-images');
         strip.innerHTML = (card.images || []).map(src =>
             `<div class="lead-photo-thumb" style="width:80px;height:80px;cursor:zoom-in">
-                <img src="${src}" alt="تصویر" onclick="openImageLightbox(this.src)"></div>`).join('');
+                <img src="${safeUrl(src)}" alt="تصویر" onclick="openImageLightbox(this.src)"></div>`).join('');
 
         const enc = encodeURIComponent(_shareText);
         document.getElementById('share-whatsapp').href = `https://wa.me/?text=${enc}`;
@@ -12192,7 +12772,7 @@ async function loadCookieHealth() {
                                 : '<i class="bi bi-x-circle text-muted"></i>'}</td>
             <td class="text-start">
               <button class="btn btn-sm btn-outline-primary"
-                      onclick="checkCookieSession('${esc(i.phone_number)}', this)">
+                      onclick="checkCookieSession(${jsArg(i.phone_number)}, this)">
                 بررسی
               </button>
               <span class="small ms-2" id="ck-res-${esc(i.phone_number)}"></span>
@@ -12280,7 +12860,7 @@ async function loadEmailAudiences() {
                      data-count="${a.count === null ? 0 : a.count}" onchange="emPickAudience(this)">
               <span>${esc(a.label)}</span>
               <span class="badge bg-secondary">${a.count === null ? '—' : faNum(a.count)}</span>
-              <button type="button" class="btn btn-sm btn-link p-0 ms-auto" onclick="exportEmailAudience('${esc(a.key)}')"
+              <button type="button" class="btn btn-sm btn-link p-0 ms-auto" onclick="exportEmailAudience(${jsArg(a.key)})"
                       title="دانلود آدرس‌ها (CSV)"><i class="bi bi-download"></i></button>
             </label>`).join('') || '<span class="text-muted small">گروهی نیست</span>';
     } catch (_) {
@@ -13068,7 +13648,7 @@ function renderSkippedRows() {
             <i class="bi bi-box-arrow-up-left"></i>
           </a>
           <button class="btn btn-sm btn-outline-primary"
-                  onclick="rescrapeSkipped('${esc(r.url)}')" title="اسکرپ تکی این آگهی">
+                  onclick="rescrapeSkipped(${jsArg(r.url)})" title="اسکرپ تکی این آگهی">
             <i class="bi bi-arrow-repeat"></i>
           </button>
         </div>`).join('');

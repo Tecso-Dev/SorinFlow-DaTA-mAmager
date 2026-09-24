@@ -120,8 +120,9 @@ class TestTheScraperSetsTheAccountAside:
         assert "self._force_rotate = True" in self.SRC
 
     def test_rotation_never_offers_it_back(self):
-        src = inspect.getsource(DivarScraper._load_rotation_pool)
+        src = inspect.getsource(DivarScraper._usable_accounts_query)
         assert "CookieModel.identity_required_at.is_(None)" in src
+        assert "_usable_accounts_query" in inspect.getsource(DivarScraper._load_rotation_pool)
 
     def test_the_column_and_its_migration(self):
         assert "identity_required_at" in Cookie.__table__.c
@@ -189,7 +190,10 @@ class TestThePanel:
         i = APP_JS.index("async function loadScraperAccounts()")
         block = APP_JS[i:i + 1600]
         assert "احراز هویت لازم" in block
-        assert "const usable = c.is_valid && !c.identity_required_at;" in block
+        # one rule for «may this number be picked», shared with the switch dialog
+        assert "_divarUsable(c) ? '' : ' disabled'" in block
+        j = APP_JS.index("function _divarUsable(")
+        assert "!c.identity_required_at" in APP_JS[j:j + 200]
 
     def test_the_account_list_shows_it_with_a_way_out(self):
         i = APP_JS.index("async function loadCookies()")

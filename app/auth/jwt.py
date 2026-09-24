@@ -17,6 +17,12 @@ TOKEN_TOTP_PENDING = "totp_pending"   # password accepted, second factor owed
 TOKEN_SMS_PENDING = "sms_pending"     # password accepted, SMS code owed
 
 
+# bcrypt of a random string nobody kept, at gensalt()'s cost (12). A login for
+# a name that does not exist is checked against it, so it takes as long as one
+# that does — otherwise the response time says which names are real.
+DUMMY_PASSWORD_HASH = "$2b$12$Y123/vLdESOnmD5aKxJ5iO/aBMSc7TjuwHYhGlhoPjGnzf/z21Yku"
+
+
 def verify_password(plain: str, hashed: str) -> bool:
     return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 

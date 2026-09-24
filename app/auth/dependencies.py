@@ -121,6 +121,66 @@ def require_permission(permission: str):
     return _check
 
 
+# ── «شماره‌ات را تأیید کن» ──────────────────────────────────────────────────
+#
+# «کاربرها شماره‌های خود را تأیید نمی‌کنند؛ هر جایی که کاربر نیاز به استفاده
+# از شماره دارد و شماره‌اش را تأیید نکرده، جلوی فعالیتش را بگیر و پاپ‌آپ تأیید
+# شماره را بیاور و کد را برایش بفرست.»
+#
+# The panel's own number for a person — users.phone — is where a Divar code
+# alert, a forwarder warning, a colleague's call reaches them. Scraping with a
+# Divar number, logging one in and registering an SMS forwarder all lean on
+# it, and an unverified one is a guess. So those actions answer 403 with a
+# machine-readable detail; the panel recognises it, opens the verification
+# popup and sends the code itself.
+
+PHONE_UNVERIFIED = "phone_unverified"
+
+
+async def phone_gate_reason(user: Optional[User], db: Optional[AsyncSession] = None) -> Optional[str]:
+    """Why `user` may not act on a phone yet, in Persian — or None if they may.
+
+    root is exempt: root is who verifies everybody else by hand, and a root
+    locked out of its own panel by an SMS outage has nobody to ask.
+
+    Fails OPEN when SMS cannot be sent at all (no provider credentials): a gate
+    nobody can pass is an outage, not a policy. phone_verified only ever
+    becomes true over SMS.
+    """
+    if user is None or (getattr(user, "role", "") or "") == ROLE_ROOT:
+        return None
+    phone = (getattr(user, "phone", None) or "").strip()
+    if phone and getattr(user, "phone_verified", False):
+        return None
+    try:
+        from app.config import get_settings
+        cfg = get_settings()
+        if (cfg.auth_sms_provider or "") != "console":
+            from app.services.sms_service import resolve_credentials
+            key, _sender = await resolve_credentials(db)
+            if not key:
+                return None
+    except Exception:
+        return None
+    if not phone:
+        return "شمارهٔ موبایلی برای حساب شما ثبت نشده است — برای این کار باید شمارهٔ خود را ثبت و تأیید کنید"
+    return "شمارهٔ موبایل شما تأیید نشده است و برای این کار باید تأیید شود"
+
+
+async def require_verified_phone(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Refuse, with a detail the panel turns into the verification popup."""
+    why = await phone_gate_reason(current_user, db)
+    if why:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": PHONE_UNVERIFIED, "message": why,
+                    "phone": current_user.phone or None})
+    return current_user
+
+
 get_staff_user = _staff_check
 
 require_staff = Depends(_staff_check)

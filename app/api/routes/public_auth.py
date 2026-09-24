@@ -33,7 +33,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
 from app.auth.jwt import (
-    verify_password, get_password_hash, create_access_token, TOKEN_ACCESS,
+    verify_password, get_password_hash, create_access_token, TOKEN_ACCESS, DUMMY_PASSWORD_HASH,
     access_claims,
 )
 from app.auth.permissions import ROLE_VISITOR, STAFF_ROLES
@@ -283,7 +283,7 @@ async def portal_verify(data: PortalVerifyRequest, db: AsyncSession = Depends(ge
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
-    await clear_login_failures(data.phone)
+    await clear_login_failures(f"name:{data.phone}")
 
     # Only on the first verification — re-verifying later must not re-welcome
     # someone who has been a customer for months.
@@ -303,8 +303,9 @@ async def portal_login(data: PortalLoginRequest, request: Request,
     admin through here would be a way around their second factor.
     """
     identifier = data.identifier.strip()
+    # «name:»: what was typed, never mistaken for an account's own «uid:» key
     try:
-        await check_login_rate(identifier)
+        await check_login_rate(f"name:{identifier}")
     except VerificationError as e:
         raise HTTPException(status_code=429, detail=e.message)
 
@@ -326,8 +327,9 @@ async def portal_login(data: PortalLoginRequest, request: Request,
         except VerificationError as e:
             raise HTTPException(status_code=429, detail=e.message)
 
-    if not user or not verify_password(data.password, user.hashed_password):
-        await record_login_failure(identifier)
+    if not verify_password(data.password, user.hashed_password if user else DUMMY_PASSWORD_HASH) \
+            or not user:
+        await record_login_failure(f"name:{identifier}")
         if account_key:
             await record_login_failure(account_key)
         raise HTTPException(status_code=401, detail="شماره/ایمیل یا رمز عبور اشتباه است")
@@ -354,7 +356,7 @@ async def portal_login(data: PortalLoginRequest, request: Request,
         return _issued_response(
             issued, "شماره شما تأیید نشده است. کد تأیید ارسال شد", phone=user.phone)
 
-    await clear_login_failures(identifier)
+    await clear_login_failures(f"name:{identifier}")
     await clear_login_failures(account_key)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()

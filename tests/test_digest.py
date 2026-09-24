@@ -80,6 +80,12 @@ class TestTheClock:
             == "رسید (300 KB · 1 چت) — بخشی نرسید: chat not found"
         assert digest._backup_line({"at": fresh, "ok": False, "error": "proxy down"}, since) == "نرسید: proxy down"
         assert digest._backup_line({"at": stale, "ok": True}, since).startswith("در ۲۴ ساعت گذشته فرستاده نشد")
+        # what backup_service writes now: with its UTC offset — a naive/aware
+        # comparison here would have raised and taken the whole digest down
+        fresh_utc = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat(timespec="seconds")
+        stale_utc = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(timespec="seconds")
+        assert digest._backup_line({"at": fresh_utc, "ok": True, "size_kb": 10, "delivered": ["1"]}, since) == "رسید (10 KB · 1 چت)"
+        assert digest._backup_line({"at": stale_utc, "ok": True}, since).startswith("در ۲۴ ساعت گذشته فرستاده نشد")
 
 
 # ── through the real app (Postgres) ──────────────────────────────────────────

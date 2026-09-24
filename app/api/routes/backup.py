@@ -11,9 +11,11 @@ where a shipment can be fired right now to see it arrive.
 super_admin and root only: it is the whole database.
 """
 import re
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,7 +71,15 @@ async def _route_for(payload, db) -> dict:
         base = (payload.relay or "").strip()
         if not bk.valid_relay(base):
             raise HTTPException(400, "آدرس رله باید https و بدون مسیر باشد (مثل https://tg.example.com)")
-        return bk._route("relay", [], base, (payload.relay_key or "").strip())
+        key = (payload.relay_key or "").strip()
+        if not key:
+            # The field reads «کلید ذخیره شده — خالی یعنی بدون تغییر». Testing
+            # with it empty sent no key at all: the Worker refused, and the
+            # panel said the bot token was wrong while backups went through.
+            saved = await secret_box.get_many(db, (bk.KEY_RELAY_KEY,))
+            if saved.get(bk.KEY_RELAY_KEY):
+                key = secret_box.decrypt(saved[bk.KEY_RELAY_KEY]).strip()
+        return bk._route("relay", [], base, key)
     if mode == "pool":
         urls = await bk._pool_urls(db, (payload.proxy_pool or "*").strip())
         if not urls:
@@ -194,7 +204,7 @@ async def proxy_test(payload: ProbeIn, db: AsyncSession = Depends(get_db),
     except Exception as e:
         blocked = not (route["proxies"] or route["mode"] == "relay")
         raise HTTPException(503, ("بدون پراکسی به تلگرام نرسید — از این سرور تلگرام مسدود است" if blocked else
-                                  f"از این راه به تلگرام نرسید ({bk.describe_route(route)})") + f" ({type(e).__name__})")
+                                  f"از این راه به تلگرام نرسید ({bk.describe_route(route)})") + f" ({e if isinstance(e, bk.RelayError) else type(e).__name__})")
     info["proxy"] = bk.describe_route(route)
     return info
 
@@ -220,7 +230,7 @@ async def probe_bot(payload: ProbeIn, db: AsyncSession = Depends(get_db),
     except Exception as e:
         blocked = not (route["proxies"] or route["mode"] == "relay")
         raise HTTPException(503, ("بدون پراکسی به تلگرام نرسید — از این سرور تلگرام مسدود است؛ پراکسی را تنظیم کنید" if blocked else
-                                  f"از این راه به تلگرام نرسید ({bk.describe_route(route)})") + f" ({type(e).__name__})")
+                                  f"از این راه به تلگرام نرسید ({bk.describe_route(route)})") + f" ({e if isinstance(e, bk.RelayError) else type(e).__name__})")
     if not info["chats"]:
         info["hint_fa"] = ("هنوز هیچ چتی به ربات پیام نداده. در تلگرام ربات را باز کنید، "
                            "Start را بزنید و یک پیام بفرستید، بعد دوباره «پیدا کن» را بزنید.")
@@ -256,3 +266,58 @@ async def run_backup_now(db: AsyncSession = Depends(get_db), user: User = _super
     logger.info(f"[backup] manual run by {user.username}: {res}")
     res["last_offsite"] = await bk.last_offsite(db)
     return res
+
+
+@router.post("/diagnose")
+async def diagnose_routes(db: AsyncSession = Depends(get_db), _: User = _super_admin):
+    """«تست همهٔ راه‌ها»: getMe straight to Telegram, through the relay, and
+    through each proxy, one at a time — which of them works today, and how
+    fast. Uses the saved token."""
+    tok = (await bk.resolve_telegram(db))["token"]
+    if not tok:
+        raise HTTPException(400, "ابتدا توکن ربات را ذخیره کنید")
+    return {"rows": await bk.diagnose(tok, await bk.every_way_out(db))}
+
+
+@router.get("/dr")
+async def dr_status(_: User = _super_admin):
+    """The full disaster-recovery bundle, built on the host every night at
+    04:00 Tehran (scripts/dr_backup.sh): the last run, the last failure, and
+    whether a «همین حالا» request is waiting for the host to pick it up."""
+    from app.services import dr_backup as dr
+    st = dr.read_status()
+    return {
+        "last_run": st.get("last_run"),
+        "history": (st.get("history") or [])[:5],
+        "last_alert": st.get("last_alert"),
+        "requested": dr.REQUEST.exists(),
+        "undelivered": sorted(d.name for d in dr.OUTBOX.glob("*") if d.is_dir()),
+        "schedule_fa": "هر شب ۰۴:۰۰ به وقت تهران",
+    }
+
+
+@router.post("/dr/run")
+async def dr_run_now(user: User = _super_admin):
+    """«همین حالا»: drop the request file the host's dr-backup.path unit
+    watches. The host builds and ships the bundle; this only asks."""
+    from app.services import dr_backup as dr
+    if dr.REQUEST.exists():
+        raise HTTPException(409, "درخواست قبلی هنوز منتظر سرور است — چند دقیقه بعد وضعیت را ببینید")
+    if not dr.request_run():
+        raise HTTPException(503, "درخواست ثبت نشد — فضای داده در دسترس نیست")
+    logger.info(f"[dr] full backup requested by {user.username}")
+    return {"requested": True}
+
+
+_RELAY_WORKER = Path(__file__).resolve().parents[3] / "deploy" / "telegram-relay" / "worker.js"
+
+
+@router.get("/relay-worker", response_class=PlainTextResponse)
+async def relay_worker_code(_: User = _super_admin):
+    """The Worker the panel tells people to paste into Cloudflare — read from
+    deploy/telegram-relay/worker.js, so the panel can never show a copy that
+    has drifted from the one that is tested."""
+    try:
+        return _RELAY_WORKER.read_text(encoding="utf-8")
+    except OSError:
+        raise HTTPException(404, "فایل Worker روی سرور پیدا نشد")

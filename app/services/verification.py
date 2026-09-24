@@ -12,8 +12,11 @@ should not hand over a live credential.
 import asyncio
 import hashlib
 import hmac
+import re
+import ipaddress
 import secrets
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
@@ -35,6 +38,56 @@ class VerificationError(Exception):
         self.retry_after = retry_after
 
 
+TEHRAN = timezone(timedelta(hours=3, minutes=30), "Asia/Tehran")
+SMS_CAP_MESSAGE = "سقف روزانهٔ پیامک کد تأیید پر شده است. فردا دوباره تلاش کنید، یا اگر ایمیل دارید با ایمیل"
+
+
+_alerts: set = set()
+
+
+class _SmsDailyCap(Exception):
+    """Today's SMS-code budget is spent — not a delivery failure."""
+
+
+def _seconds_to_tehran_midnight() -> int:
+    now = datetime.now(TEHRAN)
+    return int((now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1) - now).total_seconds())
+
+
+async def _spend_sms_budget() -> bool:
+    """One code SMS off today's budget (Tehran day), all addresses together.
+
+    Until the server saw real client addresses, the per-address budgets were
+    accidentally one budget for everybody and that was the only thing keeping
+    SMS cost down. Fails open like the other limiters: codes are how people
+    log in, and a Redis blip must not stop that.
+    """
+    cap = int(getattr(settings, "auth_sms_daily_cap", 0) or 0)
+    if cap <= 0:
+        return True
+    key = f"{_NS}:sms:day:{datetime.now(TEHRAN):%Y%m%d}"
+    try:
+        r = await get_redis()
+        n = int(await r.incr(key))
+        if n == 1:
+            await r.expire(key, 2 * 86400)
+    except Exception as e:
+        logger.warning(f"[verification] daily SMS budget unavailable, sending: {e}")
+        return True
+    if n == cap + 1:
+        # once, on the first refusal of the day
+        logger.error(f"[verification] daily SMS-code cap {cap} reached")
+        from app.services import backup_service as bk
+        task = asyncio.create_task(bk.send_text(
+            f"⚠️ سقف روزانهٔ پیامک کد تأیید ({cap}) پر شد. تا نیمه‌شب تهران کدی با پیامک "
+            "فرستاده نمی‌شود — اگر حمله نیست، AUTH_SMS_DAILY_CAP را بالا ببرید."))
+        # the loop keeps only a weak reference: without this the alert could
+        # be collected before it is sent
+        _alerts.add(task)
+        task.add_done_callback(_alerts.discard)
+    return n <= cap
+
+
 @dataclass
 class IssuedCode:
     ttl: int
@@ -48,6 +101,19 @@ class IssuedCode:
 
 def _norm(identifier: str) -> str:
     return (identifier or "").strip().lower()
+
+
+def _login_key(identifier: str) -> str:
+    """The Redis key of one login budget. `uid:<id>` names an account; any
+    other text is something a person typed, and only its hash goes into the
+    key. Kept verbatim, «uid:1» typed on the portal login spent staff account
+    1's budget — anyone could lock every account by walking the ids — and a
+    megabyte-long username became a megabyte-long key: a couple of hundred
+    fill Redis, and every limiter then fails open."""
+    ident = _norm(identifier)
+    if re.fullmatch(r"uid:\d{1,12}", ident):
+        return f"{_NS}:login:{ident}"
+    return f"{_NS}:login:h:{hashlib.sha256(ident.encode()).hexdigest()[:32]}"
 
 
 def _hash(code: str, identifier: str) -> str:
@@ -129,8 +195,12 @@ async def issue_code(purpose: str, identifier: str, phone: str,
     pipe.expire(keys["sends"], 3600)
     await pipe.execute()
 
-    used = await _deliver(code, purpose=purpose, phone=phone, email=email, channel=channel,
-                          message_template=message_template, ttl=ttl, db=db)
+    try:
+        used = await _deliver(code, purpose=purpose, phone=phone, email=email, channel=channel,
+                              message_template=message_template, ttl=ttl, db=db)
+    except _SmsDailyCap:
+        await r.delete(keys["code"], keys["cooldown"])
+        raise VerificationError(SMS_CAP_MESSAGE, retry_after=_seconds_to_tehran_midnight())
     if not used:
         # Burn the code rather than leave one alive that nobody received. This
         # is why _deliver returns a channel-or-None instead of raising: the
@@ -171,6 +241,8 @@ async def _deliver(code: str, *, phone: str, email: str | None,
     async def _sms() -> bool:
         if not phone:
             return False
+        if not await _spend_sms_budget():
+            raise _SmsDailyCap()
         try:
             # A template first, when one is configured.
             #
@@ -237,11 +309,18 @@ async def _deliver(code: str, *, phone: str, email: str | None,
     sms_ready = bool((settings.kavenegar_api_key or "").strip()) or \
         settings.auth_sms_provider == "console"
     order = ["sms", "email"] if sms_ready else ["email", "sms"]
+    capped = False
     for leg in order:
-        if leg == "sms" and await _sms():
-            return "sms"
+        if leg == "sms":
+            try:
+                if await _sms():
+                    return "sms"
+            except _SmsDailyCap:
+                capped = True            # the email leg may still get it there
         if leg == "email" and await _email():
             return "email"
+    if capped:
+        raise _SmsDailyCap()
     return None
 
 
@@ -375,9 +454,110 @@ async def spend_ip_budget(request, bucket: str) -> None:
         pass
 
 
+# Failed staff logins per address. The account budget stops one account being
+# guessed; this stops one host trying a common password on many. A fixed
+# quarter of an hour from the first attempt, not pushed back by later ones:
+# an office behind one NAT does not mistype twenty times in it, and a spray is
+# held to about two thousand guesses a day per address.
+LOGIN_IP_LIMIT = 20
+LOGIN_IP_WINDOW = 900
+
+
+def login_ip(request) -> str | None:
+    """The address a failed login is charged to, or None when there is none.
+
+    Only a globally routable one. Production has so far seen every request
+    arrive from 10.42.x.x — k3s's klipper-lb masquerades the client before
+    Traefik appends it to X-Forwarded-For — and a lock keyed on that would be
+    one lock for the whole office, handed to whoever sends twenty wrong
+    passwords. IPv6 is charged per /64, the block one subscriber is given, or
+    a single host could rotate through it.
+    """
+    try:
+        addr = ipaddress.ip_address(client_ip(request))
+    except ValueError:
+        return None
+    if not addr.is_global:
+        return None
+    if addr.version == 6:
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
+
+
+def _ip_login_key(request):
+    ip = login_ip(request)
+    return (f"{_NS}:ip:login:{ip}", LOGIN_IP_WINDOW, LOGIN_IP_LIMIT) if ip else None
+
+
+async def take_login_attempt(request, identifier: str) -> None:
+    """Count this attempt against the account and the address, then decide.
+
+    Counted first and atomically, not checked and recorded afterwards: a burst
+    of parallel guesses would all read «under the limit» before the first
+    failure was written. Each window is fixed from its first attempt — SET NX
+    EX then INCR in one transaction, so a key never counts without an expiry.
+    A refused attempt is handed back, so retrying while locked neither
+    lengthens the lock nor spends the office's address. A wrong password or
+    code needs nothing further; a right one calls login_attempt_passed.
+
+    Raises VerificationError with retry_after. Fails open when Redis is
+    unavailable, like check_login_rate.
+    """
+    # the account key is check_login_rate's, so the two share one budget
+    keys = [(_login_key(identifier), 900, settings.auth_login_max_attempts)]
+    ipk = _ip_login_key(request)
+    if ipk:
+        keys.append(ipk)
+    try:
+        r = await get_redis()
+        pipe = r.pipeline()
+        for key, window, _limit in keys:
+            pipe.set(key, 0, ex=window, nx=True)
+            pipe.incr(key)
+            pipe.ttl(key)
+        res = await pipe.execute()
+    except Exception as e:
+        logger.warning(f"[verification] login throttle unavailable, allowing: {e}")
+        return
+    over = [(i, res[3 * i + 2]) for i, (_k, _w, limit) in enumerate(keys)
+            if res[3 * i + 1] > limit]
+    if not over:
+        return
+    await _hand_back(keys)
+    i, ttl = over[0]
+    raise VerificationError(
+        (f"تلاش‌های ناموفق بیش از حد مجاز. {max(ttl, 1)} ثانیه دیگر تلاش کنید" if i == 0 else
+         "تلاش‌های ناموفق از این دستگاه بیش از حد مجاز است. "
+         f"{max(ttl // 60, 1)} دقیقهٔ دیگر تلاش کنید"),
+        retry_after=max(ttl, 1))
+
+
+async def login_attempt_passed(request) -> None:
+    """The password or code was right: the address gets its attempt back, so
+    an office behind one NAT is never locked out by logging in. The account's
+    count stays until clear_login_failures, once no second factor is owed."""
+    ipk = _ip_login_key(request)
+    if ipk:
+        await _hand_back([ipk])
+
+
+async def _hand_back(keys) -> None:
+    try:
+        r = await get_redis()
+        pipe = r.pipeline()
+        for key, window, _limit in keys:
+            # SET NX first: a key that expired a moment ago comes back with an
+            # expiry rather than as a -1 that never goes away
+            pipe.set(key, 0, ex=window, nx=True)
+            pipe.decr(key)
+        await pipe.execute()
+    except Exception:
+        pass
+
+
 async def check_login_rate(identifier: str) -> None:
     """Throttle password guessing. Raises VerificationError when locked out."""
-    key = f"{_NS}:login:{_norm(identifier)}"
+    key = _login_key(identifier)
     try:
         r = await get_redis()
         fails = int(await r.get(key) or 0)
@@ -394,7 +574,7 @@ async def check_login_rate(identifier: str) -> None:
 
 
 async def record_login_failure(identifier: str) -> None:
-    key = f"{_NS}:login:{_norm(identifier)}"
+    key = _login_key(identifier)
     try:
         r = await get_redis()
         pipe = r.pipeline()
@@ -408,6 +588,6 @@ async def record_login_failure(identifier: str) -> None:
 async def clear_login_failures(identifier: str) -> None:
     try:
         r = await get_redis()
-        await r.delete(f"{_NS}:login:{_norm(identifier)}")
+        await r.delete(_login_key(identifier))
     except Exception:
         pass

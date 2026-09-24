@@ -109,8 +109,11 @@ class TestRotationStaysInsideThePool:
         assert "current_user.id if current_user else None" in src
 
     def test_the_pool_query_filters_on_it(self):
-        src = inspect.getsource(DivarScraper._load_rotation_pool)
+        # One definition of «the numbers this run may use», shared by every
+        # place that chooses, counts or resets accounts.
+        src = inspect.getsource(DivarScraper._usable_accounts_query)
         assert "CookieModel.owner_user_id == owner" in src
+        assert "_usable_accounts_query" in inspect.getsource(DivarScraper._load_rotation_pool)
 
     def test_the_pool_still_rests_heavy_accounts(self):
         """The narrowing must not have displaced the resting rule."""
@@ -121,12 +124,14 @@ class TestRotationStaysInsideThePool:
         """Otherwise a run absorbs code prompts for accounts it can never
         reach, and concludes the pool is exhausted when it never had them."""
         src = inspect.getsource(DivarScraper._usable_account_count)
-        assert "Cookie.owner_user_id == owner" in src
+        assert "_usable_accounts_query" in src
 
-    def test_a_run_with_no_owner_keeps_the_old_behaviour(self):
-        """An internally started scrape must not lose its pool."""
-        src = inspect.getsource(DivarScraper._usable_account_count)
-        assert "if owner:" in src
+    def test_the_round_is_counted_and_reset_inside_the_same_pool(self):
+        """Counting and resetting everybody's numbers kept a colleague's fresh
+        account «unspent» for a run that could never reach it, and one run's
+        new round wiped every other person's counters."""
+        for fn in (DivarScraper._unspent_account_count, DivarScraper._rest_all_accounts):
+            assert "_usable_accounts_query" in inspect.getsource(fn), fn.__name__
 
 
 class TestTheSideDoor:
@@ -180,12 +185,18 @@ class TestTheSideDoor:
         src = inspect.getsource(auth_routes._own_session_or_403)
         assert "status_code=403" in src and "row.owner_user_id != user.id" in src
 
-    def test_answering_divars_code_takes_the_session_over(self):
-        """The person who typed the code holds the phone — the session is
-        theirs even if a previous owner logged this number in before."""
+    def test_answering_divars_code_no_longer_takes_a_number_over(self):
+        """It used to: whoever typed the code became the owner. With an SMS
+        forwarder on the owner's phone the code answers itself, so a colleague
+        could start a login on the root account's number and walk off with
+        it. A claimed number is refused before its code is typed — the jar is
+        saved inside submit_otp_code, so refusing after would be too late."""
         src = inspect.getsource(auth_routes.verify_otp)
-        assert "existing_cookie.owner_user_id != current_user.id" in src
-        assert "changes hands" in src
+        assert "existing_cookie.owner_user_id = current_user.id" in src
+        assert "existing_cookie.owner_user_id != current_user.id" not in src
+        assert src.index("await _refuse_somebody_elses") < src.index("await auth.submit_otp_code(")
+        assert "if current_user and not existing_cookie.owner_user_id" in src
+        assert "_refuse_somebody_elses" in inspect.getsource(auth_routes.initiate_login)
 
     def test_it_compares_digits_not_strings(self):
         src = inspect.getsource(scraper_routes._launch_job)
