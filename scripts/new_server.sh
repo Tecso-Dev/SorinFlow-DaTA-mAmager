@@ -153,6 +153,9 @@ if [ -n "$RUNNER_TOKEN" ]; then
   echo "runner registered as sorinflow-server (replacing the old box's)"
 fi
 
+say "disaster-recovery backup timer"
+bash "$SRC/scripts/install_dr_backup.sh" | sed 's/^/   /'
+
 say "DONE — next: stop the OLD runner, dispatch the deploy workflow, point DNS here"
 kubectl get pods -A -o wide
 

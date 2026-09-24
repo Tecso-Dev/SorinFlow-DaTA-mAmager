@@ -209,9 +209,10 @@ jobs:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LIARA_API_TOKEN: ${{ secrets.LIARA_API_TOKEN }}
+          DR_BACKUP_PASSPHRASE: ${{ secrets.DR_BACKUP_PASSPHRASE }}
         run: |
           set -euo pipefail
-          LIST="LLM_API_KEY LLM_BASE_URL LLM_MODEL LIARA_API_TOKEN"
+          LIST="LLM_API_KEY LLM_BASE_URL LLM_MODEL LIARA_API_TOKEN DR_BACKUP_PASSPHRASE"
           patch="{}"
           for name in $LIST; do
             val="${!name:-}"
@@ -357,4 +358,11 @@ jobs:
              FROM pg_stat_activity
              WHERE state <> 'idle' OR state = 'idle in transaction'
              ORDER BY state_change;" || true
-          echo "::endgroup::" 
+          echo "::endgroup::"
+
+      # Installs/refreshes the nightly disaster-recovery backup timer (and the
+      # panel's «همین حالا» watcher) on the host — idempotent, so an unchanged
+      # scripts/dr_backup.sh or deploy/systemd/* is a no-op here. Runs on the
+      # self-hosted runner itself, same as every other host command above.
+      - name: Install/refresh the disaster-recovery backup timer
+        run: bash scripts/install_dr_backup.sh
