@@ -60,6 +60,15 @@ class PropertyRequest(Base):
     customer_id = Column(Integer, ForeignKey("crm_customers.id", ondelete="SET NULL", name="fk_portal_requests_customer"),
                          nullable=True, index=True)
 
+    # The description is read into the customer's empty fields once, in the
+    # background (app/crm/portal_bridge.py enrich_needs) — never on the
+    # visitor's own request. Set once it has run, successfully or not, so a
+    # slow or broken gateway does not read the same request every pass.
+    need_enriched_at = Column(DateTime(timezone=True), nullable=True)
+    # Real failures only — a gateway that is off, over budget or unconfigured
+    # is not this request's fault and does not spend one of its 3 tries.
+    need_enrich_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

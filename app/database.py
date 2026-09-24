@@ -138,6 +138,7 @@ async def init_db():
                  _migrate_price_history,
                  _migrate_image_hashes,
                  _migrate_sms_panel,
+                 _migrate_portal_need_enrich,
                  _seed_reference_data):
         try:
             async with engine.begin() as conn:
@@ -1006,6 +1007,31 @@ async def _migrate_price_history(conn):
             _log.info("Added the price-trail columns to properties")
     except Exception:
         pass
+
+
+async def _migrate_portal_need_enrich(conn):
+    """portal_property_requests.need_enriched_at / need_enrich_attempts
+    (Alembic 0015 adds them too).
+
+    Also here because ordinary requests (GET /portal/admin/requests, /mine)
+    select the whole row: a skipped 0015 would 500 every one of them, not
+    just the background enrichment pass.
+    """
+    try:
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='portal_property_requests' AND column_name='need_enriched_at' "
+            "AND table_schema=current_schema()"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE portal_property_requests "
+                "ADD COLUMN IF NOT EXISTS need_enriched_at TIMESTAMPTZ, "
+                "ADD COLUMN IF NOT EXISTS need_enrich_attempts INTEGER NOT NULL DEFAULT 0"
+            ))
+    except Exception as e:
+        print(f"portal need-enrich migration skipped: {e}")
 
 
 async def _migrate_property_quality(conn):
