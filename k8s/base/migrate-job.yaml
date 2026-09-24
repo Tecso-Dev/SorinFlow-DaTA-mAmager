@@ -55,13 +55,13 @@ spec:
             capabilities:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
-          env:
-            - name: SORINFLOW_ROLE
-              value: "migrate"
-            # DATABASE_URL, SECRET_KEY and the rest come from the same
-            # shared-app-env patch as api/worker/scheduler — see
-            # shared-app-env.patch.yaml. alembic needs DATABASE_URL and
-            # nothing else here is harmful to have present for a one-shot job.
+          # No SORINFLOW_ROLE: `python -m app.migrate` starts no role, and the
+          # setting accepts only all|api|worker|scheduler — a made-up
+          # "migrate" failed validation before a single migration ran.
+          # DATABASE_URL, SECRET_KEY and the rest come from the same
+          # shared-app-env patch as api/worker/scheduler (it appends to this
+          # list, so the list must exist) — see shared-app-env.patch.yaml.
+          env: []
           volumeMounts:
             - name: tmp
               mountPath: /tmp
