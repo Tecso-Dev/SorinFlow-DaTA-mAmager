@@ -16,6 +16,7 @@ from loguru import logger
 from app.database import get_db
 from app.config import get_settings
 from app.models.lead import Lead
+from app.models.phone import normalize_phone
 from app.models.property import Property, allocate_serial_no
 from app.models.crm_models import (
     Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance,
@@ -1193,11 +1194,12 @@ async def convert_lead_to_deal(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # reuse an existing contact with the same phone, otherwise create one
+    # reuse an existing contact with the same phone, otherwise create one —
+    # compared normalized, so "0914..." and "+98914..." are the same seller
     seller_id = None
     if lead.phone_number:
         existing = (await db.execute(
-            select(Contact).where(Contact.phone == lead.phone_number)
+            select(Contact).where(Contact.phone_normalized == normalize_phone(lead.phone_number))
         )).scalars().first()
         if existing:
             seller_id = existing.id

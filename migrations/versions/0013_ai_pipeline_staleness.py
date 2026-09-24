@@ -1,7 +1,7 @@
 """the reader, the embedder and the matcher re-process what changed
 
 Revision ID: 0013
-Revises: 0010
+Revises: 0012
 Create Date: 2026-09-24
 
 Three columns worth of «has this listing moved since I last looked at it»:
@@ -32,7 +32,7 @@ import sqlalchemy as sa
 
 
 revision = "0013"
-down_revision = "0010"
+down_revision = "0012"
 branch_labels = None
 depends_on = None
 

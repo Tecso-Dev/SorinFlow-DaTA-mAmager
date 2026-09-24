@@ -31,6 +31,19 @@ if config.config_file_name is not None and not config.attributes.get("connection
 target_metadata = Base.metadata
 
 
+def _include_object(object, name, type_, reflected, compare_to):
+    """GIN trigram indexes (migration 0012) exist only in Postgres and only
+    through that migration — never on the models, because a fresh database
+    builds from the models before Alembic ever runs, and that call is not
+    guarded the way a migration step is (see 0012's docstring). Without this
+    filter, autogenerate would see them in the migrated schema, find no
+    model behind them, and flag every one as drift to be dropped.
+    """
+    if type_ == "index" and name and name.endswith("_trgm"):
+        return False
+    return True
+
+
 def _configure(connection):
     context.configure(
         connection=connection,
@@ -40,6 +53,7 @@ def _configure(connection):
         compare_type=True,
         compare_server_default=False,
         render_as_batch=connection.dialect.name == "sqlite",
+        include_object=_include_object,
     )
 
 
