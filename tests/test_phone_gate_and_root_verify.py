@@ -314,3 +314,18 @@ class TestThePanel:
         assert "setUserVerified(" in row
         fn = JS[JS.index("async function setUserVerified("):JS.index("async function nudgeVerify(")]
         assert "/verification`" in fn and "method: 'PATCH'" in fn
+
+
+class TestTheCodeBelongsToItsNumber:
+    """Asking for a code on a NEW number inside the resend cooldown used to
+    save the new number anyway — and the code still waiting was the one texted
+    to the OLD number. Typing it «verified» a number that received nothing."""
+
+    def test_a_refused_send_does_not_change_the_number(self, client, people, sms_ready):
+        _set(people["unv"], phone="09120000203", phone_verified=False)
+        h = _tok(client, "pg_unv")
+        client.post("/api/users/me/phone/request", json={}, headers=h)   # a code to 0203
+        r = client.post("/api/users/me/phone/request", json={"phone": "09120000277"}, headers=h)
+        assert r.status_code == 429, r.text
+        assert _flags(people["unv"])[0] == "09120000203", \
+            "the number changed although no code was sent to it"

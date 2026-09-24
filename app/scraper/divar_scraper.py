@@ -77,6 +77,11 @@ def _is_dropped_connection(e: BaseException) -> bool:
                     "InterfaceError", "ConnectionRefusedError")
 
 
+# «The browser is not open on anybody's profile» — distinct from None, which
+# is the shared anonymous profile a run with no number opens.
+_NO_BROWSER = object()
+
+
 class DivarScraper:
     """Main scraper class for Divar.ir real estate listings"""
 
@@ -237,6 +242,11 @@ class DivarScraper:
             except Exception as e:
                 logger.warning(f"[browser] closing the previous context failed: {e}")
             self.browser = self.context = self.page = None
+        # From here until the new profile is open, the browser is nobody's.
+        # If the open below raises — the profile is held by another run — a
+        # rotation must see that and put the run's own profile back, not
+        # read a stale «still on the old account» and leave it with none.
+        self._browser_account = _NO_BROWSER
 
         self.browser, self.context, self.page, self.device = await open_browser(
             self.playwright, headless=self.headless, proxy=proxy,
@@ -3258,10 +3268,10 @@ class DivarScraper:
 
         # Re-read the pool each time rather than caching it for the whole run:
         # a long job outlives the account list, so an account added or marked
-        # invalid mid-run was previously never seen.
-        pool = await self._load_rotation_pool()
-        if pool:
-            self._rotation_pool = pool
+        # invalid mid-run was previously never seen. Empty included: keeping
+        # the cached list when the fresh one is empty rotated onto numbers
+        # that had since been switched off or gone bad.
+        self._rotation_pool = await self._load_rotation_pool()
         if len(self._rotation_pool) < 2:
             # Only one account exists — there is nothing to rotate to, and that
             # will not change by asking again on the next listing. Clear the
@@ -3461,7 +3471,8 @@ class DivarScraper:
         if getattr(self, "playwright", None) is None:
             return
         active = getattr(self, "active_phone", None)
-        if getattr(self, "_browser_account", active) == active:
+        browser_on = getattr(self, "_browser_account", active)
+        if browser_on == active and getattr(self, "context", None) is not None:
             return
         try:
             _px = (await self._get_working_proxy(active)
@@ -3500,9 +3511,16 @@ class DivarScraper:
         previous = self.active_phone
         _d = lambda p: "".join(ch for ch in str(p or "") if ch.isdigit())[-10:]  # noqa: E731
 
+        # «move off X» when the run is no longer on X is already done:
+        # switching again would leave a good number for nothing and spend a
+        # profile swap and a session restore doing it.
+        away_from = (req or {}).get("from_phone")
+        if away_from and _d(away_from) != _d(previous):
+            logger.info(f"[rotate] switch away from {away_from} dropped — the run is on {previous}")
+            return False
+
         pool = await self._load_rotation_pool()
-        if pool:
-            self._rotation_pool = pool
+        self._rotation_pool = pool
         if target:
             if previous and _d(target) == _d(previous):
                 await self._log_run(f"اجرا همین حالا روی {previous} است — تعویضی لازم نبود")
@@ -3522,7 +3540,14 @@ class DivarScraper:
             return False
 
         await self._persist_active_session()
-        if not self.auth.browser_alive():
+        # Divar challenged the number being left: bank it as spent, the way a
+        # rotation does, or «least spent first» hands it straight back.
+        if getattr(self, "_force_rotate", False):
+            override = getattr(self, "_rotate_every_override", None)
+            every = override if override is not None else (getattr(settings, "cookie_rotate_every", 0) or 0)
+            if every > 0 and previous:
+                await self._mark_account_spent(previous, every)
+        if not self.auth.browser_alive() and getattr(self, "playwright", None) is None:
             await self._log_run("تعویض شماره انجام نشد: مرورگر اسکرپر بسته شده است",
                                 level="warning")
             return False

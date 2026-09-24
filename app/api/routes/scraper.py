@@ -249,6 +249,13 @@ async def run_scraping_job(
             except Exception as e:
                 logger.error(f"[{job_id}] Error disposing engine: {e}")
         
+        # A switch nobody got to belongs to a run that has ended.
+        try:
+            from app.scraper import otp_store as _os
+            _os.take_switch(job_id)
+        except Exception:
+            pass
+
         # Cleanup tracking
         if job_id in active_tasks:
             del active_tasks[job_id]
@@ -315,11 +322,17 @@ async def resume_scraping_job(
         if run_as is None or not run_as.is_active:
             raise HTTPException(status_code=409,
                                 detail="صاحب این اسکرپ دیگر فعال نیست — ادامه ممکن نیست")
+        # The route checked the caller's number; the run is the owner's.
+        from app.auth.dependencies import phone_gate_reason
+        why = await phone_gate_reason(run_as, db)
+        if why:
+            raise HTTPException(status_code=409,
+                                detail=f"شمارهٔ موبایل صاحب این اسکرپ تأیید نشده است — {why}")
 
     config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
                                   if k in ScrapingJobCreate.model_fields})
     resp = await _launch_job(config, background_tasks, db, run_as,
-                             resumed_from=job.job_id)
+                             resumed_from=job.job_id, interactive=False)
     await job_log.record(
         resp.job_id, job_log.START,
         f"ادامهٔ اسکرپ {str(job.job_id)[:8]} — آگهی‌های ذخیره‌شدهٔ آن رد می‌شوند",
@@ -333,11 +346,18 @@ async def _launch_job(
     db: AsyncSession,
     current_user: Optional[User],
     resumed_from=None,
+    interactive: bool = True,
 ) -> ScrapingJobResponse:
     """Validate, record and start one run. Shared by start and resume so the
     two cannot drift — a resume that skipped a check the start makes would be
-    the side door."""
+    the side door.
+
+    `interactive` is somebody pressing «شروع» now. A resume or a schedule
+    replays a config saved earlier, and a number switched off since then
+    must not stop it at the door with «choose خودکار» that nobody can act on
+    — it falls back to «خودکار», and the run says so."""
     
+    fell_back_from = None
     active = {k: v for k, v in job_config.model_dump().items() if v is not None and k not in ('city', 'category', 'max_items', 'download_images', 'divar_phone')}
     logger.info(f"Scraping job request — city={job_config.city} category={job_config.category} max_items={job_config.max_items} images={job_config.download_images} filters={active}")
     
@@ -378,9 +398,13 @@ async def _launch_job(
         # Yours, but switched off: the owner said this SIM is out of reach,
         # and a run started on it would send its first code nowhere.
         if mine.is_enabled is False:
-            raise HTTPException(
-                status_code=409,
-                detail=f"شمارهٔ {mine.phone_number} خاموش است — روشنش کنید یا «خودکار» را انتخاب کنید")
+            if interactive:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"شمارهٔ {mine.phone_number} خاموش است — روشنش کنید یا «خودکار» را انتخاب کنید")
+            logger.info(f"[launch] saved number {mine.phone_number} is switched off — running on «خودکار»")
+            fell_back_from = mine.phone_number
+            job_config.divar_phone = None
 
     # Check for existing running jobs
     result = await db.execute(
@@ -419,6 +443,11 @@ async def _launch_job(
     # made on another one that is still running.
     from app.scraper import otp_store
     otp_store.reset_cancel(job_id)
+    if fell_back_from:
+        from app.services import job_log as _jl
+        await _jl.record(job_id, _jl.SESSION,
+                         f"شمارهٔ ذخیره‌شدهٔ {fell_back_from} خاموش است — اجرا با «خودکار» انجام می‌شود",
+                         level="warning", phone=fell_back_from)
 
     # Store a placeholder to track active jobs
     active_tasks[job_id] = {"status": "starting", "city": job_config.city, "category": job_config.category}
@@ -945,6 +974,16 @@ async def switch_job_account(
                 detail="این شماره از شماره‌های روشن و معتبر شما نیست")
         if _d(target.phone_number) == current:
             raise HTTPException(status_code=409, detail="اسکرپ همین حالا روی همین شماره است")
+        # One browser per number: a run already on it holds its profile, and
+        # the switch would fail with the old browser already closed.
+        busy = (await db.execute(select(ScrapingJob.job_id).where(
+            ScrapingJob.status.in_(("running", "paused")),
+            ScrapingJob.job_id != job.job_id,
+            ScrapingJob.divar_phone == target.phone_number))).first()
+        if busy:
+            raise HTTPException(
+                status_code=409,
+                detail=f"شمارهٔ {target.phone_number} همین حالا در اسکرپ دیگری ({str(busy[0])[:8]}) در حال استفاده است")
     elif not any(_d(c.phone_number) != current for c in mine):
         raise HTTPException(
             status_code=409,
@@ -1513,7 +1552,8 @@ async def take_login_code(
     colleague needed to log that number in as theirs.
     """
     from app.scraper import otp_store
-    owner = (await _owner_of_account(db, [account])).get(otp_store._digits(account))
+    from app.api.routes.auth import number_owner
+    owner = await number_owner(db, account)
     if owner is not None and owner != current_user.id:
         return {"code": None}
     return {"code": otp_store.take_login_code(account)}

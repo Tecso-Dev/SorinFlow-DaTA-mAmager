@@ -1954,9 +1954,10 @@ function _openPhoneGate(detail) {
                 if (_currentUser) { _currentUser.phone = r.phone || phone || _currentUser.phone; _currentUser.phone_verified = false; }
                 showCode(`کد به ${r.phone || phone || known} پیامک شد.`);
             } catch (e) {
-                // 429 is the cooldown: a code went out moments ago and is still
-                // good — let them type it rather than sending them back.
-                if (e.status === 429) {
+                // 429 on a resend is the cooldown: a code went out moments ago
+                // and is still good — let them type it. On a NEW number it is
+                // not: nothing was sent there, and the number did not change.
+                if (e.status === 429 && !phone) {
                     showCode(e.message);
                 } else {
                     err.textContent = e.message;
@@ -1988,7 +1989,8 @@ function _openPhoneGate(detail) {
         };
         const onKey = e => {
             if (e.key === 'Escape') close(false);
-            if (e.key === 'Enter') submit();
+            // Only from a field: Enter on «بعداً» must not send a code.
+            if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT') submit();
         };
         ok.addEventListener('click', submit);
         $('pv-cancel').addEventListener('click', () => close(false));
@@ -3485,7 +3487,9 @@ function _renderScraperAccountList(rows) {
             : c.identity_required_at ? '<span class="acct-flag warn">احراز هویت</span>'
             : c.challenged_at ? '<span class="acct-flag warn" title="دیوار اخیراً برای این شماره کد خواسته">کد خواسته</span>'
             : '';
-        return `<label class="acct-row${on ? '' : ' is-off'}" title="${on ? 'روشن — در چرخش و «خودکار» استفاده می‌شود' : 'خاموش — هیچ اسکرپی از این شماره استفاده نمی‌کند'}">
+        // A div, not a <label>: switching a number off moves live runs, so
+        // only the switch itself may do it — not a tap on the number.
+        return `<div class="acct-row${on ? '' : ' is-off'}" title="${on ? 'روشن — در چرخش و «خودکار» استفاده می‌شود' : 'خاموش — هیچ اسکرپی از این شماره استفاده نمی‌کند'}">
             <span class="form-check form-switch m-0">
                 <input class="form-check-input" type="checkbox" role="switch" ${on ? 'checked' : ''}
                        onchange="toggleDivarNumber(${Number(c.id)}, this.checked, this)"
@@ -3494,7 +3498,7 @@ function _renderScraperAccountList(rows) {
             <span class="acct-phone" dir="ltr">${esc(c.phone_number)}</span>
             <span class="acct-meta">${formatNumber(c.reveals || 0)} افشا</span>
             ${state}
-        </label>`;
+        </div>`;
     }).join('');
 }
 

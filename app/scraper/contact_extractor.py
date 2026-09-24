@@ -71,7 +71,10 @@ class ContactExtractor:
     async def get_phone_number(self) -> Optional[str]:
         """Click the contact button and return the extracted phone number."""
         try:
-            login_phone = getattr(settings, 'divar_phone_number', None)
+            # The account logged in RIGHT NOW is the number Divar may echo on
+            # the page — not a configured default, which is empty on a shared
+            # install and names somebody else's number on a rotated run.
+            login_phone = self.account_phone or getattr(settings, 'divar_phone_number', None)
             normalized_login = re.sub(r"[^0-9]", "", str(login_phone)) if login_phone else None
 
             def _is_login_phone(num: str) -> bool:

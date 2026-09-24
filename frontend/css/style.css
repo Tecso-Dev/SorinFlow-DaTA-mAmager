@@ -2049,7 +2049,7 @@ html:not([data-theme="light"]) .topbar {
    Logical properties only — the panel is RTL. */
 .acct-list { display: flex; flex-direction: column; gap: .3rem; margin-top: .45rem; }
 .acct-row {
-  display: flex; align-items: center; gap: .55rem; cursor: pointer;
+  display: flex; align-items: center; gap: .55rem;
   padding: .35rem .6rem; border-radius: 10px;
   background: var(--surface2); border: 1px solid var(--border);
   font-size: .76rem; transition: opacity .15s ease;

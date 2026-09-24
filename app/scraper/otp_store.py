@@ -318,12 +318,15 @@ _switch: Dict[str, dict] = {}
 
 
 def request_switch(job_id, phone: Optional[str] = None, *, by: Optional[int] = None,
-                   reason: str = "manual") -> None:
-    """Ask a running job to move to `phone` (or to its next own number)."""
+                   reason: str = "manual", from_phone: Optional[str] = None) -> None:
+    """Ask a running job to move to `phone` (or to its next own number).
+
+    `from_phone` makes it «move off this one»: dropped if, by the time the run
+    gets to it, it is already on a different number."""
     if not job_id:
         return
     _switch[str(job_id)] = {"phone": phone or None, "by": by, "reason": reason,
-                            "at": time.time()}
+                            "from_phone": from_phone or None, "at": time.time()}
 
 
 def has_switch(job_id) -> bool:

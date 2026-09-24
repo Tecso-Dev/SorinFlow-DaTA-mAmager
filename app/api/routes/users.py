@@ -467,6 +467,8 @@ async def request_phone_code(data: PhoneChangeRequest,
     from app.api.routes.sms import normalize_mobile
     from app.services.verification import issue_code, VerificationError
 
+    target = (current_user.phone or "").strip()
+    changing = False
     if data.phone:
         number = normalize_mobile(data.phone)
         if not number:
@@ -478,20 +480,25 @@ async def request_phone_code(data: PhoneChangeRequest,
         )).scalars().first()
         if clash:
             raise HTTPException(409, "این شماره قبلاً برای حساب دیگری ثبت شده است")
-        if number != (current_user.phone or ""):
-            current_user.phone = number
-            current_user.phone_verified = False
-            await db.commit()
+        changing = number != target
+        target = number
 
-    if not (current_user.phone or "").strip():
+    if not target:
         raise HTTPException(400, "ابتدا شمارهٔ موبایل خود را وارد کنید")
-    if current_user.phone_verified:
+    if current_user.phone_verified and not changing:
         return {"sent": False, "verified": True,
                 "message": "این شماره قبلاً تأیید شده است"}
 
+    # The number changes only once a code has actually gone to it.
+    #
+    # It used to be saved first and the code sent after. Inside the resend
+    # cooldown the send was refused — but the new number was already on the
+    # row, and the code still waiting was the one texted to the OLD number.
+    # Typing that code «verified» a number that had never received anything,
+    # and the phone gate now leans on that tick.
     try:
         issued = await issue_code(
-            PURPOSE_PHONE, current_user.username, current_user.phone,
+            PURPOSE_PHONE, current_user.username, target,
             message_template="کد تأیید شمارهٔ شما در سورین‌فلو: {code}",
             channel="sms", db=db)
     except VerificationError as e:
@@ -504,6 +511,11 @@ async def request_phone_code(data: PhoneChangeRequest,
         raise HTTPException(
             status_code=503,
             detail="پیامک ارسال نشد — تنظیمات پیامک را در پنل بررسی کنید")
+
+    if changing:
+        current_user.phone = target
+        current_user.phone_verified = False
+        await db.commit()
 
     return {"sent": True, "verified": False, "phone": current_user.phone,
             "message": "کد تأیید پیامک شد"}
@@ -1054,7 +1066,19 @@ async def update_user(
     if data.is_active is not None:
         user.is_active = data.is_active
     if data.divar_phone is not None:
-        user.divar_phone = data.divar_phone or None
+        dp = (data.divar_phone or "").strip() or None
+        if dp:
+            # The boot backfill hands an unowned session to whoever's
+            # divar_phone names it; naming somebody else's number here was a
+            # slow way of moving it. Same rule as /me/divar-phone.
+            from app.models.cookie import Cookie
+            want = "".join(ch for ch in dp if ch.isdigit())[-10:]
+            for ph, owner in (await db.execute(
+                    select(Cookie.phone_number, Cookie.owner_user_id))).all():
+                if owner and owner != user.id \
+                        and "".join(ch for ch in str(ph) if ch.isdigit())[-10:] == want:
+                    raise HTTPException(403, "این شمارهٔ دیوار متعلق به کاربر دیگری است")
+        user.divar_phone = dp
     if data.phone is not None:
         from app.api.routes.sms import normalize_mobile
         raw = (data.phone or "").strip()

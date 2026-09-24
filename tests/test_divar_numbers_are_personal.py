@@ -335,6 +335,24 @@ def _job(owner, status="running", phone=JAN_1):
     return asyncio.run(_go())
 
 
+def _finish_all_runs():
+    """Earlier tests leave runs «running»; the launcher caps those at three
+    and the switch refuses a number a live run is on."""
+    from app.models.scraping_job import ScrapingJob
+    from sqlalchemy import update
+
+    async def _go():
+        eng, maker = _engine()
+        try:
+            async with maker() as s:
+                await s.execute(update(ScrapingJob).where(
+                    ScrapingJob.status.in_(("running", "paused", "pending"))).values(status="completed"))
+                await s.commit()
+        finally:
+            await eng.dispose()
+    asyncio.run(_go())
+
+
 def _cookie_id(phone):
     from app.models.cookie import Cookie
     from sqlalchemy import select
@@ -415,6 +433,7 @@ class TestTheOnOffSwitch:
         r = client.patch(f"/api/auth/cookies/{cid}", json={"enabled": True},
                          headers=_tok(client, "np_jan"))
         assert r.json()["is_enabled"] is True
+        _finish_all_runs()
 
     def test_a_colleague_cannot_switch_it(self, client, people):
         cid = _cookie_id(JAN_1)
@@ -427,6 +446,7 @@ class TestTheSwitchEndpoint:
 
     def test_the_owner_asks_for_another_of_their_numbers(self, client, people):
         from app.scraper import otp_store
+        _finish_all_runs()
         job = _job(people["jan"])
         r = client.post(f"/api/scraper/jobs/{job}/switch-account", json={"phone": JAN_2},
                         headers=_tok(client, "np_jan"))
@@ -578,3 +598,223 @@ class TestThePanel:
         fn = js[js.index("async function loadCookies("):js.index("async function deleteCookie(")]
         assert "${esc(cookie.phone_number)}" in fn
         assert "<strong>${cookie.phone_number}</strong>" not in fn
+
+
+# ── what the review of this change found ────────────────────────────────────
+
+class TestAFailedSwitchLeavesTheRunABrowser:
+    """_open_browser_for closes the old profile before opening the next. When
+    the next one would not open («already open in this process»), the run was
+    left with no browser at all, and every later listing failed on it."""
+
+    def test_the_runs_own_profile_is_opened_again(self):
+        from app.scraper.divar_scraper import DivarScraper
+        import app.scraper.divar_scraper as ds
+
+        s = DivarScraper.__new__(DivarScraper)
+        s.playwright = object()
+        s.proxy_enabled = False
+        s.active_phone = "A"
+        s.context = object()
+        s._browser_account = "A"
+        s._rotation_pool = ["A", "B"]
+        s._reveals_since_rotation = 0
+        s._force_rotate = True
+        s._rotate_every_override = 5
+        opened = []
+
+        async def _open(account, proxy=None):
+            s.context = None
+            s._browser_account = ds._NO_BROWSER
+            opened.append(account)
+            if account == "B":
+                raise RuntimeError("profile … is already open in this process")
+            s.context, s._browser_account = object(), account
+        s._open_browser_for = _open
+
+        class _A:
+            def browser_alive(self):
+                return True
+
+            async def restore_session(self, phone):
+                return True
+        s.auth = _A()
+
+        async def _noop(*a, **k):
+            return None
+
+        async def _pool():
+            return ["A", "B"]
+
+        async def _zero(*a, **k):
+            return 0
+        s._load_rotation_pool = _pool
+        s._persist_active_session = _noop
+        s._mark_account_spent = _noop
+        s._account_reveals = _zero
+        s._human_like_delay = _noop
+
+        changed = asyncio.run(s.maybe_rotate_account())
+        assert not changed and s.active_phone == "A"
+        assert opened == ["B", "A"], "the run's own profile was never reopened"
+        assert s.context is not None
+
+    def test_the_real_opener_forgets_the_account_before_it_opens(self):
+        """The stand-in above mirrors this: the moment the old profile closes,
+        the browser is nobody's — so a failed open cannot read as «still on A»."""
+        import inspect
+        from app.scraper.divar_scraper import DivarScraper
+        src = inspect.getsource(DivarScraper._open_browser_for)
+        assert src.index("self._browser_account = _NO_BROWSER") < src.index("await open_browser(")
+
+
+class TestStaleRequestsAndPools:
+
+    def test_an_empty_pool_is_not_replaced_by_the_cached_one(self):
+        from app.scraper.divar_scraper import DivarScraper
+        s = DivarScraper.__new__(DivarScraper)
+        s._rotation_pool = ["A", "B"]
+        s._reveals_since_rotation = 0
+        s._force_rotate = True
+        s._rotate_every_override = 5
+        s.active_phone = "A"
+        tried = []
+
+        class _A:
+            def browser_alive(self):
+                return True
+
+            async def restore_session(self, phone):
+                tried.append(phone)
+                return True
+        s.auth = _A()
+
+        async def _empty():
+            return []
+
+        async def _zero(*a, **k):
+            return 0
+        s._load_rotation_pool = _empty
+        s._account_reveals = _zero
+        assert asyncio.run(s.maybe_rotate_account()) is False
+        assert tried == [], "rotated onto a number the database no longer offers"
+        assert s._rotation_pool == []
+
+    def test_move_off_a_number_the_run_already_left_is_dropped(self):
+        from app.scraper import otp_store
+        from app.scraper.divar_scraper import DivarScraper
+        s = DivarScraper.__new__(DivarScraper)
+        s.active_phone = "09121110002"
+        s._job_id_str = "stale-switch"
+        tried = []
+
+        class _A:
+            def browser_alive(self):
+                return True
+
+            async def restore_session(self, phone):
+                tried.append(phone)
+                return True
+        s.auth = _A()
+
+        async def _pool():
+            return ["09121110002", "09121110003"]
+        s._load_rotation_pool = _pool
+        otp_store.request_switch("stale-switch", None, reason="disabled", from_phone="09121110001")
+        assert asyncio.run(s.maybe_rotate_account()) is False
+        assert tried == [] and s.active_phone == "09121110002"
+
+
+class TestTheReviewThroughTheApp:
+
+    def test_a_forwarder_sim_is_a_claim_even_before_a_session(self, client, people):
+        """A fresh SIM in the colleague's phone forwards its own login code;
+        nobody else may start that login or read the code."""
+        from app.models.forwarder import ForwarderDevice
+        from app.scraper import otp_store
+        fresh = "09146382499"
+
+        async def _go():
+            eng, maker = _engine()
+            try:
+                async with maker() as s:
+                    s.add(ForwarderDevice(device_id="np-fw-1", user_id=people["jan"],
+                                          secret="x" * 40, sim_phone=fresh, is_active=True))
+                    await s.commit()
+            finally:
+                await eng.dispose()
+        asyncio.run(_go())
+        r = client.post("/api/auth/login", json={"phone_number": fresh},
+                        headers=_tok(client, "np_third"))
+        assert r.status_code == 403, r.text
+        otp_store.put_login_code(fresh, "112233")
+        r = client.get(f"/api/scraper/login-code/{fresh}", headers=_tok(client, "np_third"))
+        assert r.json()["code"] is None
+        r = client.get(f"/api/scraper/login-code/{fresh}", headers=_tok(client, "np_jan"))
+        assert r.json()["code"] == "112233"
+
+    def test_a_saved_config_on_a_switched_off_number_runs_on_automatic(self, client, people):
+        """A resume or a schedule replays what was saved; a number switched off
+        since must not stop it at the door with a choice nobody can make."""
+        from fastapi import HTTPException
+        from app.api.routes.scraper import _launch_job
+        from app.schemas import ScrapingJobCreate
+        from app.models.user import User
+        from sqlalchemy import select
+
+        class _BG:
+            def __init__(self):
+                self.calls = []
+
+            def add_task(self, fn, *a):
+                self.calls.append(a)
+
+        async def _go(interactive):
+            eng, maker = _engine()
+            try:
+                async with maker() as s:
+                    jan = (await s.execute(select(User).where(User.id == people["jan"]))).scalar_one()
+                    bg = _BG()
+                    cfg = ScrapingJobCreate(city="urmia", category="rent-apartment", divar_phone=JAN_OFF)
+                    try:
+                        resp = await _launch_job(cfg, bg, s, jan, interactive=interactive)
+                    except HTTPException as e:
+                        return e.status_code, None, None
+                    return 200, resp.divar_phone, bg.calls[0][6]
+            finally:
+                await eng.dispose()
+        _finish_all_runs()
+        assert asyncio.run(_go(True))[0] == 409
+        status, row_phone, run_phone = asyncio.run(_go(False))
+        assert status == 200 and row_phone is None and run_phone is None
+
+    def test_resume_and_schedules_replay_rather_than_start(self):
+        import inspect
+        from app.api.routes import scraper as sr
+        from app.services import scrape_scheduler
+        assert "interactive=False" in inspect.getsource(sr.resume_scraping_job)
+        assert "interactive=False" in inspect.getsource(scrape_scheduler.fire)
+
+    def test_refresh_leaves_a_number_a_run_is_on_alone(self, client, people):
+        from app.scraper.stealth import profile_dir, _PROFILES_IN_USE
+        key = str(profile_dir(JAN_1))
+        _PROFILES_IN_USE.add(key)
+        try:
+            r = client.post(f"/api/auth/refresh?phone_number={JAN_1}", headers=_tok(client, "np_jan"))
+            assert r.status_code == 200 and r.json()["in_use"] is True, r.text
+        finally:
+            _PROFILES_IN_USE.discard(key)
+
+    def test_no_switch_onto_a_number_another_run_is_on(self, client, people):
+        _finish_all_runs()
+        _job(people["jan"], phone=JAN_2)
+        job = _job(people["jan"], phone=JAN_1)
+        r = client.post(f"/api/scraper/jobs/{job}/switch-account", json={"phone": JAN_2},
+                        headers=_tok(client, "np_jan"))
+        assert r.status_code == 409, r.text
+        _finish_all_runs()
+
+    def test_an_admin_cannot_name_a_colleagues_number_for_somebody(self, client, people):
+        r = client.patch(f"/api/users/{people['third']}", json={"divar_phone": JAN_1},
+                         headers=_tok(client, "np_root"))
+        assert r.status_code == 403, r.text

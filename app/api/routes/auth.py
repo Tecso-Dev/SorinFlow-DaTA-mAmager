@@ -102,11 +102,38 @@ async def _refuse_somebody_elses(db, user, phone):
     the root account's number and end up owning it. No role is exempt.
     """
     row = await _session_row_for(db, phone)
-    if row is not None and row.owner_user_id and (not user or row.owner_user_id != user.id):
+    owner = await number_owner(db, phone, row=row)
+    if owner is not None and (not user or owner != user.id):
         raise HTTPException(
             status_code=403,
             detail="این شمارهٔ دیوار متعلق به کاربر دیگری است — هر کاربر فقط با شماره‌های خودش کار می‌کند")
     return row
+
+
+async def number_owner(db, phone, *, row=None):
+    """Whose Divar number this is, or None if nobody has claimed it.
+
+    The session row says so first. A number with no session yet can still be
+    somebody's: a SIM they put in their own phone and registered as a
+    forwarder. That phone forwards the number's login code on its own, so
+    «nobody owns it yet» was a window in which a colleague could start the
+    login, receive the forwarded code, and end up with the session.
+    """
+    if row is None:
+        row = await _session_row_for(db, phone)
+    if row is not None and row.owner_user_id:
+        return row.owner_user_id
+    try:
+        from app.models.forwarder import ForwarderDevice
+        from app.services.forwarder import same_phone
+        devs = (await db.execute(select(ForwarderDevice).where(
+            ForwarderDevice.is_active == True))).scalars().all()  # noqa: E712
+        for d in devs:
+            if any(same_phone(p, phone) for p in d.sims()):
+                return d.user_id
+    except Exception as e:
+        logger.warning(f"[auth] could not read forwarder SIMs for {phone}: {e}")
+    return None
 
 
 @router.post("/login", response_model=AuthResponse, dependencies=[Depends(require_verified_phone)])
@@ -337,6 +364,16 @@ async def refresh_session(
     """Attempt to refresh/validate session"""
 
     phone = await _own_session_or_403(db, user, phone_number)
+
+    # A run is on this number right now: its browser holds the profile, and
+    # the session is as alive as it gets. Opening it a second time fails
+    # («already open»), which this route used to report as «expired — log in
+    # again»; and restoring the same session in a second browser would rotate
+    # the refresh token under the running one.
+    from app.scraper.stealth import profile_dir, _PROFILES_IN_USE
+    if str(profile_dir(phone)) in _PROFILES_IN_USE:
+        return {"success": True, "in_use": True,
+                "message": "این شماره همین حالا در یک اسکرپ در حال استفاده است و نشستش فعال است"}
     
     auth = DivarAuth(db)
     
@@ -517,8 +554,12 @@ async def import_cookies(
     from app.services.divar_session import derive_expiry
     expires_at = derive_expiry(request.cookies)
 
-    result = await db.execute(select(Cookie).where(Cookie.phone_number == request.phone_number))
-    existing = result.scalar_one_or_none()
+    # By digits: an older row stored as +98… or 912… is the same number, and
+    # an exact-string lookup missed it and made a second row beside it.
+    existing = await _session_row_for(db, request.phone_number)
+    if existing is None:
+        # Not claimed by a session — but maybe by a colleague's forwarder SIM.
+        await _refuse_somebody_elses(db, current_user, request.phone_number)
 
     if existing:
         # Checked before a single field is written: the jar used to be assigned
@@ -638,10 +679,11 @@ async def set_cookie_enabled(
         from app.services import job_log
         want = _digits10(cookie.phone_number)
         live = (await db.execute(select(ScrapingJob).where(
-            ScrapingJob.status.in_(("running", "paused", "pending"))))).scalars().all()
+            ScrapingJob.status.in_(("running", "paused", "pending"))))).scalars().all() if want else []
         for j in live:
             if _digits10(j.divar_phone) == want:
-                otp_store.request_switch(str(j.job_id), None, by=user.id, reason="disabled")
+                otp_store.request_switch(str(j.job_id), None, by=user.id, reason="disabled",
+                                         from_phone=cookie.phone_number)
                 moved.append(str(j.job_id))
                 await job_log.record(
                     str(j.job_id), job_log.SESSION,
