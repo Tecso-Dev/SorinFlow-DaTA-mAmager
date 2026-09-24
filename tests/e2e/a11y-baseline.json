@@ -1,0 +1,8 @@
+[
+  {
+    "page": "/",
+    "id": "color-contrast",
+    "target": ".copy",
+    "note": "Landing page marketing copy — a color/contrast change is a design decision (frontend-design-rules territory), not a mechanical accessibility fix. Left for a design pass rather than baselined-and-forgotten silently."
+  }
+]
