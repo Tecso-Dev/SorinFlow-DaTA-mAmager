@@ -35,8 +35,10 @@ class TestSettingsFields:
         monkeypatch.delenv("DB_POOL_SIZE", raising=False)
         monkeypatch.delenv("DB_MAX_OVERFLOW", raising=False)
         s = Settings(_env_file=None)
-        assert s.db_pool_size == 5
-        assert s.db_max_overflow == 10
+        # 10 + 20: gateway calls hold their connection for the whole call,
+        # and 30 is still well under Postgres's 100
+        assert s.db_pool_size == 10
+        assert s.db_max_overflow == 20
 
     def test_env_vars_override_them(self, monkeypatch):
         monkeypatch.setenv("DB_POOL_SIZE", "3")

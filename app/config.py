@@ -292,8 +292,8 @@ class Settings(BaseSettings):
 
     # Connection pool (app/database.py). 0 means NullPool — see there for why
     # that is still a real option and not just a default to move past.
-    db_pool_size: int = Field(default=5, validation_alias=AliasChoices("DB_POOL_SIZE", "db_pool_size"))
-    db_max_overflow: int = Field(default=10, validation_alias=AliasChoices("DB_MAX_OVERFLOW", "db_max_overflow"))
+    db_pool_size: int = Field(default=10, validation_alias=AliasChoices("DB_POOL_SIZE", "db_pool_size"))
+    db_max_overflow: int = Field(default=20, validation_alias=AliasChoices("DB_MAX_OVERFLOW", "db_max_overflow"))
 
     class Config:
         env_file = ".env"
