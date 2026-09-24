@@ -99,6 +99,10 @@ async def run_once(db, *, notify: bool = True, limit: int = BATCH) -> Dict:
     created: List[CustomerMatch] = []
     now = datetime.now(timezone.utc)
     for p in props:
+        # scoring against preloaded customers does no I/O, so without this a
+        # pass (300 listings × every customer) holds the event loop — and every
+        # request on this single worker — for seconds at a time
+        await asyncio.sleep(0)
         if customers:
             try:
                 fits = await customers_for_property(db, p, limit=PER_PROPERTY, use_llm=False, customers=customers)
