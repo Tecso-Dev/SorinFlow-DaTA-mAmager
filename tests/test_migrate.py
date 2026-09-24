@@ -121,8 +121,10 @@ class TestPythonMAppMigrate:
                         env=scratch_env)
             assert r.returncode == 0, (r.stdout + r.stderr)[-3000:]
             assert "alembic skipped" in r.stdout
-            with pytest.raises(RuntimeError, match="9999"):
-                asyncio.run(_check())
+            # and a pod on this image still starts on it: 9999 is a revision
+            # this image has never heard of — ahead of it, as after a rollback.
+            # Only the Job, which would have to migrate it, refuses.
+            asyncio.run(_check())
         finally:
             asyncio.run(_sql(admin, f'DROP DATABASE IF EXISTS "{scratch.database}" WITH (FORCE)',
                              autocommit=True))
