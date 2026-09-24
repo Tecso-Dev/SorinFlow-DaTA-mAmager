@@ -79,14 +79,26 @@ while IFS= read -r name; do
 done < <(jq -r '.parts[].name' "$MANIFEST")
 
 GPG_LOG="$(mktemp)"
+GPG_STATUS="$(mktemp)"
 if ! gpg --batch --yes --pinentry-mode loopback --no-symkey-cache \
+     --status-file "$GPG_STATUS" \
      --passphrase-file "$PASS_FILE" --decrypt -o "$OUTDIR/.plain.tar" "$WORK_ENC" 2>"$GPG_LOG"; then
   echo "gpg could not decrypt — wrong passphrase, or the parts are corrupt:" >&2
   cat "$GPG_LOG" >&2
-  rm -f "$GPG_LOG"
+  rm -f "$GPG_LOG" "$GPG_STATUS" "$OUTDIR/.plain.tar"
   exit 1
 fi
-rm -f "$GPG_LOG"
+# gpg --decrypt also «decrypts» a message that was never encrypted
+# (gpg --store), with any passphrase, and the manifest proves nothing. Anyone
+# holding the bot token could post such a «newest bundle» to the chat and
+# have new_server.sh restore their secrets and database. Only a bundle that
+# really was encrypted — so with our passphrase — goes on.
+if ! grep -q '^\[GNUPG:\] DECRYPTION_OKAY' "$GPG_STATUS"; then
+  echo "this bundle was not encrypted with the DR passphrase — refusing it" >&2
+  rm -f "$GPG_LOG" "$GPG_STATUS" "$OUTDIR/.plain.tar"
+  exit 1
+fi
+rm -f "$GPG_LOG" "$GPG_STATUS"
 
 tar -xf "$OUTDIR/.plain.tar" -C "$OUTDIR"
 rm -f "$OUTDIR/.plain.tar"

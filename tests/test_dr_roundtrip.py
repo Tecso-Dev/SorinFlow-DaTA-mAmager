@@ -397,6 +397,30 @@ class TestRestore:
         assert (victim / "etc" / "passwd").read_text() == "keep" and (victim / "home").is_dir()
         assert sorted(x.name for x in victim.iterdir()) == ["etc", "home"]
 
+    def test_a_bundle_that_was_never_encrypted_is_refused(self, pipeline, tmp_path):
+        """gpg --decrypt «decrypts» a gpg --store message with any passphrase,
+        and the manifest proves nothing: whoever holds the bot token could post
+        a forged newest bundle and have its secrets and database restored."""
+        forged = tmp_path / "forged"
+        (forged / "db").mkdir(parents=True)
+        (forged / "k8s").mkdir()
+        for f in ("db/divar_scraper.dump", "db/globals.sql", "k8s/sorinflow-secrets.env", "data-pvc.tar"):
+            (forged / f).write_text("ATTACKER")
+        subprocess.run(["tar", "-C", str(forged), "-cf", str(tmp_path / "plain.tar"), "."], check=True)
+        store = tmp_path / "chat"
+        store.mkdir()
+        part = store / "sorinflow-dr-20990101-000000.tar.gpg.part0000"
+        subprocess.run(["gpg", "--batch", "--yes", "--store", "-o", str(part), str(tmp_path / "plain.tar")],
+                       check=True, capture_output=True)
+        (store / "sorinflow-dr-20990101-000000.manifest.json").write_text(json.dumps({
+            "stamp": "20990101-000000",
+            "parts": [{"name": part.name, "size": part.stat().st_size,
+                       "sha256": hashlib.sha256(part.read_bytes()).hexdigest()}]}))
+        r = _run_restore("any passphrase at all", store)
+        assert r.returncode != 0, r.stdout
+        assert "not encrypted" in r.stderr
+        assert not (store / "restored-20990101-000000" / "k8s").exists()
+
     def test_undelivered_bundles_do_not_pile_up(self, pipeline):
         left = sorted(d.name for d in (pipeline["pvc"] / "dr-outbox").iterdir())
         assert left == ["20200102-000000"], left
