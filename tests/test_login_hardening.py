@@ -149,9 +149,9 @@ def _mk_user(username, password="pw123456", **kw):
         eng = create_async_engine(os.environ["DATABASE_URL"])
         try:
             async with async_sessionmaker(eng, expire_on_commit=False)() as s:
-                u = User(username=username, full_name=username, role="admin",
-                         hashed_password=get_password_hash(password),
-                         permissions=[], is_active=True, **kw)
+                u = User(**{"username": username, "full_name": username, "role": "admin",
+                            "hashed_password": get_password_hash(password),
+                            "permissions": [], "is_active": True, **kw})
                 s.add(u)
                 await s.commit()
                 return u.id
@@ -324,6 +324,41 @@ def test_an_address_that_is_not_a_clients_is_never_locked(client):
     for i in range(LOGIN_IP_LIMIT + 5):
         _login(client, f"lh_cluster_{i}", "x", xff="10.42.0.7")
     assert _login(client, "lh_office", xff="10.42.0.7").status_code == 200
+
+
+# ── a name that does not exist costs the same bcrypt round ────────────────────
+
+def test_a_missing_name_still_costs_exactly_one_bcrypt_round(client, monkeypatch):
+    import app.api.routes.users as users
+    from app.auth.jwt import DUMMY_PASSWORD_HASH, get_password_hash, verify_password
+    calls = []
+
+    def counting(plain, hashed):
+        calls.append(hashed)
+        return verify_password(plain, hashed)
+    monkeypatch.setattr(users, "verify_password", counting)
+
+    assert _login(client, "lh_no_such_person", "whatever").status_code == 401
+    assert calls == [DUMMY_PASSWORD_HASH]
+    # and the dummy costs what a real hash costs
+    assert DUMMY_PASSWORD_HASH[:7] == get_password_hash("x")[:7] == "$2b$12$"
+
+    calls.clear()
+    _mk_user("lh_timing_real")
+    assert _login(client, "lh_timing_real", "whatever").status_code == 401
+    assert len(calls) == 1 and calls[0] != DUMMY_PASSWORD_HASH
+
+
+def test_an_inactive_account_is_checked_in_full_before_it_is_named(client, monkeypatch):
+    import app.api.routes.users as users
+    from app.auth.jwt import verify_password
+    calls = []
+    monkeypatch.setattr(users, "verify_password",
+                        lambda p, h: calls.append(h) or verify_password(p, h))
+    _mk_user("lh_inactive", is_active=False)
+    assert _login(client, "lh_inactive", "whatever").status_code == 401
+    assert _login(client, "lh_inactive").status_code == 403
+    assert len(calls) == 2
 
 
 def test_without_redis_login_still_works(client, monkeypatch):

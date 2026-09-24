@@ -29,7 +29,7 @@ from app.database import get_db
 from app.models.user import User
 from app.auth.jwt import (
     verify_password, get_password_hash, create_access_token, decode_token,
-    access_claims,
+    access_claims, DUMMY_PASSWORD_HASH,
     TOKEN_TOTP_PENDING,
     TOKEN_SMS_PENDING,
 )
@@ -188,7 +188,11 @@ async def login(
     key = _account_key(user) if user else ident
     await _login_allowed(request, key)
 
-    if not user or not verify_password(form.password, user.hashed_password):
+    # One bcrypt round whether or not the name exists. An inactive account
+    # is checked in full too; it is only told so after its password is right.
+    ok = verify_password(form.password,
+                         user.hashed_password if user else DUMMY_PASSWORD_HASH)
+    if not user or not ok:
         await _login_failed(request, key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
