@@ -787,26 +787,28 @@ async def change_my_password(data: PasswordChangeRequest,
     moves, and a token minted before it is refused from then on. This
     device gets a fresh token in the response so it stays in."""
     from app.services.verification import (
-        check_login_rate, record_login_failure, clear_login_failures, VerificationError)
+        take_login_attempt, login_attempt_passed, clear_login_failures, VerificationError)
 
-    # The same throttle as the login form. Somebody holding a stolen session
-    # must not get unlimited guesses at the one thing that would let them
-    # keep it.
-    try:
-        await check_login_rate(f"name:{current_user.username}")
-    except VerificationError as e:
-        raise HTTPException(status_code=429, detail=e.message)
-    if not verify_password(data.current_password, current_user.hashed_password):
-        await record_login_failure(f"name:{current_user.username}")
-        raise HTTPException(400, "رمز فعلی درست نیست")
     if data.new_password == data.current_password:
         raise HTTPException(400, "رمز تازه نباید با رمز فعلی یکی باشد")
+    # The same throttle as the login form. Somebody holding a stolen session
+    # must not get unlimited guesses at the one thing that would let them
+    # keep it — counted before the password is compared, in one Redis
+    # transaction, so guesses sent together meet the cap one by one.
+    key = f"name:{current_user.username}"
+    try:
+        await take_login_attempt(request, key)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message) from None
+    if not verify_password(data.current_password, current_user.hashed_password):
+        raise HTTPException(400, "رمز فعلی درست نیست")
+    await login_attempt_passed(request)
 
     current_user.hashed_password = get_password_hash(data.new_password)
     current_user.token_version = (current_user.token_version or 0) + 1
     await db.commit()
     await db.refresh(current_user)
-    await clear_login_failures(f"name:{current_user.username}")
+    await clear_login_failures(key)
     logger.warning(f"[profile] {current_user.username} changed their password; "
                    f"other sessions signed out")
     await audit.record("password_change", actor=current_user, target_type="user",
