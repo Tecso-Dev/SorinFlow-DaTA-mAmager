@@ -118,15 +118,43 @@ def mask_url(url: str) -> str:
 
 
 # ── how the server reaches Telegram ──────────────────────────────────────────
-# api.telegram.org is blocked from Iranian networks and the server is in one.
-# Three ways out, chosen on the panel:
+# DIRECT FIRST. «راه اول برای ارسال به تلگرام از سرور ایرانی باید باشد و پراکسی
+# راه جایگزین آن است.» The server tries api.telegram.org itself before anything
+# else, with a short connect timeout; only when that does not connect does it
+# take the configured way round. api.telegram.org is usually filtered from
+# Iranian networks, so a failed direct attempt is remembered for a few
+# minutes and the next calls go straight to the fallback — a long-polling
+# assistant must not pay a connect timeout on every poll.
+#
+# The fallback, chosen on the panel:
 #   manual — one proxy URL, typed;
 #   pool   — the dashboard's proxy list (all active ones, or a chosen few),
 #            rotated so the load is spread and the next one tried when one
 #            does not answer;
 #   relay  — a Cloudflare Worker that forwards to api.telegram.org, reached
 #            directly (Cloudflare answers from Iran), optionally with a key.
+#            deploy/telegram-relay/ has the worker.
 # The environment wins over the panel, as everywhere else.
+#
+# TELEGRAM_DIRECT_FIRST=0 skips the direct attempt (a server that is known
+# never to reach Telegram).
+
+DIRECT_CONNECT_TIMEOUT = 6.0     # seconds to wait for api.telegram.org to answer at all
+DIRECT_RETRY_AFTER = 300         # after a failed direct attempt, fall back straight away for this long
+_direct_down_until = 0.0
+
+
+def _direct_first() -> bool:
+    return str(getattr(settings, "telegram_direct_first", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _direct_is_resting() -> bool:
+    return time.monotonic() < _direct_down_until
+
+
+def _note_direct(ok: bool) -> None:
+    global _direct_down_until
+    _direct_down_until = 0.0 if ok else time.monotonic() + DIRECT_RETRY_AFTER
 
 async def _pool_urls(db, spec: str) -> list:
     """The URLs of the dashboard proxies the pool names, active ones only."""
@@ -209,27 +237,90 @@ def _as_route(proxies, route: Optional[dict]) -> dict:
     return _route("manual", list(proxies or []))
 
 
+def _legs(route: dict, *, direct: bool) -> list:
+    """The ways to try, in order: (label, url base, proxy, headers).
+
+    `label` is what callers see as «which way it went»: "direct", "relay", or
+    the proxy URL itself (so existing callers that printed the proxy still do).
+    """
+    legs = []
+    configured = route["mode"] == "relay" or bool(route["proxies"])
+    if direct or not configured:
+        legs.append(("direct", TELEGRAM_API, None, None))
+    if route["mode"] == "relay" and route["api_base"].rstrip("/") != TELEGRAM_API:
+        hdr = {"X-Relay-Key": route["relay_key"]} if route.get("relay_key") else None
+        legs.append(("relay", route["api_base"], None, hdr))
+    for p in route["proxies"]:
+        legs.append((p, TELEGRAM_API, p, None))
+    return legs
+
+
 async def tg_request(token: str, method: str, route: Optional[dict] = None, *, json=None,
-                     data=None, files=None, params=None, timeout: float = 20):
-    """One Bot API call through the route: each proxy in turn until one
-    answers (an HTTP answer of any status counts — it is Telegram speaking),
-    direct when there are none. Returns (response, the proxy that carried it)."""
+                     data=None, files=None, params=None, timeout: float = 20,
+                     direct: Optional[bool] = None):
+    """One Bot API call: straight to api.telegram.org first, then the
+    configured way round — the relay, or each proxy in turn — until one
+    answers (an HTTP answer of any status counts — it is Telegram speaking).
+
+    Returns (response, how it went): "direct", "relay", or the proxy URL.
+
+    `direct` forces the direct attempt on or off for this call; by default it
+    is tried unless it failed within the last DIRECT_RETRY_AFTER seconds, or
+    TELEGRAM_DIRECT_FIRST=0. With nothing else configured, direct is the only
+    way and is always tried.
+    """
     route = route or _route("manual", [])
-    url = f"{route['api_base']}/bot{token}/{method}"
-    headers = {"X-Relay-Key": route["relay_key"]} if route.get("relay_key") else None
+    if direct is None:
+        direct = _direct_first() and not _direct_is_resting()
     last = None
-    for proxy in (route["proxies"] or [None]):
+    for label, base, proxy, headers in _legs(route, direct=direct):
+        url = f"{base.rstrip('/')}/bot{token}/{method}"
+        # Direct gets a short CONNECT timeout — a filtered host usually never
+        # answers the SYN — but the full timeout once connected, because an
+        # upload of a backup part takes as long as it takes.
+        tmo = httpx.Timeout(timeout, connect=DIRECT_CONNECT_TIMEOUT) if label == "direct" else timeout
         try:
-            async with telegram_client(proxy or "", timeout=timeout) as client:
+            async with telegram_client(proxy or "", timeout=tmo) as client:
                 if json is not None or data is not None or files is not None:
                     resp = await client.post(url, json=json, data=data, files=files, headers=headers)
                 else:
                     resp = await client.get(url, params=params, headers=headers)
-            return resp, proxy
+            if label == "direct":
+                _note_direct(True)
+            return resp, label
         except (httpx.TransportError, OSError) as e:
             last = e
-            logger.warning(f"[telegram] {method} via {mask_url(proxy) if proxy else 'direct'} failed: {type(e).__name__}")
+            if label == "direct":
+                _note_direct(False)
+            logger.warning(f"[telegram] {method} via {mask_url(label)} failed: {type(e).__name__}")
     raise last if last else RuntimeError("no route to telegram")
+
+
+async def diagnose(token: str, route: dict) -> list:
+    """getMe down every way there is, one at a time, for the panel's
+    «تست راه‌ها»: which of direct / relay / each proxy reaches Telegram today,
+    and how fast. Never raises; never touches the direct-rest memory."""
+    out = []
+    for label, base, proxy, headers in _legs(route, direct=True):
+        started = time.monotonic()
+        row = {"route": "direct" if label == "direct" else ("relay" if label == "relay" else "proxy"),
+               "target": (base if label != "direct" else TELEGRAM_API) if not proxy else mask_url(proxy)}
+        try:
+            tmo = httpx.Timeout(15, connect=DIRECT_CONNECT_TIMEOUT if label == "direct" else 10)
+            async with telegram_client(proxy or "", timeout=tmo) as client:
+                r = await client.get(f"{base.rstrip('/')}/bot{token}/getMe", headers=headers)
+            body = {}
+            try:
+                body = r.json()
+            except Exception:
+                pass
+            row.update(ok=bool(r.status_code == 200 and body.get("ok")), http=r.status_code,
+                       error=None if body.get("ok") else (body.get("description") or f"HTTP {r.status_code}"))
+        except Exception as e:
+            row.update(ok=False, http=None, error=type(e).__name__)
+        row["ms"] = int((time.monotonic() - started) * 1000)
+        out.append(row)
+    return out
 
 
 async def telegram_ping(token: str, proxies="", route: Optional[dict] = None) -> dict:
@@ -240,7 +331,8 @@ async def telegram_ping(token: str, proxies="", route: Optional[dict] = None) ->
     if me.status_code != 200 or not body.get("ok"):
         raise ValueError(body.get("description") or "توکن ربات پذیرفته نشد")
     r = _as_route(proxies, route)
-    via = mask_url(used) if used else (f"رله {r['api_base']}" if r["mode"] == "relay" else "مستقیم")
+    via = ("مستقیم" if used == "direct" else
+           f"رله {r['api_base']}" if used == "relay" else mask_url(used))
     return {"bot": body["result"].get("username", ""), "ms": int((time.monotonic() - started) * 1000), "via": via}
 
 
@@ -332,7 +424,7 @@ async def send_to_telegram(path: Path, db=None) -> bool:
     error = "؛ ".join(failures)
     if not delivered and unreachable and not proxy:
         # the usual reason on this server, said where the panel shows it
-        error = "تلگرام از ایران در دسترس نیست — پراکسی تلگرام را تنظیم کنید"
+        error = "تلگرام مستقیم از سرور در دسترس نبود و راه جایگزینی (رلهٔ Cloudflare یا پراکسی) تنظیم نشده است"
     if db is not None:
         await _remember_offsite(db, {"at": datetime.now().isoformat(timespec="seconds"),
                                      "ok": ok, "file": path.name, "size_kb": size_kb,

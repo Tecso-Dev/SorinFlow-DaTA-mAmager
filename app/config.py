@@ -247,6 +247,9 @@ class Settings(BaseSettings):
     # directly — Cloudflare answers from Iran — with an optional shared key
     telegram_api_base: str = Field(default="", env="TELEGRAM_API_BASE")
     telegram_relay_key: str = Field(default="", env="TELEGRAM_RELAY_KEY")
+    # Try api.telegram.org straight from the server before the relay/proxies.
+    # 0 for a server that is known never to reach it.
+    telegram_direct_first: str = Field(default="1", env="TELEGRAM_DIRECT_FIRST")
 
     # ── Public portal auth (visitor sign-up) ──────────────────────────────
     # OFF until the Iranian SMS panel is provisioned. While it is off the

@@ -241,6 +241,8 @@ class TestTheProxy:
             assert not bk.valid_proxy(bad), bad
 
     def test_every_call_is_made_through_it(self, monkeypatch):
+        # the fallback leg on its own — direct-first is TestDirectFirst's
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "0", raising=False)
         seen = []
         real = httpx.AsyncClient
 
@@ -352,6 +354,7 @@ class TestTheThreeWaysOut:
         assert bk.valid_relay("https://tg.sorinflow.example") and not bk.valid_relay("http://x") and not bk.valid_relay("https://x/path")
 
     def test_the_pool_rotates_and_fails_over(self, store, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "0", raising=False)
         monkeypatch.setattr(bk.settings, "telegram_proxy", "", raising=False)
         monkeypatch.setattr(bk.settings, "telegram_api_base", "", raising=False)
         store.rows[bk.KEY_PROXY_MODE] = "pool"
@@ -384,6 +387,7 @@ class TestTheThreeWaysOut:
         assert resp.status_code == 200 and used == "http://b:2" and tried == ["http://a:1", "http://b:2"]
 
     def test_the_relay_key_travels_as_a_header(self, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "0", raising=False)
         seen = {}
         real = httpx.AsyncClient
 
@@ -409,3 +413,78 @@ class TestTheThreeWaysOut:
         assert "apiCall('/proxies?active_only=true')" in js and "function _bkRouteBody" in js
         src = Path("app/api/routes/backup.py").read_text(encoding="utf-8")
         assert 'if route["mode"] == "pool":' in src and '"results": results' in src, "the pool is tested one proxy at a time"
+
+
+class TestDirectFirst:
+    """«راه اول برای ارسال به تلگرام از سرور ایرانی باید باشد و پراکسی راه
+    جایگزین آن است.» api.telegram.org straight from the server first; the
+    relay or the proxies only when that does not connect."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        monkeypatch.setattr(bk, "_direct_down_until", 0.0)
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "1", raising=False)
+
+    def _fake(self, monkeypatch, direct_works):
+        calls = []
+        real = httpx.AsyncClient
+
+        class Fake(real):
+            def __init__(self, *a, **kw):
+                self._p = kw.pop("proxy", None)
+                def handler(req):
+                    calls.append((str(req.url).split("/bot")[0], self._p, req.headers.get("X-Relay-Key")))
+                    if str(req.url).startswith(bk.TELEGRAM_API) and self._p is None and not direct_works:
+                        raise httpx.ConnectTimeout("filtered")
+                    return httpx.Response(200, json={"ok": True, "result": {"username": "b"}})
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(*a, **kw)
+        monkeypatch.setattr(bk.httpx, "AsyncClient", Fake)
+        return calls
+
+    def test_direct_is_tried_first_and_used_when_it_works(self, monkeypatch):
+        calls = self._fake(monkeypatch, direct_works=True)
+        resp, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("relay", [], "https://tg.example", "k")))
+        assert used == "direct" and calls == [(bk.TELEGRAM_API, None, None)]
+
+    def test_the_relay_is_the_fallback(self, monkeypatch):
+        calls = self._fake(monkeypatch, direct_works=False)
+        resp, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("relay", [], "https://tg.example", "k")))
+        assert used == "relay"
+        assert calls == [(bk.TELEGRAM_API, None, None), ("https://tg.example", None, "k")]
+
+    def test_proxies_are_the_fallback_too(self, monkeypatch):
+        calls = self._fake(monkeypatch, direct_works=False)
+        resp, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("pool", ["http://a:1"])))
+        assert used == "http://a:1" and [c[1] for c in calls] == [None, "http://a:1"]
+
+    def test_a_failed_direct_is_rested_so_polling_does_not_pay_it_every_time(self, monkeypatch):
+        calls = self._fake(monkeypatch, direct_works=False)
+        route = bk._route("relay", [], "https://tg.example", "")
+        asyncio.run(bk.tg_request("1:x", "getMe", route))
+        asyncio.run(bk.tg_request("1:x", "getMe", route))
+        assert [c[0] for c in calls] == [bk.TELEGRAM_API, "https://tg.example", "https://tg.example"]
+
+    def test_direct_connects_with_a_short_timeout(self):
+        import inspect
+        src = inspect.getsource(bk.tg_request)
+        assert "connect=DIRECT_CONNECT_TIMEOUT" in src and bk.DIRECT_CONNECT_TIMEOUT <= 10
+
+    def test_it_can_be_switched_off(self, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "0", raising=False)
+        calls = self._fake(monkeypatch, direct_works=True)
+        _r, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("relay", [], "https://tg.example", "")))
+        assert used == "relay" and len(calls) == 1
+
+    def test_with_nothing_configured_direct_is_the_only_way(self, monkeypatch):
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "0", raising=False)
+        calls = self._fake(monkeypatch, direct_works=True)
+        _r, used = asyncio.run(bk.tg_request("1:x", "getMe", bk._route("manual", [])))
+        assert used == "direct" and len(calls) == 1
+
+    def test_diagnose_reports_every_way_separately(self, monkeypatch):
+        self._fake(monkeypatch, direct_works=False)
+        rows = asyncio.run(bk.diagnose("1:x", bk._route("relay", [], "https://tg.example", "k")))
+        assert [r["route"] for r in rows] == ["direct", "relay"]
+        assert rows[0]["ok"] is False and rows[0]["error"] == "ConnectTimeout"
+        assert rows[1]["ok"] is True and rows[1]["http"] == 200
