@@ -93,11 +93,13 @@ say "rendering $OVERLAY_DIR"
 RENDERED="${TMP_PREFIX}.rendered.yaml"
 kubectl kustomize "$OVERLAY_DIR" > "$RENDERED"
 
+# kustomize re-emits YAML: the annotation's quotes in base/*.yaml come out as a
+# plain `synced-secrets: unsynced`, so the pattern takes it with or without them.
 # sed to a new file, not -i: BSD sed (a laptop) and GNU sed (the runner)
 # disagree about -i's argument, and this way works on both.
 sed -E \
   -e "s|^([[:space:]]*image: )${PLACEHOLDER_IMAGE//\//\\/}\$|\\1${IMAGE//\//\\/}|" \
-  -e "s/(sorinflow\.com\/synced-secrets: )\"unsynced\"/\\1\"${SECRETS_HASH}\"/" \
+  -e "s/(sorinflow\.com\/synced-secrets: )\"?unsynced\"?\$/\\1\"${SECRETS_HASH}\"/" \
   -e "s/migrate-placeholder/${MIGRATE_NAME}/" \
   "$RENDERED" > "${RENDERED}.new"
 mv "${RENDERED}.new" "$RENDERED"
