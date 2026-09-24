@@ -190,17 +190,20 @@ def pipeline(tmp_path_factory):
     subprocess.run(["docker", "run", "-d", "--name", PG_CONTAINER,
                      "-e", "POSTGRES_PASSWORD=x", "-p", "5498:5432", "postgres:16-alpine"],
                     check=True, capture_output=True)
-    for _ in range(60):
-        r = subprocess.run(["docker", "exec", PG_CONTAINER, "pg_isready", "-U", "postgres"],
-                            capture_output=True)
-        if r.returncode == 0:
+    # Over TCP, not the socket: the image's first boot runs a temporary server
+    # on the Unix socket only, answers «ready», then shuts it down and starts
+    # the real one. Asking over the socket raced that restart — CREATE
+    # DATABASE landed in the gap and failed the main-branch CI run.
+    for _ in range(90):
+        r = subprocess.run(["docker", "exec", PG_CONTAINER, "psql", "-h", "127.0.0.1", "-U", "postgres",
+                            "-c", "CREATE DATABASE divar_scraper"], capture_output=True, text=True)
+        if r.returncode == 0 or "already exists" in r.stderr:
             break
         time.sleep(1)
     else:
         subprocess.run(["docker", "rm", "-f", PG_CONTAINER], capture_output=True)
-        raise RuntimeError("throwaway postgres never became ready")
+        raise RuntimeError(f"throwaway postgres never became ready: {r.stderr.strip()}")
 
-    _docker_exec("psql", "-U", "postgres", "-c", "CREATE DATABASE divar_scraper")
     _docker_exec("psql", "-U", "postgres", "-d", "divar_scraper", "-c",
                  "CREATE TABLE users (id serial primary key, name text); "
                  "INSERT INTO users (name) VALUES ('a'), ('b'), ('c');")
