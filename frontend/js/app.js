@@ -2569,13 +2569,13 @@ async function loadProperties() {
                     }
                 </td>
                 <td data-l="" class="pt-actions">
-                    <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${property.id})">
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${property.id})" title="مشاهده">
                         <i class="bi bi-eye"></i>
                     </button>
-                    <a href="${safeUrl(property.url)}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                    <a href="${safeUrl(property.url)}" target="_blank" class="btn btn-sm btn-outline-secondary" title="مشاهده در دیوار">
                         <i class="bi bi-box-arrow-up-left"></i>
                     </a>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteProperty(${property.id})">
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteProperty(${property.id})" title="حذف">
                         <i class="bi bi-trash"></i>
                     </button>
                 </td>
@@ -3457,11 +3457,16 @@ function _buildRangeSlider(el) {
     if (!loInput || !hiInput) return;
     const ceiling = Number(el.dataset.ceiling) || 100000000000;
     const onChange = el.dataset.onChange;
+    // data-label names the field for the two thumbs' own accessible name —
+    // this builder is shared by price/deposit/rent/area/ppm sliders, so it
+    // cannot hardcode one. Falls back to something honest rather than
+    // nothing when a caller doesn't set it.
+    const label = esc(el.dataset.label || 'مقدار');
 
     el.innerHTML = `
         <div class="range-slider__rail"><div class="range-slider__fill"></div></div>
-        <input type="range" class="range-slider__thumb lo" min="0" max="${RANGE_STEPS}" value="0">
-        <input type="range" class="range-slider__thumb hi" min="0" max="${RANGE_STEPS}" value="${RANGE_STEPS}">
+        <input type="range" class="range-slider__thumb lo" min="0" max="${RANGE_STEPS}" value="0" aria-label="حداقل ${label}">
+        <input type="range" class="range-slider__thumb hi" min="0" max="${RANGE_STEPS}" value="${RANGE_STEPS}" aria-label="حداکثر ${label}">
         <div class="range-slider__readout"><span class="lo"></span><span class="hi"></span></div>`;
 
     const loThumb = el.querySelector('.range-slider__thumb.lo');
@@ -7764,7 +7769,7 @@ async function loadLeads() {
             row.innerHTML = `
                 <td><input type="checkbox" class="form-check-input lead-check" data-id="${lead.id}"
                            ${_selectedLeads.has(lead.id) ? 'checked' : ''}
-                           onchange="toggleLeadSelection(${lead.id}, this.checked)"></td>
+                           onchange="toggleLeadSelection(${lead.id}, this.checked)" aria-label="انتخاب این لید"></td>
                 <td>${lead.serial_no != null
                         ? `<span class="serial-badge" title="کد ملک — همان کدی که در لیست املاک است">${formatSerial(lead.serial_no)}</span>`
                         : '<span class="text-muted" title="ملک این لید حذف شده است">—</span>'}</td>
@@ -7784,7 +7789,7 @@ async function loadLeads() {
                 </td>
                 <td>
                     <select class="form-select form-select-sm status-quick ${st.cls}"
-                            onchange="quickLeadStatus(${lead.id}, this.value, this)">
+                            onchange="quickLeadStatus(${lead.id}, this.value, this)" aria-label="تغییر وضعیت لید">
                         ${Object.entries(CRM_STATUS_LABELS).map(([val, info]) =>
                             `<option value="${val}" ${lead.status === val ? 'selected' : ''}>${info.label}</option>`
                         ).join('')}

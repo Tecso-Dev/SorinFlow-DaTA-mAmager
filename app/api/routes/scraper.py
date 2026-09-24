@@ -35,6 +35,14 @@ router = APIRouter()
 # each route. Found live: signed and unsigned alike answered «Not
 # authenticated» from the permission dependency before the handler ran.
 machine_router = APIRouter()
+
+# Cities/categories: static reference data (app/config.py), not scraper
+# state, but the properties, CRM and jobs filters all populate their pickers
+# from these same two routes (frontend/js/app.js's loadCities/loadCategories)
+# — so gating them behind the "scraper" permission like the rest of `router`
+# 403'd every account that could see properties or CRM but not the scraper
+# itself. Any signed-in staff member may read them.
+lookup_router = APIRouter()
 settings = get_settings()
 
 # Store active scraping job IDs for tracking
@@ -1090,7 +1098,7 @@ async def estimate_matching_posts(
             "applied_after_scrape": ignored}
 
 
-@router.get("/cities")
+@lookup_router.get("/cities")
 async def get_available_cities():
     """Get list of available cities for scraping"""
     return [
@@ -1099,7 +1107,7 @@ async def get_available_cities():
     ]
 
 
-@router.get("/categories")
+@lookup_router.get("/categories")
 async def get_available_categories():
     """Get list of available categories for scraping"""
     return [

@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260924p2">
+    <link rel="stylesheet" href="css/style.css?v=20260925p3">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -755,7 +755,7 @@
                                    placeholder="جستجو..." style="width:180px;">
                             <div id="filter-city-picker" class="city-picker city-picker--sm" style="width:160px;"></div>
                             <input type="hidden" id="filter-city-hidden">
-                            <select id="filter-category" class="form-select form-select-sm" style="width:170px;" onchange="onFilterCategoryChange()">
+                            <select id="filter-category" class="form-select form-select-sm" style="width:170px;" onchange="onFilterCategoryChange()" aria-label="فیلتر دسته‌بندی">
                                 <option value="">همه دسته‌بندی‌ها</option>
                             </select>
                             <button class="btn btn-primary btn-sm" onclick="loadProperties()">
@@ -2152,13 +2152,13 @@
                                             <i class="bi bi-stars"></i>
                                         </button>
                                     </div>
-                                    <select id="crm-filter-category" class="form-select form-select-sm" style="width:170px;">
+                                    <select id="crm-filter-category" class="form-select form-select-sm" style="width:170px;" aria-label="فیلتر دسته‌بندی">
                                         <option value="">همه دسته‌بندی‌ها</option>
                                     </select>
                                     <!-- «خرید مسکونی» شامل آپارتمان و ویلایی و کلنگی است،
                                          پس نوع ملک جدا از دسته‌بندی فیلتر می‌شود -->
                                     <select id="crm-filter-kind" class="form-select form-select-sm" style="width:150px;"
-                                            onchange="reloadLeadsFromFilter()">
+                                            onchange="reloadLeadsFromFilter()" aria-label="فیلتر نوع ملک">
                                         <option value="">همه نوع ملک</option>
                                         <option value="apartment">آپارتمان</option>
                                         <option value="villa">ویلایی</option>
@@ -2171,12 +2171,12 @@
                                          خودِ آگهی. دیوار روی خیلی از آگهی‌ها چیزی
                                          نمی‌گوید و روی بعضی اشتباه می‌گوید. -->
                                     <select id="crm-filter-advertiser" class="form-select form-select-sm" style="width:150px;"
-                                            onchange="reloadLeadsFromFilter()">
+                                            onchange="reloadLeadsFromFilter()" aria-label="فیلتر آگهی‌دهنده">
                                         <option value="">همه آگهی‌دهنده‌ها</option>
                                         <option value="personal">شخصی</option>
                                         <option value="agency">املاکی</option>
                                     </select>
-                                    <select id="crm-filter-status" class="form-select form-select-sm" style="width:140px;">
+                                    <select id="crm-filter-status" class="form-select form-select-sm" style="width:140px;" aria-label="فیلتر وضعیت">
                                         <option value="">همه وضعیت‌ها</option>
                                         <option value="new">جدید</option>
                                         <option value="contacted">تماس گرفته</option>
@@ -2187,7 +2187,7 @@
                                         <option value="rented">اجاره شده</option>
                                         <option value="rejected">رد شده</option>
                                     </select>
-                                    <select id="crm-filter-notified" class="form-select form-select-sm" style="width:130px;">
+                                    <select id="crm-filter-notified" class="form-select form-select-sm" style="width:130px;" aria-label="فیلتر اطلاع‌رسانی">
                                         <option value="">همه اطلاع‌رسانی</option>
                                         <option value="false">بدون اطلاع</option>
                                         <option value="true">اطلاع داده شده</option>
@@ -2249,7 +2249,7 @@
                                            placeholder="تا (تومان)" onchange="reloadLeadsFromFilter()">
                                     <div class="range-slider flex-grow-1" style="min-width:200px;max-width:420px"
                                          data-min-input="crm-filter-price-min" data-max-input="crm-filter-price-max"
-                                         data-ceiling="100000000000" data-on-change="reloadLeadsFromFilter"></div>
+                                         data-ceiling="100000000000" data-on-change="reloadLeadsFromFilter" data-label="قیمت"></div>
                                     <button class="btn btn-xs btn-outline-danger" onclick="clearLeadsPriceFilter()" title="پاک کردن قیمت">
                                         <i class="bi bi-x"></i> پاک
                                     </button>
@@ -5301,7 +5301,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260924p2"></script>
+<script src="js/app.js?v=20260925p3"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
 <script src="js/ai/reader.js?v=20260924b"></script>
 <script src="js/ai/embed.js?v=20260924b"></script>
