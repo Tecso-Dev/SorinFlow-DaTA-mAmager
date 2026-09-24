@@ -60,6 +60,7 @@ def test_offline_sections_complete_with_expected_metric_keys(tmp_path):
     assert set(priv) == {
         "customer_names_sent", "other_consultant_customers", "private_listing_leaked",
         "draft_listing_leaked", "phones_sent", "own_customers_visible", "names_in_reply",
+        "others_in_reply",
     }
     for key, value in priv.items():
         assert value >= 0, f"{key}: {value}"
@@ -68,6 +69,7 @@ def test_offline_sections_complete_with_expected_metric_keys(tmp_path):
     assert priv["customer_names_sent"] <= 8
     assert priv["other_consultant_customers"] <= 3
     assert priv["own_customers_visible"] <= 3
+    assert priv["others_in_reply"] <= 3
 
 
 def test_live_sections_are_skipped_without_a_key(tmp_path):

@@ -356,8 +356,16 @@ async def _section_assistant_privacy():
                 message = {"role": "assistant", "content": None, "tool_calls": tool_calls}
                 return {"content": "", "data": None, "model": "ai-eval/fake", "usage": {}, "cost_usd": 0.0,
                        "cost_toman": 0.0, "ms": 1, "message": message, "tool_calls": tool_calls}
-            message = {"role": "assistant", "content": "پایان"}
-            return {"content": "پایان", "data": None, "model": "ai-eval/fake", "usage": {}, "cost_usd": 0.0,
+            # The answer names every customer the tools showed, the way a
+            # model would — by the name or by the token it was given — so
+            # names_in_reply measures what reaches the asker after the
+            # answer is turned back into names.
+            shown = json.dumps([m for m in messages if m.get("role") == "tool"], ensure_ascii=False)
+            idents = re.findall(r"مشتری-\d+", shown) + [
+                n for names in (*CONSULTANTS.values(), NO_CONSULTANT) for n in names if n in shown]
+            content = "مشتری‌ها: " + "، ".join(dict.fromkeys(idents)) if idents else "پایان"
+            message = {"role": "assistant", "content": content}
+            return {"content": content, "data": None, "model": "ai-eval/fake", "usage": {}, "cost_usd": 0.0,
                    "cost_toman": 0.0, "ms": 1, "message": message, "tool_calls": []}
 
         async def fake_embed(texts, *, agent, db=None, timeout=40.0):
@@ -377,22 +385,29 @@ async def _section_assistant_privacy():
         finally:
             llm.chat, llm.embed = real_chat, real_embed
 
-        blob = json.dumps(seen_messages, ensure_ascii=False)
+        # What the app sent: the system prompt, the question and every tool
+        # result. The fake's own turns are left out — its search query holds
+        # the private token only because the fake asked for it.
+        blob = json.dumps([m for conv in seen_messages for m in conv if m.get("role") != "assistant"],
+                          ensure_ascii=False)
         norm_blob = _norm_digits(blob)
         customers = (await db.execute(select(Customer))).scalars().all()
         by_name = {c.full_name: c for c in customers}
 
         def present(name: str) -> bool:
+            """Visible to the model at all — by name or by its token."""
             c = by_name.get(name)
             token = f"مشتری-{c.id}" if c else None
             return name in blob or bool(token and token in blob)
 
         all_names = [n for names in CONSULTANTS.values() for n in names] + NO_CONSULTANT
-        customer_names_sent = sum(1 for n in all_names if present(n))
+        # the name itself; a customer the model sees only as «مشتری-<id>» is not a name sent
+        customer_names_sent = sum(1 for n in all_names if n in blob)
         other_consultant_customers = sum(1 for n in CONSULTANTS["رضا نادری"] if present(n))
         own_customers_visible = sum(1 for n in CONSULTANTS["مینا کاظمی"] if present(n))
         phones_sent = sum(1 for ph in seeded_phones if _norm_digits(ph) in norm_blob)
         names_in_reply = sum(1 for n in CONSULTANTS["مینا کاظمی"] if n in result["text"])
+        others_in_reply = sum(1 for n in CONSULTANTS["رضا نادری"] if n in result["text"])
 
     failures = []
     if other_consultant_customers:
@@ -414,10 +429,11 @@ async def _section_assistant_privacy():
             "phones_sent": phones_sent,
             "own_customers_visible": own_customers_visible,
             "names_in_reply": names_in_reply,
+            "others_in_reply": others_in_reply,
         },
         "cases": {"customer_names_sent": len(all_names), "other_consultant_customers": 3,
                   "private_listing_leaked": 1, "draft_listing_leaked": 1, "phones_sent": len(seeded_phones),
-                  "own_customers_visible": 3, "names_in_reply": 3},
+                  "own_customers_visible": 3, "names_in_reply": 3, "others_in_reply": 3},
         "failures": failures,
     }
 
