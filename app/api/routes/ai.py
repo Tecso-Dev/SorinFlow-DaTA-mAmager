@@ -52,6 +52,7 @@ async def ai_status(db: AsyncSession = Depends(get_db), _: User = _super_admin):
         "usage": usage,
         "spent_today_usd": spent,
         "cap_reached": spent >= cfg["cap_usd"],
+        "breaker": llm.breaker_status(),
         "liara": await llm.liara_activity(),
         # what runs on this today; the agents of the later phases join here
         "agents": [
@@ -126,14 +127,16 @@ async def ai_overview(db: AsyncSession = Depends(get_db), _: User = _super_admin
         agents.append({**card, "enabled": switches.get(key, True),
                        "model": cfg["models"].get(card["job"]),
                        "state": state,
+                       "cap_usd": cfg["agent_caps"].get(key, 0.0),
                        "month": per_agent.get(key, {"calls": 0, "cost_usd": 0.0, "cost_toman": 0, "failed": 0}),
-                       "today": today_agent.get(key, {"calls": 0, "cost_toman": 0, "failed": 0})})
+                       "today": today_agent.get(key, {"calls": 0, "cost_usd": 0.0, "cost_toman": 0, "failed": 0})})
     return {
         **cfg,
         "key_set": bool((llm.settings.llm_api_key or "").strip()),
         "base_url_set": bool((llm.settings.llm_base_url or "").strip()),
         "env_models": llm.env_models(),
         "usage": usage, "spent_today_usd": spent, "cap_reached": spent >= cfg["cap_usd"],
+        "breaker": llm.breaker_status(),
         "liara": await llm.liara_activity(), "quota": await llm.liara_quota(),
         "agents": agents,
     }
@@ -166,12 +169,14 @@ async def _usage_by_agent_today(db) -> dict:
     day = llm._day_start_utc()
     rows = (await db.execute(
         select(AiUsage.agent, func.count(AiUsage.id), func.coalesce(func.sum(AiUsage.cost_toman), 0.0),
+               func.coalesce(func.sum(AiUsage.cost_usd), 0.0),
                func.coalesce(func.sum(case((AiUsage.ok.is_(False), 1), else_=0)), 0),
                func.max(case((AiUsage.ok.is_(False), AiUsage.created_at))))
         .where(AiUsage.created_at >= day).group_by(AiUsage.agent))).all()
     out = {}
-    for agent, calls, toman, failed, last_bad in rows:
-        entry = {"calls": int(calls), "cost_toman": round(float(toman)), "failed": int(failed or 0),
+    for agent, calls, toman, usd, failed, last_bad in rows:
+        entry = {"calls": int(calls), "cost_toman": round(float(toman)), "cost_usd": round(float(usd), 6),
+                 "failed": int(failed or 0),
                  "last_error_at": last_bad.isoformat() if last_bad else None, "ok_since_error": 0,
                  "last_error": None}
         if last_bad is not None:
@@ -202,6 +207,21 @@ async def ai_agent_switch(key: str, payload: AgentSwitchIn,
         await secret_box.put(db, _assistant.KEY_ENABLED, "true" if payload.enabled else "false", user.username)
     logger.info(f"[ai] agent {key} switched {'on' if payload.enabled else 'off'} by {user.username}")
     return {"key": key, "enabled": payload.enabled}
+
+
+class AgentCapIn(BaseModel):
+    cap_usd: float = Field(..., ge=0, le=100)
+
+
+@router.put("/agents/{key}/cap")
+async def ai_agent_cap(key: str, payload: AgentCapIn,
+                       db: AsyncSession = Depends(get_db), user: User = _super_admin):
+    """One agent's own daily ceiling — the shared cap still applies on top."""
+    if key not in llm.AGENTS:
+        raise HTTPException(status_code=404, detail="چنین ایجنتی وجود ندارد")
+    await secret_box.put(db, llm.agent_cap_key(key), f"{payload.cap_usd:.4f}", user.username)
+    logger.info(f"[ai] agent {key} cap set to ${payload.cap_usd:.2f} by {user.username}")
+    return {"key": key, "cap_usd": payload.cap_usd}
 
 
 @router.get("/log")

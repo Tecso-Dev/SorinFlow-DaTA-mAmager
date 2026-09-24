@@ -90,8 +90,8 @@ def configured(monkeypatch):
         ledger.append({"agent": agent, "job": job, "model": model, "ok": ok,
                        "cost": float(usage.get("cost") or 0), "error": error})
 
-    async def spent(_db):
-        return sum(r["cost"] for r in ledger)
+    async def spent(_db, agent=None):
+        return sum(r["cost"] for r in ledger if not agent or r["agent"] == agent)
 
     monkeypatch.setattr(llm.secret_box, "get_many", get_many)
     monkeypatch.setattr(llm.secret_box, "put", put)
@@ -303,6 +303,8 @@ class TestThePass:
 
     def test_a_full_cap_stops_the_pass_at_the_last_success(self, configured, store, monkeypatch):
         configured["rows"][llm.KEY_CAP] = "0.002"
+        # a generous cap of its own, so only the shared cap below is what stops it
+        configured["rows"][llm.agent_cap_key("reader")] = "100"
         _gateway(monkeypatch, lambda r: _answer(SHOP, cost=0.0015))
 
         async def scenario():

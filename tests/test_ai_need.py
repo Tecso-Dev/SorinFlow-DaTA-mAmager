@@ -72,7 +72,7 @@ def configured(monkeypatch):
     async def record(agent, job, model, usage, ms, ok, error=""):
         ledger.append({"agent": agent, "job": job, "model": model, "ok": ok, "error": error})
 
-    async def spent(_db):
+    async def spent(_db, agent=None):
         return 0.0
 
     monkeypatch.setattr(llm.secret_box, "get_many", get_many)
