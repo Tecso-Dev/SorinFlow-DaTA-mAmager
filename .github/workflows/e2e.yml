@@ -1,0 +1,100 @@
+name: E2E
+
+# Every branch but main (main only ever gets there through a PR, which this
+# already covers), every pull request, and callable from another workflow —
+# not workflow_dispatch: this spins up the real app against real Postgres and
+# Redis services, which the plain test job's lighter tests don't need.
+on:
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sorinflow
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: sorinflow_e2e_local
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Install Node test dependencies
+        run: npm ci --prefix tests/e2e
+
+      - name: Install Playwright's Chromium
+        # Same Chromium build the Python side uses (playwright==1.41.0 in
+        # requirements.txt, @playwright/test 1.41.0 in tests/e2e/package.json)
+        # — --with-deps also installs the OS libraries Ubuntu needs for it.
+        run: npx --prefix tests/e2e playwright install --with-deps chromium
+
+      - name: Generate a random SECRET_KEY for this run
+        run: echo "SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> "$GITHUB_ENV"
+
+      - name: Run the e2e + accessibility suite
+        # DATABASE_URL/REDIS_URL point at this job's own services — nothing
+        # from scripts/e2e_up.sh's local defaults applies here. CI=true is set
+        # by the runner itself, which is what turns on Playwright's 1 retry
+        # and stops it from reusing an already-running server.
+        env:
+          DATABASE_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_e2e_local
+          REDIS_URL: redis://localhost:6379/11
+        run: npx --prefix tests/e2e playwright test
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/e2e/playwright-report/
+          retention-days: 14
