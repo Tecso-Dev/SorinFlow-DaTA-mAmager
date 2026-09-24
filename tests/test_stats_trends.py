@@ -85,7 +85,19 @@ class TestTehranDayHelper:
 
 
 @pytest.fixture(scope="module")
-def boss():
+def _own_key():
+    """The app refuses to boot in production on a SECRET_KEY printed in this
+    repository (app/main.py) — the suite's own default and CI's among them —
+    so it boots here on a key of its own."""
+    import secrets
+    import app.main as m
+    saved, m.settings.secret_key = m.settings.secret_key, secrets.token_hex(32)
+    yield
+    m.settings.secret_key = saved
+
+
+@pytest.fixture(scope="module")
+def boss(_own_key):
     """A super_admin token and a TestClient sharing the real app — needed by
     every endpoint under /api/stats (router-level `stats` permission)."""
     _needs_postgres()

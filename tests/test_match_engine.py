@@ -122,6 +122,7 @@ def _seed():
     from app.models.property import Property
     from app.models.crm_models import Customer
     from app.auth.jwt import get_password_hash
+    from app.auth.visibility import stamp_owner
 
     async def _go():
         eng = create_async_engine(os.environ["DATABASE_URL"])
@@ -129,12 +130,19 @@ def _seed():
         out = {}
         try:
             async with maker() as s:
+                people = {}
                 for u, name, role in (("me_mina", "مینا رضایی", "admin"), ("me_boss", "مدیر", "super_admin")):
-                    s.add(User(username=u, full_name=name, role=role, permissions=["crm"],
-                               hashed_password=get_password_hash("pw123456"), is_active=True))
-                s.add(Customer(full_name="خریدار گلها", mobile1="09121110000", temperature="hot", consultant_name="مینا رضایی",
-                               desired_city="ارومیه", desired_district="خیابان گلها", desired_type="apartment",
-                               deal_type="buy", budget_max=5_000_000_000, desired_specs="۱۰۰ متر / ۲ خواب"))
+                    people[u] = User(username=u, full_name=name, role=role, permissions=["crm"],
+                                     hashed_password=get_password_hash("pw123456"), is_active=True)
+                    s.add(people[u])
+                await s.flush()
+                # a consultant is an account (the panel's form resolves it);
+                # «کس دیگر» is a name nobody in the office goes by
+                mine = Customer(full_name="خریدار گلها", mobile1="09121110000", temperature="hot",
+                                desired_city="ارومیه", desired_district="خیابان گلها", desired_type="apartment",
+                                deal_type="buy", budget_max=5_000_000_000, desired_specs="۱۰۰ متر / ۲ خواب")
+                stamp_owner(mine, "مینا رضایی", people["me_mina"].id)
+                s.add(mine)
                 s.add(Customer(full_name="مشتری همکار", mobile1="09121110001", temperature="warm", consultant_name="کس دیگر",
                                desired_city="ارومیه", desired_district="خیابان گلها", desired_type="apartment",
                                deal_type="buy", budget_max=5_000_000_000))

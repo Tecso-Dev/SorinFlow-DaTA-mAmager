@@ -25,10 +25,11 @@ from app.models.crm_models import (
 from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
-from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
+from app.auth.dependencies import (get_current_user, get_current_user_optional, require_authenticated,
+                                   require_super_admin)
 # who sees which match and which task: shared with the assistant
-from app.auth.visibility import (actor as _agent_name, actor as _task_actor,
-                                 matches_visible_to as _matches_visible_to,
+from app.auth.visibility import (actor as _agent_name, assign_owner, stamp_actor, is_super,
+                                 call_queue_for, matches_visible_to as _matches_visible_to,
                                  tasks_visible_to as _tasks_visible_to)
 from app.services.dpa_service import record_activity, record_lead_status
 from app.services import audit
@@ -282,8 +283,8 @@ async def create_lead(
         property_title=data.property_title,
         status=data.status or "new",
         notes=data.notes,
-        assigned_to=data.assigned_to,
     )
+    await assign_owner(db, lead, data.assigned_to, by=current_user)
     db.add(lead)
 
     agent = (data.assigned_to or "").strip() or (
@@ -570,7 +571,7 @@ async def update_lead(
     if data.notes is not None:
         lead.notes = data.notes
     if data.assigned_to is not None:
-        lead.assigned_to = data.assigned_to
+        await assign_owner(db, lead, data.assigned_to, by=current_user)
     if data.district is not None:
         # District belongs to the linked property (street search reads it there)
         prop = (await db.execute(
@@ -605,14 +606,15 @@ def _now_utc() -> datetime:
     return datetime.now(_tz.utc)
 
 
-def _queue_query(agent: Optional[str]):
+def _queue_query(user):
+    """The due leads in `user`'s queue — theirs and nobody's; with no user,
+    only nobody's (the summary's «unassigned» count)."""
     now = _now_utc()
-    q = select(Lead).where(
+    q = call_queue_for(select(Lead).where(
         Lead.status.in_(("new", "contacted")),
         Lead.phone_number.isnot(None),
         or_(Lead.next_call_at.is_(None), Lead.next_call_at <= now),
-        or_(Lead.assigned_to.is_(None), Lead.assigned_to == "", Lead.assigned_to == agent),
-    )
+    ), user)
     # Callbacks whose time has come first, then never-dialled before retries,
     # newest listing first — the freshest number is the likeliest to answer.
     return q.order_by(
@@ -625,7 +627,7 @@ async def calls_today(limit: int = Query(30, ge=1, le=100),
                       db: AsyncSession = Depends(get_db),
                       current_user: User = Depends(get_current_user)):
     agent = _agent_name(current_user)
-    q = _queue_query(agent)
+    q = _queue_query(current_user)
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
     leads = (await db.execute(q.limit(limit))).scalars().all()
     now = _now_utc()
@@ -651,8 +653,7 @@ async def log_call(lead_id: int, data: CallOutcomeIn,
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     agent = _agent_name(current_user)
-    if lead.assigned_to and lead.assigned_to != agent and \
-            (current_user.role or "") not in ("root", "super_admin"):
+    if lead.assigned_to and lead.assigned_to_user_id != current_user.id and not is_super(current_user):
         raise HTTPException(status_code=403, detail=f"این لید با {lead.assigned_to} است")
     now = _now_utc()
     try:
@@ -668,7 +669,7 @@ async def log_call(lead_id: int, data: CallOutcomeIn,
     lead.last_call_at = change["last_call_at"]
     lead.last_call_outcome = data.outcome
     if not (lead.assigned_to or "").strip():
-        lead.assigned_to = agent
+        stamp_actor(lead, current_user)
     if data.note:
         stamp = now.astimezone(_cq.TEHRAN).strftime("%Y-%m-%d %H:%M")
         lead.notes = ((lead.notes or "").rstrip() + f"\n[{stamp}] {data.note.strip()}").strip()
@@ -1673,6 +1674,7 @@ async def create_customer(data: CustomerIn, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="full_name is required")
     customer = Customer(full_name=str(data["full_name"]).strip())
     _apply_customer_payload(customer, data)
+    await assign_owner(db, customer, customer.consultant_name)
     db.add(customer)
     await db.commit()
     await db.refresh(customer)
@@ -1696,6 +1698,7 @@ async def update_customer(customer_id: int, data: CustomerIn, db: AsyncSession =
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     _apply_customer_payload(customer, data)
+    await assign_owner(db, customer, customer.consultant_name)
     customer.updated_at = datetime.now()
     await db.commit()
     await db.refresh(customer)
@@ -1944,8 +1947,7 @@ async def delete_note(note_id: int, db: AsyncSession = Depends(get_db)):
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── وظایف: who may see which task — _tasks_visible_to, app/auth/visibility.py.
-# _task_actor is the name tasks are assigned under, the same string the task
-# form puts in assigned_to.
+# The task form puts a name in assigned_to; assign_owner resolves the account.
 
 @router.get("/tasks")
 async def list_tasks(
@@ -1991,11 +1993,11 @@ class TaskStatusIn(_BaseModel):
 
 @router.post("/tasks")
 async def create_task(
-    data: TaskIn,
+    payload: TaskIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    data = data.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True)
     due = None
     if data.get("due_date"):
         try:
@@ -2010,9 +2012,13 @@ async def create_task(
         status=data.get("status", "todo"),
         contact_id=data.get("contact_id"),
         deal_id=data.get("deal_id"),
-        # falls back to the creator, so a task always has someone it belongs to
-        assigned_to=(data.get("assigned_to") or "").strip() or _task_actor(current_user),
     )
+    # falls back to the creator, so a task always has someone it belongs to
+    typed = (data.get("assigned_to") or "").strip()
+    if typed:
+        await assign_owner(db, task, typed, by=current_user)
+    else:
+        stamp_actor(task, current_user)
     db.add(task)
     await db.commit()
     await db.refresh(task)
@@ -2043,15 +2049,17 @@ async def get_task(
 @router.put("/tasks/{task_id}")
 async def update_task(
     task_id: int,
-    data: TaskIn,
+    payload: TaskIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    data = data.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True)
     task = await _own_task_or_404(task_id, db, current_user)
-    for field in ("title", "description", "priority", "status", "contact_id", "deal_id", "assigned_to"):
+    for field in ("title", "description", "priority", "status", "contact_id", "deal_id"):
         if field in data:
             setattr(task, field, data[field])
+    if "assigned_to" in data:
+        await assign_owner(db, task, data["assigned_to"], by=current_user)
     if "due_date" in data and data["due_date"]:
         try:
             task.due_date = _parse_datetime(data["due_date"])
@@ -2603,8 +2611,10 @@ def _reminder_as_event(r: Reminder) -> dict:
 async def _calendar_rows(db: AsyncSession, start: datetime, end: datetime,
                          include_overlay: bool = True,
                          event_type: Optional[str] = None,
-                         assigned_to: Optional[str] = None) -> List[dict]:
-    """Every dated row that falls inside [start, end)."""
+                         assigned_to: Optional[str] = None,
+                         user=None) -> List[dict]:
+    """Every dated row that falls inside [start, end) — the tasks among them
+    only as the task board would show them to `user`."""
     q = select(CalendarEvent).where(
         CalendarEvent.start_at >= start, CalendarEvent.start_at < end)
     if event_type:
@@ -2617,8 +2627,8 @@ async def _calendar_rows(db: AsyncSession, start: datetime, end: datetime,
 
     # A type filter is about appointment types, so it hides the overlays too
     if include_overlay and not event_type:
-        tasks = (await db.execute(select(Task).where(
-            Task.due_date >= start, Task.due_date < end))).scalars().all()
+        tasks = (await db.execute(_tasks_visible_to(select(Task).where(
+            Task.due_date >= start, Task.due_date < end), user))).scalars().all()
         rows += [_task_as_event(t) for t in tasks
                  if not assigned_to or t.assigned_to == assigned_to]
         if not assigned_to:
@@ -2638,6 +2648,7 @@ async def list_calendar(
     assigned_to: Optional[str] = None,
     include_overlay: bool = True,
     db: AsyncSession = Depends(get_db),
+    current_user: User = require_authenticated,
 ):
     """Events (plus tasks/reminders) in a date window — what a grid page needs."""
     try:
@@ -2646,7 +2657,8 @@ async def list_calendar(
         raise HTTPException(status_code=400, detail="بازهٔ تاریخ نامعتبر است")
     if end <= start:
         raise HTTPException(status_code=400, detail="تاریخ پایان باید بعد از شروع باشد")
-    items = await _calendar_rows(db, start, end, include_overlay, event_type, assigned_to)
+    items = await _calendar_rows(db, start, end, include_overlay, event_type, assigned_to,
+                                 user=current_user)
     return {"items": items, "total": len(items)}
 
 
@@ -2655,10 +2667,11 @@ async def upcoming_events(
     days: int = Query(7, ge=1, le=90),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = require_authenticated,
 ):
     """Next appointments from now — the dashboard strip and the «قرارهای پیشِ رو» box."""
     now = datetime.now()
-    rows = await _calendar_rows(db, now, now + timedelta(days=days))
+    rows = await _calendar_rows(db, now, now + timedelta(days=days), user=current_user)
     rows = [r for r in rows if r.get("status") != "canceled"]
     return {"items": rows[:limit], "total": len(rows)}
 

@@ -315,6 +315,7 @@ class LeadResponse(BaseModel):
     status: str
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
+    assigned_to_user_id: Optional[int] = None
     next_call_at: Optional[datetime] = None
     call_attempts: int = 0
     last_call_at: Optional[datetime] = None

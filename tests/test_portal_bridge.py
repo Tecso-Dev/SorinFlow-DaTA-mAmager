@@ -87,7 +87,8 @@ class TestTheShape:
         assert '"fk_portal_requests_customer"' in rev and "ix_portal_property_requests_customer_id" in rev
         assert "def downgrade" in rev and "op.drop_column" in rev
         db = (ROOT / "app/database.py").read_text(encoding="utf-8")
-        assert "customer_id" not in db[db.index("for step in ("):db.index("_seed_reference_data):")]
+        start = db.index("for step in (")
+        assert "customer_id" not in db[start:db.index("):", start)]     # the boot steps, whichever is last
 
     def test_the_panel_knows(self):
         fn = JS[JS.index("async function loadPortalRequests"):JS.index("async function updatePortalRequest")]

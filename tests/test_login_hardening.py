@@ -483,6 +483,10 @@ def test_production_with_the_default_secret_key_exits_nonzero():
 @pytest.mark.parametrize("key", [
     "your-super-secret-key-change-in-production-with-random-string",
     "replace-with-a-long-random-value",
+    "ci-only-not-a-real-secret-0123456789",
+    "0123456789abcdef0123456789abcdef",
+    "test-secret-key-0123456789abcdef",
+    "ai-eval-harness-fake-secret-0123456789",
     "a-31-character-key-is-too-shor",
     "",
 ])
@@ -493,6 +497,34 @@ def test_production_refuses_a_published_or_short_secret_key(monkeypatch, key):
     monkeypatch.setattr(m.settings, "super_admin_password", "set-for-real-1234")
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
         asyncio.run(m._refuse_default_secrets())
+
+
+def test_every_secret_key_printed_in_the_repository_is_refused():
+    """Workflows, docs, scripts and tests all print a SECRET_KEY somewhere.
+    Any of them long enough to pass the length check must be on the refused
+    list, or a copy-pasted command line boots production on a public key."""
+    import re
+    import app.main as m
+    # KEY=value, KEY: value, "KEY": "value", ("KEY", "value"), environ["KEY"] = "value", ${KEY:-value}
+    printed = re.compile(r"""SECRET_KEY["']?\]?\s*(?::-|[:=,])\s*["']?([^\s"'$)}]{32,})""")
+    skip_dirs = {".git", "node_modules", "vendor", "venv", ".venv", "__pycache__", "graphify-out"}
+    found = {}
+    for base, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
+        for name in files:
+            if not name.endswith((".py", ".md", ".yml", ".yaml", ".sh", ".example", ".toml", ".ini",
+                                  ".txt", ".cfg", ".json")) and not name.startswith((".env", "Dockerfile")):
+                continue
+            path = os.path.join(base, name)
+            try:
+                text = open(path, encoding="utf-8").read()
+            except (UnicodeDecodeError, OSError):
+                continue
+            for key in printed.findall(text):
+                found.setdefault(key, os.path.relpath(path, ROOT))
+    assert found, "the scan found nothing — the pattern is broken"
+    missing = {k: where for k, where in found.items() if k not in m._PUBLISHED_SECRET_KEYS}
+    assert not missing, f"published SECRET_KEY values production would still accept: {missing}"
 
 
 def test_the_live_pods_config_starts(client, monkeypatch):

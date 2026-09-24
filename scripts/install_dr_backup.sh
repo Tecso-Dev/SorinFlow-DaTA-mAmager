@@ -31,7 +31,8 @@ for tool in jq gpg split sha256sum; do
   fi
 done
 
-DDIR="${DR_DATA_DIR:-$(ls -d /var/lib/rancher/k3s/storage/*_"${NAMESPACE}"_data-pvc 2>/dev/null | head -1 || true)}"
+STORAGE=/var/lib/rancher/k3s/storage
+DDIR="${DR_DATA_DIR:-$(ls -d "$STORAGE"/*_"${NAMESPACE}"_data-pvc 2>/dev/null | head -1 || true)}"
 
 mkdir -p "$UNIT_DIR" "$BIN_DIR"
 CHANGED=0
@@ -45,7 +46,8 @@ render_and_install() {
   local src="$1" dst="$2"
   local tmp
   tmp="$(mktemp)"
-  sed -e "s#@@BIN@@#${BIN_DIR}#g" -e "s#@@DATA_PVC@@#${DDIR}#g" "$src" > "$tmp"
+  sed -e "s#@@BIN@@#${BIN_DIR}#g" -e "s#@@DATA_PVC@@#${DDIR}#g" \
+      -e "s#@@DATA_RW@@#${DDIR:-$STORAGE}#g" "$src" > "$tmp"
   if [ -f "$dst" ] && cmp -s "$tmp" "$dst"; then
     echo "  unchanged: $dst"
     rm -f "$tmp"

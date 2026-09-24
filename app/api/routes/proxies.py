@@ -47,7 +47,15 @@ async def create_proxy(
     db: AsyncSession = Depends(get_db)
 ):
     """Add a new proxy"""
-    
+    from app.services import net_guard
+
+    # Used by the scraper as soon as it is saved, so checked now: a public
+    # address only. The probe checks again before every test.
+    try:
+        await net_guard.resolve_public(proxy_data.address, proxy_data.port)
+    except net_guard.BlockedAddress as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
     # Check if proxy already exists
     result = await db.execute(
         select(Proxy).where(
@@ -216,17 +224,24 @@ async def import_proxies(
     defence against a list of dead or foreign exits — and a free list is
     mostly both.
     """
-    from app.services import proxy_pool
+    from app.services import net_guard, proxy_pool
 
     text = request.proxy_list or ""
     if request.url:
         try:
             text = await proxy_pool.fetch_list(request.url)
+        except net_guard.BlockedAddress as e:
+            raise HTTPException(status_code=400, detail=str(e)) from None
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"could not fetch the list: {type(e).__name__}")
 
-    imported = skipped = 0
+    imported = skipped = refused = 0
     for entry in proxy_pool.parse_list(text):
+        # an address that is plainly internal never enters the table; a name
+        # is resolved and checked by the probe, before anything connects to it
+        if net_guard.is_ip(entry["address"]) and not net_guard.is_public(entry["address"]):
+            refused += 1
+            continue
         exists = (await db.execute(
             select(Proxy).where(Proxy.address == entry["address"], Proxy.port == entry["port"])
         )).scalar_one_or_none()
@@ -240,4 +255,4 @@ async def import_proxies(
     tested = None
     if request.test and imported:
         tested = await proxy_pool.refresh_all()
-    return {"imported": imported, "skipped": skipped, "tested": tested}
+    return {"imported": imported, "skipped": skipped, "refused": refused, "tested": tested}

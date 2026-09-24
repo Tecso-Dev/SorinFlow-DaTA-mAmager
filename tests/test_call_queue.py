@@ -85,7 +85,7 @@ class TestItIsWiredIn:
     def test_the_queue_is_mine_or_nobodys_and_due(self):
         src = Path("app/api/routes/crm.py").read_text(encoding="utf-8")
         fn = src[src.index("def _queue_query"):src.index("async def calls_today")]
-        assert "Lead.assigned_to == agent" in fn and "Lead.assigned_to.is_(None)" in fn
+        assert "call_queue_for(" in fn, "«mine or nobody's» is the shared rule, by account"
         assert "Lead.next_call_at <= now" in fn
         assert 'Lead.status.in_(("new", "contacted"))' in fn
 

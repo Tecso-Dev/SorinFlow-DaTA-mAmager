@@ -27,13 +27,23 @@ from app.database import get_db
 from app.models.user import User
 from app.services import audit
 from app.services import backup_service as bk
-from app.services import secret_box
+from app.services import net_guard, secret_box
 
 router = APIRouter()
 settings = get_settings()
 _super_admin = Depends(_role_dep(ROLE_ROOT, ROLE_SUPER_ADMIN))
 
 _TOKEN_RE = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,}$")
+
+
+async def _public(url: str, *, proxy: bool) -> None:
+    """A relay or proxy the panel names is somewhere on the internet: an
+    internal or private address is refused before it is tried or saved
+    (app/services/net_guard.py). tg_request checks again on every use."""
+    try:
+        await (net_guard.check_proxy(url) if proxy else net_guard.check_url(url, schemes=("https",)))
+    except net_guard.BlockedAddress as e:
+        raise HTTPException(400, str(e)) from None
 
 
 class BackupSettingsIn(BaseModel):
@@ -65,6 +75,7 @@ async def _route_for(payload, db) -> dict:
         if typed:
             if not bk.valid_proxy(typed):
                 raise HTTPException(400, "آدرس پراکسی شکل درستی ندارد (مثل socks5://user:pass@host:1080)")
+            await _public(typed, proxy=True)
             return bk._route("manual", [typed])
         if mode == "manual":
             return bk._route("manual", [])
@@ -72,6 +83,7 @@ async def _route_for(payload, db) -> dict:
         base = (payload.relay or "").strip()
         if not bk.valid_relay(base):
             raise HTTPException(400, "آدرس رله باید https و بدون مسیر باشد (مثل https://tg.example.com)")
+        await _public(base, proxy=False)
         key = (payload.relay_key or "").strip()
         if not key:
             # The field reads «کلید ذخیره شده — خالی یعنی بدون تغییر». Testing
@@ -154,6 +166,8 @@ async def put_backup_settings(payload: BackupSettingsIn,
         proxy = payload.proxy.strip()
         if proxy and not bk.valid_proxy(proxy):
             raise HTTPException(400, "آدرس پراکسی شکل درستی ندارد (مثل socks5://user:pass@host:1080)")
+        if proxy:
+            await _public(proxy, proxy=True)
         # encrypted like the token: the URL usually carries the proxy's password
         await secret_box.put(db, bk.KEY_PROXY, secret_box.encrypt(proxy) if proxy else None, actor)
         logger.info(f"[backup] telegram proxy {'updated' if proxy else 'cleared'} by {actor}")
@@ -166,6 +180,8 @@ async def put_backup_settings(payload: BackupSettingsIn,
         base = payload.relay.strip().rstrip("/")
         if base and not bk.valid_relay(base):
             raise HTTPException(400, "آدرس رله باید https و بدون مسیر باشد (مثل https://tg.example.com)")
+        if base:
+            await _public(base, proxy=False)
         await secret_box.put(db, bk.KEY_RELAY, base or None, actor)
     if payload.relay_key is not None:
         key = payload.relay_key.strip()

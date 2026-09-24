@@ -107,6 +107,15 @@ async def put_email_settings(payload: EmailSettingsIn,
         raise HTTPException(400, "آدرس پاسخ نامعتبر است")
     if payload.from_email and not mail.valid_email(payload.from_email):
         raise HTTPException(400, "آدرس فرستنده نامعتبر است")
+    host = (payload.host or "").strip()
+    if host:
+        # somewhere on the internet: an internal or private address is refused
+        # here, and again before every connection (email_service._host_refused)
+        from app.services import net_guard
+        try:
+            await net_guard.resolve_public(host, payload.port or 587)
+        except net_guard.BlockedAddress as e:
+            raise HTTPException(400, f"میزبان SMTP: {e}") from None
 
     if payload.password is not None:
         pw = payload.password.strip()

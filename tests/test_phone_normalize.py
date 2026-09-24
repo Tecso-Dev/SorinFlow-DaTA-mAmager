@@ -250,13 +250,16 @@ class TestConvertLeadToDealReusesTheContactByNormalizedPhone:
     works against Postgres, same reason test_digest.py's own client fixture
     skips on sqlite (_guard()'s SET lock_timeout is Postgres-only)."""
 
-    def test_a_contact_typed_differently_is_still_found(self):
+    def test_a_contact_typed_differently_is_still_found(self, monkeypatch):
         import app.database as db
         if not str(db.engine.url).startswith("postgresql"):
             pytest.skip("needs Postgres — see test_digest.py's client fixture")
 
         import app.main as m
+        import secrets
         from fastapi.testclient import TestClient
+        # production refuses a SECRET_KEY printed in this repository (app/main.py)
+        monkeypatch.setattr(m.settings, "secret_key", secrets.token_hex(32))
         with TestClient(m.app) as client:
             from app.database import async_session_maker
             from app.models.crm_models import Contact

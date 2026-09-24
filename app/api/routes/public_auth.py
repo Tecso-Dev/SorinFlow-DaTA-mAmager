@@ -39,7 +39,7 @@ from app.auth.jwt import (
 from app.auth.permissions import ROLE_VISITOR, STAFF_ROLES
 from app.services.verification import (
     VerificationError, issue_code, verify_code,
-    check_login_rate, record_login_failure, clear_login_failures,
+    take_login_attempt, login_attempt_passed, clear_login_failures,
     check_ip_budget, spend_ip_budget, IP_SIGNUP_LIMIT, IP_CODE_LIMIT,
 )
 from app.schemas import (
@@ -283,6 +283,9 @@ async def portal_verify(data: PortalVerifyRequest, db: AsyncSession = Depends(ge
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
+    # the portal login charges the account itself (portal_login); a name
+    # nobody had yet was charged as typed
+    await clear_login_failures(f"uid:{user.id}")
     await clear_login_failures(f"name:{data.phone}")
 
     # Only on the first verification — re-verifying later must not re-welcome
@@ -303,12 +306,6 @@ async def portal_login(data: PortalLoginRequest, request: Request,
     admin through here would be a way around their second factor.
     """
     identifier = data.identifier.strip()
-    # «name:»: what was typed, never mistaken for an account's own «uid:» key
-    try:
-        await check_login_rate(f"name:{identifier}")
-    except VerificationError as e:
-        raise HTTPException(status_code=429, detail=e.message)
-
     # Matched on phone or email only. Matching on username too would let a
     # visitor whose email is "admin" collide with a staff account's username,
     # and first() would pick between them arbitrarily.
@@ -317,22 +314,25 @@ async def portal_login(data: PortalLoginRequest, request: Request,
         func.lower(User.email) == identifier.lower(),
     )))).scalars().first()
 
-    # The throttle above is keyed on what was typed, so an account reachable by
-    # both a phone and an email would otherwise get one budget per spelling.
-    # Once the row is known, charge the account itself as well.
-    account_key = f"uid:{user.id}" if user else None
-    if account_key:
-        try:
-            await check_login_rate(account_key)
-        except VerificationError as e:
-            raise HTTPException(status_code=429, detail=e.message)
+    # One budget per account, whichever spelling reaches it (phone or email)
+    # and whichever door (this or the panel's); a name nobody has is charged
+    # to what was typed — «name:», never mistaken for an account's own «uid:»
+    # key — so it runs out exactly like one that exists. Counted before the
+    # password is looked at, in one Redis transaction, the way the panel's
+    # login counts: requests in flight together meet the cap one by one.
+    key = f"uid:{user.id}" if user else f"name:{identifier}"
+    try:
+        await take_login_attempt(request, key)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message,
+                            headers={"Retry-After": str(e.retry_after)}) from None
 
     if not verify_password(data.password, user.hashed_password if user else DUMMY_PASSWORD_HASH) \
             or not user:
-        await record_login_failure(f"name:{identifier}")
-        if account_key:
-            await record_login_failure(account_key)
         raise HTTPException(status_code=401, detail="شماره/ایمیل یا رمز عبور اشتباه است")
+    # the password was right: the address gets its attempt back; the
+    # account's count waits until a token is issued
+    await login_attempt_passed(request)
 
     if user.role in STAFF_ROLES:
         raise HTTPException(
@@ -356,8 +356,7 @@ async def portal_login(data: PortalLoginRequest, request: Request,
         return _issued_response(
             issued, "شماره شما تأیید نشده است. کد تأیید ارسال شد", phone=user.phone)
 
-    await clear_login_failures(f"name:{identifier}")
-    await clear_login_failures(account_key)
+    await clear_login_failures(key)
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)

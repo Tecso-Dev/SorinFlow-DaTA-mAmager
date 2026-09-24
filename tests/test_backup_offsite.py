@@ -26,6 +26,19 @@ from app.services import backup_service as bk   # noqa: E402
 from app.services import secret_box              # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def public_dns(monkeypatch):
+    """The relays and proxies here are made-up names, and a relay or proxy
+    set on the panel must resolve to a public address before it is used
+    (app/services/net_guard.py) — so every name resolves to one. Internal
+    addresses are tests/test_net_guard.py's business."""
+    import socket
+
+    def resolve(host, port, *a, **kw):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port or 0))]
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+
+
 class FakeDb:
     """Just enough of secret_box's needs: a dict behind get_many/put."""
     def __init__(self):

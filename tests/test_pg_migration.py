@@ -557,3 +557,134 @@ def test_the_boot_refuses_a_users_table_without_totp_last_step():
             await eng.dispose()
 
     _run(_go())
+
+
+def test_0016_gives_owned_rows_their_account_and_comes_back_off():
+    """0016 on a schema as 0015 left it: the six owned tables gain the
+    account column (FK ON DELETE SET NULL, indexed) and owner_resolved_from,
+    each row gets the one staff account its name means, the boot step
+    resolves what an older release writes afterwards, and the downgrade
+    takes it all away again. The scratch schema is built from the models
+    and put back to 0015 by dropping the new columns — the shape an
+    established production database is in."""
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    import app.models  # noqa: F401 — every table, for create_all
+    from app.database import Base, _backfill_owner_ids
+    from app.auth.visibility import OWNERSHIP
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(root, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(root, "migrations"))
+    SCHEMA = "sf_owner_mig"
+
+    def _alembic(target, fn):
+        def _go(sync_conn):
+            cfg.attributes["connection"] = sync_conn
+            fn(cfg, target)
+        return _go
+
+    async def _cols(c):
+        return {(r[0], r[1]): (r[2], r[3], r[4]) for r in (await c.execute(text(
+            "SELECT table_name, column_name, data_type, character_maximum_length, is_nullable "
+            f"FROM information_schema.columns WHERE table_schema='{SCHEMA}'"))).all()}
+
+    async def _go():
+        eng = create_async_engine(PG_URL)
+        async with eng.begin() as c:
+            await c.execute(text(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE"))
+            await c.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        await eng.dispose()
+
+        eng = create_async_engine(PG_URL, connect_args={"server_settings": {"search_path": SCHEMA}})
+        async with eng.begin() as c:
+            await c.run_sync(Base.metadata.create_all)
+            for table, (_name, id_col) in OWNERSHIP.items():
+                await c.execute(text(f"ALTER TABLE {table} DROP COLUMN {id_col}, DROP COLUMN owner_resolved_from"))
+            await c.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+            await c.execute(text("INSERT INTO alembic_version VALUES ('0015')"))
+            await c.execute(text(
+                "INSERT INTO users (id, username, full_name, hashed_password, role, is_active, totp_enabled, "
+                "email_2fa_enabled, phone_verified, email_verified, marketing_opt_in, presence, token_version) VALUES "
+                "(1, 'mina', 'مینا رضایی', 'x', 'admin', true, false, false, false, false, false, 'available', 0),"
+                "(2, 'twin1', 'دوقلو', 'x', 'admin', true, false, false, false, false, false, 'available', 0),"
+                "(3, 'twin2', 'دوقلو', 'x', 'super_admin', true, false, false, false, false, false, 'available', 0),"
+                "(4, 'visitor', 'مینا رضایی', 'x', 'visitor', true, false, false, false, false, false, 'available', 0),"
+                "(5, 'reza', NULL, 'x', 'admin', true, false, false, false, false, false, 'available', 0)"))
+            await c.execute(text("INSERT INTO properties (id, tag_number, divar_id, title, url) "
+                                 "VALUES (1, 'b', 'b', 'x', 'u')"))
+            await c.execute(text("INSERT INTO crm_customers (id, full_name) VALUES (1, 'x')"))
+            for i, name in ((10, "مینا رضایی"), (11, "دوقلو"), (12, "reza"), (13, None)):
+                await c.execute(text("INSERT INTO properties (id, tag_number, divar_id, title, url, created_by) "
+                                     "VALUES (:i, :t, :t, 'x', 'u', :n)"), {"i": i, "t": f"p{i}", "n": name})
+                await c.execute(text("INSERT INTO crm_cabinets (id, name, owner) VALUES (:i, 'c', :n)"),
+                                {"i": i, "n": name})
+                await c.execute(text("INSERT INTO crm_customer_matches (id, property_id, customer_id, score, "
+                                     "consultant) VALUES (:i, :i, 1, 60, :n)"), {"i": i, "n": name})
+                await c.execute(text("INSERT INTO crm_tasks (id, title, assigned_to) VALUES (:i, 't', :n)"),
+                                {"i": i, "n": name})
+                await c.execute(text("INSERT INTO leads (id, property_id, status, call_attempts, assigned_to) "
+                                     "VALUES (:i, 1, 'new', 0, :n)"), {"i": i, "n": name})
+                await c.execute(text("INSERT INTO crm_customers (id, full_name, consultant_name) "
+                                     "VALUES (:i, 'x', :n)"), {"i": i, "n": name})
+
+        async with eng.begin() as c:
+            await c.run_sync(_alembic("0016", command.upgrade))
+        async with eng.begin() as c:
+            cols = await _cols(c)
+            fks = {r[0]: r[1] for r in (await c.execute(text(
+                "SELECT constraint_name, delete_rule FROM information_schema.referential_constraints "
+                f"WHERE constraint_schema='{SCHEMA}' AND constraint_name LIKE 'fk_%_user'"))).all()}
+            idx = {r[0] for r in (await c.execute(text(
+                f"SELECT indexname FROM pg_indexes WHERE schemaname='{SCHEMA}'"))).all()}
+            owners = {}
+            for table, (_name, id_col) in OWNERSHIP.items():
+                owners[table] = {r[0]: (r[1], r[2]) for r in (await c.execute(text(
+                    f"SELECT id, {id_col}, owner_resolved_from FROM {table} WHERE id >= 10"))).all()}
+            # an older release reassigns by name after the upgrade; the boot step catches it
+            await c.execute(text("UPDATE crm_tasks SET assigned_to = 'reza' WHERE id = 10"))
+        async with eng.begin() as c:
+            await _backfill_owner_ids(c)
+        async with eng.begin() as c:
+            after_boot = (await c.execute(text("SELECT assigned_to_user_id FROM crm_tasks WHERE id = 10"))).scalar()
+            await c.execute(text("DELETE FROM users WHERE id = 5"))
+            after_delete = (await c.execute(text("SELECT assigned_to_user_id FROM crm_tasks WHERE id = 10"))).scalar()
+            version = (await c.execute(text("SELECT version_num FROM alembic_version"))).scalar()
+
+        async with eng.begin() as c:
+            await c.run_sync(_alembic("0015", command.downgrade))
+        async with eng.begin() as c:
+            down = await _cols(c)
+        async with eng.begin() as c:
+            await c.run_sync(_alembic("0016", command.upgrade))     # up again, over rows it resolved before
+        async with eng.begin() as c:
+            again = (await c.execute(text("SELECT assigned_to_user_id FROM crm_tasks WHERE id = 11"))).scalar()
+            twins_gone = (await c.execute(text("SELECT count(*) FROM users WHERE username LIKE 'twin%'"))).scalar()
+        await eng.dispose()
+
+        eng = create_async_engine(PG_URL)
+        async with eng.begin() as c:
+            await c.execute(text(f"DROP SCHEMA {SCHEMA} CASCADE"))
+        await eng.dispose()
+        return cols, fks, idx, owners, after_boot, after_delete, version, down, again, twins_gone
+
+    cols, fks, idx, owners, after_boot, after_delete, version, down, again, twins = _run(_go())
+
+    assert version == "0016"
+    for table, (_name, id_col) in OWNERSHIP.items():
+        # the migration built exactly what the model declares
+        model_col = Base.metadata.tables[table].c[id_col]
+        assert cols[(table, id_col)] == ("integer", None, "YES") and model_col.nullable
+        assert cols[(table, "owner_resolved_from")] == ("character varying", 200, "YES")
+        fk = next(iter(model_col.foreign_keys))
+        assert fks.get(fk.name) == "SET NULL", (table, fks)
+        assert f"ix_{table}_{id_col}" in idx
+        assert (table, id_col) not in down and (table, "owner_resolved_from") not in down
+        # mina's own (not the visitor's), the twins nobody's, reza by his
+        # username, no name no owner
+        assert owners[table] == {10: (1, "مینا رضایی"), 11: (None, "دوقلو"), 12: (5, "reza"), 13: (None, None)}, table
+    assert after_boot == 5, "the boot step resolved a reassignment written by name"
+    assert after_delete is None, "a deleted account leaves its rows to nobody"
+    assert twins == 2 and again is None, "a re-run upgrade decides from scratch, the same way"
