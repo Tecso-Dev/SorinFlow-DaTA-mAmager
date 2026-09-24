@@ -144,6 +144,10 @@ _PUBLISHED_SECRET_KEYS = {
     "your-super-secret-key-change-in-production-with-random-string",  # .env.example
     "local-dev-only-secret-key-do-not-use-in-prod",                   # .env.local.example
     "replace-with-a-long-random-value",                               # README
+    "ci-only-not-a-real-secret-0123456789",                           # deploy.yml, CLAUDE.md
+    "0123456789abcdef0123456789abcdef",                               # the test suite's default
+    "test-secret-key-0123456789abcdef",                               # tests/test_dr_roundtrip.py
+    "ai-eval-harness-fake-secret-0123456789",                         # scripts/ai_eval.py
 }
 
 
