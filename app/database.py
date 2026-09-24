@@ -1254,6 +1254,13 @@ async def _migrate_portal_need_enrich(conn):
                 "ADD COLUMN IF NOT EXISTS need_enriched_at TIMESTAMPTZ, "
                 "ADD COLUMN IF NOT EXISTS need_enrich_attempts INTEGER NOT NULL DEFAULT 0"
             ))
+            # Every request already here was read on the visitor's own request
+            # (the old path) — without this the background pass would read the
+            # whole history again, paying for it and refilling fields a
+            # consultant emptied since. Only now, when the column is new.
+            await conn.execute(text(
+                "UPDATE portal_property_requests SET need_enriched_at = now() "
+                "WHERE need_enriched_at IS NULL"))
     except Exception as e:
         print(f"portal need-enrich migration skipped: {e}")
 

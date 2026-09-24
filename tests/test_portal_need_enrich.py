@@ -173,7 +173,8 @@ class TestRetries:
         eng = _engine()
         _cust_id, req_id = _seed(eng)
         errors = iter([llm.NotConfigured("خاموش"), llm.Disabled("خاموش از پنل"),
-                      llm.BudgetExceeded("سقف پر شد"), llm.NotConfigured("باز هم")])
+                      llm.BudgetExceeded("سقف پر شد"), llm.CircuitOpen("مسیر موقتاً متوقف است"),
+                      llm.RateLimited("HTTP 429", 30.0), llm.NotConfigured("باز هم")])
         calls = []
 
         async def deferred(db, req):
@@ -181,9 +182,61 @@ class TestRetries:
             raise next(errors)
         monkeypatch.setattr(need_parser, "enrich_request", deferred)
 
-        for _ in range(4):
+        for _ in range(6):
             assert _run_pass(eng) == 0
         req = _fetch(eng, PropertyRequest, req_id)
-        assert req.need_enrich_attempts == 0, "not configured/disabled/over budget is not this request's fault"
+        assert req.need_enrich_attempts == 0, "not configured/disabled/over budget/an open breaker is not this request's fault"
         assert req.need_enriched_at is None, "worth trying again once the gateway is usable"
-        assert len(calls) == 4, "no cap — a gateway-state error is retried every pass"
+        assert len(calls) == 6, "no cap — a gateway-state error is retried every pass"
+
+
+    def test_a_closed_request_is_not_read(self, monkeypatch):
+        """The pass is for requests someone may still act on."""
+        eng = _engine()
+        _cust_id, req_id = _seed(eng)
+
+        async def close():
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+            async with async_sessionmaker(eng, expire_on_commit=False)() as db:
+                (await db.get(PropertyRequest, req_id)).status = "done"
+                await db.commit()
+        asyncio.run(close())
+        calls = []
+
+        async def read(db, req):
+            calls.append(1)
+            return {"desired_district": "گلها"}
+        monkeypatch.setattr(need_parser, "enrich_request", read)
+        assert _run_pass(eng) == 0 and calls == []
+
+
+@pytest.mark.skipif(not os.environ.get("DATABASE_URL", "").startswith("postgresql"),
+                    reason="the boot step is Postgres SQL, like the others in app/database.py")
+def test_the_boot_step_marks_the_requests_already_there_as_read():
+    """They were read on the visitor's own request before this release; the
+    background pass must not read the whole history again."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    import app.database as database
+    schema = "sf_needmark"
+
+    async def _go():
+        eng = create_async_engine(os.environ["DATABASE_URL"],
+                                  connect_args={"server_settings": {"search_path": schema}})
+        async with eng.begin() as c:
+            await c.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+            await c.execute(text(f"CREATE SCHEMA {schema}"))
+            await c.execute(text("CREATE TABLE portal_property_requests (id SERIAL PRIMARY KEY, status TEXT)"))
+            await c.execute(text("INSERT INTO portal_property_requests (status) VALUES ('new'), ('done')"))
+        async with eng.begin() as c:
+            await database._migrate_portal_need_enrich(c)
+        async with eng.begin() as c:
+            await c.execute(text("INSERT INTO portal_property_requests (status) VALUES ('new')"))
+            rows = (await c.execute(text("SELECT id, need_enriched_at IS NOT NULL, need_enrich_attempts "
+                                         "FROM portal_property_requests ORDER BY id"))).all()
+            await c.execute(text(f"DROP SCHEMA {schema} CASCADE"))
+        await eng.dispose()
+        return rows
+
+    rows = asyncio.run(_go())
+    assert [tuple(r) for r in rows] == [(1, True, 0), (2, True, 0), (3, False, 0)]

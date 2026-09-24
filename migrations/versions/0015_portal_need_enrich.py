@@ -32,6 +32,10 @@ def upgrade() -> None:
     cols = {c["name"] for c in insp.get_columns(TABLE)}
     if "need_enriched_at" not in cols:
         op.add_column(TABLE, sa.Column("need_enriched_at", sa.DateTime(timezone=True), nullable=True))
+        # the requests already here were read when they were filed (the old
+        # path) — only new ones are the background pass's business
+        op.execute(sa.text(f"UPDATE {TABLE} SET need_enriched_at = CURRENT_TIMESTAMP "
+                           f"WHERE need_enriched_at IS NULL"))
     if "need_enrich_attempts" not in cols:
         op.add_column(TABLE, sa.Column(
             "need_enrich_attempts", sa.Integer(), nullable=False, server_default="0"))

@@ -130,6 +130,7 @@ async def enrich_needs(db) -> int:
     from app.services import llm as _llm
 
     rows = (await db.execute(select(PropertyRequest).where(
+        PropertyRequest.status.in_(OPEN),
         PropertyRequest.customer_id.isnot(None),
         PropertyRequest.need_enriched_at.is_(None),
         PropertyRequest.need_enrich_attempts < MAX_ENRICH_ATTEMPTS,
@@ -145,7 +146,10 @@ async def enrich_needs(db) -> int:
             continue
         try:
             extra = await need_parser.enrich_request(db, req)
-        except (_llm.NotConfigured, _llm.Disabled, _llm.BudgetExceeded) as e:
+        except (_llm.NotConfigured, _llm.Disabled, _llm.BudgetExceeded,
+                _llm.CircuitOpen, _llm.RateLimited) as e:
+            # the gateway's state, not this request's fault — an open breaker
+            # for three passes must not use up its attempts unread
             logger.info(f"[portal] enrichment of #{req.id} deferred: {e}")
             continue
         except Exception as e:
