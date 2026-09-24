@@ -100,7 +100,7 @@ class TestScoring:
 class TestItIsReachable:
 
     def test_the_flag_reaches_the_pod(self):
-        text = open("k8s/04-backend.yaml", encoding="utf-8").read()
+        text = open("k8s/base/shared-app-env.patch.yaml", encoding="utf-8").read()
         assert "key: PROXY_ENABLED, optional: true" in text
 
     def test_the_refresh_loop_is_started(self):

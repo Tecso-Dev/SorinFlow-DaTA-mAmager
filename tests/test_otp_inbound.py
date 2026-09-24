@@ -300,7 +300,7 @@ class TestItIsReachableInProduction:
         assert "/api/scraper/forwarder-heartbeat" in pub
 
     def test_the_secret_reaches_the_pod(self):
-        y = open("k8s/04-backend.yaml", encoding="utf-8").read()
+        y = open("k8s/base/shared-app-env.patch.yaml", encoding="utf-8").read()
         assert "key: OTP_INBOUND_SECRET, optional: true" in y
 
     def test_the_panel_says_auto_or_manual(self):

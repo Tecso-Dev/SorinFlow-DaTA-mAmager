@@ -87,8 +87,8 @@ class TestCgroupV2:
         assert mon._read_resources().get("memory_limit_bytes") is None
 
     def test_unlimited_cgroup_falls_back_to_the_host_total(self, monkeypatch):
-        """This is the path production actually takes: k8s/04-backend.yaml sets
-        no memory limit, so the cgroup says "max" and the host total is the
+        """The path taken wherever the cgroup itself is unbounded (no memory
+        limit reaching that cgroup): it says "max", and the host total is the
         honest ceiling to show a percentage against."""
         mon = _patch(monkeypatch, {
             "/sys/fs/cgroup/memory.current": "1000",

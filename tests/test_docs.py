@@ -153,7 +153,7 @@ class TestOptionalSecretsReachTheContainer:
     anyway. Every optional key config.py reads must be listed."""
 
     def test_every_llm_setting_is_in_the_backend_manifest(self):
-        text = Path("k8s/04-backend.yaml").read_text(encoding="utf-8")
+        text = Path("k8s/base/shared-app-env.patch.yaml").read_text(encoding="utf-8")
         for key in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
             assert f"key: {key}, optional: true" in text, \
                 f"{key} is read by app/config.py but never reaches the pod"
