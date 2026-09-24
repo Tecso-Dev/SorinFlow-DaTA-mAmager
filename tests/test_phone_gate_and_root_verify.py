@@ -298,11 +298,21 @@ class TestThePanel:
         assert "err.code =" in fn and "err.status = response.status" in fn
         assert "error.detail.message" in fn, "a structured refusal must read as a sentence, not JSON"
 
-    def test_the_popup_sends_the_code_itself(self):
+    def test_the_popup_says_what_is_wrong_and_sends_on_request(self):
+        """«ارور شماره تأیید نشده و باید تأیید شود بده و با زدن تأیید شماره کد
+        برایش ارسال شود» — opening the popup texts nobody."""
         fn = JS[JS.index("function _openPhoneGate("):JS.index("function _markPhoneVerified(")]
         assert "'/users/me/phone/request'" in fn and "'/users/me/phone/verify'" in fn
-        assert "if (known) { busy = true; send(null)" in fn
-        assert "e.status === 429" in fn, "a code sent moments ago is still good — let them type it"
+        assert "if (known) showIntro();" in fn
+        assert "if (known) { busy = true; send(null)" not in fn, "the code must not go out on open"
+        assert "ok.textContent = 'تأیید شماره'" in fn
+        assert "if (step === 'intro') {\n                    await send(null);" in fn
+        assert "e.status === 429 && !phone" in fn, "a code sent moments ago is still good — let them type it"
+
+    def test_the_refusal_says_the_number_must_be_verified(self, client, people, sms_ready):
+        r = client.post("/api/scraper/start", json={"city": "urmia", "category": "rent-apartment"},
+                        headers=_tok(client, "pg_unv"))
+        assert "تأیید نشده است و برای این کار باید تأیید شود" in r.json()["detail"]["message"]
 
     def test_the_sections_that_use_a_number_ask_on_arrival(self):
         sw = JS[JS.index("case 'scraper':"):JS.index("case 'forwarder':") + 200]

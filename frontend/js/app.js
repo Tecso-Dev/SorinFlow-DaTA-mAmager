@@ -1861,9 +1861,11 @@ async function _apiCallOnce(endpoint, options = {}) {
 /* ── the phone-verification popup ─────────────────────────────────────────
  *
  * «هر جایی که کاربر نیاز به استفاده از شماره را دارد و شماره‌اش را تأیید نکرده،
- * جلوی فعالیتش را بگیر و پاپ‌آپ تأیید شماره را برایش بیاور و کد تأیید را برایش
- * ارسال کن.» The server decides (require_verified_phone); this is the door it
- * points at. Resolves true once the number is verified, false if they leave.
+ * جلوی فعالیتش را بگیر… ارور «شماره تأیید نشده و باید تأیید شود» بده و با زدن
+ * «تأیید شماره» کد برایش ارسال شود.» The server decides (require_verified_phone);
+ * this is the door it points at. It says what is wrong first; the code is
+ * texted only when they press «تأیید شماره» — never just for opening it.
+ * Resolves true once the number is verified, false if they leave.
  * One popup at a time: two refused calls share the same answer.            */
 let _phoneGatePromise = null;
 
@@ -1894,7 +1896,11 @@ function _openPhoneGate(detail) {
           <div class="ask-card is-warning pv-card" role="dialog" aria-modal="true" aria-label="تأیید شمارهٔ موبایل">
             <div class="ask-ring"><i class="bi bi-phone-vibrate"></i></div>
             <h5>تأیید شمارهٔ موبایل</h5>
-            <p class="ask-body">${esc(detail.message || 'برای ادامه، شمارهٔ موبایل خود را تأیید کنید.')}</p>
+            <p class="ask-body">${esc(detail.message || 'شمارهٔ موبایل شما تأیید نشده است و برای ادامه باید تأیید شود.')}</p>
+            <div class="pv-intro d-none" id="pv-intro-step">
+                <div class="pv-number" dir="ltr">${esc(known)}</div>
+                <div class="ask-hint">با زدن «تأیید شماره» یک کد به همین شماره پیامک می‌شود.</div>
+            </div>
             <div class="ask-field" id="pv-phone-step">
                 <label for="pv-phone">شمارهٔ موبایل شما</label>
                 <input id="pv-phone" type="tel" inputmode="tel" dir="ltr" placeholder="09123456789" value="${esc(known)}">
@@ -1919,6 +1925,16 @@ function _openPhoneGate(detail) {
         const $ = id => overlay.querySelector('#' + id);
         const err = $('pv-error'), ok = $('pv-ok');
         let step = 'phone', busy = false;
+        const showIntro = () => {
+            step = 'intro';
+            $('pv-phone-step').classList.add('d-none');
+            $('pv-code-step').classList.add('d-none');
+            $('pv-intro-step').classList.remove('d-none');
+            $('pv-links').classList.remove('d-none');
+            $('pv-resend').classList.add('d-none');
+            ok.textContent = 'تأیید شماره';
+            setTimeout(() => ok.focus(), 30);
+        };
 
         const close = value => {
             if (overlay.dataset.closing) return;
@@ -1929,15 +1945,18 @@ function _openPhoneGate(detail) {
         };
         const showCode = (hint) => {
             step = 'code';
+            $('pv-intro-step').classList.add('d-none');
             $('pv-phone-step').classList.add('d-none');
             $('pv-code-step').classList.remove('d-none');
             $('pv-links').classList.remove('d-none');
+            $('pv-resend').classList.remove('d-none');
             ok.textContent = 'تأیید';
             $('pv-hint').textContent = hint || '';
             setTimeout(() => $('pv-code').focus(), 30);
         };
         const showPhone = () => {
             step = 'phone';
+            $('pv-intro-step').classList.add('d-none');
             $('pv-code-step').classList.add('d-none');
             $('pv-links').classList.add('d-none');
             $('pv-phone-step').classList.remove('d-none');
@@ -1969,7 +1988,9 @@ function _openPhoneGate(detail) {
             if (busy) return;
             busy = true; ok.disabled = true;
             try {
-                if (step === 'phone') {
+                if (step === 'intro') {
+                    await send(null);
+                } else if (step === 'phone') {
                     const phone = _digitsOnly($('pv-phone').value);
                     const norm = phone.startsWith('98') && phone.length === 12 ? '0' + phone.slice(2)
                         : phone.length === 10 && phone.startsWith('9') ? '0' + phone : phone;
@@ -1989,7 +2010,8 @@ function _openPhoneGate(detail) {
         };
         const onKey = e => {
             if (e.key === 'Escape') close(false);
-            // Only from a field: Enter on «بعداً» must not send a code.
+            // Only from a field: Enter on «بعداً» must not send a code. (The
+            // intro's «تأیید شماره» is a button and answers its own click.)
             if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT') submit();
         };
         ok.addEventListener('click', submit);
@@ -2002,9 +2024,9 @@ function _openPhoneGate(detail) {
         });
         document.addEventListener('keydown', onKey);
 
-        // A number on file: send the code straight away — the popup exists to
-        // get it into their hand, not to ask whether it should.
-        if (known) { busy = true; send(null).finally(() => { busy = false; }); }
+        // A number on file: say it is unverified and offer «تأیید شماره»;
+        // the SMS goes when they press it. No number: ask for one.
+        if (known) showIntro();
         else setTimeout(() => $('pv-phone').focus(), 30);
     });
 }

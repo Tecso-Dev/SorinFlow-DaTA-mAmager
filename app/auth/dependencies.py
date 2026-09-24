@@ -163,8 +163,8 @@ async def phone_gate_reason(user: Optional[User], db: Optional[AsyncSession] = N
     except Exception:
         return None
     if not phone:
-        return "برای این کار ابتدا شمارهٔ موبایل خود را ثبت و تأیید کنید"
-    return "شمارهٔ موبایل شما هنوز تأیید نشده — کد تأیید برایتان پیامک می‌شود"
+        return "شمارهٔ موبایلی برای حساب شما ثبت نشده است — برای این کار باید شمارهٔ خود را ثبت و تأیید کنید"
+    return "شمارهٔ موبایل شما تأیید نشده است و برای این کار باید تأیید شود"
 
 
 async def require_verified_phone(

@@ -2568,6 +2568,8 @@ body.filing-dragging .ftree-node, body.filing-dragging .folder-chip { outline: 1
 /* the phone-verification popup reuses ask-card; only its link row is new */
 .pv-card .pv-links { display: flex; justify-content: center; gap: .75rem; margin-top: .35rem; }
 .pv-card .pv-links .btn-link { font-size: .74rem; text-decoration: none; }
+.pv-card .pv-intro { text-align: center; margin: .2rem 0 .6rem; }
+.pv-card .pv-number { font-size: 1.15rem; font-weight: 700; letter-spacing: .02em; unicode-bidi: isolate; }
 .u-divar .u-muted { font-size: .68rem; }
 .u-nudge { font-size: .72rem; }
 .badge.u-warn {
