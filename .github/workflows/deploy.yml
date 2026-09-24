@@ -94,6 +94,13 @@ jobs:
           IMAGES_PATH: /tmp
         run: pytest tests/ -q
 
+      # The Telegram relay Worker ships to Cloudflare by hand, not from here —
+      # which is exactly why its rules (key, bot allow-list, relay-specific
+      # errors) are checked on every push instead of on the day it is pasted.
+      - name: Test the Telegram relay Worker
+        working-directory: deploy/telegram-relay
+        run: node --test
+
       - name: Verify the auth migration against a live Postgres
         # Skipped without PG_TEST_URL, so it only runs where a database exists.
         # This is the half SQLite can never cover: ALTER ... IF NOT EXISTS is a
