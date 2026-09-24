@@ -1,0 +1,74 @@
+# Runs the real migration chain before api/worker/scheduler ever see the new
+# image (they boot with DB_MIGRATE_ON_BOOT=false and only check the schema is
+# at head). scripts/deploy_k8s.sh renders "migrate-placeholder" in the name
+# below to "migrate-<short sha>" so each deploy gets its own Job — Jobs are
+# immutable once created, and a fixed name would fail to re-apply on the very
+# next deploy — and deletes older ones first.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-placeholder
+  labels:
+    app: migrate
+    app.kubernetes.io/component: migrate
+    sorinflow.com/inject-app-env: "true"
+spec:
+  # One shot: a migration that fails is a schema half-applied, and retrying
+  # it automatically against that state is how a partial migration becomes a
+  # corrupt one. Surface it and let a person look, per CLAUDE.md's
+  # expand/contract rule — the previous image must keep working against
+  # whatever the schema ends up being either way.
+  backoffLimit: 0
+  # Longer than any migration measured so far (0012's trigram indexes were
+  # the slowest at ~8s on 20k rows) with headroom for a much bigger table —
+  # long enough to mean something real is stuck, short enough that a wedged
+  # migrate Job does not hold up the rollout for the length of a lunch break.
+  activeDeadlineSeconds: 900
+  # Kept around a day so `kubectl logs job/migrate-<sha>` still answers
+  # "what did the last few migrations actually do" without anyone having to
+  # have been watching the deploy live.
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: migrate
+        app.kubernetes.io/part-of: sorinflow
+        app.kubernetes.io/component: migrate
+        sorinflow.com/egress: app
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.migrate"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          env:
+            - name: SORINFLOW_ROLE
+              value: "migrate"
+            # DATABASE_URL, SECRET_KEY and the rest come from the same
+            # shared-app-env patch as api/worker/scheduler — see
+            # shared-app-env.patch.yaml. alembic needs DATABASE_URL and
+            # nothing else here is harmful to have present for a one-shot job.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
