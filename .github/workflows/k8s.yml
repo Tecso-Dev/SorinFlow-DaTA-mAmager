@@ -1,0 +1,67 @@
+name: Validate Kubernetes manifests
+
+# Runs on every branch but main (main gets it through deploy.yml's own test
+# gate instead — see build/deploy: github.ref == 'refs/heads/main' there),
+# every pull request, and whenever another workflow calls it. Nothing here
+# needs a cluster: kustomize and kubeconform both work entirely offline once
+# kubeconform's schemas are cached.
+on:
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+  workflow_call:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Render both overlays
+        run: |
+          set -euo pipefail
+          kubectl kustomize k8s/overlays/production > /tmp/production.yaml
+          kubectl kustomize k8s/overlays/staging > /tmp/staging.yaml
+
+      # Pinned version and checksum (from the release's own CHECKSUMS file,
+      # verified against the downloaded bytes before this was written) rather
+      # than "latest" — a compromised release should not become part of this
+      # pipeline unnoticed.
+      - name: Download kubeconform
+        run: |
+          set -euo pipefail
+          VERSION=v0.8.0
+          curl -fsSL -o kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+          chmod +x kubeconform
+
+      # -strict: no properties the schema does not know about, no duplicate
+      # keys — the same class of typo a kustomize patch (JSON6902 or
+      # strategic-merge) can silently produce. Middleware (traefik.io) and
+      # HelmChartConfig (helm.cattle.io) are k3s/Traefik CRDs with no schema
+      # in kubeconform's default schema set, so they are named explicitly
+      # rather than blanket-ignoring every resource with a missing schema,
+      # which would also hide a genuine typo in an ordinary kind's apiVersion.
+      - name: Validate manifests (kubeconform, strict, Kubernetes 1.36)
+        run: |
+          set -euo pipefail
+          ./kubeconform -strict -kubernetes-version 1.36.0 -summary \
+            -skip Middleware,HelmChartConfig \
+            /tmp/production.yaml /tmp/staging.yaml k8s/overlays/production/traefik-acme.yaml
+
+      # Only the two scripts this phase actually rewrote — the rest of
+      # scripts/ is other streams' or other phases' to bring under lint, one
+      # at a time, not as a side effect of an unrelated k8s change.
+      - name: bash -n and shellcheck the deploy scripts
+        run: |
+          set -euo pipefail
+          command -v shellcheck >/dev/null || sudo apt-get install -y shellcheck
+          for f in scripts/deploy_k8s.sh scripts/new_server.sh; do
+            echo "-- $f --"
+            bash -n "$f"
+            shellcheck "$f"
+          done
