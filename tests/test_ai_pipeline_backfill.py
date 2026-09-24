@@ -32,8 +32,10 @@ SCHEMA = "sf_aifp"
 
 def _engine(tmp_path):
     if PG:
+        # this schema alone: with public on the path, create_all(checkfirst)
+        # finds the suite's own properties there and writes into it instead
         return create_async_engine(os.environ["DATABASE_URL"], poolclass=NullPool,
-                                   connect_args={"server_settings": {"search_path": f"{SCHEMA},public"}})
+                                   connect_args={"server_settings": {"search_path": SCHEMA}})
     return create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/aifp.db", poolclass=NullPool)
 
 
