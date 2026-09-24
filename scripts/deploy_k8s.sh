@@ -125,6 +125,14 @@ say "applying namespace, config, PVCs, postgres, redis, services"
 CORE="${TMP_PREFIX}.core.yaml"
 exclude_kinds "Deployment Ingress NetworkPolicy Job" < "$RENDERED" > "$CORE"
 retry_kubectl kubectl apply -f "$CORE"
+# Traefik's Let's Encrypt resolver: kept out of the kustomization (see the
+# file's header — kustomize would move it out of kube-system, where k3s's
+# helm-controller looks), so it is applied here, production only. Unchanged,
+# this is a no-op and Traefik is not touched. Without it a rebuilt server
+# serves no certificate, and the live one drifts from the repo.
+if [ "$OVERLAY" = production ]; then
+  retry_kubectl kubectl apply -f k8s/overlays/production/traefik-acme.yaml
+fi
 
 retry_kubectl kubectl -n "$NS" rollout status statefulset/postgres --timeout=300s
 retry_kubectl kubectl -n "$NS" rollout status statefulset/redis --timeout=120s

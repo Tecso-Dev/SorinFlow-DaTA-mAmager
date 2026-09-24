@@ -683,6 +683,14 @@ class TestCiAppliesWhatTheBudgetAssumes:
         assert manifest in base, \
             f"{manifest} is in k8s/base but not in kustomization.yaml — it will drift silently"
 
+    def test_every_manifest_outside_the_kustomization_is_applied_by_the_script(self):
+        # The one file kustomize must not render (it would move it out of
+        # kube-system, where k3s's helm-controller reads it): the deploy has to
+        # apply it itself, or a rebuilt server serves no certificate.
+        from pathlib import Path
+        script = Path("scripts/deploy_k8s.sh").read_text(encoding="utf-8")
+        assert "kubectl apply -f k8s/overlays/production/traefik-acme.yaml" in script
+
     def test_the_workflow_still_parses(self):
         import yaml
         d = yaml.safe_load(self._workflow())

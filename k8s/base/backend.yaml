@@ -93,6 +93,14 @@ spec:
         - name: api
           image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
           imagePullPolicy: IfNotPresent
+          # SIGTERM stops uvicorn accepting at once, but Traefik keeps routing to
+          # the pod until it sees the endpoint go — about a second — and each
+          # request in that gap was a 502 (seen on the k3d rehearsal: one burst
+          # per replaced pod). The pause lets Traefik catch up first.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
