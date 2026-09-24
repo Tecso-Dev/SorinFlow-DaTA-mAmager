@@ -584,6 +584,40 @@ async def api_key_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+# Content-Security-Policy-Report-Only: observe first, enforce later. Built
+# from what the pages actually load (frontend/index.html, portal.html,
+# landing.html, app.js, portal.js, sw.js, kvn-push-sw.js), not an aspirational
+# policy that would just flood /api/public/csp-report with expected noise:
+#   script-src/style-src 'unsafe-inline' — the panel is ~300 onclick=/onchange=
+#     attributes plus a handful of inline <script> blocks; a real nonce-based
+#     policy is a bigger rewrite than this phase does. 'unsafe-eval' — app.js's
+#     command-palette runs `eval(it.run)` for one built-in action.
+#   https://cdn.jsdelivr.net — landing.html's three.js. https://cdn.kavenegar.com
+#     — the push SDK <script> in landing.html/portal.html, and kvn-push-sw.js's
+#     own importScripts() of Kavenegar's service-worker script.
+#   img-src data:/blob: — the QR codes drawn for TOTP/forwarder setup
+#     (vendor/qrcode.min.js) and CSV/JSON export links (URL.createObjectURL).
+#   https://*.divarcdn.com — property photos not yet downloaded to data-pvc
+#     still point at Divar's own CDN (see app/scraper for the domain).
+#   font-src 'self' only — Estedad and Bootstrap Icons are both self-hosted
+#     (frontend/css/style.css); there is no Google Fonts dependency to allow.
+# No directive for Google Maps: the "view on map" link is a plain <a
+# target="_blank">, never embedded, which CSP does not govern at all.
+_CSP_REPORT_ONLY = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.kavenegar.com; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob: https://*.divarcdn.com; "
+    "font-src 'self'; "
+    "connect-src 'self' https://cdn.kavenegar.com; "
+    "worker-src 'self'; "
+    "frame-ancestors 'self'; "
+    "base-uri 'self'; "
+    "object-src 'none'; "
+    "report-uri /api/public/csp-report"
+)
+
+
 # Request logging + basic security headers
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -594,6 +628,12 @@ async def log_requests(request: Request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # Only in production: local dev and the test suite serve plain HTTP, and
+    # a browser that once sees this header on http://localhost refuses http
+    # again for a year (HSTS has no way to say "just kidding").
+    if settings.environment == "production":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    response.headers.setdefault("Content-Security-Policy-Report-Only", _CSP_REPORT_ONLY)
     _apply_panel_cache_policy(request, response)
     return response
 
@@ -946,6 +986,69 @@ async def client_error(request: Request):
         return Response(status_code=204)
     if isinstance(raw, dict):
         await client_errors.record(raw, client_ip(request))
+    return Response(status_code=204)
+
+
+_CSP_REPORT_LIMIT = 8 * 1024        # a violation report is a handful of URLs; anything past this is not one
+_CSP_REPORT_PER_MINUTE = 20
+
+
+async def _csp_report_allowed(ip: str) -> bool:
+    """Same per-address budget as client_errors.record() (app/services/
+    client_errors.py) — an incr/expire counter in Redis, reset every 60s.
+    False past the cap or when Redis itself is unreachable; either way the
+    route below still answers 204, never revealing the limit to a caller."""
+    try:
+        from app.database import get_redis
+        r = await get_redis()
+        bucket = f"sorinflow:csp_report:budget:{ip}"
+        n = await r.incr(bucket)
+        if n == 1:
+            await r.expire(bucket, 60)
+        return n <= _CSP_REPORT_PER_MINUTE
+    except Exception as e:
+        logger.warning(f"[csp-report] could not check the budget: {e}")
+        return False
+
+
+# Content-Security-Policy-Report-Only violations, from the browser. No auth —
+# same reasoning as /api/public/client-error above — and never the whole
+# report in the log: blocked-uri is attacker- or third-party-controlled text
+# (a query string, a redirect target) and does not belong in a log line
+# people grep.
+@app.post("/api/public/csp-report", status_code=204)
+async def csp_report(request: Request):
+    from app.services.verification import client_ip
+
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > _CSP_REPORT_LIMIT:
+            return Response(status_code=413)
+
+    if not await _csp_report_allowed(client_ip(request)):
+        return Response(status_code=204)
+
+    import json
+    try:
+        data = json.loads(body)
+    except Exception:
+        return Response(status_code=204)
+
+    # The classic report-uri shape is {"csp-report": {...}}, sent as
+    # application/csp-report. The newer Reporting API (application/
+    # reports+json) sends a list of {"type", "body", ...}; only report-uri is
+    # configured above, but a browser that prefers the new format may still
+    # use it, so both are accepted.
+    report = data.get("csp-report") if isinstance(data, dict) else None
+    if report is None and isinstance(data, list) and data and isinstance(data[0], dict):
+        body_field = data[0].get("body")
+        report = body_field if isinstance(body_field, dict) else None
+    if isinstance(report, dict):
+        directive = str(report.get("violated-directive") or report.get("effectiveDirective") or "")[:100]
+        blocked = str(report.get("blocked-uri") or report.get("blockedURL") or "")[:200]
+        doc = str(report.get("document-uri") or report.get("documentURL") or "")[:200]
+        logger.warning(f"[csp-report] {directive} blocked {blocked} on {doc}")
     return Response(status_code=204)
 
 
