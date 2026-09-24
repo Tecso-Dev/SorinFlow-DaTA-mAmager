@@ -552,3 +552,45 @@ def test_without_redis_login_still_works(client, monkeypatch):
     _mk_user("lh_no_redis")
     assert _login(client, "lh_no_redis", "wrong", xff="9.9.9.10").status_code == 401
     assert _login(client, "lh_no_redis", xff="9.9.9.10").status_code == 200
+
+
+# ── what was typed never passes for an account, nor grows a key ──────────────
+
+def _portal(client, identifier, password="x"):
+    return client.post("/api/public/auth/login", json={"identifier": identifier, "password": password})
+
+
+def test_the_portal_login_cannot_spend_a_staff_accounts_budget(client, monkeypatch):
+    """The portal counted what was typed verbatim: «uid:1» there spent staff
+    account 1's budget — every account lockable by walking the ids."""
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "public_auth_enabled", True)
+    uid = _mk_user("lh_portal_by_id")
+    codes = [_portal(client, f"uid:{uid}").status_code for _ in range(_max() + 1)]
+    assert codes[0] == 401 and set(codes) <= {401, 429}, codes     # the portal is live
+    assert _login(client, "lh_portal_by_id").status_code == 200
+
+
+def test_a_huge_name_leaves_a_small_key(client, redis_view):
+    """A megabyte username was a megabyte key; a couple of hundred filled
+    Redis and every limiter failed open."""
+    before = set(redis_view.keys("sf:auth:login:*"))
+    _login(client, "x" * 200_000, "y")
+    new = set(redis_view.keys("sf:auth:login:*")) - before
+    assert new and max(len(k) for k in new) < 100
+
+
+def test_the_portal_login_costs_one_bcrypt_round_for_anyone(client, monkeypatch):
+    """It skipped bcrypt for a phone nobody has, so timing said who has one."""
+    import app.api.routes.public_auth as pa
+    from app.auth.jwt import DUMMY_PASSWORD_HASH, verify_password
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "public_auth_enabled", True)
+    calls = []
+
+    def counting(plain, hashed):
+        calls.append(hashed)
+        return verify_password(plain, hashed)
+    monkeypatch.setattr(pa, "verify_password", counting)
+    assert _portal(client, "09129999991").status_code == 401
+    assert calls == [DUMMY_PASSWORD_HASH]

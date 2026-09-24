@@ -735,11 +735,11 @@ async def change_my_password(data: PasswordChangeRequest,
     # must not get unlimited guesses at the one thing that would let them
     # keep it.
     try:
-        await check_login_rate(current_user.username)
+        await check_login_rate(f"name:{current_user.username}")
     except VerificationError as e:
         raise HTTPException(status_code=429, detail=e.message)
     if not verify_password(data.current_password, current_user.hashed_password):
-        await record_login_failure(current_user.username)
+        await record_login_failure(f"name:{current_user.username}")
         raise HTTPException(400, "رمز فعلی درست نیست")
     if data.new_password == data.current_password:
         raise HTTPException(400, "رمز تازه نباید با رمز فعلی یکی باشد")
@@ -748,7 +748,7 @@ async def change_my_password(data: PasswordChangeRequest,
     current_user.token_version = (current_user.token_version or 0) + 1
     await db.commit()
     await db.refresh(current_user)
-    await clear_login_failures(current_user.username)
+    await clear_login_failures(f"name:{current_user.username}")
     logger.warning(f"[profile] {current_user.username} changed their password; "
                    f"other sessions signed out")
     return {"success": True,
@@ -1092,7 +1092,7 @@ async def totp_disable(
     await _login_attempt(None, current_user.username)
     if not verify_password(data.password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="رمز عبور اشتباه است")
-    await clear_login_failures(current_user.username)
+    await clear_login_failures(f"name:{current_user.username}")
 
     current_user.totp_enabled = False
     current_user.totp_secret = None

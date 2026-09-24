@@ -12,6 +12,7 @@ should not hand over a live credential.
 import asyncio
 import hashlib
 import hmac
+import re
 import ipaddress
 import secrets
 from dataclasses import dataclass
@@ -93,6 +94,19 @@ class IssuedCode:
 
 def _norm(identifier: str) -> str:
     return (identifier or "").strip().lower()
+
+
+def _login_key(identifier: str) -> str:
+    """The Redis key of one login budget. `uid:<id>` names an account; any
+    other text is something a person typed, and only its hash goes into the
+    key. Kept verbatim, «uid:1» typed on the portal login spent staff account
+    1's budget — anyone could lock every account by walking the ids — and a
+    megabyte-long username became a megabyte-long key: a couple of hundred
+    fill Redis, and every limiter then fails open."""
+    ident = _norm(identifier)
+    if re.fullmatch(r"uid:\d{1,12}", ident):
+        return f"{_NS}:login:{ident}"
+    return f"{_NS}:login:h:{hashlib.sha256(ident.encode()).hexdigest()[:32]}"
 
 
 def _hash(code: str, identifier: str) -> str:
@@ -483,7 +497,7 @@ async def take_login_attempt(request, identifier: str) -> None:
     unavailable, like check_login_rate.
     """
     # the account key is check_login_rate's, so the two share one budget
-    keys = [(f"{_NS}:login:{_norm(identifier)}", 900, settings.auth_login_max_attempts)]
+    keys = [(_login_key(identifier), 900, settings.auth_login_max_attempts)]
     ipk = _ip_login_key(request)
     if ipk:
         keys.append(ipk)
@@ -536,7 +550,7 @@ async def _hand_back(keys) -> None:
 
 async def check_login_rate(identifier: str) -> None:
     """Throttle password guessing. Raises VerificationError when locked out."""
-    key = f"{_NS}:login:{_norm(identifier)}"
+    key = _login_key(identifier)
     try:
         r = await get_redis()
         fails = int(await r.get(key) or 0)
@@ -553,7 +567,7 @@ async def check_login_rate(identifier: str) -> None:
 
 
 async def record_login_failure(identifier: str) -> None:
-    key = f"{_NS}:login:{_norm(identifier)}"
+    key = _login_key(identifier)
     try:
         r = await get_redis()
         pipe = r.pipeline()
@@ -567,6 +581,6 @@ async def record_login_failure(identifier: str) -> None:
 async def clear_login_failures(identifier: str) -> None:
     try:
         r = await get_redis()
-        await r.delete(f"{_NS}:login:{_norm(identifier)}")
+        await r.delete(_login_key(identifier))
     except Exception:
         pass
