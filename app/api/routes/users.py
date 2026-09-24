@@ -1074,8 +1074,20 @@ async def totp_disable(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.services.verification import (
+        check_login_rate, record_login_failure, clear_login_failures, VerificationError)
+
+    # The throttle «change password» has, on the same budget: a stolen session
+    # must not get unlimited guesses at the password here instead.
+    try:
+        await check_login_rate(current_user.username)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message,
+                            headers={"Retry-After": str(e.retry_after)})
     if not verify_password(data.password, current_user.hashed_password):
+        await record_login_failure(current_user.username)
         raise HTTPException(status_code=400, detail="رمز عبور اشتباه است")
+    await clear_login_failures(current_user.username)
 
     current_user.totp_enabled = False
     current_user.totp_secret = None

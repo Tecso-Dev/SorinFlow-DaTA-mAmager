@@ -361,6 +361,20 @@ def test_an_inactive_account_is_checked_in_full_before_it_is_named(client, monke
     assert len(calls) == 2
 
 
+def test_a_stolen_session_cannot_guess_the_password_at_totp_disable(client):
+    """«change password» was throttled for exactly this; switching TOTP off,
+    which asks the same password, was not."""
+    totp = _totp_user("lh_totp_off")
+    half = _half(client, "lh_totp_off")
+    tok = client.post("/api/users/token/verify-totp",
+                      json={"totp_session": half, "code": totp.now()}).json()["access_token"]
+    auth = {"Authorization": f"Bearer {tok}"}
+    off = lambda pw: client.post("/api/users/me/totp/disable", headers=auth, json={"password": pw})
+    assert [off("guess").status_code for _ in range(_max())] == [400] * _max()
+    r = off("pw123456")
+    assert r.status_code == 429 and int(r.headers["Retry-After"]) > 0
+
+
 # ── /me/email-2fa takes a model, not a dict ───────────────────────────────────
 
 def test_email_2fa_switch_reads_a_typed_body(client):
