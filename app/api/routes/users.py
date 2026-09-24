@@ -515,9 +515,9 @@ async def verify_totp_login(
 @router.post("/register", response_model=UserResponse, status_code=201)
 async def register_user(
     data: UserRegister,
-    request: Request,
     db: AsyncSession = Depends(get_db),
     actor: User = _super_admin,
+    request: Request = None,
 ):
     """Only a super_admin may create accounts — public sign-up is disabled."""
     existing = await db.execute(select(User).where(User.username == data.username))
@@ -749,9 +749,10 @@ async def update_me(data: ProfileUpdate,
 
 
 @router.post("/me/password")
-async def change_my_password(data: PasswordChangeRequest, request: Request,
+async def change_my_password(data: PasswordChangeRequest,
                              current_user: User = Depends(get_current_user),
-                             db: AsyncSession = Depends(get_db)):
+                             db: AsyncSession = Depends(get_db),
+                             request: Request = None):
     """Change my password. Every other device is signed out: token_version
     moves, and a token minted before it is refused from then on. This
     device gets a fresh token in the response so it stays in."""
@@ -1016,9 +1017,9 @@ async def totp_setup(
 @router.post("/me/totp/enable")
 async def totp_enable(
     data: TotpEnableRequest,
-    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     if not current_user.totp_secret:
         raise HTTPException(status_code=400, detail="ابتدا TOTP را راه‌اندازی کنید")
@@ -1046,9 +1047,9 @@ class Email2faIn(BaseModel):
 @router.post("/me/email-2fa")
 async def set_email_2fa(
     data: Email2faIn,
-    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     """Turn the emailed second factor on or off for the caller's own account.
 
@@ -1125,9 +1126,9 @@ async def update_my_divar_phone(
 @router.post("/me/totp/disable")
 async def totp_disable(
     data: TotpDisableRequest,
-    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     from app.services.verification import clear_login_failures
 
@@ -1170,9 +1171,9 @@ async def list_users(
 @router.post("", response_model=UserResponse, status_code=201)
 async def create_user(
     data: UserCreate,
-    request: Request,
     actor: User = _super_admin,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     _guard_role_assignment(actor, data.role)
     # Check duplicate username / email
@@ -1208,9 +1209,9 @@ async def create_user(
 async def update_user(
     user_id: int,
     data: UserUpdate,
-    request: Request,
     actor: User = _super_admin,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -1349,9 +1350,9 @@ async def set_verification_flags(
 async def reset_password(
     user_id: int,
     data: UserPasswordReset,
-    request: Request,
     actor: User = _super_admin,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -1371,9 +1372,9 @@ async def reset_password(
 @router.delete("/{user_id}")
 async def delete_user(
     user_id: int,
-    request: Request,
     current_user: User = _super_admin,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="نمی‌توانید حساب خودتان را حذف کنید")
@@ -1398,9 +1399,9 @@ async def delete_user(
 @router.post("/{user_id}/totp/disable")
 async def admin_disable_totp(
     user_id: int,
-    request: Request,
     actor: User = _super_admin,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
