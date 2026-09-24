@@ -15,6 +15,7 @@ to buy and a shop to rent), and the engine scores needs. A request the visitor
 withdraws takes its customer with it — nobody should ring about a need that
 was cancelled.
 """
+from datetime import datetime, timezone
 from typing import Dict, Iterable, Optional
 
 from loguru import logger
@@ -25,6 +26,12 @@ from app.models.portal import PropertyRequest
 from app.services.match_service import RENT_TO_DEPOSIT
 
 OPEN = ("new", "in_review")
+# A description is read into the customer's empty fields at most this many
+# times before the request is left as it is — a gateway that keeps refusing
+# is not retried forever. A gateway-state error (not configured, disabled,
+# over budget) is not counted here; see enrich_needs.
+MAX_ENRICH_ATTEMPTS = 3
+ENRICH_BATCH = 20   # requests read per engine pass — one model call each, sequentially
 # the portal's kinds → the intake form's types (match_service._family names)
 KIND_TO_TYPE = {"apartment": "apartment", "villa": "house", "house": "house", "land": "land",
                 "office": "office", "store": "shop", "shop": "shop"}
@@ -72,19 +79,15 @@ def criteria_of(req: PropertyRequest, user=None) -> Dict:
 
 
 async def customer_for(db, req: PropertyRequest, user=None) -> Customer:
-    """The customer this request is, created or refreshed. The caller commits."""
+    """The customer this request is, created or refreshed. The caller commits.
+
+    Built from the form alone — nothing here waits on the model. A description
+    the form's own fields left empty is read later, in the background
+    (see enrich_needs below), so filing a request never waits on it.
+    """
     fields = criteria_of(req, user)
     cust = await db.get(Customer, req.customer_id) if req.customer_id else None
     if cust is None:
-        # What the description says and the form did not — districts, red
-        # lines, a budget typed in words — into the keys still empty, once,
-        # when the customer is born. enrich_request swallows LLMError (a model
-        # that is off, capped or wrong never blocks a request) and returns None.
-        from app.ai import need_parser
-        try:
-            fields.update(await need_parser.enrich_request(db, req) or {})
-        except Exception as e:
-            logger.warning(f"[portal] the description was not read: {type(e).__name__}: {e}")
         cust = Customer(**fields)
         db.add(cust)
         await db.flush()
@@ -98,16 +101,73 @@ async def customer_for(db, req: PropertyRequest, user=None) -> Customer:
 async def sync_open(db) -> int:
     """Open requests that never became a customer — requests from before this
     existed, or one whose creation lost the race. Idempotent, cheap, run by the
-    engine before every pass."""
+    engine before every pass. Also runs the background enrichment pass
+    (enrich_needs), so a description is still read — just never on the
+    visitor's own request."""
     rows = (await db.execute(select(PropertyRequest).where(
         PropertyRequest.status.in_(OPEN), PropertyRequest.customer_id.is_(None)))).scalars().all()
+    if rows:
+        for req in rows:
+            await customer_for(db, req)
+        await db.commit()
+        logger.info(f"[portal] {len(rows)} open request(s) handed to the matching engine")
+    await enrich_needs(db)
+    return len(rows)
+
+
+async def enrich_needs(db) -> int:
+    """What the visitor's own words say that the form did not — read once per
+    request, in the background, so filing a request never waits on the model.
+
+    Exactly one attempt per pass; a request stops being picked up once
+    need_enriched_at is set — on success (whether or not anything new was
+    found), or after MAX_ENRICH_ATTEMPTS real failures, so a broken gateway
+    cannot loop forever. A gateway-state error (not configured, disabled, over
+    budget) costs no attempt: it is not this request's fault, and it is worth
+    retrying once the gateway is usable again.
+    """
+    from app.ai import need_parser
+    from app.services import llm as _llm
+
+    rows = (await db.execute(select(PropertyRequest).where(
+        PropertyRequest.customer_id.isnot(None),
+        PropertyRequest.need_enriched_at.is_(None),
+        PropertyRequest.need_enrich_attempts < MAX_ENRICH_ATTEMPTS,
+    ).limit(ENRICH_BATCH))).scalars().all()
     if not rows:
         return 0
+
+    now, done = datetime.now(timezone.utc), 0
     for req in rows:
-        await customer_for(db, req)
+        cust = await db.get(Customer, req.customer_id)
+        if cust is None:
+            req.need_enriched_at = now   # the customer it pointed to is gone
+            continue
+        try:
+            extra = await need_parser.enrich_request(db, req)
+        except (_llm.NotConfigured, _llm.Disabled, _llm.BudgetExceeded) as e:
+            logger.info(f"[portal] enrichment of #{req.id} deferred: {e}")
+            continue
+        except Exception as e:
+            req.need_enrich_attempts = (req.need_enrich_attempts or 0) + 1
+            logger.warning(f"[portal] enrichment of #{req.id} failed "
+                           f"(attempt {req.need_enrich_attempts}/{MAX_ENRICH_ATTEMPTS}): "
+                           f"{type(e).__name__}: {e}")
+            if req.need_enrich_attempts >= MAX_ENRICH_ATTEMPTS:
+                req.need_enriched_at = now
+            continue
+        # only what the form left empty — a manual edit made while this was
+        # waiting its turn is not overwritten by a guess made from the form
+        if extra:
+            for k, v in extra.items():
+                if not getattr(cust, k, None):
+                    setattr(cust, k, v)
+            done += 1
+        req.need_enriched_at = now   # done either way — an empty description never changes
     await db.commit()
-    logger.info(f"[portal] {len(rows)} open request(s) handed to the matching engine")
-    return len(rows)
+    if done:
+        logger.info(f"[portal] {done} request(s) enriched from their description")
+    return done
 
 
 async def note_matches(db, pairs: Iterable[tuple]) -> int:
