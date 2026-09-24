@@ -27,6 +27,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import httpx
@@ -89,6 +90,20 @@ class Disabled(LLMError):
 
 class BudgetExceeded(LLMError):
     pass
+
+
+class CircuitOpen(LLMError):
+    """The gateway failed repeatedly; calls are refused without going out
+    until the cooldown ends."""
+
+
+class RateLimited(LLMError):
+    """The gateway itself said to back off. `retry_after` is seconds, the
+    same shape as VerificationError elsewhere in the codebase."""
+
+    def __init__(self, message: str, retry_after: float):
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 # ── configuration ────────────────────────────────────────────────────────────
@@ -352,6 +367,165 @@ def _extract_json(content: str) -> Any:
     return json.loads(text)
 
 
+# ── the circuit breaker ──────────────────────────────────────────────────────
+#
+# ponytail: state lives in this process's memory. A second replica has its
+# own breaker and its own failure count, so one pod tripping does not pause
+# another — move this to Redis (app/services/verification.py already leans
+# on it for the same reason) if the backend ever runs more than one.
+
+_BREAKER_BASE_COOLDOWN = 30.0
+_BREAKER_MAX_COOLDOWN = 600.0   # 10 minutes — the escalating ceiling
+_BREAKER_FAIL_THRESHOLD = 5
+_RETRY_AFTER_CAP = 900.0        # 15 minutes — Liara's own word wins, capped
+
+
+class _Breaker:
+    def __init__(self) -> None:
+        self.state = "closed"   # closed | open | half_open
+        self.fails = 0
+        self._next_cooldown = _BREAKER_BASE_COOLDOWN
+        self.until_monotonic = 0.0
+        self.until_at: Optional[datetime] = None
+
+    def allow(self) -> bool:
+        if self.state == "closed":
+            return True
+        if self.state == "open":
+            if time.monotonic() < self.until_monotonic:
+                return False
+            self.state = "half_open"   # cooldown passed — one trial call through
+            return True
+        return False   # half_open: the one trial is already out
+
+    def on_success(self) -> None:
+        self.state, self.fails = "closed", 0
+        self._next_cooldown = _BREAKER_BASE_COOLDOWN
+
+    def on_failure(self, retry_after: Optional[float] = None) -> None:
+        if retry_after is not None:
+            # the gateway said how long, so its word wins over our own count
+            self._open(min(retry_after, _RETRY_AFTER_CAP))
+            self.fails = 0
+            return
+        if self.state == "half_open":
+            self._escalate()   # the trial failed — wait longer next time
+            return
+        self.fails += 1
+        if self.fails >= _BREAKER_FAIL_THRESHOLD:
+            self._escalate()
+
+    def _escalate(self) -> None:
+        self._open(self._next_cooldown)
+        self._next_cooldown = min(self._next_cooldown * 2, _BREAKER_MAX_COOLDOWN)
+        self.fails = 0
+
+    def _open(self, seconds: float) -> None:
+        self.state = "open"
+        self.until_monotonic = time.monotonic() + seconds
+        self.until_at = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+
+
+_breaker = _Breaker()
+
+
+def breaker_status() -> Dict[str, Any]:
+    """State and until when, for the AI card's «مکث تا …». Read-only — it is
+    the next call, not this read, that flips open → half-open once the
+    cooldown has passed."""
+    return {"state": _breaker.state,
+            "until": _breaker.until_at.isoformat() if _breaker.state == "open" else None}
+
+
+def _circuit_open() -> CircuitOpen:
+    until = _breaker.until_at.astimezone(TEHRAN).strftime("%H:%M") if _breaker.until_at else "چند لحظهٔ دیگر"
+    return CircuitOpen(f"مسیر هوش مصنوعی به‌خاطر خطاهای پیاپی موقتاً متوقف است — تا ساعت {until} دوباره تلاش کنید")
+
+
+def _parse_retry_after(value: Optional[str]) -> Optional[float]:
+    """Seconds to wait — Liara sends either a plain integer or an HTTP-date."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
+    except (TypeError, ValueError):
+        return None
+
+
+# ── cost from tokens, when the provider does not report it ──────────────────
+#
+# Liara returns usage.cost on most calls; a model that does not gets recorded
+# at $0 today, so the daily caps never see what it actually spent. USD per 1M
+# tokens (input, output) — public list prices, and they drift over time; a
+# rough charge beats a silent $0 that never trips a cap. Longer, narrower
+# names are listed first so "gpt-4.1-nano" is not priced as "gpt-4.1-mini".
+_PRICES: List[Tuple[str, float, float]] = [
+    ("gpt-4.1-nano", 0.10, 0.40),
+    ("gpt-4.1-mini", 0.40, 1.60),
+    ("gpt-4.1", 2.00, 8.00),
+    ("gpt-4o-mini", 0.15, 0.60),
+    ("gpt-4o", 2.50, 10.00),
+    ("text-embedding-3-large", 0.13, 0.0),
+    ("text-embedding-3-small", 0.02, 0.0),
+    ("gemini-2.0-flash", 0.10, 0.40),
+    ("gemini-2.5-flash", 0.30, 2.50),
+    ("gemini", 0.30, 2.50),              # an unnamed 2.x flash generation
+    ("deepseek", 0.28, 0.42),
+    ("glm", 0.60, 2.20),                 # z-ai/glm — Liara's reasoning family
+]
+_DEFAULT_PRICE = (1.00, 3.00)   # unknown model: priced like a mid model, not
+                                 # a mini one, so an unpriced model errs safe
+_warned_models: set = set()
+
+
+def _price_for(model: str) -> Tuple[float, float]:
+    """(input, output) USD per 1M tokens — a family match, or a conservative
+    default logged once per model name we have not seen."""
+    name = (model or "").lower()
+    for key, p_in, p_out in _PRICES:
+        if key in name:
+            return p_in, p_out
+    if name and name not in _warned_models:
+        _warned_models.add(name)
+        logger.warning(f"[ai] no price on file for model {model!r} — using the conservative default")
+    return _DEFAULT_PRICE
+
+
+def _estimate_tokens(text: str) -> int:
+    """Persian runs about 3 characters per token — used only when the
+    gateway reports no token counts at all."""
+    n = len(text or "")
+    return max(1, round(n / 3)) if n else 0
+
+
+def _fill_cost(model: str, usage: Dict[str, Any], sent: str, received: str = "") -> Dict[str, Any]:
+    """`usage` with `cost` filled in when Liara did not report one (or
+    reported 0 with real tokens) — priced from `_PRICES`, on token counts
+    estimated from characters when even those are missing. Returns a copy;
+    the caller's own dict is left alone."""
+    usage = dict(usage or {})
+    if float(usage.get("cost") or 0) > 0:
+        return usage
+    p_tok = int(usage.get("prompt_tokens") or 0)
+    c_tok = int(usage.get("completion_tokens") or 0)
+    if p_tok <= 0 and c_tok <= 0:
+        p_tok, c_tok = _estimate_tokens(sent), _estimate_tokens(received)
+        if p_tok or c_tok:
+            usage["prompt_tokens"], usage["completion_tokens"] = p_tok, c_tok
+            logger.info(f"[ai] {model}: no token counts from the gateway — estimated {p_tok}+{c_tok} from characters")
+    if p_tok <= 0 and c_tok <= 0:
+        return usage
+    p_in, p_out = _price_for(model)
+    usage["cost"] = p_tok * p_in / 1_000_000 + c_tok * p_out / 1_000_000
+    return usage
+
+
 async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
                schema: Optional[Type] = None, json_mode: bool = False,
                max_tokens: int = 400, temperature: float = 0.2,
@@ -364,9 +538,11 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
     `schema`, a pydantic model, when given); with `tools` (OpenAI function
     specs) the model may answer with `tool_calls` instead of content, and
     `message` is its raw turn to append to the conversation. Raises LLMError
-    (or a subclass) for anything the caller cannot use. `cap=False` skips the
-    daily cap — for the panel's own test. `model_override` is for a bake-off
-    only: the same door, the same ledger, another model than the one
+    (or a subclass) for anything the caller cannot use — including CircuitOpen
+    when the gateway has failed repeatedly and this call never goes out, and
+    RateLimited (with `.retry_after`) on a 429/503 that named one. `cap=False`
+    skips the daily cap — for the panel's own test. `model_override` is for a
+    bake-off only: the same door, the same ledger, another model than the one
     configured for the job."""
     if job not in JOBS:
         raise ValueError(f"unknown job {job!r}")
@@ -410,6 +586,8 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
         timeout = max(timeout, 90.0)
     last_error = ""
     for attempt in (1, 2):
+        if not _breaker.allow():
+            raise _circuit_open()
         t0 = time.monotonic()
         usage: Dict[str, Any] = {}
         try:
@@ -418,14 +596,24 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
             ms = int((time.monotonic() - t0) * 1000)
             if resp.status_code != 200:
                 last_error = f"HTTP {resp.status_code}: {resp.text[:160]}"
+                retry_after = _parse_retry_after(resp.headers.get("retry-after")) if resp.status_code in (429, 503) else None
                 await _record(agent, job, model, {}, ms, False, last_error)
+                if retry_after is not None:
+                    # the gateway itself named a wait — obey it, do not retry
+                    _breaker.on_failure(retry_after=retry_after)
+                    raise RateLimited(last_error, retry_after)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    _breaker.on_failure()
                 raise LLMError(last_error)
+            _breaker.on_success()
             data = resp.json()
             usage = data.get("usage") or {}
             choice = (data.get("choices") or [{}])[0]
             message = _clean_turn(choice.get("message") or {})
             content = message.get("content") or ""
             tool_calls = message.get("tool_calls") or []
+            sent = "".join(str(m.get("content") or "") for m in body["messages"])
+            usage = _fill_cost(model, usage, sent, content)
             if not content.strip() and not tool_calls and choice.get("finish_reason") == "length" and attempt == 1:
                 # the budget went to thinking and nothing was left for the
                 # answer — once more with room for both
@@ -461,9 +649,13 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
             ms = int((time.monotonic() - t0) * 1000)
             last_error = f"{type(e).__name__}: {str(e)[:160]}"
             await _record(agent, job, model, usage, ms, False, last_error)
-            if attempt == 1 and isinstance(e, (httpx.TransportError, OSError)):
-                await asyncio.sleep(1.0)
-                continue
+            if isinstance(e, (httpx.TransportError, OSError)):
+                _breaker.on_failure()
+                if attempt == 1:
+                    # today's one retry — never for a 429, which is handled
+                    # above as a normal (non-transport) response, not here
+                    await asyncio.sleep(1.0)
+                    continue
             raise LLMError(last_error)
     raise LLMError(last_error or "no answer")
 
@@ -481,21 +673,32 @@ async def embed(texts: List[str], *, agent: str, db=None, timeout: float = TIMEO
     model = cfg["models"].get("embed")
     if not model:
         raise NotConfigured("مدلی برای Embedding تعیین نشده است")
+    if not _breaker.allow():
+        raise _circuit_open()
     clean = [mask_pii(t)[:8000] for t in texts]
     t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(_url("embeddings"), headers=_headers(), json={"model": model, "input": clean})
     except (httpx.HTTPError, OSError) as e:
+        _breaker.on_failure()
         await _record(agent, "embed", model, {}, int((time.monotonic() - t0) * 1000), False, f"{type(e).__name__}: {e}")
         raise LLMError(f"{type(e).__name__}: {str(e)[:160]}")
     ms = int((time.monotonic() - t0) * 1000)
     if resp.status_code != 200:
         err = f"HTTP {resp.status_code}: {resp.text[:160]}"
+        retry_after = _parse_retry_after(resp.headers.get("retry-after")) if resp.status_code in (429, 503) else None
         await _record(agent, "embed", model, {}, ms, False, err)
+        if retry_after is not None:
+            _breaker.on_failure(retry_after=retry_after)
+            raise RateLimited(err, retry_after)
+        if resp.status_code == 429 or resp.status_code >= 500:
+            _breaker.on_failure()
         raise LLMError(err)
+    _breaker.on_success()
     data = resp.json()
-    await _record(agent, "embed", model, data.get("usage") or {}, ms, True)
+    usage = _fill_cost(model, data.get("usage") or {}, "".join(clean))
+    await _record(agent, "embed", model, usage, ms, True)
     rows = sorted(data.get("data") or [], key=lambda d: d.get("index", 0))
     return [r["embedding"] for r in rows]
 

@@ -15,6 +15,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from loguru import logger
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./_test_ai_core.db")
@@ -43,6 +44,16 @@ def _answer(content, cost=0.001, toman=300):
     return httpx.Response(200, json={
         "model": "test/model", "choices": [{"message": {"content": content}}],
         "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cost": cost, "total_cost_toman": toman}})
+
+
+@pytest.fixture(autouse=True)
+def _reset_module_state():
+    """The breaker and the once-per-model price warning live at module scope
+    so they survive a single call the way a real process would — which means
+    one test's failures leak into the next one's unless this resets them."""
+    llm._breaker = llm._Breaker()
+    llm._warned_models.clear()
+    yield
 
 
 @pytest.fixture
@@ -368,7 +379,7 @@ class TestTheAiScreen:
         assert ".ai-err.is-stale" in (ROOT / "frontend/css/style.css").read_text(encoding="utf-8")
 
 
-# ── phase 2: a budget per agent, on top of the shared one ───────────────────
+# ── phase 2: a budget per agent, cost from tokens, the breaker, better masking ──
 
 class TestPerAgentBudget:
     """A separate daily budget per agent, so a noisy reader cannot spend the
@@ -489,6 +500,204 @@ class TestConfigAgentCapsAgainstARealDatabase:
                 assert cfg["agent_caps"]["vision"] == 1.00
                 assert cfg["agent_caps"]["reader"] == 3.00   # half of 6, no override on file
         asyncio.run(_run())
+
+
+class TestCostFromTokens:
+    """Liara does not always report usage.cost; when it reports tokens (or
+    nothing at all) the call still cost real money, so the ledger — and the
+    caps that read it — have to price it themselves."""
+
+    def test_tokens_without_a_reported_cost_are_priced_from_the_table(self, configured, monkeypatch):
+        def handler(r):
+            return httpx.Response(200, json={
+                "model": "openai/gpt-4.1-mini", "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000}})   # no "cost" at all
+        _gateway(monkeypatch, handler)
+        out = asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object(),
+                                   model_override="openai/gpt-4.1-mini"))
+        assert out["cost_usd"] == pytest.approx(0.40 + 1.60)   # 1M in at $0.40/1M, 1M out at $1.60/1M
+
+    def test_cost_reported_as_zero_with_real_tokens_is_also_priced(self, configured, monkeypatch):
+        _gateway(monkeypatch, lambda r: _answer("ok", cost=0.0))
+        out = asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object(),
+                                   model_override="openai/gpt-4.1-mini"))
+        assert out["cost_usd"] > 0
+
+    def test_an_unknown_model_gets_the_default_price_and_warns_once(self, configured, monkeypatch):
+        def handler(r):
+            return httpx.Response(200, json={
+                "model": "some-vendor/mystery-model", "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 1000, "completion_tokens": 1000}})
+        _gateway(monkeypatch, handler)
+        lines = []
+        sink = logger.add(lambda m: lines.append(str(m)), level="WARNING")
+        try:
+            out1 = asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object(),
+                                        model_override="some-vendor/mystery-model"))
+            out2 = asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object(),
+                                        model_override="some-vendor/mystery-model"))
+        finally:
+            logger.remove(sink)
+        assert out1["cost_usd"] == pytest.approx(1000 * 1.00 / 1_000_000 + 1000 * 3.00 / 1_000_000)
+        assert out2["cost_usd"] == out1["cost_usd"]
+        assert len([ln for ln in lines if "mystery-model" in ln]) == 1, "warns once per model, not every call"
+
+    def test_no_token_counts_at_all_are_estimated_from_characters(self, configured, monkeypatch):
+        def handler(r):
+            return httpx.Response(200, json={
+                "model": "openai/gpt-4.1-mini",
+                "choices": [{"message": {"content": "سلام، حالت چطوره؟"}}], "usage": {}})   # no usage at all
+        _gateway(monkeypatch, handler)
+        out = asyncio.run(llm.chat("write", [{"role": "user", "content": "متن ورودی کوتاه"}], agent="t", db=object(),
+                                   model_override="openai/gpt-4.1-mini"))
+        assert out["cost_usd"] > 0
+        assert out["usage"]["prompt_tokens"] > 0 and out["usage"]["completion_tokens"] > 0
+
+    def test_embeddings_price_from_prompt_tokens_times_the_embed_price(self, configured, monkeypatch):
+        def handler(r):
+            return httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1, 0.2]}],
+                                             "usage": {"prompt_tokens": 500_000}})   # no cost
+        _gateway(monkeypatch, handler)
+        asyncio.run(llm.embed(["یک متن آزمایشی"], agent="embed", db=object()))
+        row = configured["ledger"][-1]
+        assert row["cost"] == pytest.approx(500_000 * 0.02 / 1_000_000)   # text-embedding-3-small: $0.02/1M
+
+    def test_a_computed_cost_still_trips_the_cap(self, configured, monkeypatch):
+        configured["rows"][llm.KEY_CAP] = "0.001"
+
+        def handler(r):
+            return httpx.Response(200, json={
+                "model": "openai/gpt-4.1-mini", "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 100_000, "completion_tokens": 100_000}})   # no cost; prices to $0.20
+        _gateway(monkeypatch, handler)
+        asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object(),
+                             model_override="openai/gpt-4.1-mini"))
+        with pytest.raises(llm.BudgetExceeded):
+            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object(),
+                                 model_override="openai/gpt-4.1-mini"))
+
+
+class TestCircuitBreaker:
+    """A per-process breaker around the gateway: five bad responses in a row
+    pause every call until a cooldown passes, and a 429/503 that names its
+    own wait is obeyed immediately instead."""
+
+    def test_closed_by_default(self):
+        assert llm.breaker_status() == {"state": "closed", "until": None}
+
+    def test_five_consecutive_server_errors_open_it(self, configured, monkeypatch):
+        _gateway(monkeypatch, lambda r: httpx.Response(500, json={"error": "boom"}))
+        for _ in range(5):
+            with pytest.raises(llm.LLMError):
+                asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert llm._breaker.state == "open"
+        status = llm.breaker_status()
+        assert status["state"] == "open" and status["until"]
+
+    def test_a_429_without_five_in_a_row_does_not_open_it(self, configured, monkeypatch):
+        _gateway(monkeypatch, lambda r: httpx.Response(429, json={"error": "slow down"}))
+        for _ in range(4):
+            with pytest.raises(llm.LLMError):
+                asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert llm._breaker.state == "closed"
+
+    def test_an_open_breaker_refuses_before_any_http_call_or_ledger_row(self, configured, monkeypatch):
+        calls = []
+
+        def handler(r):
+            calls.append(1)
+            return httpx.Response(500, json={"error": "boom"})
+        _gateway(monkeypatch, handler)
+        for _ in range(5):
+            with pytest.raises(llm.LLMError):
+                asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert len(calls) == 5
+        ledger_len = len(configured["ledger"])
+        with pytest.raises(llm.CircuitOpen):
+            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert len(calls) == 5, "no HTTP call while open"
+        assert len(configured["ledger"]) == ledger_len, "no ledger row while open"
+
+    def test_embed_is_gated_by_the_same_breaker(self, configured, monkeypatch):
+        _gateway(monkeypatch, lambda r: httpx.Response(500, json={"error": "boom"}))
+        for _ in range(5):
+            with pytest.raises(llm.LLMError):
+                asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        with pytest.raises(llm.CircuitOpen):
+            asyncio.run(llm.embed(["x"], agent="embed", db=object()))
+
+    def test_half_open_trial_success_closes_it(self, configured, monkeypatch):
+        state = {"n": 0}
+
+        def handler(r):
+            state["n"] += 1
+            return httpx.Response(500, json={"error": "boom"}) if state["n"] <= 5 else _answer("ok")
+        _gateway(monkeypatch, handler)
+        for _ in range(5):
+            with pytest.raises(llm.LLMError):
+                asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert llm._breaker.state == "open"
+        llm._breaker.until_monotonic = 0.0   # the cooldown has passed
+        out = asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert out["content"] == "ok" and llm._breaker.state == "closed"
+
+    def test_half_open_trial_failure_reopens_with_a_longer_cooldown(self, configured, monkeypatch):
+        _gateway(monkeypatch, lambda r: httpx.Response(500, json={"error": "boom"}))
+        for _ in range(5):
+            with pytest.raises(llm.LLMError):
+                asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        first_cooldown = llm._breaker._next_cooldown
+        llm._breaker.until_monotonic = 0.0
+        with pytest.raises(llm.LLMError):
+            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert llm._breaker.state == "open"
+        assert llm._breaker._next_cooldown > first_cooldown
+
+    def test_429_with_a_numeric_retry_after_opens_immediately(self, configured, monkeypatch):
+        _gateway(monkeypatch, lambda r: httpx.Response(429, headers={"Retry-After": "5"}, json={"error": "slow"}))
+        with pytest.raises(llm.RateLimited) as e:
+            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert e.value.retry_after == 5.0
+        assert llm._breaker.state == "open" and llm._breaker.fails == 0, "bypasses the consecutive counter"
+
+    def test_503_with_an_http_date_retry_after_is_parsed(self, configured, monkeypatch):
+        from email.utils import format_datetime
+        future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=120))
+        _gateway(monkeypatch, lambda r: httpx.Response(503, headers={"Retry-After": future}, json={"error": "down"}))
+        with pytest.raises(llm.RateLimited) as e:
+            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert 90 <= e.value.retry_after <= 130
+
+    def test_the_breakers_own_cooldown_is_capped_at_15_minutes(self, configured, monkeypatch):
+        _gateway(monkeypatch, lambda r: httpx.Response(429, headers={"Retry-After": "999999"}, json={"error": "slow"}))
+        t0 = llm.time.monotonic()
+        with pytest.raises(llm.RateLimited) as e:
+            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert e.value.retry_after == 999999.0, "the caller still learns the real, uncapped wait"
+        assert llm._breaker.until_monotonic - t0 <= 900.5, "but the breaker itself never sits idle that long"
+
+    def test_a_transport_error_still_retries_once_but_a_429_never_retries(self, configured, monkeypatch):
+        calls = []
+
+        def flaky(r):
+            calls.append(1)
+            if len(calls) == 1:
+                raise httpx.ConnectTimeout("dead")
+            return _answer("ok")
+        _gateway(monkeypatch, flaky)
+        out = asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert out["content"] == "ok" and len(calls) == 2
+
+        calls.clear()
+        _gateway(monkeypatch, lambda r: (calls.append(1), httpx.Response(429, json={"error": "slow"}))[1])
+        with pytest.raises(llm.LLMError):
+            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert len(calls) == 1, "a 429 is a normal response, not a transport error — it must not retry"
+
+    def test_the_card_shows_the_pause(self):
+        src = (ROOT / "app/api/routes/ai.py").read_text(encoding="utf-8")
+        assert '"breaker": llm.breaker_status()' in src
+        assert "_aiBreakerText" in JS and "مکث تا" in JS
 
 
 # Phones with spaces, dashes, dots and parentheses; Persian, Arabic-Indic and

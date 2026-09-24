@@ -4245,6 +4245,16 @@ function _aiMoney(usd, toman) {
     return `${t} <span class="text-muted" dir="ltr">($${d >= 0.01 ? d.toFixed(2) : d.toFixed(4)})</span>`;
 }
 
+// The circuit breaker around the gateway: closed the whole time except right
+// after repeated failures. `until` is only set while open.
+function _aiUntil(iso) {
+    return iso ? new Date(iso).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '';
+}
+function _aiBreakerText(brk) {
+    if (!brk || brk.state === 'closed') return null;
+    return brk.until ? `مکث تا ${_aiUntil(brk.until)}` : 'در حال تلاش دوباره…';
+}
+
 async function loadAi() {
     const badge = document.getElementById('ai-badge');
     if (!badge) return;
@@ -4252,8 +4262,9 @@ async function loadAi() {
         const s = await apiCall('/ai/status');
         _aiStatus = s;
         const ok = s.configured && s.enabled;
-        badge.textContent = !s.configured ? 'تنظیم نشده' : (!s.enabled ? 'خاموش' : (s.cap_reached ? 'سقف امروز پر شد' : 'فعال'));
-        badge.className = 'badge ' + (!s.configured ? 'bg-secondary' : (!s.enabled ? 'bg-secondary' : (s.cap_reached ? 'bg-warning text-dark' : 'bg-success')));
+        const paused = _aiBreakerText(s.breaker);
+        badge.textContent = !s.configured ? 'تنظیم نشده' : (!s.enabled ? 'خاموش' : (paused || (s.cap_reached ? 'سقف امروز پر شد' : 'فعال')));
+        badge.className = 'badge ' + (!s.configured ? 'bg-secondary' : (!s.enabled ? 'bg-secondary' : (paused || s.cap_reached ? 'bg-warning text-dark' : 'bg-success')));
 
         document.getElementById('ai-conn').innerHTML = s.configured
             ? `<span class="text-success">✓ وصل است</span> <span class="text-muted small">· پروژهٔ ${esc(s.workspace || '—')}</span>`
@@ -4426,11 +4437,12 @@ async function loadAiScreen() {
     try {
         const s = await apiCall('/ai/overview');
         const u = s.usage || { today: {}, month: {} };
+        const paused = _aiBreakerText(s.breaker);
         const conn = document.getElementById('ai-t-conn');
-        conn.textContent = s.configured ? (s.enabled ? 'وصل است' : 'خاموش') : 'تنظیم نشده';
-        conn.className = 'stat-value ' + (s.configured && s.enabled ? 'text-success' : 'text-warning');
+        conn.textContent = paused ? 'موقتاً متوقف' : (s.configured ? (s.enabled ? 'وصل است' : 'خاموش') : 'تنظیم نشده');
+        conn.className = 'stat-value ' + (paused ? 'text-warning' : (s.configured && s.enabled ? 'text-success' : 'text-warning'));
         conn.style.fontSize = '1rem';
-        document.getElementById('ai-t-conn-sub').textContent = s.workspace ? `پروژهٔ ${s.workspace}` : 'کلید در GitHub تنظیم نشده';
+        document.getElementById('ai-t-conn-sub').textContent = paused || (s.workspace ? `پروژهٔ ${s.workspace}` : 'کلید در GitHub تنظیم نشده');
         document.getElementById('ai-t-today').textContent = `${formatNumber(u.today.cost_toman || 0)} تومان`;
         const capPct = s.cap_usd ? Math.min(100, Math.round((u.today.cost_usd || 0) / s.cap_usd * 100)) : 0;
         document.getElementById('ai-t-cap').innerHTML =

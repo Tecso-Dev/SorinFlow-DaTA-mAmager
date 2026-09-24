@@ -52,6 +52,7 @@ async def ai_status(db: AsyncSession = Depends(get_db), _: User = _super_admin):
         "usage": usage,
         "spent_today_usd": spent,
         "cap_reached": spent >= cfg["cap_usd"],
+        "breaker": llm.breaker_status(),
         "liara": await llm.liara_activity(),
         # what runs on this today; the agents of the later phases join here
         "agents": [
@@ -135,6 +136,7 @@ async def ai_overview(db: AsyncSession = Depends(get_db), _: User = _super_admin
         "base_url_set": bool((llm.settings.llm_base_url or "").strip()),
         "env_models": llm.env_models(),
         "usage": usage, "spent_today_usd": spent, "cap_reached": spent >= cfg["cap_usd"],
+        "breaker": llm.breaker_status(),
         "liara": await llm.liara_activity(), "quota": await llm.liara_quota(),
         "agents": agents,
     }
