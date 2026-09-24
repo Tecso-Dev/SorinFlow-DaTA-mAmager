@@ -506,6 +506,14 @@ async def _migrate_phone_normalized(conn):
     """
     try:
         from sqlalchemy import text
+        # asked first: ALTER TABLE takes its lock before IF NOT EXISTS is
+        # checked, and these are the four busiest tables — every boot after
+        # the first would queue for them for nothing
+        done = (await conn.execute(text(
+            "SELECT 1 FROM information_schema.columns WHERE table_name='crm_customers' "
+            "AND column_name='mobile2_normalized' AND table_schema=current_schema()"))).first()
+        if done:
+            return
         await conn.execute(text(
             "ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone_number_normalized VARCHAR(20)"))
         await conn.execute(text(
