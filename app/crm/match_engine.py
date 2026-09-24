@@ -16,18 +16,19 @@ Not in the scraper's request path on purpose: a scoring bug or a slow query
 here must never cost a scrape.
 """
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
+from app.ai import listing_reader
 from app.config import get_settings
 from app.database import async_session_maker
 from app.models.crm_models import Customer, CustomerMatch
 from app.models.property import Property
 from app.services import secret_box
-from app.services.match_service import customers_for_property
+from app.services.match_service import customers_for_property, preload_customers
 
 settings = get_settings()
 
@@ -36,6 +37,10 @@ PER_PROPERTY = 5         # the strongest fits only; a listing that fits twenty i
 BATCH = 300              # listings per tick — a big scrape drains over a few ticks
 TICK_SECONDS = 300       # a listing waits at most five minutes for its matches
 KEY_CURSOR = "match_engine_cursor"
+# A stuck reader (a bug, a listing outside every retry path) must not hold a
+# listing back from matching forever — 30 minutes is long enough for the
+# reader's own tick (every 120s) to have had several tries at it.
+READ_WAIT_TIMEOUT = timedelta(minutes=30)
 
 
 async def _cursor(db) -> int:
@@ -46,26 +51,60 @@ async def _cursor(db) -> int:
         return 0
 
 
+async def _due(db):
+    """Listings ready to be judged, and due for it.
+
+    Ready: read at the current prompt version, OR the reader will never get
+    here — off, unconfigured, over budget (listing_reader.reader_will_run),
+    or this specific listing is past listing_reader.MAX_ATTEMPTS on its
+    current content — OR the 30-minute safety window has passed regardless.
+    Due: never judged, or the content/facts moved since (ai_match_fp behind
+    ai_content_fp — see app/models/property.py:content_fingerprint; a fresher
+    read counts too, since the reader's facts are part of what gets judged).
+    """
+    clauses = [Property.is_active == True]                                      # noqa: E712
+    if await listing_reader.reader_will_run(db):
+        read_enough = and_(Property.ai_read_at.isnot(None),
+                           Property.ai_facts["prompt_version"].as_integer() == listing_reader.PROMPT_VERSION)
+        gave_up_on_it = and_(Property.ai_read_attempts >= listing_reader.MAX_ATTEMPTS,
+                             Property.ai_read_fp.isnot(None),
+                             ~Property.ai_read_fp.is_distinct_from(Property.ai_content_fp))
+        cutoff = datetime.now(timezone.utc) - READ_WAIT_TIMEOUT
+        clauses.append(or_(read_enough, gave_up_on_it, Property.created_at < cutoff))
+    # else: nobody is coming to read anything right now, so waiting for one
+    # is pointless — every active listing is "ready" on that count, and only
+    # the due-for-judging clause below still gates it
+    changed = Property.ai_match_fp.is_distinct_from(Property.ai_content_fp)
+    clauses.append(or_(Property.ai_matched_at.is_(None), changed))
+    return and_(*clauses)
+
+
 async def run_once(db, *, notify: bool = True, limit: int = BATCH) -> Dict:
-    """One pass over the listings that arrived since the last one."""
+    """One pass over the listings due to be judged (see _due) — not only
+    the ones that arrived since the last pass: a listing the reader just
+    finished, or whose content changed, is exactly as due as a new one, so
+    there is no id lower bound any more (same reasoning as
+    listing_reader.run_once). The stored cursor is reporting only."""
     from app.crm import portal_bridge
     await portal_bridge.sync_open(db)       # portal requests the engine has not met yet
     since = await _cursor(db)
     props = (await db.execute(
-        select(Property).where(Property.id > since, Property.is_active == True)   # noqa: E712
+        select(Property).where(await _due(db))
         .order_by(Property.id.asc()).limit(limit))).scalars().all()
     if not props:
         return {"scanned": 0, "matched": 0, "cursor": since}
 
     have = (await db.execute(select(func.count(Customer.id)))).scalar_one()
+    customers = await preload_customers(db) if have else []      # once for the whole pass, not once per listing
     created: List[CustomerMatch] = []
-    if have:
-        for p in props:
+    now = datetime.now(timezone.utc)
+    for p in props:
+        if customers:
             try:
-                fits = await customers_for_property(db, p, limit=PER_PROPERTY, use_llm=False)
+                fits = await customers_for_property(db, p, limit=PER_PROPERTY, use_llm=False, customers=customers)
             except Exception as e:
                 logger.warning(f"[match] scoring listing {p.id} failed: {type(e).__name__}: {e}")
-                continue
+                fits = []
             for c in fits:
                 if c["score"] < MIN_SCORE:
                     continue
@@ -77,9 +116,13 @@ async def run_once(db, *, notify: bool = True, limit: int = BATCH) -> Dict:
                                     reasons=c.get("reasons") or [], consultant=c.get("consultant_name") or None)
                 db.add(row)
                 created.append(row)
+        # judged either way — no customers, or scoring failed, is still a
+        # pass over this listing, and the old cursor advanced past it just
+        # the same; ai_match_fp is what keeps it from looking due again
+        p.ai_matched_at = now
+        p.ai_match_fp = p.ai_content_fp
     # a portal request behind a matched customer is «مورد پیدا شد» from now on
     await portal_bridge.note_matches(db, [(r.customer_id, r.property_id) for r in created])
-    # the cursor moves whether or not anything matched: a listing is judged once
     await secret_box.put(db, KEY_CURSOR, str(props[-1].id), "match_engine")
     await db.commit()
 

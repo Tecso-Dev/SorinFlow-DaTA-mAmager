@@ -348,6 +348,90 @@ class TestThePass:
         assert src.count("except (llm.NotConfigured, llm.Disabled, llm.BudgetExceeded)") == 2
 
 
+# ── staleness and the attempt cap ────────────────────────────────────────────
+
+class TestStalenessAndTheAttemptCap:
+
+    def test_a_content_change_re_opens_an_already_read_listing(self, configured, store, monkeypatch):
+        _gateway(monkeypatch, lambda r: _answer(SHOP))
+
+        async def scenario():
+            [pid] = await _seed(store, _prop(1, description="نسخهٔ اول"))
+            async with store() as db:
+                first = await reader.run_once(db, limit=50)
+                again = await reader.run_once(db, limit=50)     # nothing changed: not due
+                p = await db.get(Property, pid)
+                before_fp = p.ai_read_fp
+                p.description = "نسخهٔ دوم، کاملاً چیز دیگری"
+                await db.commit()
+                after_edit = await reader.run_once(db, limit=50)
+                p2 = await db.get(Property, pid)
+            return first, again, before_fp, after_edit, p2
+        first, again, before_fp, after_edit, p2 = asyncio.run(scenario())
+        assert first["read"] == 1 and again["scanned"] == 0, "read once, then quiet until something changes"
+        assert before_fp is not None
+        assert after_edit["scanned"] == 1 and after_edit["read"] == 1, "the edit put it back in front of the reader"
+        assert p2.ai_read_fp == p2.ai_content_fp and p2.ai_read_fp != before_fp
+
+    def test_three_failures_on_the_same_content_stop_the_retries(self, configured, store, monkeypatch):
+        _gateway(monkeypatch, lambda r: httpx.Response(500, json={"error": "boom"}))
+        pid = asyncio.run(_seed(store, _prop(1)))[0]
+
+        async def scenario():
+            async with store() as db:
+                for _ in range(reader.MAX_ATTEMPTS):
+                    out = await reader.run_once(db, limit=50)
+                stopped = await reader.run_once(db, limit=50)   # a fourth pass: nothing left to try
+                p = await db.get(Property, pid)
+                st = await reader.status(db)
+            return out, stopped, p, st
+        out, stopped, p, st = asyncio.run(scenario())
+        assert out["failed"] == 1 and p.ai_read_attempts == reader.MAX_ATTEMPTS
+        assert stopped == {"scanned": 0, "read": 0, "failed": 0, "cursor": 0, "stopped": None}
+        assert st["behind"] == 0 and st["capped"] == 1, "capped, not still counted as behind"
+
+        async def edit_and_retry():
+            async with store() as db:
+                p = await db.get(Property, pid)
+                p.description = "متن تازه بعد از سه شکست"
+                await db.commit()
+                return await reader.run_once(db, limit=50), await reader.status(db)
+        _gateway(monkeypatch, lambda r: _answer(SHOP))
+        again, st2 = asyncio.run(edit_and_retry())
+        assert again["read"] == 1, "the content changed, so the cap no longer applies"
+        assert st2["capped"] == 0
+
+    def test_a_gate_error_does_not_count_as_an_attempt(self, configured, store, monkeypatch):
+        configured["rows"][llm.KEY_ENABLED] = "false"
+        _gateway(monkeypatch, lambda r: _answer(SHOP))
+
+        async def scenario():
+            [pid] = await _seed(store, _prop(1))
+            async with store() as db:
+                with pytest.raises(llm.Disabled):
+                    await reader.read_listing(db, await db.get(Property, pid))
+                return await db.get(Property, pid)
+        p = asyncio.run(scenario())
+        assert p.ai_read_attempts == 0, "the office turned it off — not this listing's fault"
+
+    def test_reader_will_run_reflects_the_same_gates_as_llm_gate(self, configured, store, monkeypatch):
+        async def check():
+            async with store() as db:
+                return await reader.reader_will_run(db)
+        assert asyncio.run(check()) is True
+
+        monkeypatch.setattr(llm.settings, "llm_api_key", "", raising=False)
+        assert asyncio.run(check()) is False
+        monkeypatch.setattr(llm.settings, "llm_api_key", "k-test", raising=False)
+
+        configured["rows"][llm.KEY_ENABLED] = "false"
+        assert asyncio.run(check()) is False
+        configured["rows"][llm.KEY_ENABLED] = "true"
+
+        configured["rows"][llm.KEY_CAP] = "0"
+        assert asyncio.run(check()) is False
+
+
 # ── the merge rule ───────────────────────────────────────────────────────────
 
 class TestEffective:
@@ -409,7 +493,7 @@ class TestTheRouter:
         c = self._client(store)
         r = c.get("/ai/reader/status")
         assert r.status_code == 200, r.text
-        assert r.json() == {"cursor": 0, "total": 2, "read": 0, "behind": 2, "last_read_at": None,
+        assert r.json() == {"cursor": 0, "total": 2, "read": 0, "behind": 2, "capped": 0, "last_read_at": None,
                             "prompt_version": 1, "model": "z-ai/glm-5.3-flash"}
         run = c.post("/ai/reader/run?limit=1")
         assert run.status_code == 200 and run.json()["read"] == 1

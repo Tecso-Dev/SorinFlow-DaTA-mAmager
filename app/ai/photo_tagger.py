@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Literal, Optional
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.config import get_settings
 from app.database import async_session_maker
@@ -47,6 +47,11 @@ BATCH = 30              # listings per pass
 TICK_SECONDS = 300
 KEY_CURSOR = "ai_photo_cursor"
 AGENT = "vision"        # the ledger's name for this agent
+MAX_ATTEMPTS = 3        # consecutive failures on the SAME content before a listing is skipped
+# Not the listing's fault — see app/ai/listing_reader.py's _GATEWAY_STATE,
+# the same defensive reference for classes another stream is adding to
+# app/services/llm.py right now.
+_GATEWAY_STATE = tuple(getattr(llm, n) for n in ("CircuitOpen", "RateLimited") if hasattr(llm, n))
 
 Condition = Literal["renovated", "normal", "old", "under_construction"]
 Room = Literal["living", "bedroom", "kitchen", "bathroom", "balcony", "exterior", "parking", "yard", "other"]
@@ -137,9 +142,14 @@ def build_messages(prop, jpegs: List[bytes]) -> List[Dict[str, Any]]:
 async def tag_property(db, prop, *, images_root=None) -> Optional[Dict[str, Any]]:
     """Look at one listing and store the answer. Returns the tags; None when
     there was nothing to look at (the no-photo marker is stored, so a pass
-    does not come back to it) or the model did not answer (nothing stored,
-    a later pass retries). NotConfigured, Disabled and BudgetExceeded
-    propagate: they end the pass, not just this listing."""
+    does not come back to it — attempts are untouched, there was nothing to
+    retry) or the model did not answer (nothing else stored, a failure
+    counted against MAX_ATTEMPTS, a later pass retries until it is capped).
+    NotConfigured, Disabled, BudgetExceeded and the gateway states in
+    _GATEWAY_STATE propagate: they end the pass, and are not this listing's
+    fault, so they do not count as an attempt either."""
+    if prop.ai_photo_fp is not None and prop.ai_photo_fp != prop.ai_content_fp:
+        prop.ai_photo_attempts = 0     # the content moved; the old failure streak no longer applies
     root = Path(images_root) if images_root else Path(settings.images_path)
     jpegs = prepare_images(prop, root)
     if not jpegs:
@@ -152,12 +162,19 @@ async def tag_property(db, prop, *, images_root=None) -> Optional[Dict[str, Any]
                              schema=PhotoTags, temperature=0, max_tokens=300)
     except (llm.NotConfigured, llm.Disabled, llm.BudgetExceeded):
         raise
+    except _GATEWAY_STATE:
+        raise
     except llm.LLMError as e:
         logger.warning(f"[photo] listing {prop.id} not tagged: {e}")
+        prop.ai_photo_attempts = (prop.ai_photo_attempts or 0) + 1
+        prop.ai_photo_fp = prop.ai_content_fp
+        await db.commit()
         return None
     tags = {**out["data"], "photos": len(jpegs), "prompt_version": PROMPT_VERSION, "model": out["model"]}
     prop.ai_photo_tags = tags
     prop.ai_photos_at = datetime.now(timezone.utc)
+    prop.ai_photo_attempts = 0
+    prop.ai_photo_fp = prop.ai_content_fp
     await db.commit()
     return tags
 
@@ -187,15 +204,24 @@ async def _cursor(db) -> int:
         return 0
 
 
+def _capped():
+    """MAX_ATTEMPTS consecutive failures against the content on the row
+    right now. NULL-safe: a listing never attempted is never capped."""
+    return and_(Property.ai_photo_attempts >= MAX_ATTEMPTS,
+               ~Property.ai_photo_fp.is_distinct_from(Property.ai_content_fp))
+
+
 def _pending(cursor: int):
     """Active listings past the cursor that were never looked at and have,
     or should have, photos on disk. `has_images` is «the ad had pictures»,
     `images_downloaded` is «we fetched them»; either is worth a look, and a
-    gallery that turns out to be missing costs one stamp, no call."""
+    gallery that turns out to be missing costs one stamp, no call. Excludes
+    a listing capped on its current content — see tag_property."""
     return (select(Property)
             .where(Property.id > cursor, Property.is_active == True,               # noqa: E712
                    Property.ai_photos_at.is_(None),
-                   or_(Property.images_downloaded == True, Property.has_images == True))   # noqa: E712
+                   or_(Property.images_downloaded == True, Property.has_images == True),   # noqa: E712
+                   ~_capped())
             .order_by(Property.id.asc()))
 
 
@@ -217,15 +243,18 @@ async def run_once(db, *, limit: int = BATCH) -> Dict[str, Any]:
             logger.info(f"[photo] pass ends: {e}")
             res["stopped"] = type(e).__name__
             break
+        except _GATEWAY_STATE as e:
+            logger.info(f"[photo] pass ends: {e}")
+            res["stopped"] = type(e).__name__
+            break
         if tags is not None:
             res["tagged"] += 1
         elif p.ai_photos_at is not None:        # the no-photo marker was stored
             res["skipped"] += 1
         else:
+            # tag_property just counted this against MAX_ATTEMPTS; once
+            # capped, _pending() stops offering it until the content changes
             res["failed"] += 1
-            # ponytail: a listing the model refuses on every pass is retried
-            # every five minutes; add a failure count to the tags if the
-            # ledger ever shows one listing eating the cap
             advancing = False
         if advancing:
             cursor = p.id
@@ -241,7 +270,8 @@ async def run_once(db, *, limit: int = BATCH) -> Dict[str, Any]:
 
 async def status(db) -> Dict[str, Any]:
     """The panel's numbers: where the cursor is, how many rows carry tags,
-    how many were stamped for having no photos, how many still wait."""
+    how many were stamped for having no photos, how many still wait, how
+    many gave up (MAX_ATTEMPTS on their current content)."""
     cursor = await _cursor(db)
 
     async def count(where) -> int:
@@ -250,10 +280,11 @@ async def status(db) -> Dict[str, Any]:
     looked = await count(Property.ai_photos_at.isnot(None))
     skipped = await count(Property.ai_photo_tags["skipped"].as_string().isnot(None))
     behind = (await db.execute(select(func.count()).select_from(_pending(cursor).subquery()))).scalar_one()
+    capped = await count(and_(Property.is_active == True, Property.ai_photos_at.is_(None), _capped()))  # noqa: E712
     last = (await db.execute(select(func.max(Property.ai_photos_at)))).scalar_one()
     cfg = await llm.config(db)
     return {"cursor": cursor, "tagged": looked - skipped, "skipped": skipped, "behind": behind,
-            "version": PROMPT_VERSION, "model": cfg["models"].get("vision") or "",
+            "capped": capped, "version": PROMPT_VERSION, "model": cfg["models"].get("vision") or "",
             "enabled": cfg["enabled"], "configured": cfg["configured"],
             "last_at": last.isoformat() if last else None}
 

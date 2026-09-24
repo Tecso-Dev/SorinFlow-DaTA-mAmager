@@ -42,6 +42,12 @@ KEY_CURSOR = "ai_reader_cursor"
 BATCH = 50
 TICK_SECONDS = 120
 START_DELAY = 150           # the scraper, the matcher and the digest arm first
+MAX_ATTEMPTS = 3            # consecutive failures on the SAME content before a listing is skipped
+# Not the listing's fault — a gateway state, not a bad ad — so these never
+# count against MAX_ATTEMPTS. CircuitOpen/RateLimited are not in this branch
+# yet (another stream is adding them to app/services/llm.py); referenced
+# defensively so this file works before and after that lands.
+_GATEWAY_STATE = tuple(getattr(llm, n) for n in ("CircuitOpen", "RateLimited") if hasattr(llm, n))
 MAX_TEXT = 2500             # a Divar description is rarely longer; the rest is the same words again
 # The spec said 400. The third few-shot's own answer is ~350 tokens of
 # Persian JSON, so 400 truncates a listing with a long red-flags list and
@@ -334,17 +340,30 @@ async def ask(db, prop, *, model: Optional[str] = None, agent: str = "reader") -
 
 async def read_listing(db, prop, *, model: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Read one listing and keep what it said. None when the model gave no
-    usable answer — a warning, nothing committed, retried on a later pass.
-    The three gate errors propagate so a pass can stop on them."""
+    usable answer — a warning, a failure counted against MAX_ATTEMPTS,
+    nothing else committed, retried on a later pass. The gate errors
+    (unconfigured, switched off, over budget, and the gateway states in
+    _GATEWAY_STATE) propagate so a pass can stop on them without touching
+    the listing's own attempt count — they are the gateway's state, not
+    this ad's fault."""
+    if prop.ai_read_fp is not None and prop.ai_read_fp != prop.ai_content_fp:
+        prop.ai_read_attempts = 0      # the content moved; the old failure streak no longer applies
     try:
         facts = await ask(db, prop, model=model)
     except (llm.NotConfigured, llm.Disabled, llm.BudgetExceeded):
         raise
+    except _GATEWAY_STATE:
+        raise
     except llm.LLMError as e:
         logger.warning(f"[reader] listing {prop.id} not read: {e}")
+        prop.ai_read_attempts = (prop.ai_read_attempts or 0) + 1
+        prop.ai_read_fp = prop.ai_content_fp
+        await db.commit()
         return None
     prop.ai_facts = {**facts, "prompt_version": PROMPT_VERSION}
     prop.ai_read_at = datetime.now(timezone.utc)
+    prop.ai_read_attempts = 0
+    prop.ai_read_fp = prop.ai_content_fp
     await db.commit()
     return prop.ai_facts
 
@@ -360,11 +379,40 @@ async def reread(db, property_id: int) -> Optional[Dict[str, Any]]:
 
 # ── the pass ─────────────────────────────────────────────────────────────────
 
+def _content_changed():
+    """The content the reader last saw (ai_read_fp, set on every attempt —
+    hit or miss) does not match what is on the row now. NULL-safe: a
+    listing never attempted counts as changed too."""
+    return Property.ai_read_fp.is_distinct_from(Property.ai_content_fp)
+
+
 def _pending():
-    """Active, titled, and not yet read with this prompt."""
+    """Active, titled, and not yet read with this prompt — or read, but the
+    content moved since (a scraper re-visit changed the description, the
+    price a listing is scraped under does not count — see
+    Property.ai_content_fp). Capped at MAX_ATTEMPTS consecutive failures
+    against the SAME content; a content change lifts the cap, because the
+    next attempt is a different question, not a retry of the last one."""
+    changed = _content_changed()
     return and_(Property.is_active == True, Property.title != "",       # noqa: E712
                 or_(Property.ai_read_at.is_(None),
-                    Property.ai_facts["prompt_version"].as_integer() != PROMPT_VERSION))
+                    Property.ai_facts["prompt_version"].as_integer() != PROMPT_VERSION,
+                    changed),
+                or_(changed, Property.ai_read_attempts < MAX_ATTEMPTS))
+
+
+async def reader_will_run(db) -> bool:
+    """True while the reader can plausibly still get to a listing: the
+    gateway is configured, both switches (global and «reader») are on, and
+    today's cap has room. False is the match engine's cue that waiting for
+    a read is pointless — mirrors llm._gate's own checks without reaching
+    into its private function."""
+    if not llm.configured():
+        return False
+    cfg = await llm.config(db)
+    if not cfg["enabled"] or not await llm.agent_enabled(db, "reader"):
+        return False
+    return await llm.spent_today(db) < cfg["cap_usd"]
 
 
 async def _cursor(db) -> int:
@@ -392,17 +440,25 @@ def _quiet_stop(reason: str) -> None:
 
 
 async def run_once(db, *, limit: int = BATCH) -> Dict[str, Any]:
-    """One pass: the next `limit` unread listings above the cursor.
+    """One pass: up to `limit` due listings (_pending — never read at this
+    version, or read but stale, and under the attempt cap), oldest id first.
 
-    The cursor only moves past successes. From the first failure of a pass
-    it stays put, so a listing the model could not read this time is the
-    first thing the next pass sees; listings read after it are stored and
-    excluded by the query, never paid for twice. A gate error ends the pass
-    with the cursor at the last success."""
+    No id lower bound: a listing behind the cursor whose content changed is
+    exactly as due as a new one, so the query is _pending() alone — the
+    cursor below is reporting only, not a filter (see the module's stored
+    KEY_CURSOR). The scan stays cheap because _pending() excludes the huge
+    majority (already read, unchanged) via the partial index on
+    ai_read_at IS NULL for the common case.
+
+    The stored cursor only moves past successes. From the first failure of
+    a pass it stays put, so a listing the model could not read this time is
+    the first thing the next pass reports; listings read after it are
+    stored and excluded by _pending(), never paid for twice. A gate error
+    ends the pass with the cursor at the last success."""
     global _last_stop
     since = await _cursor(db)
     props = (await db.execute(
-        select(Property).where(Property.id > since, _pending())
+        select(Property).where(_pending())
         .order_by(Property.id.asc()).limit(limit))).scalars().all()
     read = failed = 0
     cursor, stopped = since, None
@@ -413,10 +469,14 @@ async def run_once(db, *, limit: int = BATCH) -> Dict[str, Any]:
             stopped = type(e).__name__
             _quiet_stop(str(e))
             break
+        except _GATEWAY_STATE as e:
+            stopped = type(e).__name__
+            _quiet_stop(str(e))
+            break
         if facts is None:
-            # ponytail: a listing that fails on every pass is retried every
-            # tick; an attempts counter in ai_facts is the upgrade if the
-            # ledger ever shows one listing eating the cap
+            # the attempt just cost this listing one of MAX_ATTEMPTS
+            # (read_listing); after the last one _pending() stops offering
+            # it until its content changes
             failed += 1
         else:
             read += 1
@@ -433,16 +493,19 @@ async def run_once(db, *, limit: int = BATCH) -> Dict[str, Any]:
 
 async def status(db) -> Dict[str, Any]:
     """The panel's numbers: where the cursor is, how many listings carry
-    facts, how many still wait, when the last one was read."""
+    facts, how many still wait, how many gave up (MAX_ATTEMPTS on their
+    current content), when the last one was read."""
     async def count(where) -> int:
         return (await db.execute(select(func.count(Property.id)).where(where))).scalar_one()
     active = and_(Property.is_active == True, Property.title != "")      # noqa: E712
     last = (await db.execute(select(func.max(Property.ai_read_at)))).scalar_one()
+    capped = and_(active, Property.ai_read_attempts >= MAX_ATTEMPTS, ~_content_changed())
     return {
         "cursor": await _cursor(db),
         "total": await count(active),
         "read": await count(and_(active, Property.ai_read_at.isnot(None))),
         "behind": await count(_pending()),
+        "capped": await count(capped),
         "last_read_at": last.isoformat() if last else None,
         "prompt_version": PROMPT_VERSION,
         "model": (await llm.config(db))["models"].get("read") or "",

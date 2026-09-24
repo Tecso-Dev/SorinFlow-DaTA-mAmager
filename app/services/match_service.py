@@ -19,6 +19,7 @@ import httpx
 from loguru import logger
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 
 from app.config import get_settings
 from app.models.property import Property
@@ -31,7 +32,7 @@ PRICE_TOLERANCE = 0.20   # closeness curve: 0 at ±20%
 AREA_TOLERANCE = 0.35    # ±35%
 DEPOSIT_TOLERANCE = 0.50 # rentals: the deposit's own closeness, 0 at ±50%
 DEPOSIT_SHAPE_MAX = 3    # …and beyond 3× apart the deal is a different shape, whatever the total
-CANDIDATE_POOL = 300     # rows scored before trimming to the top N (customer matches)
+CANDIDATE_POOL = 300     # matches_for_customer's own pool of listings; customers_for_property scores everyone
 
 # «مشابه» for a listing means the same neighbourhood at about the same price.
 # The tight band is what a person calls the same price; the wide band is the
@@ -323,9 +324,15 @@ def score_for_customer(customer, cand: Property) -> Dict[str, Any]:
     # neighbourhood and address and came back None — so a listing in the
     # WRONG district scored as if the district were unknown, and the engine
     # rang a گلها customer about a سعدی flat.
-    known = [o for o in (_text_overlap(customer.desired_district, cand.district),
-                         _text_overlap(customer.desired_district, cand.neighborhood),
-                         _text_overlap(customer.desired_district, cand.address)) if o is not None]
+    # Both sides go through district_key() first — rank_similar and
+    # find_duplicates already do, this did not. Raw _text_overlap on
+    # «خیابان والفجر» vs «خیابان دانشکده» shares the word «خیابان» and scored
+    # a real credit for two different streets; district_key strips exactly
+    # that noise before anything is compared.
+    want = district_key(customer.desired_district)
+    known = [o for o in (_text_overlap(want, district_key(cand.district)),
+                         _text_overlap(want, district_key(cand.neighborhood)),
+                         _text_overlap(want, district_key(cand.address))) if o is not None]
     loc = max(known) if known else None
     district_penalty = 1.0
     if loc is not None:
@@ -669,7 +676,10 @@ async def similar_to_property(db: AsyncSession, prop: Property, limit: int = 12,
     if tp:
         lo, hi = int(tp * (1 - PRICE_BAND_WIDE)), int(tp * (1 + PRICE_BAND_WIDE))
         q = q.where(_comparable_sql(prop.listing_type).between(lo, hi))
-    cands = (await db.execute(q.limit(SIMILAR_POOL))).scalars().all()
+    # ai_embedding is deferred (app/models/property.py) — score_similarity's
+    # «متن مشابه» part reads it on the candidate side through text_similarity,
+    # so undefer it here rather than leave that signal silently empty.
+    cands = (await db.execute(q.limit(SIMILAR_POOL).options(undefer(Property.ai_embedding)))).scalars().all()
     results = rank_similar(prop, cands, limit)
 
     pending = False
@@ -745,22 +755,68 @@ async def matches_for_customer(db: AsyncSession, customer, limit: int = 12,
     return results, pending
 
 
+async def _customer_candidates(db: AsyncSession, prop: Property) -> List[Any]:
+    """Every customer who could possibly want `prop`, intent precomputed:
+    (Customer, intent) pairs, the shape customers_for_property's `customers`
+    kwarg and preload_customers both use.
+
+    The SQL below is the same gate customer_wants applies, for the three
+    criteria it can check without the free-text fallback customer_intent()
+    falls back to (an explicit deal_type / desired_city / desired_type is
+    binding; a blank one defers to the Python pass) — it can only ever
+    narrow the set customer_wants would keep, never drop someone it would
+    have scored.
+    """
+    from app.models.crm_models import Customer
+    q = select(Customer)
+    if prop.listing_type:
+        q = q.where(or_(Customer.deal_type.is_(None), Customer.deal_type == prop.listing_type))
+    if prop.city_name:
+        q = q.where(or_(Customer.desired_city.is_(None), Customer.desired_city == "",
+                        Customer.desired_city == prop.city_name))
+    fam = effective(prop)["kind"]
+    if fam:
+        q = q.where(or_(Customer.desired_type.is_(None), Customer.desired_type == fam))
+    rows = (await db.execute(q)).scalars().all()
+    return [(c, customer_intent(c)) for c in rows]
+
+
+async def preload_customers(db: AsyncSession) -> List[Any]:
+    """Every customer, intent precomputed once — what a pass over many
+    listings (app/crm/match_engine.py) loads a single time and hands to
+    customers_for_property for each one, instead of a fresh query and a
+    fresh customer_intent() call per listing. No SQL prefilter here: the
+    property is not known yet, so nothing can be ruled out in advance."""
+    from app.models.crm_models import Customer
+    rows = (await db.execute(select(Customer))).scalars().all()
+    return [(c, customer_intent(c)) for c in rows]
+
+
 async def customers_for_property(db: AsyncSession, prop: Property, limit: int = 12,
-                                 use_llm: bool = True) -> List[Dict[str, Any]]:
+                                 use_llm: bool = True, customers: Optional[List[Any]] = None
+                                 ) -> List[Dict[str, Any]]:
     """The other direction: which of our customers were looking for this?
 
     A new file arrives and the question is who to ring, not what to show —
     so this scores the file against every customer's criteria and returns
-    the people, ranked.
-    """
-    from app.models.crm_models import Customer
+    the people, ranked. Every customer who could match, not the newest
+    CANDIDATE_POOL — that cap silently dropped a real match once the table
+    passed 300 rows, which is most of it now.
 
-    customers = (await db.execute(
-        select(Customer).order_by(Customer.id.desc()).limit(CANDIDATE_POOL))).scalars().all()
+    `customers` is a list of (Customer, intent) — pass preload_customers()'s
+    result when scoring many listings in one pass, so the customer list and
+    each one's intent are read/computed once for the whole pass rather than
+    once per listing; left out, this loads and filters its own (cheaper for
+    a single call, which is what the panel button and price_watch do).
+    Signature and result shape are otherwise unchanged: scripts/ai_eval.py
+    and app/crm/price_watch.py call this with just (db, prop, limit=…).
+    """
+    if customers is None:
+        customers = await _customer_candidates(db, prop)
 
     scored = []
-    for c in customers:
-        if not customer_wants(c, prop):
+    for c, intent in customers:
+        if not customer_wants(c, prop, intent):
             continue
         s = score_for_customer(c, prop)
         if s["score"] > 0:

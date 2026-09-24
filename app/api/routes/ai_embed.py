@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 
 from app.ai import embeddings as emb
 from app.auth.dependencies import _role_dep, get_current_user
@@ -34,7 +35,11 @@ REASON = "شباهت متن"
 
 
 async def _load(db: AsyncSession, property_id: int) -> Property:
-    prop = (await db.execute(select(Property).where(Property.id == property_id))).scalar_one_or_none()
+    # ai_embedding is deferred on the model (app/models/property.py); every
+    # route here either reads it directly (similar) or hands the row to
+    # find_duplicates, which wants it loaded too — undefer once, here.
+    prop = (await db.execute(select(Property).where(Property.id == property_id)
+                             .options(undefer(Property.ai_embedding)))).scalar_one_or_none()
     if not prop:
         raise HTTPException(status_code=404, detail="ملک پیدا نشد")
     return prop

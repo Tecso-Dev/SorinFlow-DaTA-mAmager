@@ -1,7 +1,7 @@
 """which Telegram account is which panel user
 
 Revision ID: 0014
-Revises: 0010
+Revises: 0013
 Create Date: 2026-09-24
 
 telegram_links (app/models/telegram_link.py): the assistant «سورین»
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 
 revision = "0014"
-down_revision = "0010"
+down_revision = "0013"
 branch_labels = None
 depends_on = None
 

@@ -242,6 +242,20 @@ class TestTheScorerBugTheEngineFound:
         unknown = score_for_customer(self._c(), self._p(None))
         assert "منطقهٔ دیگر" not in unknown["reasons"] and unknown["score"] > 55
 
+    def test_a_shared_road_word_is_not_a_shared_district(self):
+        """score_for_customer compared the raw district text: «خیابان
+        والفجر» and «خیابان دانشکده» share the word «خیابان» and
+        _text_overlap alone scored that as a real overlap, so two
+        plainly-wrong-district customers still cleared MIN_SCORE (55).
+        rank_similar and find_duplicates already ran both sides through
+        district_key() first; score_for_customer did not."""
+        from app.services.match_service import score_for_customer
+        different = score_for_customer(self._c(desired_district="خیابان والفجر"), self._p("خیابان دانشکده"))
+        assert different["score"] < 55 and "منطقهٔ دیگر" in different["reasons"]
+
+        same_written_two_ways = score_for_customer(self._c(desired_district="خ گلها"), self._p("خیابان گلها"))
+        assert same_written_two_ways["score"] > 80 and "منطقه درخواستی" in same_written_two_ways["reasons"]
+
 
 # ── «پیامک به مشتری» through the app ──────────────────────────────────────────
 

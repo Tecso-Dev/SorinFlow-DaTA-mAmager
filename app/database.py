@@ -140,6 +140,8 @@ async def init_db():
                  _migrate_image_hashes,
                  _migrate_sms_panel,
                  _migrate_portal_need_enrich,
+                 _migrate_properties_ai_pipeline,
+                 _backfill_ai_pipeline_fingerprints,
                  _seed_reference_data):
         try:
             async with engine.begin() as conn:
@@ -310,6 +312,113 @@ async def _migrate_sms_panel(conn):
             "ON crm_sms_logs (campaign, sent_at DESC)"))
     except Exception as e:
         print(f"SMS panel migration skipped: {e}")
+
+
+async def _migrate_properties_ai_pipeline(conn):
+    """Alembic 0013's columns, also here: properties is read on every
+    request, and Alembic's own failure at boot is only logged (see the
+    module docstring), so a skipped 0013 would leave the reader/embedder/
+    matcher's staleness queries hitting columns that do not exist yet.
+    Same 8 columns, same 3 indexes (plain — the due-queries have no id
+    lower bound any more, see app/ai/listing_reader.py's run_once); the
+    catalog is asked first so a boot with nothing to add never queues for
+    the lock.
+    """
+    try:
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='properties' AND column_name='ai_content_fp' "
+            "AND table_schema=current_schema()"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE properties "
+                "ADD COLUMN IF NOT EXISTS ai_content_fp VARCHAR(16), "
+                "ADD COLUMN IF NOT EXISTS ai_embed_fp VARCHAR(16), "
+                "ADD COLUMN IF NOT EXISTS ai_read_fp VARCHAR(16), "
+                "ADD COLUMN IF NOT EXISTS ai_read_attempts INTEGER NOT NULL DEFAULT 0, "
+                "ADD COLUMN IF NOT EXISTS ai_photo_fp VARCHAR(16), "
+                "ADD COLUMN IF NOT EXISTS ai_photo_attempts INTEGER NOT NULL DEFAULT 0, "
+                "ADD COLUMN IF NOT EXISTS ai_matched_at TIMESTAMPTZ, "
+                "ADD COLUMN IF NOT EXISTS ai_match_fp VARCHAR(16)"))
+            for name, col in (("ix_properties_ai_read_at", "ai_read_at"),
+                              ("ix_properties_ai_embedded_at", "ai_embedded_at"),
+                              ("ix_properties_ai_matched_at", "ai_matched_at")):
+                await conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON properties ({col})"))
+    except Exception as e:
+        print(f"ai pipeline migration skipped: {e}")
+
+
+# One boot's worth, like _ADVERTISER_BACKFILL_BATCH: small enough a rollout
+# never waits on it, large enough that a few thousand rows converge fast.
+_AI_FP_BACKFILL_BATCH = 5000
+
+
+async def _backfill_ai_pipeline_fingerprints(conn):
+    """ai_content_fp for rows the ORM event listener never touched (every
+    row that existed before this deploy), and — the part that actually
+    matters — the per-stage "fp at last pass" columns for whatever each
+    stage had ALREADY finished, so nothing already read, embedded or judged
+    looks freshly stale the moment this lands. Skipping this would re-open
+    every listing in the table on the reader and the embedder at once,
+    which is exactly the gateway flood the staleness columns exist to avoid.
+
+    Driven off ai_content_fp IS NULL, so it converges over a boot or two and
+    then costs one indexed count forever after — same shape as
+    _backfill_advertiser_signals.
+    """
+    try:
+        from sqlalchemy import text
+        from app.models.property import content_fingerprint
+
+        rows = (await conn.execute(text(
+            "SELECT id, title, description, property_type, category_name, listing_type, "
+            "area, rooms, floor, total_floors, year_built, district, neighborhood, city_name, "
+            "has_elevator, has_parking, has_storage, has_balcony, document_type, unit_status, "
+            "corner_type, frontage, building_direction, "
+            "ai_read_at, ai_facts, ai_embed_version, ai_embedded_at "
+            "FROM properties WHERE ai_content_fp IS NULL LIMIT :n"
+        ), {"n": _AI_FP_BACKFILL_BATCH})).all()
+        if not rows:
+            return
+
+        # PROMPT_VERSION/EMBED_VERSION live in the AI modules, not here; a
+        # plain int import, never a DB call, so no risk of importing the
+        # heavier app.ai.* modules into a boot-time migration step.
+        from app.ai.listing_reader import PROMPT_VERSION as READER_VERSION
+        from app.ai.embeddings import EMBED_VERSION
+
+        cursor_row = (await conn.execute(text(
+            "SELECT value FROM app_settings WHERE key = 'match_engine_cursor'"))).first()
+        try:
+            match_cursor = int(cursor_row[0]) if cursor_row and cursor_row[0] else None
+        except (TypeError, ValueError):
+            match_cursor = None
+
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        done = 0
+        for r in rows:
+            fp = content_fingerprint(r)
+            already_read = r.ai_read_at is not None and isinstance(r.ai_facts, dict) \
+                and r.ai_facts.get("prompt_version") == READER_VERSION
+            already_embedded = r.ai_embedded_at is not None and r.ai_embed_version == EMBED_VERSION
+            already_matched = match_cursor is not None and r.id <= match_cursor
+            await conn.execute(text(
+                "UPDATE properties SET ai_content_fp = :fp, "
+                "ai_read_fp = CASE WHEN :read THEN :fp ELSE ai_read_fp END, "
+                "ai_embed_fp = CASE WHEN :embed THEN :fp ELSE ai_embed_fp END, "
+                "ai_matched_at = CASE WHEN :matched THEN COALESCE(ai_matched_at, :now) ELSE ai_matched_at END, "
+                "ai_match_fp = CASE WHEN :matched THEN :fp ELSE ai_match_fp END "
+                "WHERE id = :i"
+            ), {"fp": fp, "read": already_read, "embed": already_embedded,
+                "matched": already_matched, "now": now, "i": r.id})
+            done += 1
+        print(f"ai pipeline backfill: {done} rows fingerprinted "
+              f"(cursor {match_cursor if match_cursor is not None else 'unknown'})")
+    except Exception as e:
+        print(f"ai pipeline backfill skipped: {e}")
 
 
 async def _migrate_job_resume(conn):
