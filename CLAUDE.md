@@ -34,11 +34,15 @@
 LC_ALL=en_US.UTF-8 /usr/local/opt/postgresql@16/bin/pg_ctl -D /usr/local/var/postgresql@16 -l /tmp/pg.log start
 redis-server --daemonize yes --save "" --appendonly no
 psql -h localhost -d postgres -tAc "DROP DATABASE IF EXISTS sorinflow_test"; psql -h localhost -d postgres -tAc "CREATE DATABASE sorinflow_test"
-DATABASE_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test REDIS_URL=redis://localhost:6379/9 SECRET_KEY=ci-only-not-a-real-secret-0123456789 LOGS_PATH=/tmp IMAGES_PATH=/tmp /Users/macbook/Documents/SorinFlow-DaTA-mAmager/venv/bin/python -m pytest tests/ -q
-PG_TEST_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test SECRET_KEY=x LOGS_PATH=/tmp IMAGES_PATH=/tmp /Users/macbook/Documents/SorinFlow-DaTA-mAmager/venv/bin/python -m pytest tests/test_pg_migration.py -q
+DATABASE_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test REDIS_URL=redis://localhost:6379/9 SECRET_KEY=ci-only-not-a-real-secret-0123456789 LOGS_PATH=/tmp IMAGES_PATH=/tmp /Users/macbook/.venvs/sorinflow-v2/bin/python -m pytest tests/ -q
+PG_TEST_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test SECRET_KEY=x LOGS_PATH=/tmp IMAGES_PATH=/tmp /Users/macbook/.venvs/sorinflow-v2/bin/python -m pytest tests/test_pg_migration.py -q
 ```
 
-  (بدون `LC_ALL`، Postgres با خطای «postmaster became multithreaded» می‌میرد. پایگاه دادهٔ تست را پیش از هر اجرا از نو بساز، چون نام کاربرها یکتاست. venv در ریشهٔ مخزن اصلی است، نه در worktreeها.)
+  (بدون `LC_ALL`، Postgres با خطای «postmaster became multithreaded» می‌میرد. پایگاه دادهٔ تست را پیش از هر اجرا از نو بساز، چون نام کاربرها یکتاست.)
+- venv این برانچ `~/.venvs/sorinflow-v2` است و بیرون از مخزن قرار دارد. با فایل lock ساخته می‌شود:
+  `uv venv --python 3.11 ~/.venvs/sorinflow-v2 && uv pip install --python ~/.venvs/sorinflow-v2/bin/python --require-hashes -r requirements-dev.lock`
+  venv پوشهٔ اصلی (`venv/`) نسخه‌های production (FastAPI 0.109) را دارد و مال `main` است. به آن دست نزن.
+- وابستگی‌ها: `requirements.txt` ورودی دستی است. `requirements.lock` و `requirements-dev.lock` با `uv pip compile --universal --generate-hashes --python-version 3.10` ساخته می‌شوند (image پایه Python 3.10 دارد). Docker و CI فقط با `--require-hashes` نصب می‌کنند.
 
 ## اجرای محلی
 - روی این مک فقط یک پشتهٔ Docker باشد: `sorinflow-local` (`docker-compose.local.yml`). Postgres روی 5433، Redis روی 6380 و backend با hot reload روی 8000. Postgres و Redis مخصوص تست از brew روی 5432 و 6379 می‌آیند.
