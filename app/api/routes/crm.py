@@ -3,9 +3,10 @@ SorinFlow CRM — API routes
 Leads (from scraper) + Contacts + Notes + Tasks + Deals + Reminders + SMS + Dashboard
 """
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel as _BaseModel, Field as _Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_, not_
 from sqlalchemy.orm import selectinload
@@ -230,7 +231,8 @@ async def create_lead(
     # Property row to satisfy Lead.property_id's NOT NULL FK.
     is_rent = data.listing_type == "rent"
     attr_cols, extra_attrs = _split_lead_attrs(data.attrs)
-    images = [u for u in (data.images or []) if isinstance(u, str) and u.startswith("/images/")][:20]
+    # LeadCreate already rejected anything but a real /crm/upload-image url
+    images = (data.images or [])[:20]
     prop = Property(
         tag_number=manual_id,
         divar_id=manual_id,
@@ -450,9 +452,15 @@ async def export_leads_excel(
     return xlsx_response("leads.xlsx", "لیدها", headers, rows)
 
 
+class BulkLeadsIn(_BaseModel):
+    ids: List[int] = []
+    action: Optional[str] = _Field(None, max_length=20)
+    status: Optional[str] = _Field(None, max_length=30)
+
+
 @router.post("/leads/bulk")
 async def bulk_update_leads(
-    data: dict,
+    data: BulkLeadsIn,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -460,6 +468,7 @@ async def bulk_update_leads(
 
     body: {"ids": [1,2,3], "action": "status"|"delete", "status": "contacted"}
     """
+    data = data.model_dump(exclude_unset=True)
     ids = [int(i) for i in (data.get("ids") or []) if str(i).isdigit()][:500]
     action = data.get("action")
     if not ids:
@@ -558,7 +567,6 @@ async def update_lead(
 # time has come. Unassigned leads are everybody's until somebody dials one;
 # that call claims it.
 
-from pydantic import BaseModel as _BaseModel, Field as _Field
 from app.crm import call_queue as _cq
 
 
@@ -1351,8 +1359,22 @@ def _normalize_tags(tags) -> str | None:
     return str(tags).strip() or None
 
 
+class ContactIn(_BaseModel):
+    name: Optional[str] = _Field(None, max_length=200)
+    phone: Optional[str] = _Field(None, max_length=20)
+    phone2: Optional[str] = _Field(None, max_length=20)
+    email: Optional[str] = _Field(None, max_length=200)
+    contact_type: Optional[str] = _Field(None, max_length=50)
+    category: Optional[str] = _Field(None, max_length=50)
+    city: Optional[str] = _Field(None, max_length=100)
+    address: Optional[str] = _Field(None, max_length=2000)
+    notes: Optional[str] = _Field(None, max_length=5000)
+    tags: Optional[Union[List[str], str]] = None
+
+
 @router.post("/contacts")
-async def create_contact(data: dict, db: AsyncSession = Depends(get_db)):
+async def create_contact(data: ContactIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     contact = Contact(
         name=data.get("name", ""),
         phone=data.get("phone"),
@@ -1454,7 +1476,8 @@ async def get_contact(contact_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/contacts/{contact_id}")
-async def update_contact(contact_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+async def update_contact(contact_id: int, data: ContactIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     result = await db.execute(select(Contact).where(Contact.id == contact_id))
     contact = result.scalar_one_or_none()
     if not contact:
@@ -1582,8 +1605,29 @@ async def list_customers(
     return {"items": [c.to_dict() for c in items], "total": count}
 
 
+class CustomerIn(_BaseModel):
+    full_name: Optional[str] = _Field(None, max_length=200)
+    mobile1: Optional[str] = _Field(None, max_length=20)
+    mobile2: Optional[str] = _Field(None, max_length=20)
+    source: Optional[str] = _Field(None, max_length=30)
+    temperature: Optional[str] = _Field(None, max_length=20)
+    consultant_name: Optional[str] = _Field(None, max_length=200)
+    budget_max: Optional[Union[int, float]] = None
+    payment_methods: Optional[str] = _Field(None, max_length=200)
+    desired_specs: Optional[str] = _Field(None, max_length=300)
+    desired_district: Optional[str] = _Field(None, max_length=300)
+    desired_city: Optional[str] = _Field(None, max_length=100)
+    desired_type: Optional[str] = _Field(None, max_length=20)
+    deal_type: Optional[str] = _Field(None, max_length=10)
+    red_lines: Optional[str] = _Field(None, max_length=5000)
+    notes: Optional[str] = _Field(None, max_length=5000)
+    showings: Optional[List[dict]] = None
+    followups: Optional[List[dict]] = None
+
+
 @router.post("/customers")
-async def create_customer(data: dict, db: AsyncSession = Depends(get_db)):
+async def create_customer(data: CustomerIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     if not str(data.get("full_name") or "").strip():
         raise HTTPException(status_code=400, detail="full_name is required")
     customer = Customer(full_name=str(data["full_name"]).strip())
@@ -1604,7 +1648,8 @@ async def get_customer(customer_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/customers/{customer_id}")
-async def update_customer(customer_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+async def update_customer(customer_id: int, data: CustomerIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     result = await db.execute(select(Customer).where(Customer.id == customer_id))
     customer = result.scalar_one_or_none()
     if not customer:
@@ -1696,8 +1741,30 @@ async def list_dpa(
     return {"items": [d.to_dict() for d in items], "total": count}
 
 
+class DpaIn(_BaseModel):
+    agent_name: Optional[str] = _Field(None, max_length=200)
+    role: Optional[str] = _Field(None, max_length=20)
+    date_jalali: Optional[str] = _Field(None, max_length=20)
+    target_points: Optional[int] = None
+    new_files: Optional[int] = None
+    showings_count: Optional[int] = None
+    offers_count: Optional[int] = None
+    closed_count: Optional[int] = None
+    base_tasks: Optional[dict] = None
+    activities: Optional[dict] = None
+    bonus_exclusive: Optional[int] = None
+    bonus_offer: Optional[int] = None
+    bonus_close: Optional[int] = None
+    pen_crm_delay: Optional[int] = None
+    pen_cancel: Optional[int] = None
+    pen_hot_lead: Optional[int] = None
+    mentor_feedback: Optional[str] = _Field(None, max_length=5000)
+    rca: Optional[str] = _Field(None, max_length=5000)
+
+
 @router.post("/dpa")
-async def create_dpa(data: dict, db: AsyncSession = Depends(get_db)):
+async def create_dpa(data: DpaIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     if not str(data.get("agent_name") or "").strip():
         raise HTTPException(status_code=400, detail="agent_name is required")
     dpa = DailyPerformance(agent_name=str(data["agent_name"]).strip())
@@ -1718,7 +1785,8 @@ async def get_dpa(dpa_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/dpa/{dpa_id}")
-async def update_dpa(dpa_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+async def update_dpa(dpa_id: int, data: DpaIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     result = await db.execute(select(DailyPerformance).where(DailyPerformance.id == dpa_id))
     dpa = result.scalar_one_or_none()
     if not dpa:
@@ -1766,8 +1834,21 @@ async def list_notes(
     return {"items": [n.to_dict() for n in items], "total": count}
 
 
+class NoteIn(_BaseModel):
+    content: Optional[str] = _Field(None, max_length=10000)
+    contact_id: Optional[int] = None
+    property_id: Optional[int] = None
+    deal_id: Optional[int] = None
+    created_by: Optional[str] = _Field(None, max_length=200)
+
+
+class NoteUpdate(_BaseModel):
+    content: Optional[str] = _Field(None, max_length=10000)
+
+
 @router.post("/notes")
-async def create_note(data: dict, db: AsyncSession = Depends(get_db)):
+async def create_note(data: NoteIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     note = Note(
         content=data.get("content", ""),
         contact_id=data.get("contact_id"),
@@ -1782,7 +1863,8 @@ async def create_note(data: dict, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/notes/{note_id}")
-async def update_note(note_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+async def update_note(note_id: int, data: NoteUpdate, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     result = await db.execute(select(Note).where(Note.id == note_id))
     note = result.scalar_one_or_none()
     if not note:
@@ -1859,12 +1941,28 @@ async def list_tasks(
     return {"items": [t.to_dict() for t in items], "total": count}
 
 
+class TaskIn(_BaseModel):
+    title: Optional[str] = _Field(None, max_length=500)
+    description: Optional[str] = _Field(None, max_length=10000)
+    due_date: Optional[str] = _Field(None, max_length=40)
+    priority: Optional[str] = _Field(None, max_length=20)
+    status: Optional[str] = _Field(None, max_length=20)
+    contact_id: Optional[int] = None
+    deal_id: Optional[int] = None
+    assigned_to: Optional[str] = _Field(None, max_length=200)
+
+
+class TaskStatusIn(_BaseModel):
+    status: Optional[str] = _Field(None, max_length=20)
+
+
 @router.post("/tasks")
 async def create_task(
-    data: dict,
+    data: TaskIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    data = data.model_dump(exclude_unset=True)
     due = None
     if data.get("due_date"):
         try:
@@ -1912,10 +2010,11 @@ async def get_task(
 @router.put("/tasks/{task_id}")
 async def update_task(
     task_id: int,
-    data: dict,
+    data: TaskIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    data = data.model_dump(exclude_unset=True)
     task = await _own_task_or_404(task_id, db, current_user)
     for field in ("title", "description", "priority", "status", "contact_id", "deal_id", "assigned_to"):
         if field in data:
@@ -1934,10 +2033,11 @@ async def update_task(
 @router.patch("/tasks/{task_id}/status")
 async def update_task_status(
     task_id: int,
-    data: dict,
+    data: TaskStatusIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    data = data.model_dump(exclude_unset=True)
     task = await _own_task_or_404(task_id, db, current_user)
     task.status = data.get("status", task.status)
     task.updated_at = datetime.now()
@@ -1993,8 +2093,24 @@ async def list_deals(
     return {"items": [d.to_dict() for d in items], "total": count}
 
 
+class DealIn(_BaseModel):
+    title: Optional[str] = _Field(None, max_length=500)
+    deal_type: Optional[str] = _Field(None, max_length=50)
+    status: Optional[str] = _Field(None, max_length=50)
+    property_id: Optional[int] = None
+    buyer_contact_id: Optional[int] = None
+    seller_contact_id: Optional[int] = None
+    amount: Optional[Union[int, float]] = None
+    commission: Optional[Union[int, float]] = None
+    commission_paid: Optional[bool] = None
+    notes: Optional[str] = _Field(None, max_length=10000)
+    contract_date: Optional[str] = _Field(None, max_length=40)
+    close_date: Optional[str] = _Field(None, max_length=40)
+
+
 @router.post("/deals")
-async def create_deal(data: dict, db: AsyncSession = Depends(get_db)):
+async def create_deal(data: DealIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     contract_date = close_date = None
     if data.get("contract_date"):
         try:
@@ -2095,7 +2211,8 @@ async def get_deal(deal_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/deals/{deal_id}")
-async def update_deal(deal_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+async def update_deal(deal_id: int, data: DealIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     result = await db.execute(select(Deal).where(Deal.id == deal_id))
     deal = result.scalar_one_or_none()
     if not deal:
@@ -2167,8 +2284,20 @@ def _parse_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+class ReminderIn(_BaseModel):
+    title: Optional[str] = _Field(None, max_length=500)
+    remind_at: Optional[str] = _Field(None, max_length=40)
+    repeat: Optional[str] = _Field(None, max_length=20)
+    channel: Optional[str] = _Field(None, max_length=20)
+    sms_to: Optional[str] = _Field(None, max_length=20)
+    contact_id: Optional[int] = None
+    deal_id: Optional[int] = None
+    task_id: Optional[int] = None
+
+
 @router.post("/reminders")
-async def create_reminder(data: dict, db: AsyncSession = Depends(get_db)):
+async def create_reminder(data: ReminderIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     remind_at = None
     if data.get("remind_at"):
         try:
@@ -2208,8 +2337,16 @@ async def delete_reminder(reminder_id: int, db: AsyncSession = Depends(get_db)):
 # SMS
 # ─────────────────────────────────────────────────────────────────────────────
 
+class SmsSendIn(_BaseModel):
+    to_number: Optional[str] = _Field(None, max_length=20)
+    message: Optional[str] = _Field(None, max_length=4000)
+    provider: Optional[str] = _Field(None, max_length=30)
+    contact_id: Optional[int] = None
+
+
 @router.post("/sms/send")
-async def send_sms_route(data: dict, db: AsyncSession = Depends(get_db)):
+async def send_sms_route(data: SmsSendIn, db: AsyncSession = Depends(get_db)):
+    data = data.model_dump(exclude_unset=True)
     to_number = data.get("to_number", "").strip()
     message = data.get("message", "").strip()
     provider = data.get("provider", "kavenegar")
@@ -2569,12 +2706,41 @@ def _apply_event_fields(event: CalendarEvent, data: dict) -> None:
             event.end_at = None
 
 
+class CalendarEventIn(_BaseModel):
+    title: Optional[str] = _Field(None, max_length=500)
+    event_type: Optional[str] = _Field(None, max_length=20)
+    start_at: Optional[str] = _Field(None, max_length=40)
+    end_at: Optional[str] = _Field(None, max_length=40)
+    all_day: Optional[bool] = None
+    location: Optional[str] = _Field(None, max_length=500)
+    owner_name: Optional[str] = _Field(None, max_length=200)
+    owner_phone: Optional[str] = _Field(None, max_length=20)
+    customer_name: Optional[str] = _Field(None, max_length=200)
+    customer_phone: Optional[str] = _Field(None, max_length=20)
+    assigned_to: Optional[str] = _Field(None, max_length=200)
+    agent_phone: Optional[str] = _Field(None, max_length=20)
+    attendee_name: Optional[str] = _Field(None, max_length=200)    # legacy, still accepted
+    attendee_phone: Optional[str] = _Field(None, max_length=20)
+    property_id: Optional[int] = None
+    property_serial: Optional[int] = None
+    lead_id: Optional[int] = None
+    customer_id: Optional[int] = None
+    contact_id: Optional[int] = None
+    deal_id: Optional[int] = None
+    description: Optional[str] = _Field(None, max_length=10000)
+    outcome: Optional[str] = _Field(None, max_length=10000)
+    status: Optional[str] = _Field(None, max_length=20)
+    remind_before: Optional[int] = None
+    sms_reminder: Optional[bool] = None
+
+
 @router.post("/calendar")
 async def create_event(
-    data: dict,
+    data: CalendarEventIn,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
+    data = data.model_dump(exclude_unset=True)
     if not (data.get("title") or "").strip():
         raise HTTPException(status_code=400, detail="عنوان قرار الزامی است")
     if not data.get("start_at"):
@@ -2627,10 +2793,11 @@ async def get_event(event_id: int, db: AsyncSession = Depends(get_db)):
 @router.patch("/calendar/{event_id}")
 async def update_event(
     event_id: int,
-    data: dict,
+    data: CalendarEventIn,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
+    data = data.model_dump(exclude_unset=True)
     event = (await db.execute(
         select(CalendarEvent).where(CalendarEvent.id == event_id))).scalar_one_or_none()
     if not event:
@@ -2664,10 +2831,15 @@ async def delete_event(event_id: int, db: AsyncSession = Depends(get_db)):
     return {"success": True}
 
 
+class CalendarSmsIn(_BaseModel):
+    to: Optional[str] = _Field(None, max_length=20)
+    message: Optional[str] = _Field(None, max_length=4000)
+
+
 @router.post("/calendar/{event_id}/sms")
 async def send_event_sms(
     event_id: int,
-    data: Optional[dict] = None,
+    data: Optional[CalendarSmsIn] = None,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
@@ -2676,6 +2848,7 @@ async def send_event_sms(
     Separate from the scheduled reminder: sending by hand does not consume
     the automatic one, so a confirmation today still gets a reminder tomorrow.
     """
+    data = data.model_dump(exclude_unset=True) if data else None
     event = (await db.execute(
         select(CalendarEvent).where(CalendarEvent.id == event_id))).scalar_one_or_none()
     if not event:

@@ -1,9 +1,15 @@
 """
 SorinFlow Divar Scraper - Pydantic Schemas
 """
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Any
 from datetime import datetime
+
+# /crm/upload-image names every file uuid4().hex + ".jpg" — 32 lowercase hex
+# chars, nothing else. Anything a client sends that doesn't match this was
+# never handed out by that endpoint, so it isn't a path this server serves.
+MANUAL_IMAGE_RE = re.compile(r"^/images/manual/[0-9a-f]{32}\.jpg$")
 
 
 # ============== Property Schemas ==============
@@ -357,8 +363,20 @@ class LeadCreate(BaseModel):
     property_title: str
     # apartment | villa | shop | office
     property_kind: Optional[str] = None
-    # uploaded photo URLs (/images/manual/...)
+    # uploaded photo URLs (/images/manual/...) — must be exactly what
+    # /crm/upload-image hands back, or a stored <img src> could point
+    # anywhere the caller likes
     images: Optional[List[str]] = None
+
+    @field_validator("images")
+    @classmethod
+    def _images_are_uploads(cls, v):
+        if v is None:
+            return v
+        for url in v:
+            if not isinstance(url, str) or not MANUAL_IMAGE_RE.match(url):
+                raise ValueError(f"invalid image url: {url!r}")
+        return v
     # structured per-kind fields (متراژ، طبقه، پوشش کف، ...)
     attrs: Optional[dict] = None
     phone_number: Optional[str] = None
