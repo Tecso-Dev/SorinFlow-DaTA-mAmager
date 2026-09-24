@@ -1018,6 +1018,25 @@ function pfAddDivarAccount() {
 }
 
 // Admin: ask a person to verify what is still unverified on their account.
+/** root only: tick a user's phone or email verified — or take it back. */
+async function setUserVerified(id, kind, value, input) {
+    if (input) input.disabled = true;
+    try {
+        const u = await apiCall(`/users/${Number(id)}/verification`, {
+            method: 'PATCH', body: JSON.stringify({ [`${kind}_verified`]: !!value }) });
+        if (_usersById && _usersById[id]) Object.assign(_usersById[id], u);
+        showToast(value ? 'تأیید شد' : 'تأیید برداشته شد',
+            `${kind === 'email' ? 'ایمیل' : 'شمارهٔ'} ${u.full_name || u.username} ${value ? 'تأییدشده' : 'تأییدنشده'} علامت خورد`,
+            value ? 'success' : 'warning');
+    } catch (e) {
+        if (input) input.checked = !value;
+        showToast('خطا', e.message, 'danger');
+    } finally {
+        if (input) input.disabled = false;
+        if (typeof loadUsers === 'function') loadUsers();
+    }
+}
+
 async function nudgeVerify(id) {
     const u = _usersById[id] || {};
     const what = [u.email && !u.email_verified ? 'ایمیل' : '', u.phone && !u.phone_verified ? 'شمارهٔ موبایل' : ''].filter(Boolean).join(' و ');
@@ -1676,11 +1695,11 @@ function showSection(sectionName) {
     switch (sectionName) {
         case 'dashboard':  loadDashboard(); break;
         case 'properties': loadProperties(); break;
-        case 'scraper':    loadJobs(); loadSchedules(); loadScraperAccounts(); _wireEstimateRefresh(); scheduleEstimate(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling();
+        case 'scraper':    loadJobs(); loadSchedules(); loadScraperAccounts(); _wireEstimateRefresh(); scheduleEstimate(); checkDivarSessionBanner(); startOtpPolling(); startJobPolling(); checkPhoneGate();
                            _initScraperDatePicker(); refreshDivarSessionCount();
                            setTimeout(restoreScraperForm, 200); break;
-        case 'auth':       checkAuthStatus(); loadCookies(); break;
-        case 'forwarder':  loadForwarders(); loadForwarderLog(); break;
+        case 'auth':       checkAuthStatus(); loadCookies(); checkPhoneGate(); break;
+        case 'forwarder':  loadForwarders(); loadForwarderLog(); checkPhoneGate(); break;
         case 'profile':    loadProfile(); break;
         case 'proxies':    loadProxies(); break;
         case 'crm':        _applyCrmRoleVisibility(); loadCalls(); loadMatches(); loadPriceDrops(); break;
@@ -1772,50 +1791,225 @@ function formatPrice(price) {
 // API Helper
 async function apiCall(endpoint, options = {}) {
     try {
-        const token = getToken();
-        // `raw` returns the body as text instead of parsing JSON — the email
-        // template preview is an HTML document, and it still has to go through
-        // here so the Authorization header travels with it.
-        const { raw, ...fetchOptions } = options;
-        const response = await fetch(`${API_BASE}${endpoint}`, {
-            headers: {
-                'Content-Type': 'application/json',
-                ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-                ...options.headers
-            },
-            ...fetchOptions
-        });
-
-        if (response.status === 401) {
-            clearToken();
-            showLoginPage();
-            throw new Error('نشست منقضی شده. لطفاً دوباره وارد شوید.');
-        }
-
-        if (!response.ok) {
-            // An error body is not always JSON — an HTML endpoint that fails
-            // returns a page, and calling .json() on it throws a parse error
-            // that hides the real status.
-            let error = {};
-            try { error = await response.json(); } catch (_) { error = {}; }
-            let message = `Request failed (${response.status})`;
-            if (error.detail) {
-                if (typeof error.detail === 'string') {
-                    message = error.detail;
-                } else if (Array.isArray(error.detail)) {
-                    message = error.detail.map(e => e.msg || JSON.stringify(e)).join(' | ');
-                } else {
-                    message = JSON.stringify(error.detail);
-                }
-            }
-            throw new Error(message);
-        }
-
-        return raw ? await response.text() : await response.json();
+        return await _apiCallOnce(endpoint, options);
     } catch (error) {
+        // «شماره‌ات را تأیید کن»: the server refused an action that leans on
+        // the caller's own number. Open the verification popup — it sends the
+        // code itself — and, once the number is verified, do what was asked,
+        // so the click that was refused is the click that goes through.
+        if (error.code === 'phone_unverified' && !options._phoneGateRetried) {
+            const ok = await requirePhoneVerified(error.detail || {});
+            if (ok) return await apiCall(endpoint, { ...options, _phoneGateRetried: true });
+        }
         console.error('API Error:', error);
         throw error;
     }
+}
+
+async function _apiCallOnce(endpoint, options = {}) {
+    const token = getToken();
+    // `raw` returns the body as text instead of parsing JSON — the email
+    // template preview is an HTML document, and it still has to go through
+    // here so the Authorization header travels with it.
+    const { raw, _phoneGateRetried, ...fetchOptions } = options;
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            ...options.headers
+        },
+        ...fetchOptions
+    });
+
+    if (response.status === 401) {
+        clearToken();
+        showLoginPage();
+        throw new Error('نشست منقضی شده. لطفاً دوباره وارد شوید.');
+    }
+
+    if (!response.ok) {
+        // An error body is not always JSON — an HTML endpoint that fails
+        // returns a page, and calling .json() on it throws a parse error
+        // that hides the real status.
+        let error = {};
+        try { error = await response.json(); } catch (_) { error = {}; }
+        let message = `Request failed (${response.status})`;
+        if (error.detail) {
+            if (typeof error.detail === 'string') {
+                message = error.detail;
+            } else if (Array.isArray(error.detail)) {
+                message = error.detail.map(e => e.msg || JSON.stringify(e)).join(' | ');
+            } else if (error.detail.message) {
+                // A structured refusal: its sentence for people, its code
+                // for the panel.
+                message = error.detail.message;
+            } else {
+                message = JSON.stringify(error.detail);
+            }
+        }
+        const err = new Error(message);
+        err.status = response.status;
+        err.detail = error.detail;
+        err.code = error.detail && typeof error.detail === 'object' && !Array.isArray(error.detail)
+            ? error.detail.code : undefined;
+        throw err;
+    }
+
+    return raw ? await response.text() : await response.json();
+}
+
+/* ── the phone-verification popup ─────────────────────────────────────────
+ *
+ * «هر جایی که کاربر نیاز به استفاده از شماره را دارد و شماره‌اش را تأیید نکرده،
+ * جلوی فعالیتش را بگیر و پاپ‌آپ تأیید شماره را برایش بیاور و کد تأیید را برایش
+ * ارسال کن.» The server decides (require_verified_phone); this is the door it
+ * points at. Resolves true once the number is verified, false if they leave.
+ * One popup at a time: two refused calls share the same answer.            */
+let _phoneGatePromise = null;
+
+function requirePhoneVerified(detail = {}) {
+    if (_phoneGatePromise) return _phoneGatePromise;
+    _phoneGatePromise = _openPhoneGate(detail).finally(() => { _phoneGatePromise = null; });
+    return _phoneGatePromise;
+}
+
+/** Ask the server up front, on arriving somewhere that needs a verified
+ *  number — once per page load, and never for root. */
+let _phoneGateChecked = false;
+async function checkPhoneGate() {
+    if (_phoneGateChecked || !_currentUser || _currentUser.role === 'root') return;
+    _phoneGateChecked = true;
+    try {
+        const g = await apiCall('/users/me/phone-gate');
+        if (g.required) await requirePhoneVerified(g);
+    } catch (_) { /* the action itself will still ask */ }
+}
+
+function _openPhoneGate(detail) {
+    return new Promise(resolve => {
+        const known = (detail.phone || _currentUser?.phone || '').trim();
+        const overlay = document.createElement('div');
+        overlay.className = 'ask-overlay';
+        overlay.innerHTML = `
+          <div class="ask-card is-warning pv-card" role="dialog" aria-modal="true" aria-label="تأیید شمارهٔ موبایل">
+            <div class="ask-ring"><i class="bi bi-phone-vibrate"></i></div>
+            <h5>تأیید شمارهٔ موبایل</h5>
+            <p class="ask-body">${esc(detail.message || 'برای ادامه، شمارهٔ موبایل خود را تأیید کنید.')}</p>
+            <div class="ask-field" id="pv-phone-step">
+                <label for="pv-phone">شمارهٔ موبایل شما</label>
+                <input id="pv-phone" type="tel" inputmode="tel" dir="ltr" placeholder="09123456789" value="${esc(known)}">
+                <div class="ask-hint">کد تأیید به همین شماره پیامک می‌شود.</div>
+            </div>
+            <div class="ask-field d-none" id="pv-code-step">
+                <label for="pv-code">کد تأیید پیامک‌شده</label>
+                <input id="pv-code" type="text" inputmode="numeric" dir="ltr" maxlength="8" autocomplete="one-time-code" placeholder="—————">
+                <div class="ask-hint" id="pv-hint"></div>
+            </div>
+            <div class="ask-error" id="pv-error"></div>
+            <div class="ask-actions">
+              <button class="ask-ok" id="pv-ok">ارسال کد</button>
+              <button class="ask-cancel" id="pv-cancel">بعداً</button>
+            </div>
+            <div class="pv-links d-none" id="pv-links">
+              <button type="button" class="btn btn-link btn-sm" id="pv-resend">ارسال دوباره کد</button>
+              <button type="button" class="btn btn-link btn-sm" id="pv-change">شمارهٔ دیگری دارم</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        const $ = id => overlay.querySelector('#' + id);
+        const err = $('pv-error'), ok = $('pv-ok');
+        let step = 'phone', busy = false;
+
+        const close = value => {
+            if (overlay.dataset.closing) return;
+            overlay.dataset.closing = '1';
+            document.removeEventListener('keydown', onKey);
+            overlay.remove();
+            resolve(value);
+        };
+        const showCode = (hint) => {
+            step = 'code';
+            $('pv-phone-step').classList.add('d-none');
+            $('pv-code-step').classList.remove('d-none');
+            $('pv-links').classList.remove('d-none');
+            ok.textContent = 'تأیید';
+            $('pv-hint').textContent = hint || '';
+            setTimeout(() => $('pv-code').focus(), 30);
+        };
+        const showPhone = () => {
+            step = 'phone';
+            $('pv-code-step').classList.add('d-none');
+            $('pv-links').classList.add('d-none');
+            $('pv-phone-step').classList.remove('d-none');
+            ok.textContent = 'ارسال کد';
+            err.textContent = '';
+            setTimeout(() => $('pv-phone').focus(), 30);
+        };
+        const send = async (phone) => {
+            err.textContent = '';
+            try {
+                const r = await apiCall('/users/me/phone/request', {
+                    method: 'POST', body: JSON.stringify(phone ? { phone } : {}) });
+                if (r.verified) { _markPhoneVerified(); close(true); return; }
+                if (_currentUser) { _currentUser.phone = r.phone || phone || _currentUser.phone; _currentUser.phone_verified = false; }
+                showCode(`کد به ${r.phone || phone || known} پیامک شد.`);
+            } catch (e) {
+                // 429 is the cooldown: a code went out moments ago and is still
+                // good — let them type it rather than sending them back.
+                if (e.status === 429) {
+                    showCode(e.message);
+                } else {
+                    err.textContent = e.message;
+                    if (step === 'code') showPhone();
+                }
+            }
+        };
+        const submit = async () => {
+            if (busy) return;
+            busy = true; ok.disabled = true;
+            try {
+                if (step === 'phone') {
+                    const phone = _digitsOnly($('pv-phone').value);
+                    const norm = phone.startsWith('98') && phone.length === 12 ? '0' + phone.slice(2)
+                        : phone.length === 10 && phone.startsWith('9') ? '0' + phone : phone;
+                    if (!/^09\d{9}$/.test(norm)) { err.textContent = 'شماره را مثل 09123456789 بنویسید'; return; }
+                    await send(norm === _digitsOnly(known) ? null : norm);
+                } else {
+                    const code = _digitsOnly($('pv-code').value);
+                    if (code.length < 4) { err.textContent = 'کد کامل نیست'; return; }
+                    try {
+                        await apiCall('/users/me/phone/verify', { method: 'POST', body: JSON.stringify({ code }) });
+                        _markPhoneVerified();
+                        showToast('تأیید شد', 'شمارهٔ موبایل شما تأیید شد', 'success');
+                        close(true);
+                    } catch (e) { err.textContent = e.message; $('pv-code').select(); }
+                }
+            } finally { busy = false; ok.disabled = false; }
+        };
+        const onKey = e => {
+            if (e.key === 'Escape') close(false);
+            if (e.key === 'Enter') submit();
+        };
+        ok.addEventListener('click', submit);
+        $('pv-cancel').addEventListener('click', () => close(false));
+        $('pv-change').addEventListener('click', showPhone);
+        $('pv-resend').addEventListener('click', async e => {
+            const b = e.currentTarget; b.disabled = true;
+            await send(null);
+            setTimeout(() => { b.disabled = false; }, 60000);
+        });
+        document.addEventListener('keydown', onKey);
+
+        // A number on file: send the code straight away — the popup exists to
+        // get it into their hand, not to ask whether it should.
+        if (known) { busy = true; send(null).finally(() => { busy = false; }); }
+        else setTimeout(() => $('pv-phone').focus(), 30);
+    });
+}
+
+function _markPhoneVerified() {
+    if (_currentUser) _currentUser.phone_verified = true;
+    if (typeof loadPhoneState === 'function') { try { loadPhoneState(); } catch (_) {} }
 }
 
 // ==================== Dashboard ====================
@@ -3242,21 +3436,149 @@ async function loadScraperAccounts() {
         const d = await apiCall('/auth/cookies?mine=1');
         const rows = (d.cookies || []).slice().sort(
             (a, b) => (a.reveals || 0) - (b.reveals || 0));
+        _myDivarAccounts = rows;
         sel.innerHTML = '<option value="">خودکار — کم‌مصرف‌ترین</option>'
             + rows.map(c => {
                 const bits = [`${c.reveals || 0} افشا`];
+                if (c.is_enabled === false) bits.push('خاموش');
                 if (!c.is_valid) bits.push('نامعتبر');
                 if (c.identity_required_at) bits.push('احراز هویت لازم');
                 else if (c.challenged_at) bits.push('اخیراً کد خواسته');
-                const usable = c.is_valid && !c.identity_required_at;
-                return `<option value="${esc(c.phone_number)}"${usable ? '' : ' disabled'}>`
+                return `<option value="${esc(c.phone_number)}"${_divarUsable(c) ? '' : ' disabled'}>`
                      + `${esc(c.phone_number)} — ${esc(bits.join('، '))}</option>`;
             }).join('');
-        if (chosen) sel.value = chosen;
+        // A pick that has since been switched off or gone bad falls back to
+        // «خودکار» rather than quietly staying selected-but-disabled.
+        const keep = rows.find(c => c.phone_number === chosen);
+        sel.value = keep && _divarUsable(keep) ? chosen : '';
+        _renderScraperAccountList(rows);
         onScraperAccountChange();
     } catch (_) {
         // The form still works on «خودکار»; a picker that failed to load is
         // not a reason to block a scrape.
+    }
+}
+
+/* ── my Divar numbers, each with its own on/off ─────────────────────────
+ *
+ * «امکان فعال و غیرفعال کردن شماره با تاگل — شاید یک شماره در دسترس نباشد و
+ * در اسکرپ چرخشی به مشکل بخوریم: کد به آن شماره ارسال شود و آن شماره در
+ * دسترس نباشد.» Off = rotation, «خودکار» and the picker all pass it by, and
+ * a run that is on it right now moves to another of your numbers.        */
+let _myDivarAccounts = [];
+
+function _divarUsable(c) {
+    return !!c && c.is_valid && c.is_enabled !== false && !c.identity_required_at;
+}
+
+function _renderScraperAccountList(rows) {
+    const box = document.getElementById('scraper-account-list');
+    if (!box) return;
+    if (!rows.length) {
+        box.innerHTML = `<div class="acct-empty">هیچ شمارهٔ دیواری به نام شما ثبت نشده —
+            از <a href="#" onclick="showSection('auth');return false">احراز هویت دیوار</a> شمارهٔ خودتان را وارد کنید.</div>`;
+        return;
+    }
+    box.innerHTML = rows.map(c => {
+        const on = c.is_enabled !== false;
+        const state = !c.is_valid ? '<span class="acct-flag bad">نامعتبر</span>'
+            : c.identity_required_at ? '<span class="acct-flag warn">احراز هویت</span>'
+            : c.challenged_at ? '<span class="acct-flag warn" title="دیوار اخیراً برای این شماره کد خواسته">کد خواسته</span>'
+            : '';
+        return `<label class="acct-row${on ? '' : ' is-off'}" title="${on ? 'روشن — در چرخش و «خودکار» استفاده می‌شود' : 'خاموش — هیچ اسکرپی از این شماره استفاده نمی‌کند'}">
+            <span class="form-check form-switch m-0">
+                <input class="form-check-input" type="checkbox" role="switch" ${on ? 'checked' : ''}
+                       onchange="toggleDivarNumber(${Number(c.id)}, this.checked, this)"
+                       aria-label="روشن/خاموش ${esc(c.phone_number)}">
+            </span>
+            <span class="acct-phone" dir="ltr">${esc(c.phone_number)}</span>
+            <span class="acct-meta">${formatNumber(c.reveals || 0)} افشا</span>
+            ${state}
+        </label>`;
+    }).join('');
+}
+
+async function toggleDivarNumber(id, enabled, input) {
+    if (input) input.disabled = true;
+    try {
+        const r = await apiCall(`/auth/cookies/${id}`, {
+            method: 'PATCH', body: JSON.stringify({ enabled }) });
+        const moved = (r.moved_jobs || []).length;
+        showToast(enabled ? 'روشن شد' : 'خاموش شد',
+            enabled ? `${r.phone_number} دوباره در چرخش است`
+                    : `${r.phone_number} دیگر استفاده نمی‌شود`
+                      + (moved ? ` — ${formatNumber(moved)} اسکرپ در حال اجرا به شمارهٔ دیگر شما منتقل می‌شود` : ''),
+            enabled ? 'success' : 'warning');
+        if (moved) loadJobs();
+    } catch (e) {
+        showToast('خطا', e.message, 'danger');
+    } finally {
+        loadScraperAccounts();
+        if (typeof checkCookieStatus === 'function') checkCookieStatus();
+    }
+}
+
+/* ── switching a running scrape onto another number ─────────────────────
+ *
+ * «وقتی با یک شماره در حال اسکرپ به مشکل خورد، بتوان شماره را در حین اسکرپ
+ * عوض کرد و ادامه را با شمارهٔ جدید ادامه داد.» The run does not stop: the
+ * switch is taken at its next listing, or at once if it is parked on a code
+ * prompt for the current number.                                         */
+async function switchJobAccount(jobId, currentPhone) {
+    let rows = [];
+    try { rows = (await apiCall('/auth/cookies?mine=1')).cookies || []; } catch (_) {}
+    const cur = _digits(currentPhone);
+    const choices = rows.filter(c => _divarUsable(c) && _digits(c.phone_number) !== cur)
+        .sort((a, b) => (a.reveals || 0) - (b.reveals || 0));
+    if (!choices.length) {
+        await askInfo({
+            icon: 'bi-sim-slash', title: 'شمارهٔ دیگری نیست',
+            body: 'شمارهٔ روشن و معتبر دیگری به نام شما ثبت نشده است.',
+            note: 'از «احراز هویت دیوار» یک شمارهٔ دیگر اضافه کنید، یا شمارهٔ خاموش را در فرم اسکرپر روشن کنید.',
+        });
+        return false;
+    }
+    const picked = await askText({
+        icon: 'bi-arrow-left-right', title: 'تعویض شمارهٔ دیوار',
+        okLabel: 'تعویض و ادامه',
+        body: currentPhone
+            ? `اسکرپ الان روی <b dir="ltr">${esc(currentPhone)}</b> است. بدون توقف، با شمارهٔ دیگری از شماره‌های خودتان ادامه می‌دهد.`
+            : 'بدون توقف، با شمارهٔ دیگری از شماره‌های خودتان ادامه می‌دهد.',
+        note: 'اگر گوشی این شماره در دسترس نیست، بهتر است آن را در فرم اسکرپر خاموش کنید تا دوباره انتخاب نشود.',
+        field: {
+            label: 'شمارهٔ جدید', value: '',
+            options: [['', 'خودکار — کم‌مصرف‌ترین شمارهٔ دیگر من'],
+                      ...choices.map(c => [c.phone_number, `${c.phone_number} — ${c.reveals || 0} افشا`])],
+        },
+    });
+    if (picked === null) return false;
+    try {
+        const r = await apiCall(`/scraper/jobs/${encodeURIComponent(jobId)}/switch-account`, {
+            method: 'POST', body: JSON.stringify(picked ? { phone: picked } : {}) });
+        showToast('ثبت شد', r.message || 'تعویض شماره ثبت شد', 'success');
+        loadJobs();
+        return true;
+    } catch (e) {
+        showToast('تعویض نشد', e.message, 'danger');
+        return false;
+    }
+}
+
+/** From the code prompt: the phone that should receive it is not in reach. */
+async function switchFromOtp() {
+    const key = document.getElementById('divar-otp-key')?.value || '';
+    const jobId = key ? key.split(':')[0] : '';
+    if (!jobId) return;
+    const phone = document.getElementById('otp2-phone')?.textContent || '';
+    const modalEl = document.getElementById('divarOtpModal');
+    // Out of the way while the picker asks; back if they change their mind.
+    bootstrap.Modal.getInstance(modalEl)?.hide();
+    const ok = await switchJobAccount(jobId, phone);
+    if (ok) {
+        _dismissedOtpKeys.add(key);          // this prompt is being abandoned
+        _otp2StopTimer();
+    } else {
+        new bootstrap.Modal(modalEl).show();
     }
 }
 
@@ -3698,10 +4020,12 @@ async function deleteSchedule(id) {
 
 async function executeBulkScraping(city, category, maxItems, downloadImages, filters = {}) {
     try {
-        // A number picked by hand wins; «خودکار» falls back to the active
-        // session, which is what this did before the picker existed.
+        // A number picked by hand wins. «خودکار» sends none, and the server
+        // picks the least-spent of YOUR switched-on numbers — which is what
+        // the option says. It used to send the primary/newest session, so
+        // «کم‌مصرف‌ترین» always meant the same number.
         const picked = document.getElementById('scraper-account')?.value || '';
-        const session = picked ? { phone_number: picked } : await _getActiveSession();
+        const session = picked ? { phone_number: picked } : null;
         // Strip null/undefined values so the API doesn't receive empty fields
         const cleanFilters = Object.fromEntries(
             Object.entries(filters).filter(([, v]) => v !== null && v !== undefined)
@@ -4723,7 +5047,8 @@ async function _getActiveSession() {
     // and read another user's number as «شمارهٔ فعال».
     try {
         const data = await apiCall('/auth/cookies?mine=1');
-        const valid = (data.cookies || []).filter(c => c.is_valid);
+        // Switched off, or waiting on Divar's identity check, is not «active».
+        const valid = (data.cookies || []).filter(_divarUsable);
         if (!valid.length) return null;
         const primary = _digits(_currentUser?.divar_phone);
         const mine = primary && valid.find(c => _digits(c.phone_number) === primary);
@@ -4961,6 +5286,13 @@ function _renderJobsTable(items) {
                         title="آگهی‌هایی که این اسکرپ ذخیره نکرد">
                     <i class="bi bi-slash-circle"></i>
                 </button>
+                ${['running', 'paused', 'pending'].includes(job.status)
+                  && job.owner_user_id != null && job.owner_user_id === _currentUser?.id ? `
+                    <button class="btn btn-sm btn-outline-warning" onclick="switchJobAccount('${job.job_id}', '${_digits(job.divar_phone)}')"
+                            title="تعویض شمارهٔ دیوار بدون توقف اسکرپ">
+                        <i class="bi bi-arrow-left-right"></i>
+                    </button>
+                ` : ''}
                 ${['running', 'paused', 'pending'].includes(job.status) ? `
                     <button class="btn btn-sm btn-outline-danger" onclick="cancelJob('${job.job_id}')"
                             title="لغو تسک">
@@ -5524,11 +5856,11 @@ async function loadCookies() {
         }
         
         container.innerHTML = data.cookies.map(cookie => `
-            <div class="d-flex justify-content-between align-items-center p-2 border-bottom">
+            <div class="d-flex justify-content-between align-items-center p-2 border-bottom${cookie.is_enabled === false ? ' opacity-50' : ''}">
                 <div>
-                    <strong>${cookie.phone_number}</strong>
+                    <strong dir="ltr">${esc(cookie.phone_number)}</strong>
                     <br>
-                    <small class="text-muted">${cookie.is_valid ? 'معتبر' : 'منقضی'}</small>
+                    <small class="text-muted">${cookie.is_valid ? 'معتبر' : 'منقضی'}${cookie.is_enabled === false ? ' · خاموش' : ''}</small>
                     ${cookie.identity_required_at ? `
                         <div class="mt-1">
                             <span class="badge bg-danger" title="دیوار برای این شماره احراز هویت با کد ملی می‌خواهد؛ تا انجام نشود در چرخش نیست">
@@ -5537,9 +5869,16 @@ async function loadCookies() {
                             <button class="btn btn-sm btn-link p-0 ms-1 small" onclick="_identityCleared('${esc(cookie.phone_number)}')">انجام شد</button>
                         </div>` : ''}
                 </div>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${cookie.id})">
-                    <i class="bi bi-trash"></i>
-                </button>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="form-check form-switch m-0" title="روشن/خاموش برای اسکرپ — خاموش یعنی گوشی این شماره در دسترس نیست">
+                        <input class="form-check-input" type="checkbox" role="switch" ${cookie.is_enabled !== false ? 'checked' : ''}
+                               onchange="toggleDivarNumber(${Number(cookie.id)}, this.checked, this).then(loadCookies)"
+                               aria-label="روشن/خاموش ${esc(cookie.phone_number)}">
+                    </span>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${Number(cookie.id)})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
             </div>
         `).join('');
         
@@ -8305,10 +8644,21 @@ function _userRow(u) {
     // the phone, and until there is an SMS provider that is every code
     // we send. Someone about to ring this number needs to know which of
     // the two they are looking at, so each contact carries its own tick.
-    const tick = (val, ok, okText, noText) => !val ? '' :
-        `<div class="u-line"><i class="bi ${String(val).includes('@') ? 'bi-envelope' : 'bi-telephone'}"></i>
+    //
+    // root sees a switch instead of the dot: «فقط اکانت root می‌تواند به صورت
+    // دستی و با تاگل، شماره و ایمیل کاربران را تأیید کند». Everybody else
+    // still sees the dot — the server refuses the change for any other role.
+    const canVerify = _currentUser?.role === 'root';
+    const tick = (val, ok, okText, noText, kind) => !val ? '' :
+        `<div class="u-line"><i class="bi ${kind === 'email' ? 'bi-envelope' : 'bi-telephone'}"></i>
            <span dir="ltr" class="u-val">${esc(val)}</span>
-           <i class="u-tick ${ok ? 'ok' : 'no'}" title="${ok ? okText : noText}"></i>
+           ${canVerify
+             ? `<span class="form-check form-switch m-0 u-verify" title="${ok ? okText : noText} — تأیید دستی (فقط root)">
+                  <input class="form-check-input" type="checkbox" role="switch" ${ok ? 'checked' : ''}
+                         onchange="setUserVerified(${Number(u.id)}, '${kind === 'email' ? 'email' : 'phone'}', this.checked, this)"
+                         aria-label="${kind === 'email' ? 'تأیید ایمیل' : 'تأیید شماره'} ${esc(val)}">
+                </span>`
+             : `<i class="u-tick ${ok ? 'ok' : 'no'}" title="${ok ? okText : noText}"></i>`}
          </div>`;
     // Somebody with a stuck «!» can be asked to fix it from here — the
     // one screen where the person who notices is already looking.
@@ -8329,8 +8679,8 @@ function _userRow(u) {
     const privileged = ['root', 'super_admin', 'admin'].includes(u.role);
     const noRecovery = privileged && !(u.email || '').trim() && u.is_active;
     const contact =
-        (tick(u.phone, u.phone_verified, 'شماره با پیامک تأیید شده', 'شماره تأیید نشده — کدی با پیامک ارسال نشده است') +
-         tick(u.email, u.email_verified, 'ایمیل تأیید شده', 'ایمیل تأیید نشده') +
+        (tick(u.phone, u.phone_verified, 'شماره تأیید شده', 'شماره تأیید نشده — کدی با پیامک پاسخ داده نشده است', 'phone') +
+         tick(u.email, u.email_verified, 'ایمیل تأیید شده', 'ایمیل تأیید نشده', 'email') +
          (u.divar_phone ? `<div class="u-line u-divar" title="شماره‌ای که با آن در دیوار وارد می‌شود">
              <i class="bi bi-phone"></i><span dir="ltr" class="u-val">${esc(u.divar_phone)}</span><span class="u-muted">دیوار</span></div>` : ''))
         || '<span class="u-muted">—</span>';

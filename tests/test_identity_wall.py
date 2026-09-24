@@ -190,7 +190,10 @@ class TestThePanel:
         i = APP_JS.index("async function loadScraperAccounts()")
         block = APP_JS[i:i + 1600]
         assert "احراز هویت لازم" in block
-        assert "const usable = c.is_valid && !c.identity_required_at;" in block
+        # one rule for «may this number be picked», shared with the switch dialog
+        assert "_divarUsable(c) ? '' : ' disabled'" in block
+        j = APP_JS.index("function _divarUsable(")
+        assert "!c.identity_required_at" in APP_JS[j:j + 200]
 
     def test_the_account_list_shows_it_with_a_way_out(self):
         i = APP_JS.index("async function loadCookies()")

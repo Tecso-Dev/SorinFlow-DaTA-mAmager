@@ -16,6 +16,7 @@ from app.models.user import User
 from app.scraper.auth import DivarAuth
 from app.config import get_settings
 from app.auth.dependencies import get_current_user_optional
+from app.auth.dependencies import require_verified_phone
 from app.schemas import (
     LoginRequest,
     OTPVerifyRequest,
@@ -108,7 +109,7 @@ async def _refuse_somebody_elses(db, user, phone):
     return row
 
 
-@router.post("/login", response_model=AuthResponse)
+@router.post("/login", response_model=AuthResponse, dependencies=[Depends(require_verified_phone)])
 async def initiate_login(
     request: LoginRequest,
     db: AsyncSession = Depends(get_db),
@@ -468,7 +469,7 @@ class CookieImportRequest(BaseModel):
     cookies: List[Any]
 
 
-@router.post("/cookies/import")
+@router.post("/cookies/import", dependencies=[Depends(require_verified_phone)])
 async def import_cookies(
     request: CookieImportRequest,
     db: AsyncSession = Depends(get_db),
@@ -488,6 +489,14 @@ async def import_cookies(
     """
     if not request.cookies:
         raise HTTPException(status_code=400, detail="هیچ کوکی‌ای ارسال نشد")
+    # A phone number, in the one shape the table stores. This took any string
+    # at all, and the panel prints it — into innerHTML, and into the key the
+    # pool and every ownership check compare on.
+    from app.api.routes.sms import normalize_mobile
+    _norm = normalize_mobile(request.phone_number or "")
+    if not _norm:
+        raise HTTPException(status_code=400, detail="شمارهٔ دیوار معتبر نیست (مثل 09123456789)")
+    request.phone_number = _norm
 
     # Find token cookie to extract expiry
     from app.services.divar_session import auth_cookie as _auth_cookie

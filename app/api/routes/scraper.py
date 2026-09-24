@@ -22,6 +22,7 @@ from app.config import get_settings, CITIES, CATEGORIES
 from pydantic import BaseModel, Field
 from app.schemas import ScrapingJobCreate, ScrapingJobResponse, ScrapingJobList
 from app.auth.dependencies import get_current_user, get_current_user_optional
+from app.auth.dependencies import require_verified_phone
 from app.auth.permissions import FULL_ACCESS_ROLES
 from app.models.user import User
 
@@ -256,7 +257,7 @@ async def run_scraping_job(
         logger.info(f"[{job_id}] Background task completed")
 
 
-@router.post("/start", response_model=ScrapingJobResponse)
+@router.post("/start", response_model=ScrapingJobResponse, dependencies=[Depends(require_verified_phone)])
 async def start_scraping_job(
     job_config: ScrapingJobCreate,
     background_tasks: BackgroundTasks,
@@ -267,7 +268,7 @@ async def start_scraping_job(
     return await _launch_job(job_config, background_tasks, db, current_user)
 
 
-@router.post("/jobs/{job_id}/resume", response_model=ScrapingJobResponse)
+@router.post("/jobs/{job_id}/resume", response_model=ScrapingJobResponse, dependencies=[Depends(require_verified_phone)])
 async def resume_scraping_job(
     job_id: str,
     background_tasks: BackgroundTasks,
@@ -534,7 +535,7 @@ async def list_schedules(db: AsyncSession = Depends(get_db),
             "can_see_all": _sees_every_schedule(current_user)}
 
 
-@router.post("/schedules")
+@router.post("/schedules", dependencies=[Depends(require_verified_phone)])
 async def create_schedule(data: ScheduleIn, db: AsyncSession = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
     """Save the form as a daily run. Validated the way a run is: the config
@@ -590,7 +591,7 @@ async def delete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db),
     return {"success": True}
 
 
-@router.post("/schedules/{schedule_id}/run")
+@router.post("/schedules/{schedule_id}/run", dependencies=[Depends(require_verified_phone)])
 async def run_schedule_now(schedule_id: int, db: AsyncSession = Depends(get_db),
                            current_user: User = Depends(get_current_user)):
     """Fire it now, as its owner — the same path the clock takes, so what
@@ -894,7 +895,7 @@ class SwitchAccountIn(BaseModel):
     phone: Optional[str] = Field(None, max_length=20)
 
 
-@router.post("/jobs/{job_id}/switch-account")
+@router.post("/jobs/{job_id}/switch-account", dependencies=[Depends(require_verified_phone)])
 async def switch_job_account(
     job_id: str,
     body: SwitchAccountIn,
@@ -1585,7 +1586,7 @@ async def cancel_otp(
 class SingleScrapeRequest(BaseModel):
     url: str
 
-@router.post("/scrape-single")
+@router.post("/scrape-single", dependencies=[Depends(require_verified_phone)])
 async def scrape_single_property(
     request: SingleScrapeRequest,
     background_tasks: BackgroundTasks,
@@ -1618,7 +1619,7 @@ class RescrapeRequest(BaseModel):
     label: Optional[str] = None
 
 
-@router.post("/rescrape")
+@router.post("/rescrape", dependencies=[Depends(require_verified_phone)])
 async def rescrape_listings(
     body: RescrapeRequest,
     background_tasks: BackgroundTasks,

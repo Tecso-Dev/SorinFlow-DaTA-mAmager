@@ -520,3 +520,61 @@ class TestTheShape:
                / "migrations/versions/0009_cookie_enabled.py").read_text(encoding="utf-8")
         assert 'revision = "0009"' in rev and 'down_revision = "0008"' in rev
         assert '"is_enabled" not in' in rev and "server_default=sa.true()" in rev
+
+
+class TestThePanel:
+    """The scrape form, the code prompt and the jobs table."""
+
+    @staticmethod
+    def _js():
+        from pathlib import Path
+        return (Path(__file__).resolve().parent.parent / "frontend/js/app.js").read_text(encoding="utf-8")
+
+    @staticmethod
+    def _html():
+        from pathlib import Path
+        return (Path(__file__).resolve().parent.parent / "frontend/index.html").read_text(encoding="utf-8")
+
+    def test_each_number_has_its_own_switch_in_the_form(self):
+        js, html = self._js(), self._html()
+        assert 'id="scraper-account-list"' in html
+        fn = js[js.index("function _renderScraperAccountList("):js.index("async function toggleDivarNumber(")]
+        assert 'role="switch"' in fn and "toggleDivarNumber(" in fn
+        assert "esc(c.phone_number)" in fn
+        tog = js[js.index("async function toggleDivarNumber("):js.index("async function switchJobAccount(")]
+        assert "`/auth/cookies/${id}`" in tog and "method: 'PATCH'" in tog
+
+    def test_a_switched_off_number_cannot_be_picked(self):
+        js = self._js()
+        assert "c.is_enabled !== false" in js[js.index("function _divarUsable("):][:200]
+        fn = js[js.index("async function loadScraperAccounts("):js.index("let _myDivarAccounts")]
+        assert "_divarUsable(c) ? '' : ' disabled'" in fn
+
+    def test_automatic_means_the_servers_least_spent_pick(self):
+        """«خودکار — کم‌مصرف‌ترین» used to send the primary/newest session."""
+        js = self._js()
+        fn = js[js.index("async function executeBulkScraping("):][:1200]
+        assert "picked ? { phone_number: picked } : null" in fn
+        assert "_getActiveSession()" not in fn
+
+    def test_the_code_prompt_offers_another_number(self):
+        html = self._html()
+        modal = html[html.index('id="divarOtpModal"'):html.index('id="twoFAModal"')]
+        assert 'onclick="switchFromOtp()"' in modal
+        js = self._js()
+        fn = js[js.index("async function switchFromOtp("):][:900]
+        assert "key.split(':')[0]" in fn and "switchJobAccount(jobId" in fn
+
+    def test_a_running_job_of_ones_own_can_switch(self):
+        js = self._js()
+        fn = js[js.index("function _renderJobsTable("):js.index("const _dismissedOtpKeys")]
+        assert "job.owner_user_id === _currentUser?.id" in fn
+        assert "switchJobAccount('${job.job_id}'" in fn
+        sw = js[js.index("async function switchJobAccount("):js.index("async function switchFromOtp(")]
+        assert "/switch-account`" in sw and "_divarUsable(c)" in sw
+
+    def test_the_sessions_list_escapes_the_number(self):
+        js = self._js()
+        fn = js[js.index("async function loadCookies("):js.index("async function deleteCookie(")]
+        assert "${esc(cookie.phone_number)}" in fn
+        assert "<strong>${cookie.phone_number}</strong>" not in fn

@@ -61,14 +61,17 @@ class TestWhatTheChoiceIsMadeOn:
 
 
 class TestItReachesTheRun:
-    def test_a_picked_number_wins_over_the_active_session(self):
+    def test_a_picked_number_is_sent(self):
         b = block("async function executeBulkScraping(")
         assert "scraper-account" in b
-        assert "picked ? { phone_number: picked } : await _getActiveSession()" in b
+        assert "picked ? { phone_number: picked } : null" in b
 
-    def test_automatic_still_falls_back_to_what_it_did_before(self):
+    def test_automatic_leaves_the_choice_to_the_server(self):
+        """«خودکار — کم‌مصرف‌ترین» used to send the primary/newest session, so
+        it always meant the same number. The server picks the least-spent of
+        the caller's switched-on numbers when none is sent."""
         b = block("async function executeBulkScraping(")
-        assert "_getActiveSession()" in b
+        assert "_getActiveSession()" not in b
 
     def test_it_is_sent_as_divar_phone(self):
         b = block("async function executeBulkScraping(", 3000)

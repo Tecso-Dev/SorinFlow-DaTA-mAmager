@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_verified_phone
 from app.config import get_settings
 from app.database import get_db
 from app.models.forwarder import ForwarderDevice, new_secret
@@ -107,7 +107,7 @@ async def list_devices(db: AsyncSession = Depends(get_db),
             "count": len(rows)}
 
 
-@router.post("/devices")
+@router.post("/devices", dependencies=[Depends(require_verified_phone)])
 async def create_device(data: DeviceIn, db: AsyncSession = Depends(get_db),
                         user: User = Depends(get_current_user)):
     """Register a phone. The secret is shown in full here and nowhere else in

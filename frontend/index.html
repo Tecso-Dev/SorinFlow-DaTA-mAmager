@@ -844,6 +844,9 @@
                                             <option value="">خودکار — کم‌مصرف‌ترین</option>
                                         </select>
                                         <div id="scraper-account-note" class="form-text small"></div>
+                                        <!-- هر شماره روشن/خاموش: شماره‌ای که گوشی‌اش در
+                                             دسترس نیست خاموش شود تا کد به آن نرود. -->
+                                        <div id="scraper-account-list" class="acct-list" aria-label="شماره‌های دیوار من"></div>
                                     </div>
 
                                     <!-- فیلتر قیمت خرید -->
@@ -5045,6 +5048,11 @@
                 <button class="btn btn-outline-primary otp2-resend" id="otp2-resend"
                         onclick="resendDivarOtp()">
                     <i class="bi bi-arrow-repeat"></i> <span id="otp2-resend-label">ارسال دوباره کد</span>
+                </button>
+                <!-- گوشیِ این شماره در دسترس نیست؟ اسکرپ بدون توقف با شمارهٔ
+                     دیگری از شماره‌های خودتان ادامه می‌دهد. -->
+                <button class="btn btn-outline-warning otp2-switch" onclick="switchFromOtp()">
+                    <i class="bi bi-arrow-left-right"></i> گوشی در دسترس نیست — تعویض شماره
                 </button>
                 <button class="btn btn-outline-secondary otp2-skip" onclick="dismissDivarOtp()">
                     رد کردن و ادامه بدون شماره

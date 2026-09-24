@@ -436,6 +436,19 @@ async def register_user(
 
 # ── Authenticated ─────────────────────────────────────────────────────────────
 
+@router.get("/me/phone-gate")
+async def my_phone_gate(current_user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
+    """Whether the actions that lean on my number are closed to me until I
+    verify it — the same answer those actions would give, asked up front, so
+    the panel can open the verification popup on arrival instead of after a
+    refused click."""
+    from app.auth.dependencies import phone_gate_reason
+    why = await phone_gate_reason(current_user, db)
+    return {"required": bool(why), "message": why, "phone": current_user.phone or None,
+            "phone_verified": bool(current_user.phone_verified)}
+
+
 @router.post("/me/phone/request")
 async def request_phone_code(data: PhoneChangeRequest,
                              current_user: User = Depends(get_current_user),
@@ -1023,7 +1036,17 @@ async def update_user(
     _guard_role_assignment(_, data.role)
 
     if data.email is not None:
-        user.email = data.email
+        new_email = (data.email or "").strip() or None
+        if new_email and new_email.lower() != (user.email or "").lower():
+            clash = (await db.execute(select(User).where(
+                func.lower(User.email) == new_email.lower(), User.id != user.id))).scalars().first()
+            if clash:
+                raise HTTPException(409, "این ایمیل قبلاً برای حساب دیگری ثبت شده است")
+        # A different address is an unproven one. Keeping the tick would
+        # vouch for an inbox nobody has opened a code in.
+        if (new_email or "").lower() != (user.email or "").lower():
+            user.email_verified = False
+        user.email = new_email
     if data.full_name is not None:
         user.full_name = data.full_name
     if data.role is not None:
@@ -1033,12 +1056,79 @@ async def update_user(
     if data.divar_phone is not None:
         user.divar_phone = data.divar_phone or None
     if data.phone is not None:
-        user.phone = data.phone or None
+        from app.api.routes.sms import normalize_mobile
+        raw = (data.phone or "").strip()
+        new_phone = normalize_mobile(raw) if raw else None
+        if raw and not new_phone:
+            raise HTTPException(400, "شمارهٔ موبایل معتبر نیست (مثل 09123456789)")
+        if new_phone and new_phone != user.phone:
+            # Unique index on the column: a clash is a 500 at flush time
+            # unless it is caught here.
+            clash = (await db.execute(select(User).where(
+                User.phone == new_phone, User.id != user.id))).scalars().first()
+            if clash:
+                raise HTTPException(409, "این شماره قبلاً برای حساب دیگری ثبت شده است")
+        # Same as the address: a changed number has not answered a code.
+        if new_phone != user.phone:
+            user.phone_verified = False
+        user.phone = new_phone
     if data.permissions is not None:
         user.permissions = normalize_permissions(data.permissions)
 
     await db.commit()
     await db.refresh(user)
+    return user
+
+
+class VerificationFlagsIn(BaseModel):
+    phone_verified: Optional[bool] = None
+    email_verified: Optional[bool] = None
+
+
+@router.patch("/{user_id}/verification", response_model=UserResponse)
+async def set_verification_flags(
+    user_id: int,
+    data: VerificationFlagsIn,
+    request: Request,
+    current_user: User = Depends(_role_dep(ROLE_ROOT)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a user's phone or email verified — or not — by hand.
+
+    «فقط اکانت root می‌تواند به صورت دستی و با تاگل، شماره و ایمیل کاربران را
+    تأیید کند.» root only; super_admin cannot, because a verified tick is a
+    statement the whole panel then relies on (the phone gate, SMS audiences,
+    «قابل بازیابی»), and it should have exactly one author besides the code
+    itself.
+
+    Only for something that exists: a tick next to an empty phone or address
+    would verify nothing. Every change is written to the log at WARNING —
+    who, from where, for whom — because it is the one way a tick appears
+    without a code being answered.
+    """
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    if data.phone_verified is None and data.email_verified is None:
+        raise HTTPException(status_code=400, detail="چیزی برای تغییر فرستاده نشد")
+    if data.phone_verified and not (user.phone or "").strip():
+        raise HTTPException(status_code=400, detail="این کاربر شمارهٔ موبایلی ثبت نکرده است")
+    if data.email_verified and not (user.email or "").strip():
+        raise HTTPException(status_code=400, detail="این کاربر ایمیلی ثبت نکرده است")
+
+    changes = []
+    if data.phone_verified is not None and bool(user.phone_verified) != data.phone_verified:
+        user.phone_verified = data.phone_verified
+        changes.append(f"phone {user.phone} -> {'verified' if data.phone_verified else 'unverified'}")
+    if data.email_verified is not None and bool(user.email_verified) != data.email_verified:
+        user.email_verified = data.email_verified
+        changes.append(f"email {user.email} -> {'verified' if data.email_verified else 'unverified'}")
+    await db.commit()
+    await db.refresh(user)
+    if changes:
+        _ip = request.client.host if request.client else "?"
+        logger.warning(f"[audit] {current_user.username} (root) from {_ip} set "
+                       f"{user.username}: {'; '.join(changes)}")
     return user
 
 
