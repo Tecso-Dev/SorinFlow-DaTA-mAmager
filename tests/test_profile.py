@@ -139,13 +139,13 @@ class TestEditingMyself:
         _mk_user("pf_edit", "admin", permissions=["crm"])
         tok = _token(client, "pf_edit")
         r = client.patch("/api/users/me", headers=_auth(tok), json={
-            "full_name": "سارا احمدی", "headline": "مشاور فروش", "bio": "ده سال در بازار مسکن",
+            "full_name": "سارا احمدی (پروفایل)", "headline": "مشاور فروش", "bio": "ده سال در بازار مسکن",
             "presence": "busy",
             "links": {"website": "https://sara.ir", "instagram": "@sara.ahmadi", "linkedin": ""},
         })
         assert r.status_code == 200, r.text
         u = r.json()["user"]
-        assert u["full_name"] == "سارا احمدی" and u["headline"] == "مشاور فروش"
+        assert u["full_name"] == "سارا احمدی (پروفایل)" and u["headline"] == "مشاور فروش"
         assert u["presence"] == "busy"
         # a handle is stored as the URL it means, an empty link is dropped
         assert u["links"] == {"website": "https://sara.ir",

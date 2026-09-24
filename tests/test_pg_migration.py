@@ -444,7 +444,9 @@ def test_0011_creates_audit_events_matching_the_model():
 
         def _upgrade(sync_conn):
             cfg.attributes["connection"] = sync_conn
-            command.upgrade(cfg, "head")
+            # 0011 itself, not head: the revisions after it alter tables
+            # (properties, leads, …) this scratch schema was never given
+            command.upgrade(cfg, "0011")
 
         async with eng2.begin() as c:
             await c.run_sync(_upgrade)
