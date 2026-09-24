@@ -42,16 +42,17 @@ function extractConst(name) {
 // evaluated once, exactly as app.js defines them.
 const body = [
     extractFunction('esc'),
+    extractFunction('jsArg'),
     extractFunction('raw'),
     extractFunction('html'),
     extractFunction('safeUrl'),
     extractConst('MANUAL_PHOTO_RE'),
     extractFunction('safeManualPhoto'),
-    '\nglobalThis.__panel = { esc, raw, html, safeUrl, safeManualPhoto };',
+    '\nglobalThis.__panel = { esc, jsArg, raw, html, safeUrl, safeManualPhoto };',
 ].join('\n\n');
 
 new Function(body)();
-const { esc, raw, html, safeUrl, safeManualPhoto } = globalThis.__panel;
+const { esc, jsArg, raw, html, safeUrl, safeManualPhoto } = globalThis.__panel;
 
 let passed = 0;
 function check(label, fn) {
@@ -137,6 +138,34 @@ check('safeManualPhoto() rejects anything not matching the exact shape', () => {
     assert.equal(safeManualPhoto('https://evil.example/images/manual/' + 'a'.repeat(32) + '.jpg'), '');
     assert.equal(safeManualPhoto('javascript:alert(1)'), '');
     assert.equal(safeManualPhoto(null), '');
+});
+
+// ── jsArg(): a value inside onclick="f(…)" ────────────────────────────────
+
+// What the browser does: decode the attribute's entities, then run the code.
+function runHandler(attrValue) {
+    const decoded = attrValue.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#96;/g, '`')
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const seen = [];
+    new Function('f', `f(${decoded})`)(v => seen.push(v));
+    return seen;
+}
+
+check('jsArg() hands the handler the value itself, whatever quotes it holds', () => {
+    for (const v of [`');alert(1);('`, `");alert(1);("`, '\\\');alert(1)//', '`${alert(1)}`', '09121234567']) {
+        assert.deepEqual(runHandler(jsArg(v)), [v]);
+    }
+});
+
+check('esc() alone inside a handler is what let the quote through', () => {
+    // the reason jsArg exists: the entity is decoded before the code runs,
+    // so the payload's own call is reached
+    assert.throws(() => runHandler(`'${esc(`');alert(1);('`)}'`), /alert is not defined/);
+});
+
+check('safeUrl() refuses a backslash-led path browsers read as another site', () => {
+    assert.equal(safeUrl('/\\evil.example/x.png'), '#');
+    assert.equal(safeUrl('/images/a.jpg'), '/images/a.jpg');
 });
 
 console.log(`${passed} checks passed`);

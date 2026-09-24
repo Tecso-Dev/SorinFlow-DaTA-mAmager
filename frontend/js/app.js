@@ -982,7 +982,7 @@ async function pfLoadDivarAccounts() {
                   <span class="pf-note">${formatNumber(c.reveals || 0)} شماره‌گیری</span>
                 </div>
                 <div class="pf-acct-actions">
-                  ${isPrimary ? '' : `<button class="btn btn-sm btn-outline-primary" onclick="pfSetPrimaryDivar('${esc(c.phone_number)}')" title="پیش‌فرض کن">پیش‌فرض</button>`}
+                  ${isPrimary ? '' : `<button class="btn btn-sm btn-outline-primary" onclick="pfSetPrimaryDivar(${jsArg(c.phone_number)})" title="پیش‌فرض کن">پیش‌فرض</button>`}
                   <button class="btn btn-sm btn-outline-danger" onclick="pfDeleteDivar(${esc(c.id)})" title="حذف نشست"><i class="bi bi-trash"></i></button>
                 </div>
             </div>`;
@@ -1742,7 +1742,8 @@ function showToast(title, message, type = 'info') {
 // paths survive; anything else becomes an inert '#'.
 function safeUrl(u) {
     const raw = String(u ?? '').trim();
-    if (!/^https?:\/\//i.test(raw) && !/^\/(?!\/)/.test(raw)) return '#';
+    // "/\evil.com" is read by browsers as "//evil.com": another site
+    if (!/^https?:\/\//i.test(raw) && !/^\/(?![\/\\])/.test(raw)) return '#';
     return esc(raw);
 }
 
@@ -1799,6 +1800,11 @@ function esc(s) {
 // new/rewritten spots where that got missed often enough to matter. Wrap
 // markup that is already safe (built from esc()'d parts, or another html`` )
 // in raw(...) — that keeps the one opt-out greppable as `raw(`.
+// A value inside an inline handler — onclick="f(…)". The browser decodes the
+// attribute's entities before it runs the code, so esc() alone let a quote
+// through: a contact phone of  ');alert(1);('  broke out of quickSmsToContact.
+// JSON makes it a JS string literal; esc keeps it inside the attribute.
+function jsArg(v) { return esc(JSON.stringify(v == null ? '' : String(v))); }
 function raw(s) { return { __html: String(s ?? '') }; }
 function html(strings, ...values) {
     let out = strings[0];
@@ -4384,7 +4390,7 @@ function _aiAgentCard(a) {
             </div>
             <div class="form-check form-switch m-0 ms-auto">
                 <input class="form-check-input" type="checkbox" id="ai-sw-${esc(a.key)}" ${a.enabled ? 'checked' : ''}
-                       onchange="aiAgentToggle('${esc(a.key)}', this.checked)">
+                       onchange="aiAgentToggle(${jsArg(a.key)}, this.checked)">
             </div>
         </div>
         <div class="ai-card-desc">${esc(a.desc)}</div>
@@ -4394,14 +4400,14 @@ function _aiAgentCard(a) {
             <span title="مدل این کار" dir="ltr">${esc(a.model || '—')}</span>
             <span>امروز: ${formatNumber(a.today.calls || 0)} فراخوانی · ${formatNumber(a.today.cost_toman || 0)} تومان</span>
             ${err ? `<button class="ai-err ${(a.today.ok_since_error || 0) >= 5 ? 'is-stale' : ''}"
-                onclick="aiShowErrors('${esc(a.key)}')"
+                onclick="aiShowErrors(${jsArg(a.key)})"
                 title="${esc(a.today.last_error || '')}">
                 ${formatNumber(err)} خطا${(a.today.ok_since_error || 0) >= 5
                     ? ` · از آن به بعد ${formatNumber(a.today.ok_since_error)} موفق`
                     : ''}${a.today.last_error_at ? ` · آخری ${esc(a.today.last_error_at.slice(11, 16))}` : ''}
             </button>` : ''}
             <span class="text-muted">ماه: ${formatNumber(a.month.calls || 0)} · ${formatNumber(a.month.cost_toman || 0)} تومان</span>
-            ${runnable ? `<button class="btn btn-sm btn-outline-primary ms-auto" onclick="aiRunAgent('${esc(a.key)}', this)">
+            ${runnable ? `<button class="btn btn-sm btn-outline-primary ms-auto" onclick="aiRunAgent(${jsArg(a.key)}, this)">
                 <i class="bi bi-play-fill"></i> اجرای یک دور</button>` : ''}
         </div>
     </div>`;
@@ -4906,7 +4912,7 @@ async function bkProbe() {
             return;
         }
         box.innerHTML = `<div class="small text-muted mb-1">ربات <b dir="ltr">@${esc(r.bot)}</b> — یکی را انتخاب کنید:</div>` +
-            r.chats.map(c => `<button class="btn btn-sm btn-outline-secondary me-1 mb-1" onclick="bkPickChat('${esc(c.id)}')">
+            r.chats.map(c => `<button class="btn btn-sm btn-outline-secondary me-1 mb-1" onclick="bkPickChat(${jsArg(c.id)})">
                 ${esc(c.name || c.id)} <span class="text-muted" dir="ltr">${esc(c.id)}</span></button>`).join('') +
             '<div class="small text-muted mt-1">هر کدام را بزنید به فهرست اضافه می‌شود؛ بعد «ذخیره».</div>';
     } catch (e) {
@@ -6013,7 +6019,7 @@ async function loadCookies() {
                             <span class="badge bg-danger" title="دیوار برای این شماره احراز هویت با کد ملی می‌خواهد؛ تا انجام نشود در چرخش نیست">
                                 <i class="bi bi-person-badge"></i> احراز هویت لازم
                             </span>
-                            <button class="btn btn-sm btn-link p-0 ms-1 small" onclick="_identityCleared('${esc(cookie.phone_number)}')">انجام شد</button>
+                            <button class="btn btn-sm btn-link p-0 ms-1 small" onclick="_identityCleared(${jsArg(cookie.phone_number)})">انجام شد</button>
                         </div>` : ''}
                 </div>
                 <div class="d-flex align-items-center gap-2">
@@ -6081,7 +6087,7 @@ async function loadNumbersRegistry() {
                 <td class="small">${formatNumber(r.reveals || 0)}</td>
                 <td class="small">${hint}</td>
                 <td class="text-nowrap">
-                    <button class="btn btn-sm btn-primary" onclick="saveNumberOwner(${Number(r.id)}, '${esc(r.phone_number)}')">ذخیره</button>
+                    <button class="btn btn-sm btn-primary" onclick="saveNumberOwner(${Number(r.id)}, ${jsArg(r.phone_number)})">ذخیره</button>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteCookie(${Number(r.id)}).then(loadNumbersRegistry)" title="حذف نشست">
                         <i class="bi bi-trash"></i></button>
                 </td></tr>`;
@@ -9287,7 +9293,7 @@ async function loadContacts() {
                 <td>
                     <button class="btn btn-xs btn-outline-primary" onclick="openContactModal(${c.id})"><i class="bi bi-pencil"></i></button>
                     <button class="btn btn-xs btn-outline-danger" onclick="deleteContact(${c.id})"><i class="bi bi-trash"></i></button>
-                    <button class="btn btn-xs btn-outline-info" onclick="quickSmsToContact('${esc(c.phone || '')}')"><i class="bi bi-chat-dots"></i></button>
+                    <button class="btn btn-xs btn-outline-info" onclick="quickSmsToContact(${jsArg(c.phone || '')})"><i class="bi bi-chat-dots"></i></button>
                 </td>
             </tr>`;
         }).join('');
@@ -12766,7 +12772,7 @@ async function loadCookieHealth() {
                                 : '<i class="bi bi-x-circle text-muted"></i>'}</td>
             <td class="text-start">
               <button class="btn btn-sm btn-outline-primary"
-                      onclick="checkCookieSession('${esc(i.phone_number)}', this)">
+                      onclick="checkCookieSession(${jsArg(i.phone_number)}, this)">
                 بررسی
               </button>
               <span class="small ms-2" id="ck-res-${esc(i.phone_number)}"></span>
@@ -12854,7 +12860,7 @@ async function loadEmailAudiences() {
                      data-count="${a.count === null ? 0 : a.count}" onchange="emPickAudience(this)">
               <span>${esc(a.label)}</span>
               <span class="badge bg-secondary">${a.count === null ? '—' : faNum(a.count)}</span>
-              <button type="button" class="btn btn-sm btn-link p-0 ms-auto" onclick="exportEmailAudience('${esc(a.key)}')"
+              <button type="button" class="btn btn-sm btn-link p-0 ms-auto" onclick="exportEmailAudience(${jsArg(a.key)})"
                       title="دانلود آدرس‌ها (CSV)"><i class="bi bi-download"></i></button>
             </label>`).join('') || '<span class="text-muted small">گروهی نیست</span>';
     } catch (_) {
@@ -13642,7 +13648,7 @@ function renderSkippedRows() {
             <i class="bi bi-box-arrow-up-left"></i>
           </a>
           <button class="btn btn-sm btn-outline-primary"
-                  onclick="rescrapeSkipped('${esc(r.url)}')" title="اسکرپ تکی این آگهی">
+                  onclick="rescrapeSkipped(${jsArg(r.url)})" title="اسکرپ تکی این آگهی">
             <i class="bi bi-arrow-repeat"></i>
           </button>
         </div>`).join('');

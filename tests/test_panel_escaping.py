@@ -36,4 +36,4 @@ def test_esc_html_raw_and_url_guard_hold_against_real_payloads():
     assert result.returncode == 0, (
         f"panel escaping check failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert "12 checks passed" in result.stdout, result.stdout
+    assert "15 checks passed" in result.stdout, result.stdout
