@@ -66,6 +66,12 @@ spec:
         runAsUser: 1000    # pwuser in the Playwright base image
         runAsGroup: 1000
         fsGroup: 1000
+        # data-pvc is a `local` PV, so the kubelet re-applies fsGroup to every
+        # file on it at EVERY mount by default — a recursive walk over all the
+        # downloaded images on each pod start and rolling update. Once the root
+        # is right (the data-ownership Job, then the first mount) there is
+        # nothing to fix, so only a mismatched root triggers the walk.
+        fsGroupChangePolicy: OnRootMismatch
         # Chromium's own sandbox needs a handful of syscalls
         # RuntimeDefault blocks (unshare/clone with CLONE_NEWUSER, mainly) —
         # see deploy/seccomp/sorinflow-chromium.json for exactly which ones
