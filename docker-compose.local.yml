@@ -13,11 +13,11 @@
 #   cp .env.local.example .env.local
 #   docker compose --env-file .env.local -f docker-compose.local.yml up -d --build
 #   docker compose -f docker-compose.local.yml exec backend python scripts/seed_local.py
+#   (or just scripts/local_up.sh)
 #
-# --env-file is what makes ${POSTGRES_PASSWORD} etc. below resolve from
-# .env.local instead of compose's default (a bare ".env", which this repo
-# already uses for something else). The backend's own env_file: line loads
-# the same file again, for the app's settings rather than compose's.
+# Every container reads .env.local itself (env_file), so no command needs
+# compose-side interpolation: exec, logs and down work without --env-file.
+# Only `up` wants it, and only so BACKEND_PORT from .env.local applies.
 #
 # app/, frontend/, migrations/, scripts/ and alembic.ini are bind-mounted so
 # edits hot-reload under --reload; everything else (installed deps, data/,
@@ -25,30 +25,32 @@
 # (app/database.py:init_db — create_all, the boot-time ALTERs, then
 # `alembic upgrade head`), so a fresh `db` volume ends up fully migrated the
 # first time uvicorn starts; nothing extra to run before it.
+name: sorinflow-local
+
 services:
   db:
     image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-sorinflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.local}
-      POSTGRES_DB: ${POSTGRES_DB:-divar_scraper_local}
+    env_file:
+      - .env.local          # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
     ports:
       - "5433:5432"
     volumes:
       - sorinflow_local_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sorinflow} -d ${POSTGRES_DB:-divar_scraper_local}"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.local}
+    env_file:
+      - .env.local          # REDIS_PASSWORD
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
     ports:
       - "6380:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.local}", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 10
