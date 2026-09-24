@@ -594,6 +594,20 @@ async def _run(live: bool, only) -> dict:
     return out
 
 
+def _scrub(results: dict) -> dict:
+    """The key and the gateway's address out of everything this run
+    writes. GitHub masks a secret in the job log only — the step summary
+    and the uploaded JSON are public too, and a gateway's error body (the
+    text a live section reports) may quote either."""
+    text = json.dumps(results, ensure_ascii=False)
+    base = (os.environ.get("LLM_BASE_URL") or "").strip()
+    for value in ((os.environ.get("LLM_API_KEY") or "").strip(), base, base.rstrip("/"),
+                  *re.findall(r"[0-9a-f]{24}", base)):
+        if len(value) >= 8:
+            text = text.replace(value, "***")
+    return json.loads(text)
+
+
 def _print_table(results: dict) -> None:
     rows = []
     for section, res in results.items():
@@ -646,7 +660,7 @@ def main() -> int:
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
     with tempfile.TemporaryDirectory(prefix="sorinflow_ai_eval_") as tmp:
         _prepare_env(tmp)
-        results = asyncio.run(_run(args.live, only))
+        results = _scrub(asyncio.run(_run(args.live, only)))
     _print_table(results)
     if args.json:
         _write_json(args.json, results, args.live)
