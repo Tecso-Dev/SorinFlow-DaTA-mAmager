@@ -168,6 +168,7 @@ if [ -n "$EXISTING_UID" ]; then
   say "backend already runs as uid $EXISTING_UID — running the ownership job with apps up"
   run_ownership_job
 elif kubectl -n "$NS" get deployment backend >/dev/null 2>&1; then
+  FIRST_TRANSITION=1
   say "FIRST TRANSITION: the live backend Deployment has no runAsUser (the old root image)."
   echo "The old image scrapes in-process AS ROOT, so it and a uid-1000 pod cannot safely"
   echo "share data-pvc at once. Scaling backend to 0 first — a short, accepted downtime"
@@ -198,6 +199,18 @@ rollback_and_diagnose() {
   local dep="$1"
   echo "::error::$dep did not become ready — rolling back to the previous image."
   kubectl -n "$NS" rollout undo "deployment/$dep" || true
+  # The first move to three processes has nothing to undo worker and scheduler
+  # TO, and the image backend returns to runs every loop and every scrape in
+  # its own process: left beside a live scheduler it would send every Telegram
+  # message twice and fight it for getUpdates. So a failure here puts back
+  # exactly what ran before — one backend pod on the previous image, worker
+  # and scheduler off.
+  if [ "${FIRST_TRANSITION:-0}" = 1 ]; then
+    echo "::error::first move to separate processes failed — restoring the single previous pod."
+    kubectl -n "$NS" scale deployment/worker deployment/scheduler --replicas=0 || true
+    [ "$dep" = backend ] || kubectl -n "$NS" rollout undo deployment/backend || true
+    kubectl -n "$NS" scale deployment/backend --replicas=1 || true
+  fi
   echo "::group::pods"
   kubectl -n "$NS" get pods -o wide || true
   echo "::endgroup::"
