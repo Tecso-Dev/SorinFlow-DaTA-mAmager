@@ -322,19 +322,18 @@ async def parse_need(db, text: str, *, hint: Optional[Dict[str, Any]] = None) ->
 async def enrich_request(db, req) -> Optional[Dict[str, Any]]:
     """For the portal: what the description says that the form's fields do not —
     only the Customer keys criteria_of left empty (red lines, districts, a
-    budget the visitor typed in words…). Never a write: portal_bridge.customer_for
-    folds the dict into the customer it is building. A model that is off, over
-    its cap or wrong is not the visitor's problem — LLMError becomes None."""
+    budget the visitor typed in words…). Never a write: portal_bridge folds the
+    dict into the customer it is building, in the background — never on the
+    visitor's own request, so this raises llm.LLMError (or a subclass) on
+    failure instead of swallowing it. portal_bridge.enrich_needs is the one
+    caller and decides what a gateway-state error (not configured, disabled,
+    over budget) costs versus a real failure; it is not this function's call."""
     text = (getattr(req, "description", None) or "").strip()
     if not text:
         return None
     from app.crm.portal_bridge import criteria_of   # here, not at the top: portal_bridge imports this module
     hint = {k: v for k, v in (("city", req.city), ("deal_type", req.deal_type)) if v}
-    try:
-        parsed = await parse_need(db, text, hint=hint)
-    except llm.LLMError as e:
-        logger.warning(f"[ai:need] portal request #{req.id} not enriched: {e}")
-        return None
+    parsed = await parse_need(db, text, hint=hint)
     known = criteria_of(req)
     extra = {k: v for k, v in parsed["customer"].items() if v not in (None, "") and not known.get(k)}
     if extra:

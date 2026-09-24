@@ -1,10 +1,12 @@
 """
 SorinFlow Divar Scraper - Property Models
 """
-from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Float, Text, ForeignKey, DateTime, JSON
-from sqlalchemy.orm import relationship
+import hashlib
+from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Float, Text, ForeignKey, DateTime, JSON, Index, event
+from sqlalchemy.orm import deferred, relationship
 from sqlalchemy.sql import func
 from app.database import Base
+from app.models.phone import sync_phone_columns
 from datetime import datetime
 
 
@@ -107,6 +109,11 @@ class Property(Base):
     
     # Contact
     phone_number = Column(String(20), index=True)
+    # Kept in sync by the before_insert/before_update listener below — see
+    # app/models/phone.py. owner_phone is which of OUR Divar accounts
+    # scraped the listing, not a seller's number, so it is not part of this:
+    # nothing matches it against a lead or a customer.
+    phone_number_normalized = Column(String(20), index=True)
     # How the contact reveal ended: "phone", "chat_only", "unavailable", or
     # NULL for rows from before this existed. «chat_only» is the poster's
     # choice and never changes; «unavailable» is ours and is worth a retry.
@@ -176,21 +183,44 @@ class Property(Base):
     created_by = Column(String(200), index=True)               # who filed it
     tags = Column(String(500))                                 # برچسب، comma-separated
 
+    # ── AI pipeline staleness (app/ai/listing_reader.py, embeddings.py,
+    #    app/crm/match_engine.py) ──
+    # A short hash of the fields the reader and the matcher read — price is
+    # deliberately out (same reason as embeddings.text_of: the same flat at
+    # two asking prices must still read as one flat, and a re-scraped price
+    # must not by itself re-open a listing for every stage; price drops get
+    # their own pass in app/crm/price_watch.py). Kept current by the event
+    # listener below on every insert/update, so the scraper — and anything
+    # else that writes a Property — never has to remember it. Each stage
+    # below keeps its own "content fingerprint as of my last pass" column
+    # and is due again once this one has moved past it.
+    ai_content_fp = Column(String(16))
+
     # ── AI (app/ai/embeddings.py) ──
     # The listing's text as a vector, for semantic search and duplicate
     # detection. JSON on the row because the scale is thousands, not
     # millions; pgvector is the later step. ai_duplicate_of points at the
     # OLDER listing this one seems to repeat — a flag, never a merge.
-    ai_embedding = Column(JSON)                                 # [float, …]
-    ai_embedded_at = Column(DateTime(timezone=True))
+    # deferred(): a vector is ~1536 floats and every Property query used to
+    # carry it along even when nothing looked at it (list pages, the
+    # assistant, the scraper, the engine). Load it explicitly — a column
+    # select, or .options(undefer(Property.ai_embedding)) — where a vector
+    # is actually needed.
+    ai_embedding = deferred(Column(JSON))                       # [float, …]
+    # Indexed: run_once's due-query has no id lower bound any more (see the
+    # module), so "never embedded" has to be findable without a full scan.
+    ai_embedded_at = Column(DateTime(timezone=True), index=True)
     ai_embed_version = Column(Integer)                          # embeddings.EMBED_VERSION when written
+    ai_embed_fp = Column(String(16))                            # ai_content_fp when this vector was written
     ai_duplicate_of = Column(Integer, nullable=True, index=True)
     # ── AI (app/ai/listing_reader.py) ──
     # What the listing's own text says that the fields do not: kind, floor,
     # document, condition, the deal flags, a confidence per field, and the
     # prompt version that read it. NULL until the reader has been through.
     ai_facts = Column(JSON)
-    ai_read_at = Column(DateTime(timezone=True))
+    ai_read_at = Column(DateTime(timezone=True), index=True)    # see ai_embedded_at
+    ai_read_fp = Column(String(16))                             # ai_content_fp at the last attempt, hit or miss
+    ai_read_attempts = Column(Integer, nullable=False, default=0, server_default="0")
     # ── AI (app/ai/photo_tagger.py) ──
     # What the vision model saw in the first photos — condition, furnished,
     # rooms, a floor plan or an ad card, a watermark, a 1–5 impression — with
@@ -199,6 +229,15 @@ class Property(Base):
     # that, not on the tags.
     ai_photo_tags = Column(JSON)
     ai_photos_at = Column(DateTime(timezone=True))
+    ai_photo_fp = Column(String(16))                            # ai_content_fp at the last attempt, hit or miss
+    ai_photo_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    # ── AI (app/crm/match_engine.py) ──
+    # When this listing was last judged against the customer list, and the
+    # content fingerprint it carried then — so an unrelated field changing
+    # (or nothing at all) does not re-open it, but a new description or a
+    # fresh reader fact does.
+    ai_matched_at = Column(DateTime(timezone=True), index=True)  # see ai_embedded_at
+    ai_match_fp = Column(String(16))
 
     # Status
     is_active = Column(Boolean, default=True)
@@ -208,7 +247,14 @@ class Property(Base):
     scraped_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+
+    # The properties list (app/api/routes/properties.py) always filters
+    # is_active and, by default, sorts by scraped_at desc — one composite
+    # index for that WHERE+ORDER BY instead of a full scan plus a sort.
+    __table_args__ = (
+        Index("ix_properties_active_scraped_at", "is_active", scraped_at.desc()),
+    )
+
     # Relationships
     city = relationship("City", back_populates="properties")
     category = relationship("Category", back_populates="properties")
@@ -292,9 +338,49 @@ class Property(Base):
         return data
 
 
+_sync_property_phone = sync_phone_columns(("phone_number", "phone_number_normalized"))
+event.listen(Property, "before_insert", _sync_property_phone)
+event.listen(Property, "before_update", _sync_property_phone)
+
+
 async def allocate_serial_no(db) -> int:
     """Next incrementing property serial (starts at 1000). Concurrency-safe
     enough for our single-writer scraper: reads MAX+1 within the caller's tx."""
     from sqlalchemy import select, func
     current_max = (await db.execute(select(func.max(Property.serial_no)))).scalar()
     return max((current_max or 999) + 1, 1000)
+
+
+# ── content fingerprint (app/ai/listing_reader.py, embeddings.py, app/crm/match_engine.py) ──
+
+# What the reader reads and the matcher scores. Deliberately not every
+# column: images, prices, filing state and the AI columns themselves are
+# left out, so uploading a photo or moving a price does not make three
+# background passes think the listing is new again.
+FP_FIELDS = (
+    "title", "description", "property_type", "category_name", "listing_type",
+    "area", "rooms", "floor", "total_floors", "year_built",
+    "district", "neighborhood", "city_name",
+    "has_elevator", "has_parking", "has_storage", "has_balcony",
+    "document_type", "unit_status", "corner_type", "frontage", "building_direction",
+)
+
+
+def content_fingerprint(prop) -> str:
+    """A short, stable hash of FP_FIELDS — the same listing hashes the same
+    whoever computes it: the event listener below, the boot-time backfill in
+    app/database.py, or a stage's own staleness check. `prop` is anything
+    with attribute access to those fields — an ORM row or a raw SQL Row."""
+    blob = "\x1f".join(str(getattr(prop, f, "") or "") for f in FP_FIELDS)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:16]
+
+
+@event.listens_for(Property, "before_insert")
+@event.listens_for(Property, "before_update")
+def _stamp_content_fingerprint(mapper, connection, target):
+    """Runs on every flush, so nothing that writes a Property — the scraper,
+    filing, the CRM routes, a script — has to remember to keep this current.
+    Recomputing it when an AI stage is the one writing (and FP_FIELDS did not
+    move) just repeats the same hash; harmless, and simpler than guessing
+    which columns changed."""
+    target.ai_content_fp = content_fingerprint(target)

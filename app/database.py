@@ -4,19 +4,66 @@ SorinFlow Divar Scraper - Database Connection
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
 import redis.asyncio as redis
 from typing import AsyncGenerator
 from app.config import get_settings
 
 settings = get_settings()
 
-# Create async engine
+# Create async engine.
+#
+# NullPool was the choice from the project's first commit, with no comment
+# and no bug tied to it in history (git log -S NullPool) — the honest read is
+# that it was never a deliberate fix, just the safe-by-construction option: it
+# opens a fresh DBAPI connection per checkout and drops it right after, so it
+# can never hand a pooled asyncpg connection to a different event loop than
+# the one that opened it. asyncpg connections are loop-bound; using one from
+# another loop fails with "attached to a different loop" or "another
+# operation is in progress".
+#
+# In the running app that risk does not exist — one uvicorn worker
+# (Dockerfile), one process, one event loop, and every background job runs as
+# asyncio.create_task() on it (app/main.py), never asyncio.run() or a second
+# loop. It only bites where a NEW loop can appear inside the SAME process:
+# pytest-asyncio hands every test function its own loop, and at least one
+# test mixes in a third loop of its own (asyncio.run() on top of a
+# TestClient's loop) — see tests/conftest.py, which is why the suite defaults
+# DB_POOL_SIZE to 0 rather than fighting that pattern from here. The one-shot
+# CLI scripts (scripts/*.py, app/services/dr_backup.py) each call
+# asyncio.run() exactly once per process and exit, so they never see a second
+# loop either. alembic's own run (migrations/env.py) opens a throwaway engine
+# of its own, not this one.
+#
+# DB_POOL_SIZE=0 keeps NullPool — an honest escape hatch, not a hidden mode,
+# for any other process that turns out to violate the one-loop assumption.
+def _pool_kwargs_for(pool_size: int, max_overflow: int) -> dict:
+    """The create_async_engine() pooling kwargs for a given DB_POOL_SIZE.
+
+    poolclass is explicit (AsyncAdaptedQueuePool) rather than left to dialect
+    defaults when pooling: a file-backed sqlite+aiosqlite URL — what most of
+    the test suite uses — defaults to NullPool on its own, and NullPool
+    rejects pool_size/max_overflow/pool_timeout outright, so leaving
+    poolclass unset broke every test module at import time the moment
+    DB_POOL_SIZE was not 0.
+    """
+    if pool_size == 0:
+        return {"poolclass": NullPool}
+    return {
+        "poolclass": AsyncAdaptedQueuePool,
+        "pool_size": pool_size,
+        "max_overflow": max_overflow,
+        "pool_pre_ping": True,    # a connection Postgres closed while idle fails fast, not mid-query
+        "pool_recycle": 1800,     # stay under any load balancer / firewall idle-close window
+        "pool_timeout": 30,
+    }
+
+
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
-    poolclass=NullPool,
-    future=True
+    future=True,
+    **_pool_kwargs_for(settings.db_pool_size, settings.db_max_overflow),
 )
 
 # Create async session factory
@@ -93,7 +140,8 @@ async def init_db():
     """
     from app.models import (property, cookie, scraping_job, lead, user,
                             crm_models, app_setting, portal, email_log,
-                            sms_log, forwarder, scrape_schedule, ai_usage, ai_chat)
+                            sms_log, forwarder, scrape_schedule, ai_usage, ai_chat,
+                            telegram_link, audit_event)
 
     # Whether this database existed before this boot decides what Alembic is
     # told below: a fresh one IS the models (stamp head); an established one
@@ -138,6 +186,10 @@ async def init_db():
                  _migrate_price_history,
                  _migrate_image_hashes,
                  _migrate_sms_panel,
+                 _migrate_portal_need_enrich,
+                 _migrate_properties_ai_pipeline,
+                 _migrate_phone_normalized,
+                 _backfill_ai_pipeline_fingerprints,
                  _seed_reference_data):
         try:
             async with engine.begin() as conn:
@@ -235,9 +287,14 @@ async def _guard(conn):
     Five seconds is far more than any of these statements needs against a free
     table, and a timeout is caught by the caller — so the pod boots and the
     migration applies on the next restart instead of taking the deploy down.
+
+    LOCAL — this transaction only. Every caller runs inside engine.begin(),
+    and with a connection pool the connection goes back to the pool after
+    boot: a plain SET would ride along into ordinary requests, which would
+    then give up on a lock after 5 s and on any query after 120 s.
     """
-    await conn.execute(text("SET lock_timeout = '5s'"))
-    await conn.execute(text("SET statement_timeout = '120s'"))
+    await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+    await conn.execute(text("SET LOCAL statement_timeout = '120s'"))
 
 
 async def _migrate_dpa_activities(conn):
@@ -308,6 +365,182 @@ async def _migrate_sms_panel(conn):
             "ON crm_sms_logs (campaign, sent_at DESC)"))
     except Exception as e:
         print(f"SMS panel migration skipped: {e}")
+
+
+async def _migrate_properties_ai_pipeline(conn):
+    """Alembic 0013's columns, also here: properties is read on every
+    request, and Alembic's own failure at boot is only logged (see the
+    module docstring), so a skipped 0013 would leave the reader/embedder/
+    matcher's staleness queries hitting columns that do not exist yet.
+    Same 8 columns, same 3 indexes (plain — the due-queries have no id
+    lower bound any more, see app/ai/listing_reader.py's run_once); the
+    catalog is asked first so a boot with nothing to add never queues for
+    the lock.
+    """
+    try:
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='properties' AND column_name='ai_content_fp' "
+            "AND table_schema=current_schema()"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE properties "
+                "ADD COLUMN IF NOT EXISTS ai_content_fp VARCHAR(16), "
+                "ADD COLUMN IF NOT EXISTS ai_embed_fp VARCHAR(16), "
+                "ADD COLUMN IF NOT EXISTS ai_read_fp VARCHAR(16), "
+                "ADD COLUMN IF NOT EXISTS ai_read_attempts INTEGER NOT NULL DEFAULT 0, "
+                "ADD COLUMN IF NOT EXISTS ai_photo_fp VARCHAR(16), "
+                "ADD COLUMN IF NOT EXISTS ai_photo_attempts INTEGER NOT NULL DEFAULT 0, "
+                "ADD COLUMN IF NOT EXISTS ai_matched_at TIMESTAMPTZ, "
+                "ADD COLUMN IF NOT EXISTS ai_match_fp VARCHAR(16)"))
+            for name, col in (("ix_properties_ai_read_at", "ai_read_at"),
+                              ("ix_properties_ai_embedded_at", "ai_embedded_at"),
+                              ("ix_properties_ai_matched_at", "ai_matched_at")):
+                await conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON properties ({col})"))
+    except Exception as e:
+        print(f"ai pipeline migration skipped: {e}")
+
+
+# Rows per UPDATE batch. Unlike _ADVERTISER_BACKFILL_BATCH this one does not
+# stop after a batch: every row must be done before the loops start (below).
+_AI_FP_BACKFILL_BATCH = 2000
+# The ceiling on one boot's share. A few thousand rows take seconds; a table
+# far past that finishes on the next boot — and says so in the log.
+_AI_FP_BACKFILL_SECONDS = 120
+
+
+async def _backfill_ai_pipeline_fingerprints(conn):
+    """ai_content_fp for rows the ORM event listener never touched (every
+    row that existed before this deploy), and — the part that actually
+    matters — the per-stage "fp at last pass" columns for whatever each
+    stage had ALREADY finished, so nothing already read, embedded or judged
+    looks freshly stale the moment this lands.
+
+    All of the table, not one batch per boot: the listener stamps
+    ai_content_fp on ANY write to a row, so a row left for a later boot
+    turns stale the first time anything touches it — the re-embed this
+    release starts writes to every row — and the reader re-reads it (money)
+    and the engine re-judges and re-announces it (Telegram). Batches keep
+    each statement small; the time ceiling keeps a huge table from holding
+    the boot, and the rest converges on the next one.
+    """
+    try:
+        import json
+        import time
+        from datetime import datetime, timezone
+        from sqlalchemy import text
+        from app.models.property import content_fingerprint
+        # plain ints from the AI modules, never a DB call
+        from app.ai.listing_reader import PROMPT_VERSION as READER_VERSION
+        from app.ai.embeddings import EMBED_VERSION
+
+        cursor_row = (await conn.execute(text(
+            "SELECT value FROM app_settings WHERE key = 'match_engine_cursor'"))).first()
+        try:
+            match_cursor = int(cursor_row[0]) if cursor_row and cursor_row[0] else None
+        except (TypeError, ValueError):
+            match_cursor = None
+
+        update = text(
+            "UPDATE properties SET ai_content_fp = :fp, "
+            "ai_read_fp = CASE WHEN :read THEN :fp ELSE ai_read_fp END, "
+            "ai_embed_fp = CASE WHEN :embed THEN :fp ELSE ai_embed_fp END, "
+            "ai_matched_at = CASE WHEN :matched THEN COALESCE(ai_matched_at, :now) ELSE ai_matched_at END, "
+            "ai_match_fp = CASE WHEN :matched THEN :fp ELSE ai_match_fp END "
+            "WHERE id = :i")
+        now = datetime.now(timezone.utc)
+        deadline = time.monotonic() + _AI_FP_BACKFILL_SECONDS
+        done, last_id = 0, 0
+        while time.monotonic() < deadline:
+            rows = (await conn.execute(text(
+                "SELECT id, title, description, property_type, category_name, listing_type, "
+                "area, rooms, floor, total_floors, year_built, district, neighborhood, city_name, "
+                "has_elevator, has_parking, has_storage, has_balcony, document_type, unit_status, "
+                "corner_type, frontage, building_direction, "
+                "ai_read_at, ai_facts, ai_embed_version, ai_embedded_at "
+                "FROM properties WHERE ai_content_fp IS NULL AND id > :after ORDER BY id LIMIT :n"
+            ), {"after": last_id, "n": _AI_FP_BACKFILL_BATCH})).all()
+            if not rows:
+                break
+            batch = []
+            for r in rows:
+                fp = content_fingerprint(r)
+                # a JSON column through a raw text() query can come back as
+                # the string itself, depending on the driver's codecs
+                facts = r.ai_facts
+                if isinstance(facts, str):
+                    try:
+                        facts = json.loads(facts)
+                    except ValueError:
+                        facts = None
+                already_read = r.ai_read_at is not None and isinstance(facts, dict) \
+                    and facts.get("prompt_version") == READER_VERSION
+                already_embedded = r.ai_embedded_at is not None and r.ai_embed_version == EMBED_VERSION
+                already_matched = match_cursor is not None and r.id <= match_cursor
+                batch.append({"fp": fp, "read": already_read, "embed": already_embedded,
+                              "matched": already_matched, "now": now, "i": r.id})
+            await conn.execute(update, batch)
+            done += len(batch)
+            last_id = rows[-1].id
+        if done:
+            left = (await conn.execute(text(
+                "SELECT count(*) FROM properties WHERE ai_content_fp IS NULL"))).scalar()
+            print(f"ai pipeline backfill: {done} rows fingerprinted, {left} left for the next boot "
+                  f"(match cursor {match_cursor if match_cursor is not None else 'unknown'})")
+    except Exception as e:
+        print(f"ai pipeline backfill skipped: {e}")
+
+
+async def _migrate_phone_normalized(conn):
+    """The normalized companion column for every phone that is looked up or
+    deduped: leads.phone_number, properties.phone_number, crm_contacts.phone,
+    crm_customers.mobile1/2. See app/models/phone.py for the normalization
+    and the ORM event that fills it on every write from here on.
+
+    No backfill here — Alembic 0012 does that once, in batches. This only
+    guards the column and its index existing, because every one of these
+    tables is read on every request and a route must not 500 for a column
+    Alembic failed to add.
+    """
+    try:
+        from sqlalchemy import text
+        # asked first: ALTER TABLE takes its lock before IF NOT EXISTS is
+        # checked, and these are the four busiest tables — every boot after
+        # the first would queue for them for nothing
+        done = (await conn.execute(text(
+            "SELECT 1 FROM information_schema.columns WHERE table_name='crm_customers' "
+            "AND column_name='mobile2_normalized' AND table_schema=current_schema()"))).first()
+        if done:
+            return
+        await conn.execute(text(
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone_number_normalized VARCHAR(20)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_leads_phone_number_normalized "
+            "ON leads (phone_number_normalized)"))
+        await conn.execute(text(
+            "ALTER TABLE properties ADD COLUMN IF NOT EXISTS phone_number_normalized VARCHAR(20)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_properties_phone_number_normalized "
+            "ON properties (phone_number_normalized)"))
+        await conn.execute(text(
+            "ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS phone_normalized VARCHAR(20)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_contacts_phone_normalized "
+            "ON crm_contacts (phone_normalized)"))
+        await conn.execute(text(
+            "ALTER TABLE crm_customers "
+            "ADD COLUMN IF NOT EXISTS mobile1_normalized VARCHAR(20), "
+            "ADD COLUMN IF NOT EXISTS mobile2_normalized VARCHAR(20)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_customers_mobile1_normalized "
+            "ON crm_customers (mobile1_normalized)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_customers_mobile2_normalized "
+            "ON crm_customers (mobile2_normalized)"))
+    except Exception as e:
+        print(f"phone normalization migration skipped: {e}")
 
 
 async def _migrate_job_resume(conn):
@@ -1008,6 +1241,38 @@ async def _migrate_price_history(conn):
         pass
 
 
+async def _migrate_portal_need_enrich(conn):
+    """portal_property_requests.need_enriched_at / need_enrich_attempts
+    (Alembic 0015 adds them too).
+
+    Also here because ordinary requests (GET /portal/admin/requests, /mine)
+    select the whole row: a skipped 0015 would 500 every one of them, not
+    just the background enrichment pass.
+    """
+    try:
+        from sqlalchemy import text
+        result = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='portal_property_requests' AND column_name='need_enriched_at' "
+            "AND table_schema=current_schema()"
+        ))
+        if result.fetchone() is None:
+            await conn.execute(text(
+                "ALTER TABLE portal_property_requests "
+                "ADD COLUMN IF NOT EXISTS need_enriched_at TIMESTAMPTZ, "
+                "ADD COLUMN IF NOT EXISTS need_enrich_attempts INTEGER NOT NULL DEFAULT 0"
+            ))
+            # Every request already here was read on the visitor's own request
+            # (the old path) — without this the background pass would read the
+            # whole history again, paying for it and refilling fields a
+            # consultant emptied since. Only now, when the column is new.
+            await conn.execute(text(
+                "UPDATE portal_property_requests SET need_enriched_at = now() "
+                "WHERE need_enriched_at IS NULL"))
+    except Exception as e:
+        print(f"portal need-enrich migration skipped: {e}")
+
+
 async def _migrate_property_quality(conn):
     """Idempotently add the scrape-quality columns to properties.
 
@@ -1077,7 +1342,8 @@ async def _seed_super_admin():
         # its port, so the readiness probe gets "connection refused", the
         # liveness probe kills the pod, and it crashloops. That is the b491c0c
         # rollout, exactly.
-        await session.execute(text("SET lock_timeout = '5s'"))
+        # LOCAL: the session's transaction only — see _guard
+        await session.execute(text("SET LOCAL lock_timeout = '5s'"))
         result = await session.execute(
             __import__("sqlalchemy", fromlist=["select"]).select(User)
         )
@@ -1264,7 +1530,7 @@ async def _seed_root():
         return
 
     async with async_session_maker() as session:
-        await session.execute(text("SET lock_timeout = '5s'"))   # see _seed_super_admin
+        await session.execute(text("SET LOCAL lock_timeout = '5s'"))   # see _seed_super_admin
         existing = await session.execute(
             select(User).where(User.username == cfg.root_username))
         if existing.scalars().first():

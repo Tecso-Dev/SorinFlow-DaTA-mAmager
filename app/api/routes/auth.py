@@ -1,9 +1,9 @@
 """
 SorinFlow Divar Scraper - Authentication API Routes
 """
-import logging
 from datetime import datetime
 from fastapi import Request, APIRouter, Depends, HTTPException
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -17,14 +17,13 @@ from app.scraper.auth import DivarAuth
 from app.config import get_settings
 from app.auth.dependencies import get_current_user_optional
 from app.auth.dependencies import require_verified_phone
+from app.services import audit
 from app.schemas import (
     LoginRequest,
     OTPVerifyRequest,
     CookieStatusResponse,
     AuthResponse
 )
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 settings = get_settings()
@@ -812,6 +811,11 @@ async def set_number_owner(
     _ip = request.client.host if request.client else "?"
     logger.warning(f"[audit] {user.username} (root) from {_ip} gave Divar number "
                    f"{cookie.phone_number} to user {new_owner.id} (was {old or '—'})")
+    await audit.record(
+        "divar_number_owner_change", actor=user, target_type="cookie", target_id=cookie.id,
+        summary=f"شمارهٔ دیوار {cookie.phone_number} به «{new_owner.full_name or new_owner.username}» منتقل شد",
+        detail={"phone_number": cookie.phone_number, "old_owner_id": old, "new_owner_id": new_owner.id},
+        request=request)
     return {"success": True, "id": cookie.id, "owner_user_id": new_owner.id,
             "owner_name": new_owner.full_name or new_owner.username,
             "changed": True, "moved_jobs": moved}
@@ -892,6 +896,10 @@ async def delete_cookie(
 
     await db.delete(cookie)
     await db.commit()
+    await audit.record(
+        "divar_session_delete", actor=user, target_type="cookie", target_id=cookie_id,
+        summary=f"نشست دیوار {phone} حذف شد", detail={"phone_number": phone},
+        request=request)
 
     if not file_removed:
         return {

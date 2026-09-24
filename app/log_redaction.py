@@ -12,8 +12,22 @@ Applied as a loguru `filter=` on both sinks, so a new call site cannot bypass
 it by forgetting to mask. Call sites are still fixed where they were obviously
 wrong; this is what catches the ones nobody thought about.
 """
+import contextvars
 import re
 from typing import Any
+
+# The request-id middleware (app/main.py) sets this for the life of one
+# request; "-" is what every background loop and startup log line carries,
+# since none of them run inside a request.
+request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default="-")
+
+
+def inject_request_id(record: dict) -> None:
+    """loguru patcher: stamp every record with the request id in scope right
+    now, so a line logged three calls deep still carries it without every
+    call site threading it through by hand."""
+    record["extra"]["request_id"] = request_id_var.get()
 
 # Persian and Arabic-Indic digits appear in scraped Divar text, so a pattern
 # written only for 0-9 would miss the numbers that matter most here.
@@ -54,6 +68,16 @@ def redact_filter(record: dict) -> bool:
     what was masked.
     """
     try:
+        exc = record.get("exception")
+        if exc is not None and exc.type is not None:
+            # A sink prints the traceback — the exception's own text included,
+            # a driver error's [parameters: …] with it — from the exception
+            # object, past this filter. Folded into the message it is redacted
+            # like the rest; still no local variables, as with diagnose=False.
+            import traceback
+            tb = "".join(traceback.format_exception(exc.type, exc.value, exc.traceback))
+            record["message"] = f"{record['message']}\n{tb.rstrip()}"
+            record["exception"] = None
         record["message"] = redact(record["message"])
     except Exception:
         # A logging path that can raise is worse than one that leaks: this runs

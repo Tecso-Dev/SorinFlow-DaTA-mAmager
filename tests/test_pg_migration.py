@@ -406,6 +406,81 @@ def test_alembic_stamps_at_boot_and_models_match_the_schema():
     assert established == [head]
 
 
+def test_0011_creates_audit_events_matching_the_model():
+    """0011 is a plain op.create_table, so on any database this suite's other
+    fixtures already touch, create_all (via init_db, or via 0001's own
+    create_all-from-current-models — see its docstring) has already built
+    audit_events and 0011's own body never runs, guard included. That would
+    make this test tautological: the schema would just be the model, compared
+    to itself. So this starts a scratch schema already stamped at 0010 —
+    where audit_events genuinely does not exist yet — the shape an
+    established production database is actually in, and upgrades it to head
+    for real, so op.create_table's own column types, nullability and index
+    names are what gets checked against AuditEvent.
+    """
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from app.models.audit_event import AuditEvent
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(root, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(root, "migrations"))
+    SCHEMA = "sf_audit_mig"
+
+    async def _go():
+        eng = create_async_engine(PG_URL)
+        async with eng.begin() as c:
+            await c.execute(text(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE"))
+            await c.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+
+        eng2 = create_async_engine(
+            PG_URL, connect_args={"server_settings": {"search_path": SCHEMA}})
+        async with eng2.begin() as c:
+            await c.execute(text(
+                "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+            await c.execute(text("INSERT INTO alembic_version VALUES ('0010')"))
+
+        def _upgrade(sync_conn):
+            cfg.attributes["connection"] = sync_conn
+            # 0011 itself, not head: the revisions after it alter tables
+            # (properties, leads, …) this scratch schema was never given
+            command.upgrade(cfg, "0011")
+
+        async with eng2.begin() as c:
+            await c.run_sync(_upgrade)
+
+        async with eng2.begin() as c:
+            cols = {r[0]: (r[1], r[2] == "YES") for r in (await c.execute(text(
+                "SELECT column_name, data_type, is_nullable FROM information_schema.columns "
+                f"WHERE table_schema='{SCHEMA}' AND table_name='audit_events'"))).all()}
+            idx = {r[0] for r in (await c.execute(text(
+                "SELECT indexname FROM pg_indexes "
+                f"WHERE schemaname='{SCHEMA}' AND tablename='audit_events'"))).all()}
+        await eng2.dispose()
+        async with eng.begin() as c:
+            await c.execute(text(f"DROP SCHEMA {SCHEMA} CASCADE"))
+        await eng.dispose()
+        return cols, idx
+
+    cols, idx = _run(_go())
+
+    model_cols = {c.name: c.nullable for c in AuditEvent.__table__.columns}
+    assert set(model_cols) == set(cols), \
+        f"columns differ: model={set(model_cols)} schema={set(cols)}"
+    for name, model_nullable in model_cols.items():
+        assert cols[name][1] == model_nullable, \
+            f"{name}: model nullable={model_nullable}, migration built {cols[name][1]}"
+    assert cols["id"] == ("bigint", False)
+    assert cols["created_at"][0] == "timestamp with time zone"
+    assert cols["detail"][0] == "json"
+
+    for name in ("ix_audit_events_created_at", "ix_audit_events_actor_created",
+                 "ix_audit_events_action_created"):
+        assert name in idx, f"{name} missing from what 0011 built"
+
+
 def test_a_second_0009_that_added_cookies_enabled_does_not_strand_is_enabled():
     """Local main once held an unpushed revision «0009» that added
     cookies.enabled; sorinflow-v2's 0009 adds cookies.is_enabled. Had the

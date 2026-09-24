@@ -822,6 +822,7 @@ function pfRender(me) {
         document.getElementById('pf-email-btn').textContent = me.email && !ok ? 'ارسال کد' : 'تغییر ایمیل';
     }
     pfLoadDivarAccounts();
+    pfLoadTelegram();
 
     // the sidebar card follows
     if (_currentUser) { Object.assign(_currentUser, me); applyRoleUI(); }
@@ -950,6 +951,80 @@ async function pfChangePassword(ev) {
         out.textContent = e.message || 'خطا'; out.className = 'small mt-2 text-danger';
     }
     return false;
+}
+
+// ── «سورین» in Telegram: my own account, linked with a one-time code ──
+let _pfTgTimer = null;
+
+async function pfLoadTelegram() {
+    const st = document.getElementById('pf-tg-status');
+    if (!st) return null;
+    try {
+        const d = await apiCall('/users/me/telegram');
+        st.innerHTML = d.linked
+            ? html`<span class="badge bg-success">وصل</span>
+                   <span dir="ltr">${d.telegram_username ? '@' + d.telegram_username : ''}</span>
+                   ${d.linked_at ? 'از ' + new Date(d.linked_at).toLocaleDateString('fa-IR') : ''}`
+            : '<span class="badge bg-secondary">وصل نیست</span>';
+        document.getElementById('pf-tg-unlink')?.classList.toggle('d-none', !d.linked);
+        return d;
+    } catch (e) {
+        st.textContent = e.message || 'خطا';
+        return null;
+    }
+}
+
+async function pfTelegramCode() {
+    let d;
+    try { d = await apiCall('/users/me/telegram/link-code', { method: 'POST' }); }
+    catch (e) { showToast('خطا', e.message, 'danger'); return; }
+    // a link made with THIS code, not the one that may already be there
+    const before = (await pfLoadTelegram())?.linked_at || null;
+    const box = document.getElementById('pf-tg-code-wrap');
+    const open = d.deep_link
+        ? html`<a class="btn btn-primary btn-sm mt-2" href="${raw(safeUrl(d.deep_link))}" target="_blank" rel="noopener">
+                 <i class="bi bi-telegram"></i> باز کردن ربات در تلگرام</a>`
+        : '';
+    box.innerHTML = html`
+        <input class="form-control form-control-sm otp-input" dir="ltr" readonly value="${d.code}" aria-label="کد اتصال">
+        <div class="pf-note mt-2">در چت خصوصی با ربات دفتر بفرستید: <b dir="ltr">${d.command}</b></div>
+        ${raw(open)}
+        <div class="pf-note mt-1" id="pf-tg-timer"></div>`;
+    box.classList.remove('d-none');
+    const until = Date.now() + d.expires_in * 1000;
+    let ticks = 0;
+    clearInterval(_pfTgTimer);
+    const tick = async () => {
+        const left = Math.max(0, Math.round((until - Date.now()) / 1000));
+        const timer = document.getElementById('pf-tg-timer');
+        if (!timer) { clearInterval(_pfTgTimer); return; }
+        if (!left) {
+            clearInterval(_pfTgTimer);
+            box.innerHTML = '<div class="pf-note">کد منقضی شد — «دریافت کد اتصال» را دوباره بزنید.</div>';
+            return;
+        }
+        timer.innerHTML = html`اعتبار کد: <span dir="ltr">${formatNumber(Math.floor(left / 60))}:${formatNumber(left % 60).padStart(2, '۰')}</span>`;
+        if (++ticks % 5) return;
+        const now = await pfLoadTelegram();
+        if (now && now.linked && now.linked_at !== before) {
+            clearInterval(_pfTgTimer);
+            box.classList.add('d-none');
+            box.innerHTML = '';
+            showToast('وصل شد', 'سورین حالا در تلگرام به شما جواب می‌دهد', 'success');
+        }
+    };
+    tick();
+    _pfTgTimer = setInterval(tick, 1000);
+}
+
+async function pfTelegramUnlink() {
+    if (!await askConfirm({ icon: 'bi-telegram', title: 'قطع اتصال تلگرام', tone: 'danger', okLabel: 'قطع اتصال',
+                            body: 'سورین دیگر در تلگرام به این حساب جواب نمی‌دهد، تا دوباره وصلش کنید.' })) return;
+    try {
+        await apiCall('/users/me/telegram', { method: 'DELETE' });
+        showToast('اتصال قطع شد', '', 'success');
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+    pfLoadTelegram();
 }
 
 // ── my Divar accounts: as many numbers as I have logged in ──
@@ -1159,7 +1234,7 @@ function copyTotpSecret() {
 }
 
 // ═══ Hash router: #/login, #/dashboard, #/properties, ... ═══════
-const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'insights', 'auth', 'forwarder', 'proxies', 'portal', 'monitoring', 'ai', 'sms', 'email', 'users', 'profile'];
+const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'insights', 'auth', 'forwarder', 'proxies', 'portal', 'monitoring', 'ai', 'sms', 'email', 'users', 'audit', 'profile'];
 let _currentSection = null;
 let _intendedRoute = null;   // deep link requested before login
 let _suppressHashNav = false;
@@ -1246,7 +1321,8 @@ const NAV_PERMISSION = {
     'nav-link-email':      'email',
 };
 // Sections that are not permission-gated but role-gated.
-const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'], 'nav-link-ai': ['root', 'super_admin'] };
+const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'], 'nav-link-ai': ['root', 'super_admin'],
+                        'nav-link-audit': ['root', 'super_admin'] };
 
 const SECTION_PERMISSION = {
     dashboard: 'stats', properties: 'properties', scraper: 'scraper',
@@ -1357,6 +1433,7 @@ const SECTION_META = {
     email:      { title: 'ایمیل',                subtitle: 'تنظیمات SMTP، قالب‌های سایت و گزارش ارسال' },
     sms:        { title: 'پیامک',                subtitle: 'تنظیمات کاوه‌نگار، ارسال تکی و گروهی، و گزارش تحویل' },
     users:      { title: 'مدیریت کاربران',       subtitle: 'حساب‌ها، دسترسی‌ها و درخواست‌های ارتقا' },
+    audit:      { title: 'رویدادها',             subtitle: 'چه کسی، چه کاری، کِی — فقط برای root و مدیر ارشد' },
     profile:    { title: 'پروفایل من',           subtitle: 'مشخصات، تماس و تأیید، امنیت حساب' },
 };
 
@@ -1371,7 +1448,7 @@ const NAV_GROUPS = {
     daily:  ['dashboard', 'properties', 'crm', 'portal'],
     scrape: ['scraper', 'auth', 'proxies', 'insights'],
     comms:  ['sms', 'email', 'forwarder'],
-    system: ['ai', 'monitoring', 'users'],
+    system: ['ai', 'monitoring', 'users', 'audit'],
 };
 const _NAV_SHUT_KEY = 'sf_nav_shut';
 
@@ -1423,6 +1500,7 @@ const PALETTE_EXTRA_WORDS = {
     ai:         'هوش ایجنت مدل توکن سورین دستیار',
     monitoring: 'لاگ سلامت سرور منابع مانیتور',
     users:      'کاربر دسترسی نقش حساب',
+    audit:      'رویداد لاگ گزارش ورود تغییر حذف audit log',
     profile:    'پروفایل من رمز عبور دو مرحله‌ای امنیت',
 };
 
@@ -1485,7 +1563,8 @@ const NAV_ICONS = {
     dashboard: 'speedometer2', properties: 'house-door', crm: 'people', portal: 'inbox',
     scraper: 'robot', auth: 'key', proxies: 'shield-check', insights: 'graph-up-arrow',
     sms: 'chat-left-text', email: 'envelope-at', forwarder: 'phone-vibrate',
-    ai: 'stars', monitoring: 'activity', users: 'person-gear', profile: 'person-circle',
+    ai: 'stars', monitoring: 'activity', users: 'person-gear', audit: 'shield-lock',
+    profile: 'person-circle',
 };
 
 function _navIcon(sec) {
@@ -1633,7 +1712,7 @@ function _defaultSection() {
 
 function _isSectionAllowed(sectionName) {
     const role = _currentUser?.role || 'visitor';
-    if (sectionName === 'users') return ['root', 'super_admin'].includes(role);
+    if (sectionName === 'users' || sectionName === 'audit') return ['root', 'super_admin'].includes(role);
     const perm = SECTION_PERMISSION[sectionName];
     return perm ? _hasPerm(perm) : true;
 }
@@ -1715,6 +1794,9 @@ function showSection(sectionName) {
         case 'email':      _applyCrmRoleVisibility(); loadEmail(); break;
         case 'users':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
                                loadUsers(); loadMaintenance(); loadBackup(); initPermsUI(); loadTickets();
+                           } break;
+        case 'audit':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
+                               loadAuditActions(); loadAuditEvents();
                            } break;
     }
 }
@@ -4245,6 +4327,16 @@ function _aiMoney(usd, toman) {
     return `${t} <span class="text-muted" dir="ltr">($${d >= 0.01 ? d.toFixed(2) : d.toFixed(4)})</span>`;
 }
 
+// The circuit breaker around the gateway: closed the whole time except right
+// after repeated failures. `until` is only set while open.
+function _aiUntil(iso) {
+    return iso ? new Date(iso).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '';
+}
+function _aiBreakerText(brk) {
+    if (!brk || brk.state === 'closed') return null;
+    return brk.until ? `مکث تا ${_aiUntil(brk.until)}` : 'در حال تلاش دوباره…';
+}
+
 async function loadAi() {
     const badge = document.getElementById('ai-badge');
     if (!badge) return;
@@ -4252,8 +4344,9 @@ async function loadAi() {
         const s = await apiCall('/ai/status');
         _aiStatus = s;
         const ok = s.configured && s.enabled;
-        badge.textContent = !s.configured ? 'تنظیم نشده' : (!s.enabled ? 'خاموش' : (s.cap_reached ? 'سقف امروز پر شد' : 'فعال'));
-        badge.className = 'badge ' + (!s.configured ? 'bg-secondary' : (!s.enabled ? 'bg-secondary' : (s.cap_reached ? 'bg-warning text-dark' : 'bg-success')));
+        const paused = _aiBreakerText(s.breaker);
+        badge.textContent = !s.configured ? 'تنظیم نشده' : (!s.enabled ? 'خاموش' : (paused || (s.cap_reached ? 'سقف امروز پر شد' : 'فعال')));
+        badge.className = 'badge ' + (!s.configured ? 'bg-secondary' : (!s.enabled ? 'bg-secondary' : (paused || s.cap_reached ? 'bg-warning text-dark' : 'bg-success')));
 
         document.getElementById('ai-conn').innerHTML = s.configured
             ? `<span class="text-success">✓ وصل است</span> <span class="text-muted small">· پروژهٔ ${esc(s.workspace || '—')}</span>`
@@ -4366,7 +4459,7 @@ function _aiAgentState(a) {
         if (st.skipped) bits.push(`بدون عکس: ${formatNumber(st.skipped)}`);
         if (st.behind != null) bits.push(`در نوبت: ${formatNumber(st.behind)}`);
     } else if (a.key === 'assistant') {
-        bits.push(`${formatNumber((st.allowed_chats || []).length)} چت مجاز`);
+        bits.push(`${formatNumber((st.linked_users || []).length)} کاربر وصل`);
         bits.push(`امروز ${formatNumber(st.questions_today || 0)} سؤال`);
         if (!st.telegram_configured) bits.push('<span class="text-warning">تلگرام تنظیم نشده</span>');
     } else {
@@ -4379,6 +4472,8 @@ function _aiAgentCard(a) {
     const st = a.state || {};
     const runnable = a.kind === 'loop';
     const err = (a.today.failed || 0);
+    const spent = a.today.cost_usd || 0;
+    const capPct = a.cap_usd ? Math.min(100, Math.round(spent / a.cap_usd * 100)) : 0;
     return `
     <div class="ai-card ${a.enabled ? '' : 'is-off'}">
         <div class="ai-card-head">
@@ -4396,6 +4491,11 @@ function _aiAgentCard(a) {
         <div class="ai-card-desc">${esc(a.desc)}</div>
         <div class="ai-card-where">${(a.where || []).map(w => `<span class="pill">${esc(w)}</span>`).join('')}</div>
         <div class="ai-card-state">${_aiAgentState(a)}</div>
+        <div class="ai-card-budget">
+            <span>بودجهٔ امروز: $${spent >= 0.01 ? spent.toFixed(2) : spent.toFixed(4)} از $${(a.cap_usd || 0).toFixed(2)}</span>
+            <div class="ai-cap-bar"><span style="width:${capPct}%" class="${capPct >= 100 ? 'is-full' : ''}"></span></div>
+            <button class="ai-photo-btn" onclick="aiAgentCapEdit(${jsArg(a.key)}, ${jsArg(a.cap_usd)})">ویرایش سقف</button>
+        </div>
         <div class="ai-card-foot">
             <span title="مدل این کار" dir="ltr">${esc(a.model || '—')}</span>
             <span>امروز: ${formatNumber(a.today.calls || 0)} فراخوانی · ${formatNumber(a.today.cost_toman || 0)} تومان</span>
@@ -4419,11 +4519,12 @@ async function loadAiScreen() {
     try {
         const s = await apiCall('/ai/overview');
         const u = s.usage || { today: {}, month: {} };
+        const paused = _aiBreakerText(s.breaker);
         const conn = document.getElementById('ai-t-conn');
-        conn.textContent = s.configured ? (s.enabled ? 'وصل است' : 'خاموش') : 'تنظیم نشده';
-        conn.className = 'stat-value ' + (s.configured && s.enabled ? 'text-success' : 'text-warning');
+        conn.textContent = paused ? 'موقتاً متوقف' : (s.configured ? (s.enabled ? 'وصل است' : 'خاموش') : 'تنظیم نشده');
+        conn.className = 'stat-value ' + (paused ? 'text-warning' : (s.configured && s.enabled ? 'text-success' : 'text-warning'));
         conn.style.fontSize = '1rem';
-        document.getElementById('ai-t-conn-sub').textContent = s.workspace ? `پروژهٔ ${s.workspace}` : 'کلید در GitHub تنظیم نشده';
+        document.getElementById('ai-t-conn-sub').textContent = paused || (s.workspace ? `پروژهٔ ${s.workspace}` : 'کلید در GitHub تنظیم نشده');
         document.getElementById('ai-t-today').textContent = `${formatNumber(u.today.cost_toman || 0)} تومان`;
         const capPct = s.cap_usd ? Math.min(100, Math.round((u.today.cost_usd || 0) / s.cap_usd * 100)) : 0;
         document.getElementById('ai-t-cap').innerHTML =
@@ -4457,6 +4558,26 @@ async function aiAgentToggle(key, on) {
         showToast(on ? 'روشن شد' : 'خاموش شد', '', 'success');
         loadAiScreen();
     } catch (e) { showToast('خطا', e.message, 'danger'); loadAiScreen(); }
+}
+
+/** This agent's own daily ceiling — on top of the shared one, so a noisy
+ * agent stops alone instead of using up everyone else's budget too. */
+async function aiAgentCapEdit(key, current) {
+    const v = await askText({
+        icon: 'bi-cash-coin', title: 'سقف روزانهٔ این ایجنت',
+        body: 'با پر شدن این سقف، فقط همین ایجنت تا فردا صبر می‌کند؛ بقیه ادامه می‌دهند.',
+        field: { label: 'سقف (دلار)', type: 'number', inputmode: 'decimal', dir: 'ltr',
+                 value: current || '0', placeholder: '۰ تا ۱۰۰',
+                 validate: v => {
+                     const n = Number(v);
+                     return v !== '' && !isNaN(n) && n >= 0 && n <= 100 ? '' : 'عددی بین ۰ و ۱۰۰ وارد کنید';
+                 } } });
+    if (v === null) return;
+    try {
+        await apiCall(`/ai/agents/${encodeURIComponent(key)}/cap`, { method: 'PUT', body: JSON.stringify({ cap_usd: Number(v) }) });
+        showToast('ذخیره شد', '', 'success');
+        loadAiScreen();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
 
 /** «اجرای یک دور» — one pass now, for an agent that otherwise waits for its tick. */
@@ -4534,9 +4655,9 @@ async function _aiAssistantStatus() {
         if (sw) sw.checked = !!s.enabled;
         const last = document.getElementById('ai-assistant-last');
         if (last) {
-            last.textContent = !s.telegram_configured ? 'تا تلگرام (کارت بکاپ) تنظیم نشود، جواب نمی‌دهد'
+            last.textContent = !s.telegram_configured ? 'تا ربات تلگرام (کارت بکاپ) تنظیم نشود، جواب نمی‌دهد'
                 : !s.configured ? 'تا هوش مصنوعی وصل نشود، جواب نمی‌دهد'
-                : `${formatNumber(s.allowed_chats.length)} چت مجاز · امروز ${formatNumber(s.questions_today)} سؤال${s.last ? ' · آخری: «' + (s.last.question || '').slice(0, 40) + '»' : ''}`;
+                : `${formatNumber((s.linked_users || []).length)} کاربر وصل · امروز ${formatNumber(s.questions_today)} سؤال${s.last ? ' · آخری: «' + (s.last.question || '').slice(0, 40) + '»' : ''}`;
         }
     } catch (_) {}
 }
@@ -4544,7 +4665,7 @@ async function _aiAssistantStatus() {
 async function aiAssistantToggle(on) {
     try {
         await apiCall('/ai/assistant/settings', { method: 'PUT', body: JSON.stringify({ enabled: !!on }) });
-        showToast(on ? 'روشن شد' : 'خاموش شد', on ? 'سورین به چت‌های مجاز جواب می‌دهد' : 'سورین دیگر جواب نمی‌دهد', 'success');
+        showToast(on ? 'روشن شد' : 'خاموش شد', on ? 'سورین به کاربرهای وصل‌شده جواب می‌دهد' : 'سورین دیگر جواب نمی‌دهد', 'success');
         _aiAssistantStatus();
     } catch (e) { showToast('خطا', e.message, 'danger'); _aiAssistantStatus(); }
 }
@@ -7325,7 +7446,10 @@ function _toDateStr(jsDate) {
 function jalaliToGregorian(jalaliStr) {
     if (!jalaliStr || !jalaliStr.trim()) return '';
     try {
-        const parts = jalaliStr.trim().split('/').map(Number);
+        // the placeholders say ۱۴۰۵/۰۱/۰۱ — Persian (and Arabic-Indic) digits are what people type
+        const ascii = jalaliStr.trim().replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+                                      .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+        const parts = ascii.split('/').map(Number);
         if (parts.length < 3 || parts.some(isNaN)) return '';
         const jsDate = new persianDate(parts).toDate();
         const result = _toDateStr(jsDate);
@@ -7998,38 +8122,68 @@ function _matchCriteria(intent) {
     return bits.join(' • ');
 }
 
+/** Renders the fetched match list into the modal body. `emptyMsg` is only
+ *  given on the first load — a background re-check (see _pollMatchReasons)
+ *  that comes back with nothing new leaves whatever is already on screen. */
+function _renderMatchModal(data, emptyMsg) {
+    const items = data.items || [];
+    const criteria = _matchCriteria(data.intent);
+    if (!items.length) {
+        if (!emptyMsg) return;
+        // an empty list is almost always a criterion that is too narrow,
+        // so show what was searched for instead of a bare "not found"
+        document.getElementById('match-modal-body').innerHTML = `
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-search" style="font-size:2rem"></i>
+                <p class="mt-3">${emptyMsg}</p>
+                ${criteria ? `<p class="small">جستجو بر اساس: ${criteria}<br>
+                    اگر انتظار نتیجه داشتید، این معیارها را در پروندهٔ مشتری بازبینی کنید.</p>` : ''}
+            </div>`;
+        return;
+    }
+    const src = data.source?.title || data.source?.name || '';
+    const s0 = data.source || {};
+    const money = s0.listing_type === 'rent'
+        ? (s0.deposit || s0.rent_price ? `ودیعه ${s0.deposit ? formatPrice(s0.deposit) : '—'} · اجاره ${s0.rent_price ? formatPrice(s0.rent_price) : 'ندارد'}${s0.comparable ? ` — رهن کامل ≈ ${formatPrice(s0.comparable)}` : ''}` : '')
+        : (s0.price ? `قیمت ${formatPrice(s0.price)}` : '');
+    document.getElementById('match-modal-body').innerHTML = `
+        ${src ? `<div class="match-source">مبنای تطابق: <b>${esc(src)}</b> — ${formatNumber(items.length)} مورد یافت شد
+            ${money ? `<div class="small mt-1 match-source-money">${money}${s0.listing_type === 'rent' ? ' <span class="text-muted">· اختلاف قیمت‌ها روی رهن کامل حساب می‌شود</span>' : ''}</div>` : ''}
+            ${criteria ? `<div class="small mt-1">${criteria}</div>` : ''}</div>` : ''}
+        ${_matchGroups(items, data.source)}`;
+}
+
+/** The Persian reason for each row is written by the model in the background
+ *  (app/services/match_service.py _attach_reasons) — a page never waits the
+ *  up to 90 s that can take. `reasons_pending` means it is still being
+ *  written; a few light re-checks pick it up with no spinner that never
+ *  ends, and give up quietly if it is still not ready — the ranking already
+ *  showed without it. Stops on its own if a different card was opened
+ *  meanwhile (modalEl.dataset.matchUrl no longer matches `url`). */
+function _pollMatchReasons(url, modalEl, triesLeft) {
+    if (triesLeft <= 0) return;
+    setTimeout(async () => {
+        if (modalEl.dataset.matchUrl !== url) return;
+        try {
+            const data = await apiCall(url);
+            if (modalEl.dataset.matchUrl !== url) return;
+            _renderMatchModal(data, null);
+            if (data.reasons_pending) _pollMatchReasons(url, modalEl, triesLeft - 1);
+        } catch (e) { /* quietly give up — the ranking already showed without it */ }
+    }, 4000);
+}
+
 async function _openMatchModal(title, url, emptyMsg) {
     const modalEl = document.getElementById('matchModal');
+    modalEl.dataset.matchUrl = url;
     document.getElementById('match-modal-title').innerHTML = title;
     document.getElementById('match-modal-body').innerHTML =
         '<div class="text-center py-5 text-muted"><span class="spinner-border"></span><p class="mt-3">در حال یافتن بهترین موارد...</p></div>';
     new bootstrap.Modal(modalEl).show();
     try {
         const data = await apiCall(url);
-        const items = data.items || [];
-        const criteria = _matchCriteria(data.intent);
-        if (!items.length) {
-            // an empty list is almost always a criterion that is too narrow,
-            // so show what was searched for instead of a bare "not found"
-            document.getElementById('match-modal-body').innerHTML = `
-                <div class="text-center py-5 text-muted">
-                    <i class="bi bi-search" style="font-size:2rem"></i>
-                    <p class="mt-3">${emptyMsg}</p>
-                    ${criteria ? `<p class="small">جستجو بر اساس: ${criteria}<br>
-                        اگر انتظار نتیجه داشتید، این معیارها را در پروندهٔ مشتری بازبینی کنید.</p>` : ''}
-                </div>`;
-            return;
-        }
-        const src = data.source?.title || data.source?.name || '';
-        const s0 = data.source || {};
-        const money = s0.listing_type === 'rent'
-            ? (s0.deposit || s0.rent_price ? `ودیعه ${s0.deposit ? formatPrice(s0.deposit) : '—'} · اجاره ${s0.rent_price ? formatPrice(s0.rent_price) : 'ندارد'}${s0.comparable ? ` — رهن کامل ≈ ${formatPrice(s0.comparable)}` : ''}` : '')
-            : (s0.price ? `قیمت ${formatPrice(s0.price)}` : '');
-        document.getElementById('match-modal-body').innerHTML = `
-            ${src ? `<div class="match-source">مبنای تطابق: <b>${esc(src)}</b> — ${formatNumber(items.length)} مورد یافت شد
-                ${money ? `<div class="small mt-1 match-source-money">${money}${s0.listing_type === 'rent' ? ' <span class="text-muted">· اختلاف قیمت‌ها روی رهن کامل حساب می‌شود</span>' : ''}</div>` : ''}
-                ${criteria ? `<div class="small mt-1">${criteria}</div>` : ''}</div>` : ''}
-            ${_matchGroups(items, data.source)}`;
+        _renderMatchModal(data, emptyMsg);
+        if (data.reasons_pending) _pollMatchReasons(url, modalEl, 3);
     } catch (e) {
         document.getElementById('match-modal-body').innerHTML =
             `<div class="alert alert-danger">خطا در تطابق‌سازی: ${esc(e.message)}</div>`;
@@ -11728,6 +11882,109 @@ async function decideTicket(id, approve) {
         if (typeof loadUsers === 'function') loadUsers();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
+
+// ── رویدادها: the audit trail (root/super_admin only) ─────────────────────────
+let _auditPage = 1;
+const AUDIT_PAGE_SIZE = 50;
+
+function _auditWhen(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return `${d.toLocaleDateString('fa-IR')} ${d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function _auditFilterChanged() {
+    _auditPage = 1;
+    loadAuditEvents();
+}
+
+async function loadAuditActions() {
+    const sel = document.getElementById('audit-filter-action');
+    if (!sel || sel.dataset.loaded) return;
+    try {
+        const { items } = await apiCall('/audit/actions');
+        sel.insertAdjacentHTML('beforeend',
+            items.map(a => `<option value="${esc(a.key)}">${esc(a.label)}</option>`).join(''));
+        sel.dataset.loaded = '1';
+    } catch (e) {
+        // the filter list is a nicety; the table itself still works without it
+    }
+}
+
+function goToAuditPage(page) {
+    _auditPage = Math.max(page, 1);
+    loadAuditEvents();
+}
+
+async function loadAuditEvents() {
+    const body = document.getElementById('audit-rows');
+    const empty = document.getElementById('audit-empty');
+    const countEl = document.getElementById('audit-count');
+    if (!body) return;
+
+    const actor = document.getElementById('audit-filter-actor')?.value.trim() || '';
+    const action = document.getElementById('audit-filter-action')?.value || '';
+    const sinceJ = document.getElementById('audit-filter-since')?.value.trim() || '';
+    const untilJ = document.getElementById('audit-filter-until')?.value.trim() || '';
+    const since = sinceJ ? jalaliToGregorian(sinceJ) : '';
+    const until = untilJ ? jalaliToGregorian(untilJ) : '';
+    if ((sinceJ && !since) || (untilJ && !until)) {
+        showToast('خطا', 'تاریخ را به شکل ۱۴۰۵/۰۱/۰۱ وارد کنید', 'danger');
+        return;
+    }
+
+    const qs = new URLSearchParams({
+        limit: String(AUDIT_PAGE_SIZE),
+        offset: String((_auditPage - 1) * AUDIT_PAGE_SIZE),
+    });
+    if (actor) qs.set('actor', actor);
+    if (action) qs.set('action', action);
+    if (since) qs.set('since', since);
+    if (until) qs.set('until', until);
+
+    body.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-4">در حال بارگذاری…</td></tr>';
+    empty.classList.add('d-none');
+    try {
+        const { items, total } = await apiCall(`/audit/events?${qs.toString()}`);
+        if (countEl) countEl.textContent = `${formatNumber(total)} رویداد`;
+        body.innerHTML = items.map(row => html`
+            <tr>
+                <td class="text-nowrap">${_auditWhen(row.created_at)}</td>
+                <td>${row.actor_username || '—'}</td>
+                <td>${row.action_label}</td>
+                <td>${row.target_type ? `${row.target_type} #${row.target_id ?? ''}` : '—'}</td>
+                <td class="text-nowrap" dir="ltr">${row.ip || '—'}</td>
+            </tr>`).join('');
+        empty.classList.toggle('d-none', items.length > 0);
+        _renderAuditPagination(total);
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="5" class="text-center text-danger p-4">${esc(e.message)}</td></tr>`;
+    }
+}
+
+function _renderAuditPagination(total) {
+    const wrap = document.getElementById('audit-pagination');
+    if (!wrap) return;
+    const pages = Math.max(Math.ceil(total / AUDIT_PAGE_SIZE), 1);
+    if (pages <= 1) { wrap.innerHTML = ''; return; }
+    const add = (label, page, opts = {}) =>
+        `<li class="page-item ${opts.active ? 'active' : ''} ${opts.disabled ? 'disabled' : ''}">`
+        + (opts.gap ? `<span class="page-link">…</span>`
+                    : `<a class="page-link" href="#" onclick="goToAuditPage(${page}); return false;">${label}</a>`)
+        + '</li>';
+    let out = add('‹', Math.max(_auditPage - 1, 1), { disabled: _auditPage === 1 });
+    let last = 0;
+    for (let i = 1; i <= pages; i++) {
+        if (i === 1 || i === pages || Math.abs(i - _auditPage) <= 2) {
+            if (i - last > 1) out += add('', 0, { gap: true });
+            out += add(formatNumber(i), i, { active: i === _auditPage });
+            last = i;
+        }
+    }
+    out += add('›', Math.min(_auditPage + 1, pages), { disabled: _auditPage === pages });
+    wrap.innerHTML = `<ul class="pagination pagination-sm justify-content-center mb-0">${out}</ul>`;
+}
+
 
 // ── visitor property requests ────────────────────────────────────────────────
 const PORTAL_STATUS = {

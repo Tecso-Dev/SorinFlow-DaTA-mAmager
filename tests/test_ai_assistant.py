@@ -3,11 +3,13 @@
 
 The only real agent: the model picks a tool, reads what comes back, and
 answers. Its power is exactly its tools — every one a read, none carrying a
-phone number out — and who may ask is the backup's chat list.
+phone number out — and who may ask is a linked panel user, in private
+(tests/test_assistant_per_user.py has the links, the scope and the names).
 """
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -22,8 +24,11 @@ os.environ.setdefault("IMAGES_PATH", "/tmp")
 
 from app.services import llm  # noqa: E402
 from app.ai import assistant  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
+# the asker: the tools are stubbed here, so only the account's standing matters
+SOBHAN = User(id=1, username="sobhan", full_name="سبحان", role="root", is_active=True, permissions=[])
 JS = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
 HTML = (ROOT / "frontend/index.html").read_text(encoding="utf-8")
 _REAL_CLIENT = httpx.AsyncClient
@@ -62,7 +67,7 @@ def configured(monkeypatch):
     async def record(agent, job, model, usage, ms, ok, error=""):
         ledger.append({"agent": agent, "ok": ok})
 
-    async def spent(_db):
+    async def spent(_db, agent=None):
         return 0.0
     monkeypatch.setattr(llm.secret_box, "get_many", get_many)
     monkeypatch.setattr(llm.secret_box, "put", put)
@@ -70,6 +75,10 @@ def configured(monkeypatch):
     monkeypatch.setattr(assistant.secret_box, "put", put)
     monkeypatch.setattr(llm, "_record", record)
     monkeypatch.setattr(llm, "spent_today", spent)
+
+    async def no_customers(_db, _user):
+        return {}
+    monkeypatch.setattr(assistant, "_customer_names", no_customers)
     return {"rows": rows, "ledger": ledger}
 
 
@@ -89,12 +98,19 @@ class _Db:
         pass
 
 
+def _linked(monkeypatch, accounts):
+    """Telegram account id → the panel user it is linked to."""
+    async def linked_user(_db, telegram_user_id):
+        return accounts.get(int(telegram_user_id))
+    monkeypatch.setattr(assistant, "linked_user", linked_user)
+
+
 class TestTheConversation:
 
     def test_the_model_reads_a_tool_and_answers_from_it(self, configured, monkeypatch):
         seen = []
 
-        async def fake_queue(db):
+        async def fake_queue(db, user):
             return {"calls_due": 18, "matches_waiting": 3, "price_drops_new": 1, "listings_today": 40, "listings_active": 812}
         monkeypatch.setitem(assistant._TOOL_FUNCS, "queue_status", fake_queue)
 
@@ -112,16 +128,17 @@ class TestTheConversation:
             return _turn(content="۱۸ تماس در صف است و ۳ تطبیق منتظر.")
         _gateway(monkeypatch, handler)
         db = _Db()
-        out = asyncio.run(assistant.answer(db, "صف تماس چطوره؟", who="سبحان", chat_id="542901635"))
+        out = asyncio.run(assistant.answer(db, "صف تماس چطوره؟", user=SOBHAN, chat_id="542901635"))
         assert out["text"] == "۱۸ تماس در صف است و ۳ تطبیق منتظر." and out["tools"] == ["queue_status"] and out["ok"]
         row = db.added[-1]
         assert row.question == "صف تماس چطوره؟" and row.answer == out["text"] and row.tools == ["queue_status"] and row.chat_id == "542901635"
+        assert row.who == "sobhan", "who asked is the panel account, not whatever name Telegram shows"
         assert all(r["agent"] == "assistant" for r in configured["ledger"])
 
     def test_after_the_last_round_the_model_must_speak(self, configured, monkeypatch):
         calls = []
 
-        async def fake_queue(db):
+        async def fake_queue(db, user):
             return {"calls_due": 1}
         monkeypatch.setitem(assistant._TOOL_FUNCS, "queue_status", fake_queue)
 
@@ -131,20 +148,20 @@ class TestTheConversation:
                 return _turn(tool_calls=[{"id": f"c{len(calls)}", "type": "function", "function": {"name": "queue_status", "arguments": "{}"}}])
             return _turn(content="جواب نهایی")
         _gateway(monkeypatch, handler)
-        out = asyncio.run(assistant.answer(_Db(), "x"))
+        out = asyncio.run(assistant.answer(_Db(), "x", user=SOBHAN))
         assert out["text"] == "جواب نهایی" and len(out["tools"]) == assistant.MAX_ROUNDS
         assert calls == [True] * assistant.MAX_ROUNDS + [False], "the final turn carries no tools, so it cannot stall"
 
     def test_a_bad_tool_name_or_arguments_is_an_answer_not_a_crash(self):
-        out = asyncio.run(assistant.run_tool(_Db(), "delete_everything", "{}"))
+        out = asyncio.run(assistant.run_tool(_Db(), SOBHAN, "delete_everything", "{}"))
         assert "وجود ندارد" in out["error"]
-        out = asyncio.run(assistant.run_tool(_Db(), "property", "not json"))
+        out = asyncio.run(assistant.run_tool(_Db(), SOBHAN, "property", "not json"))
         assert "error" in out
 
     def test_the_question_and_the_tool_results_are_masked(self, configured, monkeypatch):
         seen = []
 
-        async def fake_prop(db, serial_no):
+        async def fake_prop(db, user, serial_no):
             return {"found": True, "title": "x", "owner_phone_leak": "09141112233"}
         monkeypatch.setitem(assistant._TOOL_FUNCS, "property", fake_prop)
 
@@ -154,20 +171,20 @@ class TestTheConversation:
                 return _turn(tool_calls=[{"id": "c1", "type": "function", "function": {"name": "property", "arguments": '{"serial_no": 5}'}}])
             return _turn(content="ok")
         _gateway(monkeypatch, handler)
-        asyncio.run(assistant.answer(_Db(), "ملک ۵ رو بده، شماره‌م 09121234567"))
+        asyncio.run(assistant.answer(_Db(), "ملک ۵ رو بده، شماره‌م 09121234567", user=SOBHAN))
         assert "09121234567" not in seen[0]["messages"][-1]["content"]
         assert "09141112233" not in seen[1]["messages"][-1]["content"], "a tool result never carries a number out"
 
     def test_the_model_being_down_is_a_polite_answer(self, configured, monkeypatch):
         _gateway(monkeypatch, lambda r: httpx.Response(503, text="down"))
         db = _Db()
-        out = asyncio.run(assistant.answer(db, "x"))
+        out = asyncio.run(assistant.answer(db, "x", user=SOBHAN))
         assert not out["ok"] and "دسترسی ندارم" in out["text"] and db.added[-1].ok is False
 
 
 class TestTelegram:
 
-    def test_only_the_backups_chats_are_answered_and_every_chat_is_remembered(self, configured, monkeypatch):
+    def test_only_a_linked_user_is_answered_and_every_chat_is_remembered(self, configured, monkeypatch):
         sent = []
 
         async def fake_tg(token, method, route, **kw):
@@ -176,14 +193,16 @@ class TestTelegram:
         from app.services import backup_service as bk
         monkeypatch.setattr(bk, "tg_request", fake_tg)
 
-        async def fake_answer(db, text, **kw):
+        async def fake_answer(db, text, *, user, chat_id=""):
+            assert user is SOBHAN, "the question is read with the linked account's rights"
             return {"text": "جواب", "tools": [], "ms": 1, "ok": True}
         monkeypatch.setattr(assistant, "answer", fake_answer)
+        _linked(monkeypatch, {542901635: SOBHAN})
         db = _Db()
-        stranger = {"update_id": 1, "message": {"chat": {"id": 999, "first_name": "غریبه", "type": "private"}, "text": "سلام"}}
-        friend = {"update_id": 2, "message": {"chat": {"id": 542901635, "first_name": "سبحان", "type": "private"}, "from": {"first_name": "سبحان"}, "text": "صف تماس؟"}}
-        assert asyncio.run(assistant.handle_update(db, stranger, allowed=["542901635"], token="t", route={})) is None
-        assert asyncio.run(assistant.handle_update(db, friend, allowed=["542901635"], token="t", route={})) == "جواب"
+        stranger = {"update_id": 1, "message": {"chat": {"id": 999, "first_name": "غریبه", "type": "private"}, "from": {"id": 999}, "text": "سلام"}}
+        friend = {"update_id": 2, "message": {"chat": {"id": 542901635, "first_name": "سبحان", "type": "private"}, "from": {"id": 542901635, "first_name": "سبحان"}, "text": "صف تماس؟"}}
+        assert asyncio.run(assistant.handle_update(db, stranger, token="t", route={})) is None
+        assert asyncio.run(assistant.handle_update(db, friend, token="t", route={})) == "جواب"
         assert sent == [("sendChatAction", 542901635), ("sendMessage", 542901635)], "the stranger got nothing, not even a refusal"
         seen = asyncio.run(assistant.seen_chats(db))
         assert [c["id"] for c in seen] == ["542901635", "999"], "both are remembered for «پیدا کن»"
@@ -197,8 +216,9 @@ class TestTelegram:
         from app.services import backup_service as bk
         monkeypatch.setattr(bk, "tg_request", fake_tg)
         _gateway(monkeypatch, lambda r: (_ for _ in ()).throw(AssertionError("no model call for /start")))
-        upd = {"update_id": 3, "message": {"chat": {"id": 1, "type": "private"}, "text": "/start@Sorinflow_bot"}}
-        out = asyncio.run(assistant.handle_update(_Db(), upd, allowed=["1"], token="t", route={}))
+        _linked(monkeypatch, {1: SOBHAN})
+        upd = {"update_id": 3, "message": {"chat": {"id": 1, "type": "private"}, "from": {"id": 1}, "text": "/start@Sorinflow_bot"}}
+        out = asyncio.run(assistant.handle_update(_Db(), upd, token="t", route={}))
         assert out == assistant.HELP and sent and sent[0].startswith("سلام")
 
     def test_the_offset_moves_past_everything_seen(self, configured, monkeypatch):
@@ -215,12 +235,13 @@ class TestTelegram:
             if method == "getUpdates":
                 assert kw["params"]["offset"] == 10 and kw["params"]["timeout"] == assistant.POLL_TIMEOUT
                 return httpx.Response(200, json={"ok": True, "result": [
-                    {"update_id": 10, "message": {"chat": {"id": 2, "type": "private"}, "text": "x"}},
-                    {"update_id": 11, "message": {"chat": {"id": 1, "type": "private"}, "text": "/help"}}]}), None
+                    {"update_id": 10, "message": {"chat": {"id": 2, "type": "private"}, "from": {"id": 2}, "text": "x"}},
+                    {"update_id": 11, "message": {"chat": {"id": 1, "type": "private"}, "from": {"id": 1}, "text": "/help"}}]}), None
             return httpx.Response(200, json={"ok": True}), None
         monkeypatch.setattr(bk, "resolve_telegram", fake_resolve)
         monkeypatch.setattr(bk, "resolve_route", fake_route)
         monkeypatch.setattr(bk, "tg_request", fake_tg)
+        _linked(monkeypatch, {1: SOBHAN})
         res = asyncio.run(assistant.poll_once(_Db()))
         assert res == {"updates": 2, "answered": 1, "offset": 12}
         assert configured["rows"][assistant.KEY_OFFSET] == "12"
@@ -241,12 +262,14 @@ class TestTheShape:
         names = {t["function"]["name"] for t in assistant.TOOLS}
         assert names == set(assistant._TOOL_FUNCS) == {"count_listings", "search_listings", "queue_status", "customers", "property", "today_digest"}
         src = (ROOT / "app/ai/assistant.py").read_text(encoding="utf-8")
-        # the module writes exactly one row (the question) and moves its own
-        # cursor; nothing of the office's data is touched
+        # the module writes the question's row and a Telegram link's, and
+        # moves its own cursor; nothing of the office's data is touched
         for verb in ("db.delete(", "sa.update(", "sqlalchemy import update", "sqlalchemy import insert",
                      "db.add(Property", "db.add(Customer", "db.add(Lead"):
             assert verb not in src, verb
-        assert src.count("db.add(") == 1 and "db.add(AiChat(" in src
+        assert src.count("db.add(") == 2 and "db.add(AiChat(" in src and "db.add(TelegramLink(" in src
+        # the one SQL delete is the old link a new one replaces (r.delete is Redis)
+        assert re.findall(r"(?<![.\w])delete\((\w+)", src) == ["TelegramLink"]
         assert '"phone": "در پنل"' in src and '"owner_phone": "در پنل"' in src
         assert "شمارهٔ تلفن مالک یا مشتری را هرگز ننویس" in assistant.PERSONA
 

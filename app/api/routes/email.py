@@ -15,7 +15,7 @@ Two deliberate separations:
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -27,6 +27,7 @@ from app.auth.permissions import ROLE_ROOT, ROLE_SUPER_ADMIN
 from app.database import get_db
 from app.models.email_log import EmailLog
 from app.models.user import User
+from app.services import audit
 from app.services import email_service as mail
 from app.services import email_templates as tpl
 from app.services import secret_box
@@ -94,7 +95,8 @@ async def get_email_settings(db: AsyncSession = Depends(get_db),
 @router.put("/settings")
 async def put_email_settings(payload: EmailSettingsIn,
                              db: AsyncSession = Depends(get_db),
-                             user: User = _super_admin):
+                             user: User = _super_admin,
+                             request: Request = None):
     actor = user.username
 
     if payload.security is not None and payload.security not in ("starttls", "ssl", "none"):
@@ -130,6 +132,18 @@ async def put_email_settings(payload: EmailSettingsIn,
     if payload.enabled is not None:
         await secret_box.put(db, mail.KEY_ENABLED,
                              "true" if payload.enabled else "false", actor)
+
+    # Field names only — never a value, since one of them is the SMTP password.
+    changed = [name for name, v in (
+        ("رمز SMTP", payload.password), ("هاست", payload.host), ("کاربر", payload.user),
+        ("نام فرستنده", payload.from_name), ("پاسخ به", payload.reply_to),
+        ("ایمیل فرستنده", payload.from_email), ("رمزگذاری", payload.security),
+        ("پورت", payload.port), ("فعال/غیرفعال", payload.enabled))
+        if v is not None]
+    if changed:
+        await audit.record("email_settings_save", actor=user,
+                           summary="تنظیمات ایمیل تغییر کرد: " + "، ".join(changed),
+                           detail={"fields": changed}, request=request)
 
     return await get_email_settings(db, user)
 

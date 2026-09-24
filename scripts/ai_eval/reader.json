@@ -1,0 +1,104 @@
+[
+  {
+    "id": "R1",
+    "title": "آپارتمان ۹۵ متری خ گلها، طبقه دوم، سند تک‌برگ",
+    "description": "آپارتمان ۹۵ متر، ۲ خواب، طبقه ۲ از ۴، ساخت ۱۳۹۹، آسانسور، پارکینگ و انباری دارد. سند تک‌برگ به نام مالک. نوساز و تمیز، قیمت مقطوع.",
+    "property_type": "آپارتمان", "listing_type": "buy", "area": 95, "rooms": 2,
+    "district": null, "total_price": 4300000000,
+    "expected": {"kind": "apartment", "floor": 2, "total_floors": 4, "year_built": 1399,
+                 "document": "تک‌برگ", "condition": "نوساز", "has_elevator": true,
+                 "has_parking": true, "has_storage": true, "district": "خیابان گلها", "negotiable": false}
+  },
+  {
+    "id": "R2",
+    "title": "مغازه ۲۵ متری بلوار والفجر، رهن و اجاره",
+    "description": "مغازه ۲۵ متر، بر ۳ متر، تخلیه و آماده تحویل. ۱۰۰ میلیون رهن و ۶ میلیون اجاره، قابل تبدیل. مناسب کافه یا لوازم آرایشی.",
+    "property_type": "مغازه", "listing_type": "rent", "area": 25,
+    "district": "والفجر", "deposit": 100000000, "rent_price": 6000000,
+    "expected": {"kind": "shop", "vacant": true, "convertible": true, "district": "والفجر",
+                 "suitable_for": ["کافه", "لوازم آرایشی"]}
+  },
+  {
+    "id": "R3",
+    "title": "خانه قدیمی ۱۵۰ متری بلوار سعدی",
+    "description": "خانه ویلایی کلنگی، ۱۵۰ متر زمین، حیاط بزرگ. سند وقفی، بدون سند رسمی. مالک حاضر به معاوضه با آپارتمان است.",
+    "property_type": "خانه", "listing_type": "buy", "area": 150,
+    "district": "بلوار سعدی", "total_price": 6000000000,
+    "expected": {"kind": "house", "document": "وقفی", "condition": "کلنگی", "exchange": true,
+                 "district": "بلوار سعدی", "red_flags": ["وقفی", "بدون سند"]}
+  },
+  {
+    "id": "R4",
+    "title": "دفتر اداری ۶۰ متری خیابان مدرس، اجاره",
+    "description": "دفتر اداری در طبقه سوم با آسانسور. سند مشاع بین چند مالک. اجاره قابل مذاکره است.",
+    "property_type": "اداری", "listing_type": "rent", "area": 60,
+    "district": "خیابان مدرس", "deposit": 50000000, "rent_price": 12000000,
+    "expected": {"kind": "office", "floor": 3, "document": "مشاع", "has_elevator": true, "negotiable": true}
+  },
+  {
+    "id": "R5",
+    "title": "آپارتمان ۸۰ متری بلوار امین، طبقه اول",
+    "description": "آپارتمان بازسازی‌شده با بالکن بزرگ. طبقه واقعی ۴ است، فیلد سایت اشتباه طبقه ۱ ثبت کرده. کابینت و کفپوش نو.",
+    "property_type": "آپارتمان", "listing_type": "buy", "area": 80, "rooms": 2, "floor": 1,
+    "district": "بلوار امین", "total_price": 3500000000,
+    "expected": {"kind": "apartment", "floor": 4, "condition": "بازسازی‌شده", "has_balcony": true}
+  },
+  {
+    "id": "R6",
+    "title": "زمین ۴۰۰ متری جاده امامزاده",
+    "description": "زمین کشاورزی ۴۰۰ متر با سند تک‌برگ، تخلیه و آماده تحویل، مناسب احداث انبار.",
+    "property_type": "زمین", "listing_type": "buy", "area": 400,
+    "district": "جاده امامزاده", "total_price": 2000000000,
+    "expected": {"kind": "land", "document": "تک‌برگ", "vacant": true, "suitable_for": ["انبار"]}
+  },
+  {
+    "id": "R7",
+    "title": "آپارتمان ۶۰ متری خیابان فرهنگ، اجاره",
+    "description": "آپارتمان یک‌خوابه، پارکینگ ندارد. آسانسور دارد. مبلغ اجاره قابل مذاکره است.",
+    "property_type": "آپارتمان", "listing_type": "rent", "area": 60, "rooms": 1,
+    "district": "خیابان فرهنگ", "deposit": 80000000, "rent_price": 4000000,
+    "expected": {"kind": "apartment", "has_parking": false, "has_elevator": true, "negotiable": true}
+  },
+  {
+    "id": "R8",
+    "title": "مغازه ۳۵ متری خیابان براعتی",
+    "description": "مغازه در رهن بانک است، انتقال سند منوط به تسویه وام. مناسب موبایل‌فروشی. تخلیه.",
+    "property_type": "مغازه", "listing_type": "buy", "area": 35,
+    "district": "خیابان براعتی", "total_price": 2200000000,
+    "expected": {"kind": "shop", "vacant": true, "suitable_for": ["موبایل‌فروشی"],
+                 "red_flags": ["در رهن بانک"]}
+  },
+  {
+    "id": "R9",
+    "title": "آپارتمان ۱۰۵ متری خیابان امام، ساخت ۱۴۰۰",
+    "description": "آپارتمان سه‌خواب، ساخت ۱۴۰۰، سند تک‌برگ آماده. آسانسور و پارکینگ مزاحم ندارد.",
+    "property_type": "آپارتمان", "listing_type": "buy", "area": 105, "rooms": 3,
+    "district": "خیابان امام", "total_price": 5800000000,
+    "expected": {"kind": "apartment", "year_built": 1400, "document": "تک‌برگ", "has_elevator": true}
+  },
+  {
+    "id": "R10",
+    "title": "خانه قدیمی‌ساز ۱۸۰ متری خیابان مولوی",
+    "description": "خانه قدیمی با حیاط، مناسب کافه یا مهدکودک. مالک حاضر به معاوضه با خودرو است.",
+    "property_type": "خانه", "listing_type": "buy", "area": 180,
+    "district": "خیابان مولوی", "total_price": 4800000000,
+    "expected": {"kind": "house", "condition": "قدیمی", "exchange": true,
+                 "suitable_for": ["کافه", "مهدکودک"]}
+  },
+  {
+    "id": "R11",
+    "title": "آپارتمان ۷۵ متری بلوار والفجر، اجاره",
+    "description": "آپارتمان با انباری و بالکن. سند هنوز در دست اقدام است و نوع آن مشخص نیست.",
+    "property_type": "آپارتمان", "listing_type": "rent", "area": 75, "rooms": 2,
+    "district": "والفجر", "deposit": 150000000, "rent_price": 5000000,
+    "expected": {"kind": "apartment", "has_storage": true, "has_balcony": true, "document": "نامشخص"}
+  },
+  {
+    "id": "R12",
+    "title": "دفتر اداری ۴۵ متری خیابان کاشانی",
+    "description": "دفتر اداری معمولی بدون آسانسور در طبقه همکف. سند مشاع با دو مالک دیگر.",
+    "property_type": "اداری", "listing_type": "buy", "area": 45,
+    "district": "خیابان کاشانی", "total_price": 2100000000,
+    "expected": {"kind": "office", "has_elevator": false, "condition": "معمولی", "document": "مشاع"}
+  }
+]

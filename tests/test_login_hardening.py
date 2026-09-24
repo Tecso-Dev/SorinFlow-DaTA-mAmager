@@ -96,10 +96,14 @@ def test_0010_upgrades_downgrades_and_the_boot_builds_the_column_anyway():
         asyncio.run(db.engine.dispose())
         db.engine, db.async_session_maker = saved_engine, saved_maker
 
-    assert fresh == (("bigint", "YES"), "0010")
+    # head, not "0010": later revisions stack on top, and a downgrade to 0009
+    # runs each of their downgrades on the way — the path this test walks
+    from alembic.script import ScriptDirectory
+    head = ScriptDirectory.from_config(cfg).get_current_head()
+    assert fresh == (("bigint", "YES"), head)
     assert down == (None, "0009")
-    assert up == (("bigint", "YES"), "0010")
-    assert booted == (("bigint", "YES"), "0010")
+    assert up == (("bigint", "YES"), head)
+    assert booted == (("bigint", "YES"), head)
 
 
 # ── the app, on Postgres, with a fake Redis ───────────────────────────────────
@@ -543,7 +547,9 @@ def test_the_placeholder_is_refused_only_where_it_would_seed(client, monkeypatch
 
 def test_without_redis_login_still_works(client, monkeypatch):
     """Fail open: a Redis blip must not lock the office out of the panel.
-    /ready already takes the pod out of service if Redis stays down."""
+    /ready reports Redis but no longer gates on it either (app/main.py) —
+    the two together mean a Redis outage degrades rate limiting, not the
+    whole API."""
     import app.services.verification as v
 
     async def _down():

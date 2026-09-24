@@ -219,3 +219,52 @@ class TestThroughTheApp:
         assert client.get(f"/api/crm/customers/{req['customer_id']}", headers=boss).status_code == 404
         assert not [m for m in client.get("/api/crm/matches?status=all&limit=200", headers=boss).json()["items"]
                     if m["customer_id"] == req["customer_id"]]
+
+    def test_a_description_is_never_read_on_the_visitors_own_request(self, client, monkeypatch):
+        """The old code called need_parser.enrich_request inline, so the visitor
+        waited on the model — up to 90 s for a reasoning model. Now the customer
+        is built from the form alone (proven here by making the model call blow
+        up) and the description is read later, in the background
+        (portal_bridge.enrich_needs, run by the engine's own pass)."""
+        from app.ai import need_parser
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        from app.models.user import User
+        from app.models.portal import PropertyRequest
+        from app.auth.jwt import get_password_hash
+
+        async def boom(db, req):
+            raise AssertionError("enrich_request must not run on the request path")
+        monkeypatch.setattr(need_parser, "enrich_request", boom)
+
+        async def _make_visitor():
+            eng = create_async_engine(os.environ["DATABASE_URL"])
+            maker = async_sessionmaker(eng, expire_on_commit=False)
+            try:
+                async with maker() as s:
+                    s.add(User(username="pb_vis2", full_name="آرش رضایی", role="visitor", permissions=[],
+                               hashed_password=get_password_hash("pw123456"), is_active=True,
+                               phone="09129990002", phone_verified=True))
+                    await s.commit()
+            finally:
+                await eng.dispose()
+        asyncio.run(_make_visitor())
+        vis2 = _tok(client, "pb_vis2")
+
+        r = client.post("/api/portal/requests", headers=vis2, json={
+            "deal_type": "buy", "city": "ارومیه",
+            "description": "طرف گلها، پارکینگ حتماً، بودجه پنج میلیارد"})
+        assert r.status_code == 201, r.text   # would 500 from `boom` if this ran inline
+        req = r.json()
+        assert req["customer_id"]
+
+        async def _row():
+            eng = create_async_engine(os.environ["DATABASE_URL"])
+            maker = async_sessionmaker(eng, expire_on_commit=False)
+            try:
+                async with maker() as s:
+                    return await s.get(PropertyRequest, req["id"])
+            finally:
+                await eng.dispose()
+        saved = asyncio.run(_row())
+        assert saved.need_enriched_at is None, "the description waits for a background pass, not this request"
+        assert saved.need_enrich_attempts == 0

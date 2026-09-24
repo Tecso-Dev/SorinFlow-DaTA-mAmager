@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260924b">
+    <link rel="stylesheet" href="css/style.css?v=20260924p2">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -498,6 +498,10 @@
                 <a class="nav-item-link d-none" onclick="showSection('users')" id="nav-users">
                     <span class="nav-icon"><i class="bi bi-person-gear"></i></span>
                     کاربران
+                </a>
+                <a class="nav-item-link d-none" onclick="showSection('audit')" id="nav-link-audit">
+                    <span class="nav-icon"><i class="bi bi-shield-lock"></i></span>
+                    رویدادها
                 </a>
                 </div>
             </div>
@@ -1305,6 +1309,31 @@
                           <button type="button" class="btn btn-outline-secondary btn-sm" onclick="pfRender(_pfMe)">انصراف</button>
                         </div>
                       </form>
+                    </div>
+                  </div>
+
+                  <!-- «سورین» in Telegram answers this account only, in a private chat,
+                       once a code from here has been sent to the bot -->
+                  <div class="card mb-3" id="pf-tg-card">
+                    <div class="card-header d-flex align-items-center gap-2">
+                      <i class="bi bi-telegram"></i> اتصال به تلگرام (دستیار سورین)
+                    </div>
+                    <div class="card-body">
+                      <div class="pf-contact">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                          <i class="bi bi-chat-square-text pf-ic"></i>
+                          <div style="flex:1">
+                            <div class="pf-lbl">حساب تلگرام من</div>
+                            <div class="pf-val" id="pf-tg-status">—</div>
+                          </div>
+                          <button class="btn btn-outline-primary btn-sm" onclick="pfTelegramCode()">دریافت کد اتصال</button>
+                          <button class="btn btn-outline-danger btn-sm d-none" id="pf-tg-unlink" onclick="pfTelegramUnlink()">قطع اتصال</button>
+                        </div>
+                        <div class="mt-2 d-none" id="pf-tg-code-wrap"></div>
+                      </div>
+                      <div class="pf-note mt-2">
+                        سورین فقط در چت خصوصی با ربات دفتر جواب می‌دهد، و فقط از چیزهایی که خودتان در پنل می‌بینید.
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2845,11 +2874,11 @@
                             <input class="form-check-input" type="checkbox" id="ai-enabled">
                             <label class="form-check-label small" for="ai-enabled">هوش مصنوعی روشن باشد</label>
                         </div>
-                        <!-- «سورین» in Telegram: the backup's bot answers the backup's chats from the database -->
+                        <!-- «سورین» in Telegram: the backup's bot answers each linked panel user, in private, with their own rights -->
                         <div class="bk-digest mb-3" id="ai-assistant">
                             <div class="bk-digest-text">
                                 <i class="bi bi-chat-square-text"></i>
-                                <span><b>دستیار دفتر «سورین»</b> — در تلگرام، به همان چت‌های بکاپ، از دیتابیس دفتر جواب می‌دهد (آگهی‌ها، صف تماس، مشتری‌ها، خلاصهٔ امروز). فقط می‌خواند و شماره‌ای نمی‌دهد.</span>
+                                <span><b>دستیار دفتر «سورین»</b> — در تلگرام، فقط در چت خصوصی و به کاربری که از پروفایلش وصل شده، با دسترسی خود او از دیتابیس دفتر جواب می‌دهد (آگهی‌ها، صف تماس، مشتری‌ها، خلاصهٔ امروز). فقط می‌خواند، شماره‌ای نمی‌دهد و اسم مشتری را به مدل نمی‌فرستد.</span>
                                 <span class="text-muted" id="ai-assistant-last"></span>
                             </div>
                             <div class="form-check form-switch m-0">
@@ -4000,6 +4029,44 @@
                         <i class="bi bi-person-x"></i>
                         <p>کاربری با این فیلتر پیدا نشد.</p>
                     </div>
+                </div>
+            </div>
+
+            <!-- رویدادها: audit trail — root/super_admin only (nav-link-audit gates it, applyRoleUI) -->
+            <div id="section-audit" class="section-content" style="display:none;">
+                <div class="card">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-shield-lock"></i> رویدادها
+                        <span class="text-muted small" id="audit-count"></span>
+                        <div class="d-flex gap-2 flex-wrap ms-auto">
+                            <input type="search" id="audit-filter-actor" class="form-control form-control-sm"
+                                  style="width:150px" placeholder="کاربر… (Enter)"
+                                  onkeydown="if(event.key==='Enter')_auditFilterChanged()" autocomplete="off">
+                            <select id="audit-filter-action" class="form-select form-select-sm" style="width:200px"
+                                   onchange="_auditFilterChanged()">
+                                <option value="">همهٔ عملکردها</option>
+                            </select>
+                            <input type="text" id="audit-filter-since" class="form-control form-control-sm"
+                                  style="width:130px" placeholder="از… ۱۴۰۵/۰۱/۰۱"
+                                  onkeydown="if(event.key==='Enter')_auditFilterChanged()" autocomplete="off">
+                            <input type="text" id="audit-filter-until" class="form-control form-control-sm"
+                                  style="width:130px" placeholder="تا… ۱۴۰۵/۰۱/۰۱"
+                                  onkeydown="if(event.key==='Enter')_auditFilterChanged()" autocomplete="off">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="loadAuditEvents()" title="بازخوانی">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0" id="audit-table">
+                            <thead><tr>
+                                <th>زمان</th><th>کاربر</th><th>عملکرد</th><th>هدف</th><th>IP</th>
+                            </tr></thead>
+                            <tbody id="audit-rows"></tbody>
+                        </table>
+                    </div>
+                    <div id="audit-empty" class="text-center text-muted py-4 d-none">رویدادی با این فیلتر پیدا نشد.</div>
+                    <div id="audit-pagination" class="py-2"></div>
                 </div>
             </div>
 
@@ -5234,7 +5301,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260924b"></script>
+<script src="js/app.js?v=20260924p2"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
 <script src="js/ai/reader.js?v=20260924b"></script>
 <script src="js/ai/embed.js?v=20260924b"></script>

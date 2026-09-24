@@ -4,18 +4,19 @@ Leads (from scraper) + Contacts + Notes + Tasks + Deals + Reminders + SMS + Dash
 """
 from datetime import datetime, timedelta
 from typing import List, Optional, Union
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel as _BaseModel, Field as _Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_, not_
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, undefer
 import io
 from loguru import logger
 
 from app.database import get_db
 from app.config import get_settings
 from app.models.lead import Lead
+from app.models.phone import normalize_phone
 from app.models.property import Property, allocate_serial_no
 from app.models.crm_models import (
     Contact, Deal, Note, Task, Reminder, SmsLog, Customer, DailyPerformance,
@@ -25,7 +26,12 @@ from app.schemas import LeadResponse, LeadUpdate, LeadCreate, LeadList
 from app.crm.notification import notify
 from app.services.sms_service import send_sms
 from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
+# who sees which match and which task: shared with the assistant
+from app.auth.visibility import (actor as _agent_name, actor as _task_actor,
+                                 matches_visible_to as _matches_visible_to,
+                                 tasks_visible_to as _tasks_visible_to)
 from app.services.dpa_service import record_activity, record_lead_status
+from app.services import audit
 from app.services.excel_export import xlsx_response, fa_date
 from app.services.match_service import (
     similar_to_property, matches_for_customer, customer_intent, customers_for_property,
@@ -413,12 +419,16 @@ async def export_leads_excel(
     advertiser: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Excel counterpart of the leads list — same filters, same rows.
 
     It used to honour «status» alone, so exporting a narrowed view silently
     handed back everything else too.
     """
+    # who took the office's data out, and when — the file itself is not kept
+    await audit.record("crm_export", actor=current_user, target_type="leads",
+                       summary="خروجی Excel لیدها", request=request)
     query = _apply_lead_filters(
         select(Lead).order_by(Lead.created_at.desc()),
         status=status, city=city, category=category, search=search,
@@ -470,6 +480,7 @@ async def bulk_update_leads(
     data: BulkLeadsIn,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    request: Request = None,
 ):
     """Bulk status change or delete for the selected leads.
 
@@ -502,6 +513,9 @@ async def bulk_update_leads(
                               f"وضعیت گروهی به «{new_status}» تغییر کرد", agent)
                 changed += 1
         await db.commit()
+        await audit.record("leads_bulk", actor=current_user, target_type="lead",
+                           summary=f"تغییر گروهی وضعیت {changed} لید به «{new_status}»",
+                           detail={"ids": ids, "status": new_status}, request=request)
         return {"success": True, "updated": changed}
 
     if action == "delete":
@@ -510,6 +524,8 @@ async def bulk_update_leads(
             await db.delete(lead)
             removed += 1
         await db.commit()
+        await audit.record("leads_bulk", actor=current_user, target_type="lead",
+                           summary=f"حذف گروهی {removed} لید", detail={"ids": ids}, request=request)
         return {"success": True, "deleted": removed}
 
     raise HTTPException(status_code=400, detail="Unknown action")
@@ -582,10 +598,6 @@ class CallOutcomeIn(_BaseModel):
     note: Optional[str] = _Field(None, max_length=_TEXT)
     callback_at: Optional[datetime] = None
     visit_at: Optional[datetime] = None
-
-
-def _agent_name(user) -> Optional[str]:
-    return (getattr(user, "full_name", None) or getattr(user, "username", None)) if user else None
 
 
 def _now_utc() -> datetime:
@@ -730,15 +742,8 @@ async def calls_summary(days: int = Query(1, ge=1, le=90),
 
 # ── تطبیق خودکار — the engine's matches, on the call queue ────────────────────
 # A consultant sees the matches for their own customers (and for customers
-# nobody is assigned to); root and super_admin see everybody's.
-
-def _matches_visible_to(query, user):
-    if getattr(user, "role", None) in ("root", "super_admin"):
-        return query
-    agent = _agent_name(user)
-    return query.where(or_(CustomerMatch.consultant.is_(None), CustomerMatch.consultant == "",
-                           CustomerMatch.consultant == agent))
-
+# nobody is assigned to); root and super_admin see everybody's
+# (_matches_visible_to, app/auth/visibility.py).
 
 class MatchDecisionIn(_BaseModel):
     status: str
@@ -1008,7 +1013,9 @@ async def notify_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/leads/{lead_id}")
-async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db),
+                      current_user: User = Depends(get_current_user),
+                      request: Request = None):
     """Delete the lead AND wipe the linked property everywhere:
     the property row itself, any sibling leads on it, its property-notes
     and its downloaded images. Deals keep their business record (their
@@ -1042,6 +1049,8 @@ async def delete_lead(lead_id: int, db: AsyncSession = Depends(get_db)):
     if prop:
         await db.delete(prop)
     await db.commit()
+    await audit.record("crm_delete", actor=current_user, target_type="lead",
+                       target_id=lead_id, summary="حذف لید", request=request)
 
     # downloaded images on disk (best-effort)
     if divar_id:
@@ -1093,8 +1102,12 @@ async def export_customers_excel(
     sort: str = "newest",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Excel export of the customer intake list, filtered as the screen is."""
+    # who took the office's data out, and when — the file itself is not kept
+    await audit.record("crm_export", actor=current_user, target_type="customers",
+                       summary="خروجی Excel مشتری‌ها", request=request)
     items = (await db.execute(
         _apply_customer_filters(
             select(Customer), search=search, temperature=temperature,
@@ -1132,8 +1145,12 @@ async def export_dpa_excel(
     date_jalali: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Excel export of daily performance records with the score breakdown."""
+    # who took the office's data out, and when — the file itself is not kept
+    await audit.record("crm_export", actor=current_user, target_type="dpa",
+                       summary="خروجی Excel عملکرد روزانه", request=request)
     items = (await db.execute(_apply_dpa_filters(
         select(DailyPerformance).order_by(DailyPerformance.created_at.desc()),
         search=search, date_jalali=date_jalali).limit(5000)
@@ -1200,11 +1217,12 @@ async def convert_lead_to_deal(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # reuse an existing contact with the same phone, otherwise create one
+    # reuse an existing contact with the same phone, otherwise create one —
+    # compared normalized, so "0914..." and "+98914..." are the same seller
     seller_id = None
     if lead.phone_number:
         existing = (await db.execute(
-            select(Contact).where(Contact.phone == lead.phone_number)
+            select(Contact).where(Contact.phone_normalized == normalize_phone(lead.phone_number))
         )).scalars().first()
         if existing:
             seller_id = existing.id
@@ -1254,12 +1272,15 @@ async def match_similar_properties(
     current_user: User = Depends(get_current_user),
 ):
     """Listings similar to this one — «مشتری این ملک را پسندید، مشابهش را نشان بده»."""
-    prop = (await db.execute(select(Property).where(Property.id == property_id))).scalar_one_or_none()
+    # ai_embedding is deferred; the target's own vector is the other half of
+    # score_similarity's «متن مشابه», so it is loaded with the row
+    prop = (await db.execute(select(Property).where(Property.id == property_id)
+                             .options(undefer(Property.ai_embedding)))).scalar_one_or_none()
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
-    items = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
+    items, pending = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
     return {"items": items, "total": len(items),
-            "source": _match_source(prop)}
+            "source": _match_source(prop), "reasons_pending": pending}
 
 
 def _match_source(prop) -> dict:
@@ -1286,12 +1307,13 @@ async def match_similar_for_lead(
     lead = (await db.execute(select(Lead).where(Lead.id == lead_id))).scalar_one_or_none()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    prop = (await db.execute(select(Property).where(Property.id == lead.property_id))).scalar_one_or_none()
+    prop = (await db.execute(select(Property).where(Property.id == lead.property_id)
+                             .options(undefer(Property.ai_embedding)))).scalar_one_or_none()
     if not prop:
         raise HTTPException(status_code=404, detail="Linked property not found")
-    items = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
+    items, pending = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
     return {"items": items, "total": len(items),
-            "source": _match_source(prop)}
+            "source": _match_source(prop), "reasons_pending": pending}
 
 
 @router.get("/match/customer/{customer_id}")
@@ -1312,10 +1334,10 @@ async def match_properties_for_customer(
     customer = (await db.execute(select(Customer).where(Customer.id == customer_id))).scalar_one_or_none()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
-    items = await matches_for_customer(db, customer, limit=limit, use_llm=use_llm, city=city)
+    items, pending = await matches_for_customer(db, customer, limit=limit, use_llm=use_llm, city=city)
     return {"items": items, "total": len(items),
             "source": {"id": customer.id, "name": customer.full_name},
-            "intent": customer_intent(customer)}
+            "intent": customer_intent(customer), "reasons_pending": pending}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1407,7 +1429,11 @@ async def export_contacts_excel(
     category: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
+    # who took the office's data out, and when — the file itself is not kept
+    await audit.record("crm_export", actor=current_user, target_type="contacts",
+                       summary="خروجی Excel مخاطب‌ها", request=request)
     try:
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment
@@ -1459,7 +1485,11 @@ async def export_contacts_json(
     # The same rows leave as .xlsx for any admin with «crm»; gating the JSON
     # shape alone protected nothing (roadmap #11).
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
+    # who took the office's data out, and when — the file itself is not kept
+    await audit.record("crm_export", actor=current_user, target_type="contacts",
+                       summary="خروجی JSON مخاطب‌ها", request=request)
     items = (await db.execute(_apply_contact_filters(
         select(Contact).order_by(Contact.name),
         search=search, contact_type=contact_type, category=category
@@ -1501,13 +1531,17 @@ async def update_contact(contact_id: int, data: ContactIn, db: AsyncSession = De
 
 
 @router.delete("/contacts/{contact_id}")
-async def delete_contact(contact_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_contact(contact_id: int, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user),
+                         request: Request = None):
     result = await db.execute(select(Contact).where(Contact.id == contact_id))
     contact = result.scalar_one_or_none()
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     await db.delete(contact)
     await db.commit()
+    await audit.record("crm_delete", actor=current_user, target_type="contact",
+                       target_id=contact_id, summary="حذف مخاطب", request=request)
     return {"success": True}
 
 
@@ -1669,13 +1703,17 @@ async def update_customer(customer_id: int, data: CustomerIn, db: AsyncSession =
 
 
 @router.delete("/customers/{customer_id}")
-async def delete_customer(customer_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_customer(customer_id: int, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user),
+                          request: Request = None):
     result = await db.execute(select(Customer).where(Customer.id == customer_id))
     customer = result.scalar_one_or_none()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     await db.delete(customer)
     await db.commit()
+    await audit.record("crm_delete", actor=current_user, target_type="customer",
+                       target_id=customer_id, summary="حذف مشتری", request=request)
     return {"success": True}
 
 
@@ -1808,13 +1846,17 @@ async def update_dpa(dpa_id: int, data: DpaIn, db: AsyncSession = Depends(get_db
 
 
 @router.delete("/dpa/{dpa_id}")
-async def delete_dpa(dpa_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_dpa(dpa_id: int, db: AsyncSession = Depends(get_db),
+                     current_user: User = Depends(get_current_user),
+                     request: Request = None):
     result = await db.execute(select(DailyPerformance).where(DailyPerformance.id == dpa_id))
     dpa = result.scalar_one_or_none()
     if not dpa:
         raise HTTPException(status_code=404, detail="DPA record not found")
     await db.delete(dpa)
     await db.commit()
+    await audit.record("crm_delete", actor=current_user, target_type="dpa",
+                       target_id=dpa_id, summary="حذف رکورد عملکرد روزانه", request=request)
     return {"success": True}
 
 
@@ -1901,27 +1943,9 @@ async def delete_note(note_id: int, db: AsyncSession = Depends(get_db)):
 # TASKS
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── وظایف: who may see which task ───────────────────────────────────────
-def _task_actor(user) -> Optional[str]:
-    """The name tasks are assigned under — the same string the task form puts
-    in assigned_to."""
-    return getattr(user, "full_name", None) or getattr(user, "username", None)
-
-
-def _tasks_visible_to(query, user):
-    """A super_admin sees the whole board; everyone else sees only their own.
-
-    Tasks with no assignee stay visible to all, because they predate this rule
-    and hiding them would orphan them — new tasks are stamped with their
-    creator on the way in, so the unassigned set only ever shrinks.
-    """
-    if getattr(user, "role", None) in ("root", "super_admin"):
-        return query
-    actor = _task_actor(user)
-    if not actor:
-        return query.where(Task.assigned_to.is_(None))
-    return query.where(or_(Task.assigned_to.is_(None), Task.assigned_to == actor))
-
+# ── وظایف: who may see which task — _tasks_visible_to, app/auth/visibility.py.
+# _task_actor is the name tasks are assigned under, the same string the task
+# form puts in assigned_to.
 
 @router.get("/tasks")
 async def list_tasks(
@@ -2157,7 +2181,11 @@ async def export_deals_excel(
     deal_type: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
+    # who took the office's data out, and when — the file itself is not kept
+    await audit.record("crm_export", actor=current_user, target_type="deals",
+                       summary="خروجی Excel معامله‌ها", request=request)
     try:
         import openpyxl
         from openpyxl.styles import Font, PatternFill
@@ -2197,7 +2225,11 @@ async def export_deals_json(
     deal_type: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
+    # who took the office's data out, and when — the file itself is not kept
+    await audit.record("crm_export", actor=current_user, target_type="deals",
+                       summary="خروجی JSON معامله‌ها", request=request)
     items = (await db.execute(_apply_deal_filters(
         select(Deal).order_by(Deal.created_at.desc()),
         status=status, deal_type=deal_type))).scalars().all()
@@ -2243,13 +2275,17 @@ async def update_deal(deal_id: int, data: DealIn, db: AsyncSession = Depends(get
 
 
 @router.delete("/deals/{deal_id}")
-async def delete_deal(deal_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_deal(deal_id: int, db: AsyncSession = Depends(get_db),
+                      current_user: User = Depends(get_current_user),
+                      request: Request = None):
     result = await db.execute(select(Deal).where(Deal.id == deal_id))
     deal = result.scalar_one_or_none()
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
     await db.delete(deal)
     await db.commit()
+    await audit.record("crm_delete", actor=current_user, target_type="deal",
+                       target_id=deal_id, summary="حذف معامله", request=request)
     return {"success": True}
 
 
@@ -2634,6 +2670,7 @@ async def export_calendar_excel(
     event_type: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    request: Request = None,
 ):
     """Excel counterpart of the calendar (appointments only, not overlays).
 
@@ -2641,6 +2678,9 @@ async def export_calendar_excel(
     to be dropped here, so exporting a month of «بازدید ملک» handed back every
     appointment in it.
     """
+    # who took the office's data out, and when — the file itself is not kept
+    await audit.record("crm_export", actor=current_user, target_type="calendar",
+                       summary="خروجی Excel تقویم", request=request)
     q = select(CalendarEvent).order_by(CalendarEvent.start_at.asc())
     if event_type:
         q = q.where(CalendarEvent.event_type == event_type)
@@ -2830,13 +2870,17 @@ async def update_event(
 
 
 @router.delete("/calendar/{event_id}")
-async def delete_event(event_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_event(event_id: int, db: AsyncSession = Depends(get_db),
+                       current_user: User = Depends(get_current_user),
+                       request: Request = None):
     event = (await db.execute(
         select(CalendarEvent).where(CalendarEvent.id == event_id))).scalar_one_or_none()
     if not event:
         raise HTTPException(status_code=404, detail="قرار یافت نشد")
     await db.delete(event)
     await db.commit()
+    await audit.record("crm_delete", actor=current_user, target_type="calendar",
+                       target_id=event_id, summary="حذف قرار تقویم", request=request)
     return {"success": True}
 
 

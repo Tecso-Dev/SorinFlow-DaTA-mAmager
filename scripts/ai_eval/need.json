@@ -1,0 +1,59 @@
+[
+  {
+    "id": "N1", "text": "یه آپارتمان دوخوابه طرف گلها تا ۴ میلیارد، پارکینگ حتماً",
+    "expected": {"deal_type": "buy", "kind": "apartment", "budget_max": 4000000000,
+                 "district_contains": "گلها", "rooms_min": 2, "must_have": ["پارکینگ"]}
+  },
+  {
+    "id": "N2", "text": "دنبال یه واحد اجاره‌ای طرف دانشکده‌ام، رهن ۲۰۰ تومن اجاره ۸ تومن، آسانسور داشته باشه",
+    "expected": {"deal_type": "rent", "kind": "apartment", "deposit_max": 200000000, "rent_max": 8000000,
+                 "district_contains": "دانشکده", "must_have": ["آسانسور"]}
+  },
+  {
+    "id": "N3", "text": "می‌خوام یه خونه ویلایی طرف شهرک امامت بخرم، حدود ۷ میلیارد، حیاط داشته باشه",
+    "expected": {"deal_type": "buy", "kind": "house", "budget_max": 7000000000,
+                 "district_contains": "شهرک امامت", "must_have": ["حیاط"]}
+  },
+  {
+    "id": "N4", "text": "یه مغازه طرف بلوار سعدی می‌خوام اجاره کنم، رهن کامل باشه بهتره، بودجه رهن ۳۰۰ تومنه",
+    "expected": {"deal_type": "rent", "kind": "shop", "deposit_max": 300000000,
+                 "district_contains": "سعدی"}
+  },
+  {
+    "id": "N5", "text": "دنبال آپارتمان سه‌خوابه‌ام، بودجه تا ۶ میلیارد، فقط طبقه اول نباشه",
+    "expected": {"deal_type": "buy", "kind": "apartment", "budget_max": 6000000000, "rooms_min": 3,
+                 "red_lines": ["طبقه اول"]}
+  },
+  {
+    "id": "N6", "text": "یه دفتر اداری طرف خیابان مدرس اجاره می‌خوام، اجاره‌ش ماهی ۱۰ تومن باشه کافیه",
+    "expected": {"deal_type": "rent", "kind": "office", "rent_max": 10000000, "district_contains": "مدرس"}
+  },
+  {
+    "id": "N7", "text": "آپارتمان نوساز دوخوابه دنبالم، طرف والفجر، تا ۵ میلیارد و ۵۰۰ میلیون",
+    "expected": {"deal_type": "buy", "kind": "apartment", "budget_max": 5500000000, "rooms_min": 2,
+                 "district_contains": "والفجر", "must_have": ["نوساز"]}
+  },
+  {
+    "id": "N8", "text": "زمین می‌خوام بخرم طرف جاده امامزاده، حدود ۲ میلیارد بودجه دارم",
+    "expected": {"deal_type": "buy", "kind": "land", "budget_max": 2000000000, "district_contains": "امامزاده"}
+  },
+  {
+    "id": "N9", "text": "دنبال اجاره آپارتمان طرف باغ ملی‌ام، طبقه همکف نباشه، پارکینگ حتماً باشه",
+    "expected": {"deal_type": "rent", "kind": "apartment", "district_contains": "باغ ملی",
+                 "must_have": ["پارکینگ"], "red_lines": ["طبقه همکف"]}
+  },
+  {
+    "id": "N10", "text": "فوری دنبال آپارتمان دوخوابه‌ام طرف شهرک فرهنگیان، تا ۴ میلیارد و ۲۰۰ میلیون، همین هفته باید جابه‌جا بشم",
+    "expected": {"deal_type": "buy", "kind": "apartment", "budget_max": 4200000000, "rooms_min": 2,
+                 "district_contains": "شهرک فرهنگیان", "urgency": "immediate"}
+  },
+  {
+    "id": "N11", "text": "مغازه می‌خوام بخرم مناسب کافه، طرف خیابان ورزش، تا ۳ میلیارد",
+    "expected": {"deal_type": "buy", "kind": "shop", "budget_max": 3000000000, "district_contains": "ورزش"}
+  },
+  {
+    "id": "N12", "text": "یه واحد دوخوابه رهن کامل طرف بلوار رودکی می‌خوام، رهنش تا ۵۰۰ تومن",
+    "expected": {"deal_type": "rent", "kind": "apartment", "deposit_max": 500000000, "rooms_min": 2,
+                 "district_contains": "رودکی"}
+  }
+]

@@ -297,6 +297,43 @@ class TestThePass:
         assert "async_session_maker()" in src[src.index("async def tick"):]
 
 
+class TestTheAttemptCap:
+
+    async def test_three_failures_on_the_same_content_stop_the_retries(self, db, tmp_path, configured, monkeypatch):
+        root = tmp_path / "images"
+        monkeypatch.setattr(pt.settings, "images_path", str(root))
+        p = _with_photos(root, "cap")
+        db.add(p)
+        await db.commit()
+        _gateway(monkeypatch, lambda r: httpx.Response(500, json={"error": "boom"}))
+
+        for _ in range(pt.MAX_ATTEMPTS):
+            await pt.run_once(db)
+        assert p.ai_photo_attempts == pt.MAX_ATTEMPTS
+        again = await pt.run_once(db)
+        assert again == {"scanned": 0, "tagged": 0, "skipped": 0, "failed": 0, "cursor": 0, "stopped": None}
+        st = await pt.status(db)
+        assert st["behind"] == 0 and st["capped"] == 1
+
+        p.title = "یک عنوان کاملاً متفاوت برای همین آگهی"
+        await db.commit()
+        _gateway(monkeypatch, lambda r: _answer(json.dumps(GOOD)))
+        again2 = await pt.run_once(db)
+        assert again2["tagged"] == 1, "the content changed, so the cap no longer applies"
+        assert (await pt.status(db))["capped"] == 0
+
+    async def test_a_gate_error_does_not_count_as_an_attempt(self, db, tmp_path, configured, monkeypatch):
+        root = tmp_path / "images"
+        p = _with_photos(root, "gate")
+        db.add(p)
+        await db.commit()
+        await secret_box.put(db, llm.KEY_CAP, "0", "test")
+        _gateway(monkeypatch, lambda r: _answer(json.dumps(GOOD)))
+        with pytest.raises(llm.BudgetExceeded):
+            await pt.tag_property(db, p, images_root=root)
+        assert p.ai_photo_attempts == 0, "the cap is the office's, not this listing's fault"
+
+
 class TestTheLabels:
 
     def test_persian_chips_from_a_stored_answer(self):

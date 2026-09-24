@@ -78,8 +78,8 @@ def configured(monkeypatch):
     async def record(agent, job, model, usage, ms, ok, error=""):
         ledger.append({"agent": agent, "job": job, "model": model, "ok": ok, "cost": float(usage.get("cost") or 0)})
 
-    async def spent(_db):
-        return sum(r["cost"] for r in ledger)
+    async def spent(_db, agent=None):
+        return sum(r["cost"] for r in ledger if not agent or r["agent"] == agent)
 
     monkeypatch.setattr(llm, "_record", record)
     monkeypatch.setattr(llm, "spent_today", spent)
@@ -108,6 +108,19 @@ def maker(tmp_path):
     asyncio.run(eng.dispose())
 
 
+@pytest.fixture(autouse=True)
+def _reset_matrix_cache():
+    """emb._cache/_generation are module-level (one process-wide cache by
+    design — see the ponytail: note on _cache), but every test here gets its
+    own fresh sqlite file with its own id sequence. Without this, a cache
+    entry a test populates for (city, listing_type) could be handed to a
+    later test whose database has different rows under the same ids."""
+    emb._cache.clear()
+    emb._generation = 0
+    yield
+    emb._cache.clear()
+
+
 def P(i, title, *, district="خیابان گلها", city="ارومیه", listing_type="buy", price=4_000_000_000,
       area=100, rooms=2, description="", kind="آپارتمان", **kw):
     return Property(tag_number=f"e-{i}", divar_id=f"e-{i}", url=f"https://divar.ir/v/e-{i}", title=title,
@@ -126,9 +139,13 @@ async def _add(maker, props):
 
 
 async def _get(maker, pid):
+    """The row, vector included — deferred, so this test file's own reads of
+    it undefer explicitly, the way any caller that actually needs it must."""
     from sqlalchemy import select
+    from sqlalchemy.orm import undefer
     async with maker() as s:
-        return (await s.execute(select(Property).where(Property.id == pid))).scalar_one()
+        return (await s.execute(select(Property).where(Property.id == pid)
+                                .options(undefer(Property.ai_embedding)))).scalar_one()
 
 
 # ── the text ──────────────────────────────────────────────────────────────────
@@ -146,15 +163,31 @@ class TestText:
         assert "4000000000" not in t, "the same flat at two asking prices must still read as one flat"
 
     def test_the_readers_facts_ride_along_when_they_exist(self):
+        """text_of used to read ai_facts["flags"], a key the reader
+        (app/ai/listing_reader.py: ListingFacts) never writes. These are its
+        actual keys."""
         base = dict(title="ویلا در بند", district=None, neighborhood="بند", city_name="ارومیه", property_type="ویلا",
                     category_name=None, area=300, rooms=None, listing_type="rent", description="")
         plain = SimpleNamespace(**base)
         assert "ai_facts" not in emb.text_of(plain)
-        with_facts = SimpleNamespace(**base, ai_facts={"summary": "دوبلکس با استخر", "flags": ["نورگیر", "بازسازی‌شده"]})
+        with_facts = SimpleNamespace(**base, ai_facts={
+            "summary": "دوبلکس با استخر", "kind": "house", "document": "تک‌برگ", "condition": "نوساز",
+            "convertible": True, "exchange": False, "vacant": True, "negotiable": False,
+            "suitable_for": ["کافه", "مهدکودک"]})
         t = emb.text_of(with_facts)
-        assert "دوبلکس با استخر" in t and "نورگیر، بازسازی‌شده" in t and "بند · ارومیه" in t and "رهن و اجاره" in t
-        as_dict = SimpleNamespace(**base, ai_facts={"flags": {"نورگیر": True, "کلنگی": False}})
-        assert "نورگیر" in emb.text_of(as_dict) and "کلنگی" not in emb.text_of(as_dict)
+        assert "دوبلکس با استخر" in t and "بند · ارومیه" in t and "رهن و اجاره" in t
+        assert "خانه، تک‌برگ، نوساز، قابل تبدیل، تخلیه" in t, "kind in Persian, document/condition as-is, true flags only"
+        assert "معاوضه" not in t and "قابل مذاکره" not in t, "false flags say nothing"
+        assert "مناسب کافه، مهدکودک" in t
+        bare = SimpleNamespace(**base, ai_facts={"kind": "apartment"})
+        assert emb.text_of(bare).splitlines()[-1] == "آپارتمان", "no summary, no suitable_for: just the one word"
+        # the amenities a search names, and the red flags that are part of what the listing is
+        equipped = SimpleNamespace(**base, ai_facts={
+            "kind": "apartment", "has_elevator": True, "has_parking": True, "has_storage": False,
+            "has_balcony": None, "red_flags": ["سند مشاع", "در رهن بانک"]})
+        t = emb.text_of(equipped)
+        assert "آپارتمان، آسانسور، پارکینگ" in t and "انباری" not in t and "بالکن" not in t
+        assert t.splitlines()[-1] == "سند مشاع، در رهن بانک"
 
     def test_it_masks_nothing_itself_because_the_door_does(self, configured, monkeypatch, maker):
         p = P(3, "آپارتمان", description="تماس 09143495300")
@@ -187,6 +220,18 @@ class TestArithmetic:
         assert out[0][1] == pytest.approx(1.0) and 0.99 < out[1][1] < 1.0
         assert [i for i, _ in emb.nearest([1, 0, 0], rows, limit=10)] == [1, 2, 3, 5]
         assert emb.nearest([1, 0, 0], [], 5) == [] and emb.nearest([], rows, 5) == [] and emb.nearest([1, 0, 0], rows, 0) == []
+
+    def test_nearest_is_build_matrix_plus_nearest_in(self):
+        """nearest() keeps its old signature and answer; the matrix it
+        builds each call is the same object shape a pass can build once and
+        reuse — see TestTheMatrixIsBuiltOnce."""
+        rows = [(1, [1, 0, 0]), (2, [0.9, 0.1, 0]), (3, [0, 1, 0]), (4, [1, 0]), (5, [0, 0, 0])]
+        m = emb.build_matrix(rows)
+        assert m is not None and m.ids == [1, 2, 3, 5] and m.vecs.shape == (4, 3)
+        assert emb.nearest_in([1, 0, 0], m, limit=2) == emb.nearest([1, 0, 0], rows, limit=2)
+        assert emb.build_matrix([]) is None
+        assert emb.nearest_in([1, 0, 0], None, limit=5) == []
+        assert emb.nearest_in([1, 0], m, limit=5) == [], "the query's own dimension does not match the matrix"
 
     def test_text_similarity_needs_two_vectors_of_one_version(self):
         a = SimpleNamespace(ai_embedding=[1, 0], ai_embed_version=1)
@@ -270,6 +315,83 @@ class TestRunOnce:
         assert asyncio.run(_get(maker, shop)).ai_duplicate_of is None
 
 
+class TestStaleness:
+    """After a content change, a re-read, or an EMBED_VERSION bump, a
+    listing already embedded is due again — even behind the stored cursor,
+    which is why run_once no longer bounds its query on id > cursor."""
+
+    def test_an_unchanged_vector_is_not_touched_again(self, configured, monkeypatch, maker):
+        _gateway(monkeypatch, _embeddings([]))
+        asyncio.run(_add(maker, [P(1, "آپارتمان ۱۰۰ متری خیابان گلها")]))
+
+        async def _go():
+            async with maker() as s:
+                return await emb.run_once(s)
+        first = asyncio.run(_go())
+        again = asyncio.run(_go())
+        assert first["embedded"] == 1 and again["embedded"] == 0 and again["scanned"] == 0
+
+    def test_a_content_edit_re_embeds_even_behind_the_cursor(self, configured, monkeypatch, maker):
+        _gateway(monkeypatch, _embeddings([]))
+        ids = asyncio.run(_add(maker, [P(1, "آپارتمان یک"), P(2, "آپارتمان دو")]))
+
+        async def first_pass():
+            async with maker() as s:
+                return await emb.run_once(s)
+        asyncio.run(first_pass())
+        before = asyncio.run(_get(maker, ids[0]))
+        before_fp = before.ai_embed_fp
+
+        async def edit_and_rerun():
+            async with maker() as s:
+                p = await s.get(Property, ids[0])
+                p.description = "متن کاملاً تازه که قبلاً نبود"
+                await s.commit()
+                return await emb.run_once(s)
+        again = asyncio.run(edit_and_rerun())
+        assert again["scanned"] == 1 and again["embedded"] == 1, "the id-1 listing, not the untouched id-2 one"
+        after = asyncio.run(_get(maker, ids[0]))
+        assert after.ai_embed_fp == after.ai_content_fp and after.ai_embed_fp != before_fp
+
+    def test_a_fresher_read_re_embeds_even_when_the_raw_columns_did_not_move(self, configured, monkeypatch, maker):
+        """text_of() folds in the reader's facts (kind, document, …); a
+        re-read after the vector was written means the text the vector
+        stands for changed too, even though title/description are the same
+        columns as before."""
+        _gateway(monkeypatch, _embeddings([]))
+        [pid] = asyncio.run(_add(maker, [P(1, "آپارتمان یک")]))
+
+        async def embed_it():
+            async with maker() as s:
+                return await emb.run_once(s)
+        asyncio.run(embed_it())
+
+        async def read_then_rerun():
+            from datetime import datetime, timezone
+            async with maker() as s:
+                p = await s.get(Property, pid)
+                p.ai_facts = {"kind": "house", "prompt_version": 1}
+                p.ai_read_at = datetime.now(timezone.utc)
+                await s.commit()
+                return await emb.run_once(s)
+        again = asyncio.run(read_then_rerun())
+        assert again["scanned"] == 1 and again["embedded"] == 1
+
+    def test_a_version_bump_reopens_every_listing_not_only_new_ones(self, configured, monkeypatch, maker):
+        _gateway(monkeypatch, _embeddings([]))
+        asyncio.run(_add(maker, [P(1, "آپارتمان یک")]))
+
+        async def embed_it():
+            async with maker() as s:
+                return await emb.run_once(s)
+        asyncio.run(embed_it())
+        assert asyncio.run(embed_it())["scanned"] == 0, "settled, at the current version"
+
+        monkeypatch.setattr(emb, "EMBED_VERSION", emb.EMBED_VERSION + 1)
+        again = asyncio.run(embed_it())
+        assert again["scanned"] == 1 and again["embedded"] == 1, "a version bump is due even with unchanged content"
+
+
 # ── duplicates, on hand-made vectors ──────────────────────────────────────────
 
 U = [1.0] + [0.0] * (DIM - 1)                 # the original
@@ -343,6 +465,110 @@ class TestDuplicates:
             return await emb.find_duplicates(s, (await s.execute(select(Property).where(Property.id == pid))).scalar_one())
         assert [d["id"] for d in self._run(maker, lambda s: _find(s, b))] == [a]
         assert self._run(maker, lambda s: _find(s, c)) == []
+
+
+# ── deferred() — the column is not loaded unless something asks for it ────────
+
+class TestDeferredColumn:
+
+    def test_a_plain_select_does_not_carry_the_vector(self, maker):
+        """The whole point of deferred(): a query nobody wrote for embeddings
+        does not pay for 1536 floats it never reads."""
+        from sqlalchemy import inspect as sa_inspect, select
+        [pid] = asyncio.run(_add(maker, [_vec(P(1, "آپارتمان"), U)]))
+
+        async def _go():
+            async with maker() as s:
+                row = (await s.execute(select(Property).where(Property.id == pid))).scalar_one()
+                return "ai_embedding" in sa_inspect(row).unloaded
+        assert asyncio.run(_go()) is True
+
+    def test_ordinary_property_reads_do_not_crash_on_the_deferred_column(self, maker):
+        """to_dict() — what every listing endpoint sends — never touches
+        ai_embedding, loaded or not; ordinary access stays safe."""
+        from sqlalchemy import select
+        [pid] = asyncio.run(_add(maker, [_vec(P(1, "آپارتمان"), U)]))
+
+        async def _go():
+            async with maker() as s:
+                row = (await s.execute(select(Property).where(Property.id == pid))).scalar_one()
+                return row.to_dict()
+        d = asyncio.run(_go())
+        assert "ai_embedding" not in d and d["id"] == pid
+
+    def test_text_similarity_and_find_duplicates_survive_an_unloaded_row(self, maker):
+        """text_similarity has no db handle to fall back on (a sync
+        function): an unloaded vector reads as "no signal", not a crash.
+        find_duplicates does have one and fetches the column itself — proven
+        already by TestDuplicates, which loads every row through a plain
+        select; this just names the two failure modes explicitly."""
+        from sqlalchemy import select
+        a, b = asyncio.run(_add(maker, [_vec(P(1, "آپارتمان یک"), U), _vec(P(2, "آپارتمان دو"), V)]))
+
+        async def _go():
+            async with maker() as s:
+                ra = (await s.execute(select(Property).where(Property.id == a))).scalar_one()
+                rb = (await s.execute(select(Property).where(Property.id == b))).scalar_one()
+                return emb.text_similarity(ra, rb), await emb.find_duplicates(s, ra)
+        sim, dups = asyncio.run(_go())
+        assert sim is None, "neither row's vector was loaded by this query"
+        assert dups == [] or all(isinstance(x, dict) for x in dups), "a fetch, not a MissingGreenlet"
+
+
+# ── the matrix is built once, not once per listing or per query ───────────────
+
+class TestTheMatrixIsBuiltOnce:
+
+    def test_mark_duplicates_builds_the_matrix_once_for_the_whole_batch(self, maker, monkeypatch):
+        rows = [_vec(P(i, f"آپارتمان {i} متری گلها", price=4_000_000_000), U) for i in range(1, 6)]
+        ids = asyncio.run(_add(maker, rows))
+        calls = []
+        real = emb.build_matrix
+
+        def counting(*a, **kw):
+            calls.append(1)
+            return real(*a, **kw)
+        monkeypatch.setattr(emb, "build_matrix", counting)
+
+        async def _go():
+            async with maker() as s:
+                from sqlalchemy import select
+                props = (await s.execute(select(Property).where(Property.id.in_(ids)))).scalars().all()
+                return await emb.mark_duplicates(s, props)
+        asyncio.run(_go())
+        assert calls == [1], "one matrix for five listings, not five"
+
+    def test_semantic_candidates_reuses_the_cached_matrix_within_the_ttl(self, configured, monkeypatch, maker):
+        _gateway(monkeypatch, _embeddings([]))
+        asyncio.run(_add(maker, [_vec(P(1, "آپارتمان ۱۰۰ متری خیابان گلها"), U)]))
+        loads = []
+        real = emb.load_index
+
+        async def counting(*a, **kw):
+            loads.append(1)
+            return await real(*a, **kw)
+        monkeypatch.setattr(emb, "load_index", counting)
+
+        async def _go():
+            async with maker() as s:
+                await emb.semantic_candidates(s, "آپارتمان گلها", city="ارومیه")
+                await emb.semantic_candidates(s, "یک متن دیگر", city="ارومیه")   # same (city, type): cached
+                await emb.semantic_candidates(s, "و باز هم", city="تبریز")       # a different key: its own load
+        asyncio.run(_go())
+        assert loads == [1, 1], "two distinct (city, listing_type) keys, not three lookups"
+
+    def test_an_embed_pass_bumps_the_generation_and_invalidates_the_cache(self, configured, monkeypatch, maker):
+        _gateway(monkeypatch, _embeddings([]))
+        asyncio.run(_add(maker, [_vec(P(1, "آپارتمان یک"), U)]))
+
+        async def _go():
+            async with maker() as s:
+                await emb.semantic_candidates(s, "آپارتمان", city="ارومیه")
+                gen_before = emb._cache[("ارومیه", None)][2]
+                await emb.embed_properties(s, [(await s.get(Property, 1))])
+                return gen_before, emb._generation
+        gen_before, gen_after = asyncio.run(_go())
+        assert gen_after > gen_before, "the next semantic_candidates for this key rebuilds, not serves stale"
 
 
 # ── the routes ────────────────────────────────────────────────────────────────
@@ -453,3 +679,24 @@ class TestTheShape:
         md = (ROOT / "app/ai/EMBED.INTEGRATION.md").read_text(encoding="utf-8")
         for needle in ("embed_loop", "0006", "text_similarity", "semantic_candidates", "aiDuplicateBadge", "pgvector"):
             assert needle in md
+
+
+# ── the similar-listings route loads the target's own vector ─────────────────
+
+class TestSimilarRouteReadsBothVectors:
+
+    def test_the_route_gives_text_similarity_its_target_vector(self, maker):
+        """ai_embedding is deferred, so a plain select of the target listing
+        leaves its vector unloaded and score_similarity's «متن مشابه» would
+        silently drop out of /match/property — the candidates' vectors
+        loaded for nothing. The route loads the target's with the row."""
+        from app.api.routes.crm import match_similar_properties
+        a, _b = asyncio.run(_add(maker, [_vec(P(1, "آپارتمان ۱۰۰ متری گلها"), U),
+                                          _vec(P(2, "آپارتمان ۱۰۰ متری گلها نوساز"), V)]))
+
+        async def _go():
+            async with maker() as s:
+                return await match_similar_properties(a, limit=12, use_llm=False, db=s, current_user=None)
+        out = asyncio.run(_go())
+        assert out["items"], "the twin listing must be offered"
+        assert "متن مشابه" in out["items"][0]["reasons"]

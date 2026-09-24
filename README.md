@@ -320,7 +320,7 @@ because its thinking comes out of the same budget as its answer.
 | **خوانندهٔ نیاز مشتری** (`app/ai/need_parser.py`) | on demand | proposes the intake form's fields; writes nothing without a person | «پر کردن از متن» on the customer form; a portal request's description refines its customer |
 | **جستجوی معنایی و تکراری‌یاب** (`app/ai/embeddings.py`) | background, every 180 s, 200 listings | `properties.ai_embedding` (JSON, numpy at this scale — pgvector later) and `ai_duplicate_of` | «جستجوی معنایی» on the leads page, «شباهت متن» in the score, the «احتمالاً تکراری» badge, the assistant's search tool |
 | **برچسب‌زن عکس** (`app/ai/photo_tagger.py`) | background, every 300 s, 30 listings | `properties.ai_photo_tags` from the first three photos at 512 px | the property modal's photo box, the «هوش تصویری» page |
-| **دستیار دفتر «سورین»** (`app/ai/assistant.py`) | when somebody asks | six read-only tools; every question in `ai_chats` | Telegram (the backup's chats) and «بپرس» on the AI screen |
+| **دستیار دفتر «سورین»** (`app/ai/assistant.py`) | when a linked panel user asks, in a private chat | six read-only tools, each run with that user's rights (app/auth/visibility.py); customers reach the model only as «مشتری-<id>»; every question in `ai_chats` | Telegram (a private chat with the linked user) and «بپرس» on the AI screen |
 
 Rules that hold for all six: none of them sits on a request path that matters
 (the model being down costs a sentence, never a page); every one is gated on

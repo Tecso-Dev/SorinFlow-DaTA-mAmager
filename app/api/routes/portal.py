@@ -12,11 +12,12 @@ the row exists.
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.services import audit
 from app.models.user import User
 from app.models.portal import PropertyRequest, UpgradeTicket
 from app.auth.dependencies import get_current_user, require_permission, _role_dep
@@ -254,7 +255,8 @@ async def list_tickets(status: str = Query(None),
 @router.post("/admin/tickets/{ticket_id}/decide")
 async def decide_ticket(ticket_id: int, data: UpgradeTicketDecision,
                         current_user: User = _super_admin,
-                        db: AsyncSession = Depends(get_db)):
+                        db: AsyncSession = Depends(get_db),
+                        request: Request = None):
     """Approve a visitor into an admin, or reject the request.
 
     Approval is the only path that raises a role, and it can only ever produce
@@ -274,6 +276,10 @@ async def decide_ticket(ticket_id: int, data: UpgradeTicketDecision,
         raise HTTPException(status_code=404, detail="کاربر یافت نشد")
 
     if data.approve:
+        # a visitor becoming staff joins the name-based ownership rules — the
+        # same guard as a name typed in the profile (app/api/routes/users.py)
+        from app.api.routes.users import _guard_name_is_free
+        await _guard_name_is_free(db, user.full_name, exclude_id=user.id)
         perms = normalize_permissions(data.permissions)
         if not perms:
             perms = list(DEFAULT_ADMIN_PERMISSIONS)
@@ -290,6 +296,11 @@ async def decide_ticket(ticket_id: int, data: UpgradeTicketDecision,
     ticket.decided_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(ticket)
+    # the one path that raises a visitor's role — who did it, for whom
+    await audit.record("portal_ticket_decide", actor=current_user, target_type="user", target_id=user.id,
+                       summary=f"درخواست ارتقای {user.username} {'تأیید' if data.approve else 'رد'} شد",
+                       detail={"approve": bool(data.approve), "permissions": ticket.granted_permissions},
+                       request=request)
 
     from app.services import email_templates as _t
     from app.api.routes.public_auth import notify_by_email

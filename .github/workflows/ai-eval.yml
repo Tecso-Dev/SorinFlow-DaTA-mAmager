@@ -1,0 +1,77 @@
+name: AI evaluation
+
+# Only a push to sorinflow-v2 that actually touches the AI code or the
+# harness itself — never workflow_dispatch, never pull_request. The
+# repository is public, so its logs are public, and this job's env carries
+# the gateway key; a fork opening a PR must never be able to trigger it.
+on:
+  push:
+    branches:
+      - sorinflow-v2
+    paths:
+      - app/ai/**
+      - app/services/llm.py
+      - app/services/match_service.py
+      - app/crm/match_engine.py
+      - app/crm/portal_bridge.py
+      - scripts/ai_eval.py
+      - scripts/ai_eval/**
+      - .github/workflows/ai-eval.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ai-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        # Same closure the test job installs (requirements-dev.lock,
+        # hash-pinned) — this harness imports the app itself.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock
+
+      - name: Run the AI evaluation harness
+        # LLM_API_KEY/LLM_BASE_URL/LLM_MODEL only — no DATABASE_URL, no
+        # REDIS_URL: the harness builds its own throwaway sqlite database
+        # and refuses to read either from the environment. Liara is an
+        # Iranian provider and GitHub's runners may simply not reach it —
+        # the script's own contract is to report that in the live
+        # sections and still exit 0, so this step is not expected to fail
+        # the job on a network miss, only on a real bug.
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: python scripts/ai_eval.py --live --json ai_eval.json --markdown ai_eval.md
+
+      - name: Add the results to the job summary
+        if: always()
+        run: |
+          if [ -f ai_eval.md ]; then
+            cat ai_eval.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the full results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-eval-results
+          path: ai_eval.json
+          retention-days: 30

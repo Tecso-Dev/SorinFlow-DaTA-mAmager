@@ -31,7 +31,9 @@ class TestTheShape:
         src = (ROOT / "app/crm/digest.py").read_text(encoding="utf-8")
         assert 'getattr(settings, "match_engine", True)' in src and "HOUR < 0" in src
         cfg = (ROOT / "app/config.py").read_text(encoding="utf-8")
-        assert 'digest_hour: int = Field(default=8, env="DIGEST_HOUR")' in cfg
+        # env="DIGEST_HOUR" was pydantic v1 syntax that pydantic-settings 2.x
+        # silently ignores; DIGEST_HOUR now reaches the field via AliasChoices.
+        assert 'digest_hour: int = Field(default=8, validation_alias=AliasChoices("DIGEST_HOUR", "digest_hour"))' in cfg
 
     def test_no_system_tzdata_is_needed(self):
         src = (ROOT / "app/crm/digest.py").read_text(encoding="utf-8")

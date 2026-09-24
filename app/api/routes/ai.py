@@ -11,7 +11,7 @@ switching the agents off are not an admin's to do.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import _role_dep
 from app.database import get_db
 from app.models.user import User
-from app.services import llm, secret_box
+from app.services import audit, llm, secret_box
 
 router = APIRouter()
 _super_admin = Depends(_role_dep("root", "super_admin"))
@@ -52,6 +52,7 @@ async def ai_status(db: AsyncSession = Depends(get_db), _: User = _super_admin):
         "usage": usage,
         "spent_today_usd": spent,
         "cap_reached": spent >= cfg["cap_usd"],
+        "breaker": llm.breaker_status(),
         "liara": await llm.liara_activity(),
         # what runs on this today; the agents of the later phases join here
         "agents": [
@@ -66,7 +67,7 @@ async def ai_status(db: AsyncSession = Depends(get_db), _: User = _super_admin):
             {"key": "vision", "name": "برچسب‌زن عکس", "job": "vision",
              "desc": "بازسازی‌شده، مبله، نقشه به‌جای عکس، لوگوی مشاور — روی سه عکس اول هر آگهی", "live": True},
             {"key": "assistant", "name": "دستیار دفتر «سورین»", "job": "write",
-             "desc": "در تلگرام از دیتابیس دفتر جواب می‌دهد — به همان چت‌های بکاپ؛ فقط خواندن، بدون شماره", "live": True},
+             "desc": "در تلگرام، در چت خصوصی، به هر کاربری که از پروفایلش وصل شده با دسترسی خود او جواب می‌دهد؛ فقط خواندن، بدون شماره", "live": True},
         ],
     }
 
@@ -80,7 +81,7 @@ AGENT_CARDS = [
      "where": ["جزئیات ملک ← برداشت هوش مصنوعی", "موتور تطبیق", "ملک‌های مشابه (نوع واقعی و قابل تبدیل)"]},
     {"key": "need", "name": "خوانندهٔ نیاز مشتری", "job": "read", "kind": "on_demand",
      "desc": "حرف آزاد مشتری را به معیارهای فرم تبدیل می‌کند؛ فقط فیلدهای خالی را پر می‌کند و چیزی را ذخیره نمی‌کند.",
-     "where": ["فرم مشتری ← پر کردن از متن", "درخواست‌های پرتال (هنگام ساخت مشتری)"]},
+     "where": ["فرم مشتری ← پر کردن از متن", "درخواست‌های پرتال (بعد از ساخت مشتری، در پس‌زمینه)"]},
     {"key": "embed", "name": "جستجوی معنایی و تکراری‌یاب", "job": "embed", "kind": "loop", "status_url": "/ai/embed/status",
      "desc": "متن هر آگهی را به بردار تبدیل می‌کند: جستجو با جملهٔ آزاد، «شباهت متن» در امتیاز، و تشخیص آگهی تکراری.",
      "where": ["لیدها ← جستجوی معنایی", "ملک‌های مناسب (کاندیدهای شباهت متن)", "نشان «احتمالاً تکراری»", "ابزار دستیار"]},
@@ -88,8 +89,8 @@ AGENT_CARDS = [
      "desc": "سه عکس اول هر آگهی را می‌بیند: بازسازی‌شده، مبله، اتاق‌ها، نقشه به‌جای عکس، لوگوی مشاور، کیفیت.",
      "where": ["جزئیات ملک ← برچسب‌های عکس", "هوش تصویری ← برچسب‌های هوش تصویری"]},
     {"key": "assistant", "name": "دستیار دفتر «سورین»", "job": "write", "kind": "telegram", "status_url": "/ai/assistant/status",
-     "desc": "در تلگرام از دیتابیس دفتر جواب می‌دهد — شش ابزار فقط‌خواندنی، بدون شمارهٔ کسی.",
-     "where": ["تلگرام (چت‌های بکاپ)", "همین صفحه ← بپرس"]},
+     "desc": "در تلگرام، در چت خصوصی و با دسترسی همان کاربر وصل‌شده، از دیتابیس دفتر جواب می‌دهد — شش ابزار فقط‌خواندنی، بدون شمارهٔ کسی و بدون فرستادن اسم مشتری به مدل.",
+     "where": ["تلگرام (چت خصوصی کاربر وصل‌شده)", "همین صفحه ← بپرس"]},
 ]
 
 
@@ -126,14 +127,16 @@ async def ai_overview(db: AsyncSession = Depends(get_db), _: User = _super_admin
         agents.append({**card, "enabled": switches.get(key, True),
                        "model": cfg["models"].get(card["job"]),
                        "state": state,
+                       "cap_usd": cfg["agent_caps"].get(key, 0.0),
                        "month": per_agent.get(key, {"calls": 0, "cost_usd": 0.0, "cost_toman": 0, "failed": 0}),
-                       "today": today_agent.get(key, {"calls": 0, "cost_toman": 0, "failed": 0})})
+                       "today": today_agent.get(key, {"calls": 0, "cost_usd": 0.0, "cost_toman": 0, "failed": 0})})
     return {
         **cfg,
         "key_set": bool((llm.settings.llm_api_key or "").strip()),
         "base_url_set": bool((llm.settings.llm_base_url or "").strip()),
         "env_models": llm.env_models(),
         "usage": usage, "spent_today_usd": spent, "cap_reached": spent >= cfg["cap_usd"],
+        "breaker": llm.breaker_status(),
         "liara": await llm.liara_activity(), "quota": await llm.liara_quota(),
         "agents": agents,
     }
@@ -166,12 +169,14 @@ async def _usage_by_agent_today(db) -> dict:
     day = llm._day_start_utc()
     rows = (await db.execute(
         select(AiUsage.agent, func.count(AiUsage.id), func.coalesce(func.sum(AiUsage.cost_toman), 0.0),
+               func.coalesce(func.sum(AiUsage.cost_usd), 0.0),
                func.coalesce(func.sum(case((AiUsage.ok.is_(False), 1), else_=0)), 0),
                func.max(case((AiUsage.ok.is_(False), AiUsage.created_at))))
         .where(AiUsage.created_at >= day).group_by(AiUsage.agent))).all()
     out = {}
-    for agent, calls, toman, failed, last_bad in rows:
-        entry = {"calls": int(calls), "cost_toman": round(float(toman)), "failed": int(failed or 0),
+    for agent, calls, toman, usd, failed, last_bad in rows:
+        entry = {"calls": int(calls), "cost_toman": round(float(toman)), "cost_usd": round(float(usd), 6),
+                 "failed": int(failed or 0),
                  "last_error_at": last_bad.isoformat() if last_bad else None, "ok_since_error": 0,
                  "last_error": None}
         if last_bad is not None:
@@ -191,7 +196,8 @@ class AgentSwitchIn(BaseModel):
 
 @router.put("/agents/{key}")
 async def ai_agent_switch(key: str, payload: AgentSwitchIn,
-                          db: AsyncSession = Depends(get_db), user: User = _super_admin):
+                          db: AsyncSession = Depends(get_db), user: User = _super_admin,
+                          request: Request = None):
     """One agent on or off, without touching the others."""
     if key not in llm.AGENTS:
         raise HTTPException(status_code=404, detail="چنین ایجنتی وجود ندارد")
@@ -201,7 +207,28 @@ async def ai_agent_switch(key: str, payload: AgentSwitchIn,
         from app.ai import assistant as _assistant
         await secret_box.put(db, _assistant.KEY_ENABLED, "true" if payload.enabled else "false", user.username)
     logger.info(f"[ai] agent {key} switched {'on' if payload.enabled else 'off'} by {user.username}")
+    await audit.record("ai_agent_toggle", actor=user, target_type="ai_agent", target_id=key,
+                       summary=f"ایجنت {key} {'روشن' if payload.enabled else 'خاموش'} شد", request=request)
     return {"key": key, "enabled": payload.enabled}
+
+
+class AgentCapIn(BaseModel):
+    cap_usd: float = Field(..., ge=0, le=100)
+
+
+@router.put("/agents/{key}/cap")
+async def ai_agent_cap(key: str, payload: AgentCapIn,
+                       db: AsyncSession = Depends(get_db), user: User = _super_admin,
+                       request: Request = None):
+    """One agent's own daily ceiling — the shared cap still applies on top."""
+    if key not in llm.AGENTS:
+        raise HTTPException(status_code=404, detail="چنین ایجنتی وجود ندارد")
+    await secret_box.put(db, llm.agent_cap_key(key), f"{payload.cap_usd:.4f}", user.username)
+    logger.info(f"[ai] agent {key} cap set to ${payload.cap_usd:.2f} by {user.username}")
+    await audit.record("ai_agent_cap_set", actor=user, target_type="ai_agent", target_id=key,
+                       summary=f"سقف روزانهٔ ایجنت {key}: {payload.cap_usd:.2f} دلار",
+                       detail={"cap_usd": payload.cap_usd}, request=request)
+    return {"key": key, "cap_usd": payload.cap_usd}
 
 
 @router.get("/log")
@@ -223,7 +250,8 @@ async def ai_log(agent: Optional[str] = Query(None), failed_only: bool = False,
 @router.put("/settings")
 async def put_ai_settings(payload: AiSettingsIn,
                           db: AsyncSession = Depends(get_db),
-                          user: User = _super_admin):
+                          user: User = _super_admin,
+                          request: Request = None):
     """The knobs that live in the panel. An empty model falls back to the
     environment's; the key and the URL are not settable here on purpose."""
     actor = user.username
@@ -238,6 +266,11 @@ async def put_ai_settings(payload: AiSettingsIn,
                        ("vision", payload.model_vision), ("embed", payload.model_embed)):
         if value is not None:
             await secret_box.put(db, llm.KEY_MODELS[job], value.strip() or None, actor)
+    # which knobs moved, not the office notes' text
+    await audit.record("ai_settings_save", actor=user, target_type="ai_settings",
+                       summary="ذخیرهٔ تنظیمات هوش مصنوعی",
+                       detail={"changed": sorted(k for k, v in payload.model_dump().items() if v is not None)},
+                       request=request)
     return await llm.config(db)
 
 

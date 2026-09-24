@@ -2,10 +2,11 @@
 SorinFlow CRM — database models
 Contact, Deal, Note, Task, Reminder, SmsLog, Customer
 """
-from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Text, ForeignKey, DateTime, JSON, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Text, ForeignKey, DateTime, JSON, UniqueConstraint, Index, event
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
+from app.models.phone import sync_phone_columns
 
 
 class Contact(Base):
@@ -15,6 +16,10 @@ class Contact(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False, index=True)
     phone = Column(String(20), index=True)
+    # Kept in sync by the before_insert/before_update listener below — see
+    # app/models/phone.py. phone2 has no equality lookup anywhere today, so
+    # it stays plain text.
+    phone_normalized = Column(String(20), index=True)
     phone2 = Column(String(20))
     email = Column(String(200))
     contact_type = Column(String(50), default="owner", index=True)   # owner|landlord|tenant|seeker|builder|agency
@@ -44,6 +49,11 @@ class Contact(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+_sync_contact_phone = sync_phone_columns(("phone", "phone_normalized"))
+event.listen(Contact, "before_insert", _sync_contact_phone)
+event.listen(Contact, "before_update", _sync_contact_phone)
 
 
 class Deal(Base):
@@ -253,6 +263,10 @@ class Customer(Base):
     full_name = Column(String(200), nullable=False, index=True)
     mobile1 = Column(String(20), index=True)
     mobile2 = Column(String(20))                       # همسر / شریک
+    # Kept in sync by the before_insert/before_update listener below — see
+    # app/models/phone.py.
+    mobile1_normalized = Column(String(20), index=True)
+    mobile2_normalized = Column(String(20), index=True)
     source = Column(String(30), default="in_person")   # in_person|divar|referral
     temperature = Column(String(20), default="warm", index=True)  # hot|warm|cold
     consultant_name = Column(String(200))              # نام مشاور
@@ -305,6 +319,12 @@ class Customer(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+_sync_customer_phone = sync_phone_columns(
+    ("mobile1", "mobile1_normalized"), ("mobile2", "mobile2_normalized"))
+event.listen(Customer, "before_insert", _sync_customer_phone)
+event.listen(Customer, "before_update", _sync_customer_phone)
 
 
 class DailyPerformance(Base):

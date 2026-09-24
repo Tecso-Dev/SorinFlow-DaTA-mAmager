@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.database import get_db, get_redis
 from app.models.property import Property, City, Category
@@ -26,6 +26,49 @@ from app.auth.dependencies import require_admin as _require_admin  # noqa: E402
 settings = get_settings()
 
 _DASHBOARD_CACHE_TTL = 60  # seconds
+
+# Fixed +03:30 — the production image has no tz database (see app/crm/digest.TEHRAN).
+TEHRAN = timezone(timedelta(hours=3, minutes=30), "Asia/Tehran")
+
+
+def _tehran_day_col(dialect_name: str, column):
+    """The Tehran calendar day `column` (a UTC timestamp) falls on, as one
+    SQL expression — the GROUP BY key that replaces a per-day COUNT loop.
+
+    Postgres: AT TIME ZONE by NAME, not by literal offset. '+03:30' would be
+    read under POSIX sign rules and mean UTC-03:30 — the wrong direction —
+    and the database server (unlike the Python image) carries tzdata, so the
+    zone name resolves. sqlite has no AT TIME ZONE at all: scraped_at is
+    written by func.now(), which on sqlite is CURRENT_TIMESTAMP — a naive
+    UTC string — so the same shift is explicit interval arithmetic on it
+    before truncating to a date.
+    """
+    if dialect_name == "postgresql":
+        return func.date(func.timezone("Asia/Tehran", column))
+    return func.date(column, "+3 hours", "+30 minutes")
+
+
+def _tehran_today_and_utc_cutoff(days: int, dialect_name: str = "postgresql"):
+    """Today in Tehran (a date), and the UTC instant that Tehran day started
+    `days` ago — the WHERE-clause range bound the GROUP BY runs inside.
+
+    Postgres: kept tz-aware. asyncpg sends an aware datetime as an
+    unambiguous instant; a NAIVE one is instead interpreted in the
+    connection's own `TimeZone` session setting, which is not guaranteed to
+    be UTC (a local Homebrew Postgres can default to the machine's zone) —
+    binding naive-and-assumed-UTC silently shifted this cutoff by that
+    session's offset.
+    sqlite: naive, because that is how scraped_at is actually stored there
+    (func.now() is sqlite's CURRENT_TIMESTAMP, a plain UTC string with no
+    offset) — a tz-aware bind would compare a "+00:00"-suffixed string
+    against sqlite's plain one and silently match nothing.
+    """
+    today = datetime.now(timezone.utc).astimezone(TEHRAN).date()
+    start_day = today - timedelta(days=days - 1)
+    cutoff = datetime.combine(start_day, datetime.min.time(), tzinfo=TEHRAN).astimezone(timezone.utc)
+    if dialect_name != "postgresql":
+        cutoff = cutoff.replace(tzinfo=None)
+    return today, cutoff
 
 
 @router.get("/dashboard", response_model=DashboardStats)
@@ -132,28 +175,26 @@ async def get_dashboard_stats(
         for row in cat_dist_result.all()
     ]
 
-    # Daily scraping (last 7 days)
+    # Daily scraping (last 7 days), by Tehran calendar day — one grouped
+    # query instead of seven, each of which used to re-run the same
+    # is_active filter.
+    dialect = db.bind.dialect.name
+    day_col = _tehran_day_col(dialect, Property.scraped_at)
+    today, cutoff = _tehran_today_and_utc_cutoff(7, dialect)
+
+    daily_result = await db.execute(
+        select(day_col.label("day"), func.count(Property.id).label("count"))
+        .where(_base([Property.scraped_at >= cutoff]))
+        .group_by(day_col)
+    )
+    counts_by_day = {str(row.day)[:10]: row.count for row in daily_result.all()}
     daily_scraping = []
-    for i in range(7):
-        day = datetime.now() - timedelta(days=i)
-        day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
-        day_end = day_start + timedelta(days=1)
-
-        day_result = await db.execute(
-            select(func.count(Property.id)).where(
-                _base([
-                    Property.scraped_at >= day_start,
-                    Property.scraped_at < day_end,
-                ])
-            )
-        )
-        count = day_result.scalar() or 0
+    for i in range(6, -1, -1):
+        date_str = (today - timedelta(days=i)).strftime("%Y-%m-%d")
         daily_scraping.append({
-            "date": day_start.strftime("%Y-%m-%d"),
-            "count": count
+            "date": date_str,
+            "count": counts_by_day.get(date_str, 0),
         })
-
-    daily_scraping.reverse()
 
     result = DashboardStats(
         total_properties=total_properties,
@@ -385,43 +426,34 @@ async def get_property_trends(
     days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get property trends over time"""
-    
+    """Property trends over time, by Tehran calendar day.
+
+    Used to be two COUNT queries per day in a Python loop — up to 730 round
+    trips for a year of history. One grouped query now does both counts at
+    once (func.count(phone_number) skips NULLs the same way .isnot(None)
+    did), and the days nothing was scraped are filled in afterwards so the
+    response shape — oldest day first, {date, total, with_phone} — is
+    unchanged for the chart.
+    """
+    dialect = db.bind.dialect.name
+    day_col = _tehran_day_col(dialect, Property.scraped_at)
+    today, cutoff = _tehran_today_and_utc_cutoff(days, dialect)
+
+    rows = (await db.execute(
+        select(
+            day_col.label("day"),
+            func.count(Property.id).label("total"),
+            func.count(Property.phone_number).label("with_phone"),
+        )
+        .where(Property.scraped_at >= cutoff)
+        .group_by(day_col)
+    )).all()
+    by_day = {str(row.day)[:10]: (row.total, row.with_phone) for row in rows}
+
     trends = []
-    
-    for i in range(days):
-        day = datetime.now() - timedelta(days=i)
-        day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
-        day_end = day_start + timedelta(days=1)
-        
-        # Count properties scraped
-        count_result = await db.execute(
-            select(func.count(Property.id)).where(
-                and_(
-                    Property.scraped_at >= day_start,
-                    Property.scraped_at < day_end
-                )
-            )
-        )
-        count = count_result.scalar() or 0
-        
-        # Count with phone numbers
-        phone_result = await db.execute(
-            select(func.count(Property.id)).where(
-                and_(
-                    Property.scraped_at >= day_start,
-                    Property.scraped_at < day_end,
-                    Property.phone_number.isnot(None)
-                )
-            )
-        )
-        phone_count = phone_result.scalar() or 0
-        
-        trends.append({
-            "date": day_start.strftime("%Y-%m-%d"),
-            "total": count,
-            "with_phone": phone_count
-        })
-    
-    trends.reverse()
+    for i in range(days - 1, -1, -1):
+        date_str = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+        total, with_phone = by_day.get(date_str, (0, 0))
+        trends.append({"date": date_str, "total": total, "with_phone": with_phone})
+
     return {"trends": trends}

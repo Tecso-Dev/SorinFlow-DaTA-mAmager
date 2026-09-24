@@ -1,10 +1,11 @@
 """
 SorinFlow Divar Scraper - CRM Lead Model
 """
-from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Text, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Text, ForeignKey, DateTime, event
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
+from app.models.phone import sync_phone_columns
 
 
 class Lead(Base):
@@ -16,6 +17,11 @@ class Lead(Base):
 
     # Contact info (copied from property for quick access)
     phone_number = Column(String(20), index=True)
+    # Kept in sync by the before_insert/before_update listener below —
+    # +98/0098/98/0 and Persian digits all collapse to the same string, so a
+    # dedupe check does not miss a lead just because the number was typed
+    # differently the second time. See app/models/phone.py.
+    phone_number_normalized = Column(String(20), index=True)
     seller_name = Column(String(200))
 
     # Property summary
@@ -81,3 +87,8 @@ class Lead(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+_sync_lead_phone = sync_phone_columns(("phone_number", "phone_number_normalized"))
+event.listen(Lead, "before_insert", _sync_lead_phone)
+event.listen(Lead, "before_update", _sync_lead_phone)

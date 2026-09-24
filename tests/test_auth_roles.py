@@ -840,3 +840,21 @@ def test_changing_a_root_role_warns_it_is_one_way():
     from pathlib import Path
     js = Path("frontend/js/app.js").read_text(encoding="utf-8")
     assert "این حساب Root است" in js
+
+
+def test_a_failed_login_under_an_unknown_name_does_not_store_what_was_typed(client):
+    """A password typed into the username box would otherwise sit in the
+    audit trail for a year, shown to whoever reads «رویدادها»."""
+    typed = "Secret-Typed-In-The-Wrong-Box-123"
+    r = client.post("/api/users/token", data={"username": typed, "password": "whatever-1"})
+    assert r.status_code == 401
+
+    async def _rows(maker):
+        from sqlalchemy import select
+        from app.models.audit_event import AuditEvent
+        async with maker() as s:
+            return (await s.execute(select(AuditEvent.summary, AuditEvent.detail)
+                                    .where(AuditEvent.action == "login_failed"))).all()
+    rows = _in_fresh_loop(_rows)
+    assert rows, "the failure is still recorded"
+    assert all(typed not in (summary or "") and typed not in str(detail or "") for summary, detail in rows)
