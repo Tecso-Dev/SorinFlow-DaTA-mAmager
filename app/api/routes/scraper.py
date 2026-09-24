@@ -450,7 +450,7 @@ async def _launch_job(
     # this job so starting one scrape does not lift a dismissal the user just
     # made on another one that is still running.
     from app.scraper import otp_store
-    otp_store.reset_cancel(job_id)
+    await otp_store.reset_cancel(job_id)
     if fell_back_from:
         from app.services import job_log as _jl
         await _jl.record(job_id, _jl.SESSION,
@@ -916,7 +916,7 @@ async def cancel_scraping_job(
     # out of its wait on the cancelled status, and the prompt in the dashboard
     # would otherwise sit there collecting a code nobody is listening for.
     from app.scraper import otp_store
-    freed = otp_store.clear_job(job_id)
+    freed = await otp_store.clear_job(job_id)
 
     # Remove from active tasks tracking
     # The scraper will check job status in the database and stop
@@ -997,8 +997,8 @@ async def switch_job_account(
             status_code=409,
             detail="شمارهٔ روشن و معتبر دیگری ندارید — اول یک شمارهٔ دیوار دیگر اضافه یا روشن کنید")
 
-    otp_store.request_switch(str(job.job_id), target.phone_number if target else None,
-                             by=user.id)
+    await otp_store.request_switch(str(job.job_id), target.phone_number if target else None,
+                                   by=user.id)
     to = target.phone_number if target else "شمارهٔ بعدی شما"
     await job_log.record(
         str(job.job_id), job_log.SESSION,
@@ -1181,7 +1181,7 @@ async def _my_prompts(db, user, pending, identity):
 async def _my_prompt_or_404(db, user, key: str):
     """The pending prompt behind this key, if it is this person's to answer."""
     from app.scraper import otp_store
-    mine, _ = await _my_prompts(db, user, otp_store.get_pending(), [])
+    mine, _ = await _my_prompts(db, user, await otp_store.get_pending(), [])
     got = next((p for p in mine if p.get("key") == key), None)
     if not got:
         # Deliberately the same answer as a key that does not exist: whether
@@ -1203,10 +1203,10 @@ async def get_otp_pending(
     """
     from app.scraper import otp_store
     pending, identity = await _my_prompts(
-        db, current_user, otp_store.get_pending(),
+        db, current_user, await otp_store.get_pending(),
         # Accounts Divar wants identified — national ID, birth date. No
         # code answers it; the panel opens a dialog naming the number.
-        otp_store.identity_required())
+        await otp_store.identity_required())
     return {"forwarders": await _my_forwarders(db, current_user), "pending": pending,
             "timeout": otp_store.wait_window(),
             "identity_required": identity}
@@ -1249,7 +1249,7 @@ async def submit_otp_code(
     """
     from app.scraper import otp_store
     await _my_prompt_or_404(db, current_user, key)
-    ok = otp_store.submit(key, body.code.strip())
+    ok = await otp_store.submit(key, body.code.strip())
     if not ok:
         raise HTTPException(status_code=404, detail="No pending OTP request for this key")
     return {"success": True}
@@ -1405,14 +1405,14 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     elif not code:
         reason = "no_code_in_text"
     elif kind == "login":
-        otp_store.put_login_code(body.account, code)
+        await otp_store.put_login_code(body.account, code)
         reason = "parked_for_login"
     elif kind == "contact":
-        hit = otp_store.find_pending_for_account(body.account)
+        hit = await otp_store.find_pending_for_account(body.account)
         if not hit:
             # Not a miss — an arrival ahead of the request. Park it; the
             # scraper claims it the moment it opens one for this account.
-            if otp_store.park_early_code(body.account, code, body.sentStamp):
+            if await otp_store.park_early_code(body.account, code, body.sentStamp):
                 reason = "parked_early"
             else:
                 reason = "no_pending_for_account"
@@ -1445,7 +1445,7 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
                     sent_ms = None
             if sent_ms is not None and (sent_ms / 1000.0) < (entry["ts"] - 10):
                 reason = "stale_code"
-            elif otp_store.submit(key, code, sent_stamp_ms=body.sentStamp, source="forwarder"):
+            elif await otp_store.submit(key, code, sent_stamp_ms=body.sentStamp, source="forwarder"):
                 matched, matched_key, reason = True, key, "matched"
             else:
                 reason = "already_answered"
@@ -1595,7 +1595,7 @@ async def take_login_code(
     owner = await number_owner(db, account)
     if owner is not None and owner != current_user.id:
         return {"code": None}
-    return {"code": otp_store.take_login_code(account)}
+    return {"code": await otp_store.take_login_code(account)}
 
 
 @router.post("/otp/{key}/resend")
@@ -1615,7 +1615,7 @@ async def resend_otp_code(
     """
     from app.scraper import otp_store
     await _my_prompt_or_404(db, current_user, key)
-    result = otp_store.ask_resend(key)
+    result = await otp_store.ask_resend(key)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("message"))
     return result
@@ -1638,7 +1638,7 @@ async def cancel_otp(
     from app.scraper import otp_store
     if key:
         await _my_prompt_or_404(db, current_user, key)
-        otp_store.clear(key)
+        await otp_store.clear(key)
         return {"success": True, "cleared": 1}
 
     # The key carries the job («{job_id}:{divar_id}»), so a dismissal aimed at
@@ -1652,12 +1652,12 @@ async def cancel_otp(
         owner = (await _owner_of_job(db, [job_id])).get(str(job_id))
         if not _is_mine(current_user, owner):
             raise HTTPException(status_code=404, detail="تسک یافت نشد")
-        cleared = otp_store.cancel_all(job_id)
+        cleared = await otp_store.cancel_all(job_id)
         return {"success": True, "cleared": cleared, "suppressed": True, "scope": job_id}
 
-    mine, _ = await _my_prompts(db, current_user, otp_store.get_pending(), [])
+    mine, _ = await _my_prompts(db, current_user, await otp_store.get_pending(), [])
     jobs = {otp_store.job_of(p["key"]) for p in mine}
-    cleared = sum(otp_store.cancel_all(j) for j in jobs)
+    cleared = sum([await otp_store.cancel_all(j) for j in jobs])
     return {"success": True, "cleared": cleared,
             "suppressed": True, "scope": ", ".join(sorted(jobs)) or "none"}
 

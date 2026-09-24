@@ -2082,7 +2082,7 @@ class DivarScraper:
                 property_data["phone_number"] = phone_number
                 # A reveal worked, so the pool is not exhausted after all.
                 from app.scraper import otp_store as _os
-                _os.clear_timeouts(self._job_id_str)
+                await _os.clear_timeouts(self._job_id_str)
 
             return property_data
             
@@ -3138,7 +3138,7 @@ class DivarScraper:
         from app.services import job_log as _jl
         job_id = getattr(self, "_job_id_str", None)
 
-        _os.note_identity_required(phone or "", job_id=job_id, text=page_text)
+        await _os.note_identity_required(phone or "", job_id=job_id, text=page_text)
 
         db = getattr(self, "db_session", None)
         if phone and db is not None:
@@ -3216,7 +3216,7 @@ class DivarScraper:
         # the current one off. Before any threshold, and before the pin
         # below: that is a person saying the phone is not in their hand, not
         # a budget question.
-        requested = self._take_switch_request()
+        requested = await self._take_switch_request()
         if requested is not None:
             return await self._switch_on_request(requested)
 
@@ -3493,13 +3493,13 @@ class DivarScraper:
         except Exception as e:
             logger.warning(f"[rotate] could not return to {active}'s profile: {e}")
 
-    def _take_switch_request(self):
+    async def _take_switch_request(self):
         """A switch somebody asked for from the panel, consumed once."""
         jid = getattr(self, "_job_id_str", None)
         if not jid:
             return None
         from app.scraper import otp_store as _os
-        return _os.take_switch(jid)
+        return await _os.take_switch(jid)
 
     async def _switch_on_request(self, req: dict) -> bool:
         """Honour «use a different number» from the panel, at a safe point.
@@ -3568,8 +3568,8 @@ class DivarScraper:
                     # The previous number's unanswered prompts said nothing
                     # about this one. Let it be asked, and answered.
                     from app.scraper import otp_store as _os
-                    _os.reset_cancel(jid)
-                    _os.clear_timeouts(jid)
+                    await _os.reset_cancel(jid)
+                    await _os.clear_timeouts(jid)
                 return True
             logger.warning(f"[rotate] manual switch: {cand} not usable — trying next")
 
@@ -4794,7 +4794,7 @@ class DivarScraper:
             # normal, but half its listings have no phone number. Say so.
             try:
                 from app.scraper import otp_store
-                if otp_store.is_cancelled(job.job_id):
+                if await otp_store.is_cancelled(job.job_id):
                     note = ("کد تأیید دیوار وارد نشد — آگهی‌ها ذخیره شدند "
                             "ولی شمارهٔ تماس بعضی‌شان خالی است")
                     finish_reason = f"{finish_reason}؛ {note}" if finish_reason else note

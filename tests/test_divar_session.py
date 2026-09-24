@@ -521,7 +521,16 @@ class TestLoginBrowsersDoNotLeak:
     the dict entry, dropping the only handle to the previous browser. On a
     single-replica box that is most of the CPU."""
 
-    @pytest.mark.asyncio
+    @pytest.fixture(autouse=True)
+    def _redis(self, monkeypatch):
+        """auth_instances (the browsers) stays a plain dict — it cannot mean
+        anything outside this process — but who-started-it/when now lives in
+        Redis (sf:divar-login:*) so it survives a restart. These tests drive
+        that registry directly, without the full app/TestClient."""
+        import app.api.routes.auth as r
+        from _fake_redis import patch_redis
+        patch_redis(monkeypatch, r)
+
     async def test_starting_a_second_login_closes_the_first(self):
         import app.api.routes.auth as r
 
@@ -532,16 +541,14 @@ class TestLoginBrowsersDoNotLeak:
             async def close_browser(self): closed.append(self.tag)
 
         r.auth_instances["0912"] = _Auth("first")
-        r._auth_started["0912"] = 0.0
+        await r._note_login_started("0912", user_id=1)
         await r._discard_auth_instance("0912", "superseded")
 
         assert closed == ["first"]
         assert "0912" not in r.auth_instances
-        assert "0912" not in r._auth_started
+        assert await r._login_started_by("0912") is None
 
-    @pytest.mark.asyncio
     async def test_an_abandoned_login_is_swept(self):
-        import time
         import app.api.routes.auth as r
 
         closed = []
@@ -550,25 +557,24 @@ class TestLoginBrowsersDoNotLeak:
             async def close_browser(self): closed.append(True)
 
         r.auth_instances["0913"] = _Auth()
-        r._auth_started["0913"] = time.monotonic() - (r.AUTH_INSTANCE_TTL + 5)
+        # no registry entry at all — same as one whose AUTH_INSTANCE_TTL
+        # already passed, since Redis's own TTL is what "abandoned" means now
         await r._sweep_auth_instances()
         assert closed == [True] and "0913" not in r.auth_instances
 
-    @pytest.mark.asyncio
     async def test_a_login_still_in_progress_is_left_alone(self):
-        import time
         import app.api.routes.auth as r
 
         class _Auth:
             async def close_browser(self): raise AssertionError("closed too early")
 
         r.auth_instances["0914"] = _Auth()
-        r._auth_started["0914"] = time.monotonic()
+        await r._note_login_started("0914", user_id=1)
         await r._sweep_auth_instances()
         assert "0914" in r.auth_instances
-        r.auth_instances.pop("0914"); r._auth_started.pop("0914")
+        r.auth_instances.pop("0914", None)
+        await r._clear_login_started("0914")
 
-    @pytest.mark.asyncio
     async def test_a_browser_that_will_not_close_does_not_raise(self):
         """A dead browser must not turn into a 500 on somebody else's login."""
         import app.api.routes.auth as r
@@ -577,7 +583,6 @@ class TestLoginBrowsersDoNotLeak:
             async def close_browser(self): raise RuntimeError("already gone")
 
         r.auth_instances["0915"] = _Auth()
-        r._auth_started["0915"] = 0.0
         await r._discard_auth_instance("0915", "test")
         assert "0915" not in r.auth_instances
 

@@ -826,11 +826,11 @@ class TestOneChallengedAccountDoesNotKillThePool:
         src = inspect.getsource(DivarScraper._usable_account_count)
         assert "except Exception" in src and "return 1" in src
 
-    def test_otp_store_exposes_the_counter(self):
+    async def test_otp_store_exposes_the_counter(self):
         from app.scraper import otp_store
         assert hasattr(otp_store, "note_timeout")
         assert hasattr(otp_store, "clear_timeouts")
-        assert otp_store.note_timeout(None) == 0     # no job, no crash
+        assert await otp_store.note_timeout(None) == 0     # no job, no crash
 
 
 class TestTheStoredJarStaysFresh:
@@ -980,20 +980,22 @@ class TestWeDoNotLearnTheSameFactFiveTimes:
         src = _code_only(inspect.getsource(ContactExtractor._handle_sms_otp_if_present))
         assert "min(timeout, 30)" in src
 
-    def test_a_successful_reveal_restores_the_full_window(self):
+    async def test_a_successful_reveal_restores_the_full_window(self, monkeypatch):
         """clear_timeouts resets the strike count, so a job that starts working
         again treats the next prompt as a first one."""
         from app.scraper import otp_store
-        otp_store.clear_timeouts("j")
-        assert otp_store.strikes("j") == 0
-        otp_store.note_timeout("j")
-        assert otp_store.strikes("j") == 1
-        otp_store.clear_timeouts("j")
-        assert otp_store.strikes("j") == 0
+        from _fake_redis import patch_redis
+        patch_redis(monkeypatch, otp_store)
+        await otp_store.clear_timeouts("j")
+        assert await otp_store.strikes("j") == 0
+        await otp_store.note_timeout("j")
+        assert await otp_store.strikes("j") == 1
+        await otp_store.clear_timeouts("j")
+        assert await otp_store.strikes("j") == 0
 
-    def test_strikes_is_safe_without_a_job(self):
+    async def test_strikes_is_safe_without_a_job(self):
         from app.scraper import otp_store
-        assert otp_store.strikes(None) == 0
+        assert await otp_store.strikes(None) == 0
 
 
 class TestANewRoundStartsOnlyWhenNothingIsLeft:

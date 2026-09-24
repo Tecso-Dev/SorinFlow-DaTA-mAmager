@@ -130,13 +130,17 @@ class TestTheScraperSetsTheAccountAside:
 
 
 class TestTheRegistry:
-    def test_note_list_clear(self):
-        otp_store._identity.clear()
-        otp_store.note_identity_required("0905-833-3026", job_id="j1", text="کد ملی")
-        items = otp_store.identity_required()
+    @pytest.fixture(autouse=True)
+    def _redis(self, monkeypatch):
+        from _fake_redis import patch_redis
+        patch_redis(monkeypatch, otp_store)
+
+    async def test_note_list_clear(self):
+        await otp_store.note_identity_required("0905-833-3026", job_id="j1", text="کد ملی")
+        items = await otp_store.identity_required()
         assert len(items) == 1 and items[0]["phone"] == "0905-833-3026" and items[0]["job_id"] == "j1"
-        assert otp_store.clear_identity_required("09058333026") is True
-        assert otp_store.identity_required() == []
+        assert await otp_store.clear_identity_required("09058333026") is True
+        assert await otp_store.identity_required() == []
 
     def test_it_is_in_the_poll(self):
         """It rides the same poll — now filtered to the person who owns the

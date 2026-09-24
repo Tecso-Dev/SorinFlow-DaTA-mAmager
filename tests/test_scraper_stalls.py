@@ -57,9 +57,9 @@ class TestAnUnansweredPromptStopsTheRestAsking:
         from app.scraper import otp_store
         assert otp_store._CANCEL_WINDOW > 0
 
-    def test_the_store_accepts_a_bare_job_id(self):
+    async def test_the_store_accepts_a_bare_job_id(self):
         from app.scraper import otp_store
-        assert otp_store.is_cancelled("some-job-id") is False
+        assert await otp_store.is_cancelled("some-job-id") is False
         assert otp_store.job_of("job-1:divar-abc") == "job-1"
 
 
