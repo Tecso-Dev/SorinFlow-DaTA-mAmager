@@ -1,10 +1,11 @@
 """
 SorinFlow Divar Scraper - Property Models
 """
-from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Float, Text, ForeignKey, DateTime, JSON
+from sqlalchemy import Column, Integer, String, BigInteger, Boolean, Float, Text, ForeignKey, DateTime, JSON, Index, event
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
+from app.models.phone import sync_phone_columns
 from datetime import datetime
 
 
@@ -107,6 +108,11 @@ class Property(Base):
     
     # Contact
     phone_number = Column(String(20), index=True)
+    # Kept in sync by the before_insert/before_update listener below — see
+    # app/models/phone.py. owner_phone is which of OUR Divar accounts
+    # scraped the listing, not a seller's number, so it is not part of this:
+    # nothing matches it against a lead or a customer.
+    phone_number_normalized = Column(String(20), index=True)
     # How the contact reveal ended: "phone", "chat_only", "unavailable", or
     # NULL for rows from before this existed. «chat_only» is the poster's
     # choice and never changes; «unavailable» is ours and is worth a retry.
@@ -208,7 +214,14 @@ class Property(Base):
     scraped_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+
+    # The properties list (app/api/routes/properties.py) always filters
+    # is_active and, by default, sorts by scraped_at desc — one composite
+    # index for that WHERE+ORDER BY instead of a full scan plus a sort.
+    __table_args__ = (
+        Index("ix_properties_active_scraped_at", "is_active", scraped_at.desc()),
+    )
+
     # Relationships
     city = relationship("City", back_populates="properties")
     category = relationship("Category", back_populates="properties")
@@ -290,6 +303,11 @@ class Property(Base):
             data["deposit"] = self.deposit
             data["rent_price"] = self.rent_price
         return data
+
+
+_sync_property_phone = sync_phone_columns(("phone_number", "phone_number_normalized"))
+event.listen(Property, "before_insert", _sync_property_phone)
+event.listen(Property, "before_update", _sync_property_phone)
 
 
 async def allocate_serial_no(db) -> int:

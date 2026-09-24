@@ -185,6 +185,7 @@ async def init_db():
                  _migrate_price_history,
                  _migrate_image_hashes,
                  _migrate_sms_panel,
+                 _migrate_phone_normalized,
                  _seed_reference_data):
         try:
             async with engine.begin() as conn:
@@ -355,6 +356,48 @@ async def _migrate_sms_panel(conn):
             "ON crm_sms_logs (campaign, sent_at DESC)"))
     except Exception as e:
         print(f"SMS panel migration skipped: {e}")
+
+
+async def _migrate_phone_normalized(conn):
+    """The normalized companion column for every phone that is looked up or
+    deduped: leads.phone_number, properties.phone_number, crm_contacts.phone,
+    crm_customers.mobile1/2. See app/models/phone.py for the normalization
+    and the ORM event that fills it on every write from here on.
+
+    No backfill here — Alembic 0012 does that once, in batches. This only
+    guards the column and its index existing, because every one of these
+    tables is read on every request and a route must not 500 for a column
+    Alembic failed to add.
+    """
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE leads ADD COLUMN IF NOT EXISTS phone_number_normalized VARCHAR(20)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_leads_phone_number_normalized "
+            "ON leads (phone_number_normalized)"))
+        await conn.execute(text(
+            "ALTER TABLE properties ADD COLUMN IF NOT EXISTS phone_number_normalized VARCHAR(20)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_properties_phone_number_normalized "
+            "ON properties (phone_number_normalized)"))
+        await conn.execute(text(
+            "ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS phone_normalized VARCHAR(20)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_contacts_phone_normalized "
+            "ON crm_contacts (phone_normalized)"))
+        await conn.execute(text(
+            "ALTER TABLE crm_customers "
+            "ADD COLUMN IF NOT EXISTS mobile1_normalized VARCHAR(20), "
+            "ADD COLUMN IF NOT EXISTS mobile2_normalized VARCHAR(20)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_customers_mobile1_normalized "
+            "ON crm_customers (mobile1_normalized)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_customers_mobile2_normalized "
+            "ON crm_customers (mobile2_normalized)"))
+    except Exception as e:
+        print(f"phone normalization migration skipped: {e}")
 
 
 async def _migrate_job_resume(conn):
