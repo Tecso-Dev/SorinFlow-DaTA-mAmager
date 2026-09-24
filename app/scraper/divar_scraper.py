@@ -2696,7 +2696,10 @@ class DivarScraper:
 
         Owner-scoped when the run has one (every run started from the panel
         or a schedule does); switched-on only; and never a number Divar has
-        asked to verify its identity.
+        asked to verify its identity. A run nobody owns gets the numbers
+        nobody owns: it used to get the whole table «so an internally-started
+        scrape does not lose its pool», which made every internal run a way
+        onto everybody's numbers.
         """
         from app.models.cookie import Cookie as CookieModel
         query = (query
@@ -2705,8 +2708,8 @@ class DivarScraper:
                  .where(CookieModel.identity_required_at.is_(None)))
         owner = getattr(self, "owner_user_id", None)
         if owner:
-            query = query.where(CookieModel.owner_user_id == owner)
-        return query
+            return query.where(CookieModel.owner_user_id == owner)
+        return query.where(CookieModel.owner_user_id.is_(None))
 
     async def _account_usable(self, phone: Optional[str]) -> bool:
         """Whether this run may put `phone` in the browser: the owner's own,

@@ -126,11 +126,6 @@ class TestRotationStaysInsideThePool:
         src = inspect.getsource(DivarScraper._usable_account_count)
         assert "_usable_accounts_query" in src
 
-    def test_a_run_with_no_owner_keeps_the_old_behaviour(self):
-        """An internally started scrape must not lose its pool."""
-        src = inspect.getsource(DivarScraper._usable_accounts_query)
-        assert "if owner:" in src
-
     def test_the_round_is_counted_and_reset_inside_the_same_pool(self):
         """Counting and resetting everybody's numbers kept a colleague's fresh
         account «unspent» for a run that could never reach it, and one run's

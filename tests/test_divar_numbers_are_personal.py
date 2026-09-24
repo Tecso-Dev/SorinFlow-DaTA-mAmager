@@ -39,6 +39,7 @@ JAN_1 = "09146382408"
 JAN_OFF = "09146382409"       # switched off by its owner
 JAN_ID = "09146382410"        # Divar wants an identity check
 JAN_2 = "09146382411"
+NOBODYS = "09146382412"       # a session no user has claimed
 
 
 @pytest.fixture(scope="module")
@@ -154,6 +155,26 @@ class TestTheRunsPool:
         assert JAN_OFF not in pool, "a number its owner switched off is still rotated onto"
         assert JAN_ID not in pool
         assert pool == [JAN_1, JAN_2], "least spent first"
+
+    def test_a_run_nobody_owns_gets_only_the_numbers_nobody_owns(self, people):
+        """It used to get the whole table, so every internally started run
+        was a way onto everybody's numbers — root's first, as the most used."""
+        from app.models.cookie import Cookie
+
+        async def fn(sc):
+            row = Cookie(phone_number=NOBODYS, cookies=[{"name": "x", "value": "y"}])
+            sc.db_session.add(row)
+            await sc.db_session.commit()
+            try:
+                return (await sc._load_rotation_pool(),
+                        await sc._account_usable(ROOT_NUM),
+                        await sc._account_usable(NOBODYS))
+            finally:
+                await sc.db_session.delete(row)
+                await sc.db_session.commit()
+        pool, root_usable, nobodys_usable = _with_scraper(None, fn)
+        assert pool == [NOBODYS]
+        assert not root_usable and nobodys_usable
 
     def test_a_named_number_must_be_the_owners_own_and_on(self, people):
         async def fn(sc):
