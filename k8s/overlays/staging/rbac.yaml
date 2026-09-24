@@ -1,0 +1,38 @@
+# .github/workflows/staging.yml applies this file (and the rest of this
+# overlay) with the cluster-admin kubeconfig, then mints a short-lived token
+# for staging-deployer and runs scripts/deploy_k8s.sh under THAT token instead
+# — so a bug in the staging workflow, or in deploy_k8s.sh itself, cannot
+# reach any namespace but this one: a Role, not a ClusterRole, grants
+# everything only inside sorinflow-staging, and there is no ClusterRoleBinding
+# anywhere in this file.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: staging-deployer
+  labels:
+    app.kubernetes.io/component: rbac
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: staging-deployer
+  labels:
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: staging-deployer
+  labels:
+    app.kubernetes.io/component: rbac
+subjects:
+  - kind: ServiceAccount
+    name: staging-deployer
+roleRef:
+  kind: Role
+  name: staging-deployer
+  apiGroup: rbac.authorization.k8s.io
