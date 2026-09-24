@@ -227,7 +227,8 @@ jobs:
       # blank a key that was patched by hand on the server. Values are only
       # ever passed to kubectl; nothing here prints one (GitHub masks them in
       # the log anyway). To manage another key this way, add its name to LIST
-      # — and, if it is new, wire it in k8s/04-backend.yaml (SECRETS.md §2).
+      # — and, if it is new, wire it in k8s/base/shared-app-env.patch.yaml
+      # (SECRETS.md §2).
       - name: Sync secrets from GitHub
         env:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
@@ -262,129 +263,74 @@ jobs:
             echo "SECRETS_HASH=$hash" >> "$GITHUB_ENV"
           fi
 
-      - name: Apply manifests
-        env:
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-        # --validate=false skips the client-side schema check, which downloads
-        # the OpenAPI document from the API server first. That download keeps
-        # timing out on this node and failing deploys whose manifests had not
-        # even changed. The apiserver still validates on admission, so the
-        # manifest is not going in unchecked — only the local pre-check is
-        # dropped. Retried once, because the same node hiccup can hit the apply.
-        #
-        # 04-backend.yaml is applied here too. It used not to be, so every
-        # change to it — secret wiring, probes, resources, update strategy —
-        # sat in the repo doing nothing until somebody remembered to apply it
-        # by hand, and the cluster quietly drifted from what the repo claimed
-        # was true. Wiring it in is the only way that stops recurring.
-        #
-        # It cannot be applied as it stands: the manifest carries a placeholder
-        # `:latest` tag, and with imagePullPolicy IfNotPresent that either
-        # reuses whatever stale blob is cached under that name — shipping old
-        # code while reporting a healthy rollout — or wedges in ErrImagePull.
-        # So the image this run actually built is rendered into it first.
+      # Host-level, run once per deploy so a change here reaches the server
+      # without anyone SSHing in: the kubelet seccomp profile Chromium's
+      # sandbox needs (k8s/base/worker.yaml references it by the same path),
+      # and closing 6443 to everything except the cluster's own pod/service
+      # networks (Sobhan's decision — kubectl from outside was never a
+      # supported way to manage this cluster, and the port had no reason to
+      # be reachable from the internet at all).
+      - name: Host prerequisites
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
 
-          RENDERED="$(mktemp)"
-          sed -E -e "s|^([[:space:]]*image: )ghcr\.io/tecso-dev/sorinflow-data-manager:.*|\1${IMAGE}|" \
-                 -e "s|^([[:space:]]*sorinflow\.com/synced-secrets: ).*|\1\"${SECRETS_HASH:-unsynced}\"|" \
-            k8s/04-backend.yaml > "$RENDERED"
+          echo "── seccomp profile for worker's Chromium sandbox ──"
+          # k3s's kubelet root-dir defaults to /var/lib/kubelet (confirmed
+          # against a live k3s v1.36.2 node); the seccomp/ subdirectory under
+          # it does not exist until something creates it.
+          install -d -m 0755 /var/lib/kubelet/seccomp/profiles
+          install -m 0644 deploy/seccomp/sorinflow-chromium.json \
+            /var/lib/kubelet/seccomp/profiles/sorinflow-chromium.json
 
-          # If that image line is ever renamed the sed silently matches nothing
-          # and we would apply :latest — the exact failure this guard exists to
-          # prevent. Stop loudly instead of deploying the wrong thing.
-          grep -qF "image: ${IMAGE}" "$RENDERED" || {
-            echo "::error::Could not render the image into k8s/04-backend.yaml."
-            echo "Its image line no longer matches the expected pattern; applying"
-            echo "the manifest unchanged would reset the deployment to :latest."
-            exit 1
-          }
-          grep -qF "sorinflow.com/synced-secrets: \"${SECRETS_HASH:-unsynced}\"" "$RENDERED" || {
-            echo "::error::Could not render the secrets fingerprint into k8s/04-backend.yaml."
-            echo "A changed key would then not restart the pod that reads it."
-            exit 1
-          }
+          echo "── 6443: pod/service networks only, not the world ──"
+          if command -v ufw >/dev/null 2>&1 && ufw status | grep -q active; then
+            # The allow rules for the cluster's own networks go in FIRST —
+            # deleting the world rule before these exist would cut the
+            # runner's own kubectl off from the API server it needs for
+            # everything below.
+            ufw allow from 10.42.0.0/16 to any port 6443 proto tcp comment 'k8s API - pod network'
+            ufw allow from 10.43.0.0/16 to any port 6443 proto tcp comment 'k8s API - service network'
+            # new_server.sh wrote this as "6443/tcp"; tolerate a bare "6443"
+            # too, and tolerate either already being gone — this step is
+            # idempotent and re-runs on every deploy.
+            ufw delete allow 6443/tcp 2>/dev/null || true
+            ufw delete allow 6443 2>/dev/null || true
 
-          kubectl apply --validate=false -f "$RENDERED" ||
-            { sleep 10; kubectl apply --validate=false -f "$RENDERED"; }
-          kubectl apply --validate=false -f k8s/05-ingress.yaml ||
-            { sleep 10; kubectl apply --validate=false -f k8s/05-ingress.yaml; }
-
-          # Postgres and Redis, which CI did not apply until now.
-          #
-          # That gap was not cosmetic. Their resource limits lived in git and
-          # never reached the cluster, so both stayed BestEffort — the first
-          # pods the kubelet evicts under node memory pressure — while the
-          # backend's limit was raised on the strength of those very limits
-          # existing. The backend could grow into memory the node did not have
-          # and the eviction would land on the database.
-          #
-          # apply is idempotent: an unchanged manifest is a no-op and restarts
-          # nothing. Only a real spec change causes a restart, which is what it
-          # should do.
-          # The remaining three as well (roadmap #12): the namespace, the
-          # Postgres init ConfigMap and the Traefik ACME config. All
-          # idempotent; the ACME config only re-renders Traefik when it
-          # actually changed. Nothing in the repo drifts from the cluster
-          # any more.
-          for m in k8s/00-namespace.yaml k8s/02b-postgres-init-configmap.yaml \
-                   k8s/02-postgres.yaml k8s/03-redis.yaml k8s/06-traefik-acme.yaml; do
-            kubectl apply --validate=false -f "$m" ||
-              { sleep 10; kubectl apply --validate=false -f "$m"; }
-          done
-
-      - name: Roll out new image
-        env:
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-        run: |
-          IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
-          kubectl set image deployment/backend backend="$IMAGE" -n sorinflow
-          if ! kubectl rollout status deployment/backend -n sorinflow --timeout=300s; then
-            # The strategy is Recreate: the old pod is already gone, so a new
-            # pod that never comes up is the site being DOWN, not a failed
-            # canary. On 2026-09-18 an import-time error crash-looped the only
-            # pod for fifteen minutes until somebody rolled back by hand.
-            # Roll back here, first, and only then explain.
-            echo "::error::The new pod did not become ready — rolling back to the previous image."
-            kubectl rollout undo deployment/backend -n sorinflow
-            kubectl rollout status deployment/backend -n sorinflow --timeout=300s \
-              && echo "Rolled back; the site is up on the previous image." \
-              || echo "::error::The rollback did not come up either — look at the pods NOW."
-            exit 1
+            echo "── proving pods can still reach the API server ──"
+            IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}"
+            kubectl -n kube-system delete pod sorinflow-6443-check --ignore-not-found >/dev/null
+            kubectl -n kube-system run sorinflow-6443-check --image="$IMAGE" --restart=Never \
+              --command -- sh -c \
+              'curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -k https://kubernetes.default.svc/readyz' \
+              >/dev/null
+            ok=0
+            for i in $(seq 1 30); do
+              phase="$(kubectl -n kube-system get pod sorinflow-6443-check -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+              [ "$phase" = "Succeeded" ] && { ok=1; break; }
+              [ "$phase" = "Failed" ] && break
+              sleep 2
+            done
+            kubectl -n kube-system logs sorinflow-6443-check 2>/dev/null || true
+            kubectl -n kube-system delete pod sorinflow-6443-check --ignore-not-found >/dev/null 2>&1 || true
+            if [ "$ok" != 1 ]; then
+              echo "::error::pods could not reach the API server with 6443 closed — reopening it to the world."
+              ufw allow 6443/tcp
+              exit 1
+            fi
+          else
+            echo "ufw missing or inactive on this host — leaving the firewall untouched."
           fi
-          kubectl get pods -n sorinflow
-
-      # `kubectl get pods` above only ever runs when the rollout succeeded,
-      # which is precisely when nobody needs it. The 65048fc failure printed
-      # five minutes of "1 old replicas are pending termination" and not one
-      # word about why the new pod was unhealthy.
-      - name: Why the rollout failed
-        if: failure()
         env:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+      - name: Deploy
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          OVERLAY: production
         run: |
-          echo "::group::pods"
-          kubectl get pods -n sorinflow -o wide || true
-          echo "::endgroup::"
-          echo "::group::new pod description (events at the bottom)"
-          POD=$(kubectl get pods -n sorinflow -l app=backend \
-                --sort-by=.metadata.creationTimestamp -o name | tail -1)
-          kubectl describe "$POD" -n sorinflow || true
-          echo "::endgroup::"
-          echo "::group::new pod logs"
-          kubectl logs "$POD" -n sorinflow --tail=120 || true
-          kubectl logs "$POD" -n sorinflow --previous --tail=60 2>/dev/null || true
-          echo "::endgroup::"
-          echo "::group::sessions holding locks (the deadlock that bit us before)"
-          kubectl exec -n sorinflow postgres-0 -- psql -U sorinflow -d divar_scraper -c \
-            "SELECT pid, state, wait_event_type, left(query,80) AS query,
-                    now()-state_change AS held
-             FROM pg_stat_activity
-             WHERE state <> 'idle' OR state = 'idle in transaction'
-             ORDER BY state_change;" || true
-          echo "::endgroup::"
+          IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_sha }}" \
+            SECRETS_HASH="${SECRETS_HASH:-unsynced}" \
+            bash scripts/deploy_k8s.sh
 
       # Installs/refreshes the nightly disaster-recovery backup timer (and the
       # panel's «همین حالا» watcher) on the host — idempotent, so an unchanged
