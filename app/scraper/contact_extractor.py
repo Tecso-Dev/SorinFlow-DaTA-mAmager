@@ -924,13 +924,13 @@ class ContactExtractor:
             from app.scraper import otp_store
             # If the user already dismissed an OTP prompt this run, don't block
             # every subsequent phone for the full timeout — skip straight away.
-            if otp_store.is_cancelled(self.otp_key):
+            if await otp_store.is_cancelled(self.otp_key):
                 logger.info("SMS-OTP suppressed for this job (dismissed earlier) — skipping phone")
                 return
             # A different number has already been asked for. Typing this one
             # into Divar's form would send a code to the phone the person just
             # told us is out of reach.
-            if otp_store.has_switch(otp_store.job_of(self.otp_key)):
+            if await otp_store.has_switch(otp_store.job_of(self.otp_key)):
                 logger.info("SMS-OTP skipped — a switch to another Divar number is pending")
                 return
 
@@ -950,7 +950,7 @@ class ContactExtractor:
                 # one, and asking again would only trip its rate limit.)
                 await self._request_otp_resend()
 
-            event = otp_store.request(self.otp_key, self.account_phone or "")
+            await otp_store.request(self.otp_key, self.account_phone or "")
             timeout = getattr(settings, "otp_wait_timeout", 300)
 
             # Wait the full time for the FIRST prompt of a job, and briefly for
@@ -965,7 +965,7 @@ class ContactExtractor:
             #
             # Somebody who IS watching answers the first prompt, and the full
             # timeout is theirs.
-            _prior = otp_store.strikes(otp_store.job_of(self.otp_key))
+            _prior = await otp_store.strikes(otp_store.job_of(self.otp_key))
 
             # Wait for a human, or get on with it? A real choice, not a guess.
             #
@@ -1031,7 +1031,7 @@ class ContactExtractor:
                         _auto_resends += 1
                         _next_auto = waited + _resend_after
                         sent = await self._request_otp_resend()
-                        otp_store.restart_clock(self.otp_key)
+                        await otp_store.restart_clock(self.otp_key)
                         logger.info(
                             f"no code after {int(waited)}s — automatic resend "
                             f"{_auto_resends}/2 "
@@ -1039,42 +1039,41 @@ class ContactExtractor:
                     # Did the operator press «ارسال دوباره»? Only this loop can
                     # act on it: Divar's resend control lives on the page the
                     # browser is parked on, and nothing outside can reach it.
-                    if otp_store.take_resend(self.otp_key):
+                    if await otp_store.take_resend(self.otp_key):
                         sent = await self._request_otp_resend()
-                        otp_store.restart_clock(self.otp_key)
+                        await otp_store.restart_clock(self.otp_key)
                         waited = 0.0
                         _notified = False
                         logger.info(
                             "OTP resend requested from the panel — "
                             + ("Divar's control was clicked" if sent
                                else "no control on the page; Divar may still resend on its own"))
-                    if otp_store.is_cancelled(self.otp_key):
+                    if await otp_store.is_cancelled(self.otp_key):
                         logger.info("SMS-OTP wait cancelled by user")
-                        otp_store.clear(self.otp_key)
+                        await otp_store.clear(self.otp_key)
                         break
                     # Somebody asked for a different number — usually because
                     # this one's phone is not in anyone's hand, so no code is
                     # coming. Stop waiting here; the scraper makes the switch
                     # at the end of this listing. Peeked, not taken: the
                     # request is the scraper's to consume.
-                    if otp_store.has_switch(otp_store.job_of(self.otp_key)):
+                    if await otp_store.has_switch(otp_store.job_of(self.otp_key)):
                         logger.info("SMS-OTP wait left — a different Divar number was asked for")
-                        otp_store.clear(self.otp_key)
+                        await otp_store.clear(self.otp_key)
                         switched = True
                         break
                     if self.should_cancel:
                         try:
                             if await self.should_cancel():
                                 logger.info("SMS-OTP wait aborted — job cancelled")
-                                otp_store.clear(self.otp_key)
+                                await otp_store.clear(self.otp_key)
                                 break
                         except Exception:
                             pass
-                    try:
-                        await asyncio.wait_for(event.wait(), timeout=slice_s)
+                    if await otp_store.wait_code(self.otp_key, slice_s):
                         got_code = True
                         break
-                    except asyncio.TimeoutError:
+                    else:
                         waited += slice_s
                         # Tell somebody, once, that the run is parked.
                         #
@@ -1089,9 +1088,9 @@ class ContactExtractor:
                 # A switch is not an unanswered prompt: the person is right
                 # there, answering with a different number. Counting it as a
                 # strike would suppress codes on the number they moved to.
-                if not got_code and not switched and not otp_store.is_cancelled(self.otp_key):
+                if not got_code and not switched and not await otp_store.is_cancelled(self.otp_key):
                     logger.warning(f"SMS-OTP timeout — no code in {timeout}s")
-                    otp_store.clear(self.otp_key)
+                    await otp_store.clear(self.otp_key)
 
                     # A challenge belongs to ONE account, so try the others
                     # before giving up on phone numbers entirely.
@@ -1111,10 +1110,10 @@ class ContactExtractor:
                     # and been challenged too. A successful reveal resets the
                     # count, because it proves the pool is not exhausted.
                     job = otp_store.job_of(self.otp_key)
-                    strikes = otp_store.note_timeout(job)
+                    strikes = await otp_store.note_timeout(job)
                     budget = max(1, int(self.account_count or 1))
                     if strikes >= budget:
-                        otp_store.cancel_all(job)
+                        await otp_store.cancel_all(job)
                         logger.warning(
                             f"No one answered on {strikes} account(s) — every "
                             "session has been challenged, so OTP requests are "
@@ -1137,14 +1136,14 @@ class ContactExtractor:
             if not got_code:
                 return
 
-            code = otp_store.pop_code(self.otp_key)
+            code = await otp_store.pop_code(self.otp_key)
             if not code:
                 logger.warning("OTP event fired but no code found in store")
                 return
             # SMS sent -> typed here, when a forwarder told us the send time.
             # The one number a forwarder is judged by; carrier delivery is
             # inside it, and only the phone->server hop is ours to fix.
-            _sent_at = otp_store.pop_sent_stamp(self.otp_key)
+            _sent_at = await otp_store.pop_sent_stamp(self.otp_key)
             if _sent_at:
                 try:
                     from app import metrics as _mx
