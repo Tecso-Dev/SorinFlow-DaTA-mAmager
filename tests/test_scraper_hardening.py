@@ -24,59 +24,57 @@ os.environ.setdefault("IMAGES_PATH", "/tmp")
 # ── OTP suppression is per job ───────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
-def clean_otp_store():
+def clean_otp_store(monkeypatch):
     from app.scraper import otp_store
-    otp_store._store.clear()
-    otp_store.reset_cancel()
+    from _fake_redis import patch_redis
+    patch_redis(monkeypatch, otp_store)
     yield
-    otp_store._store.clear()
-    otp_store.reset_cancel()
 
 
-def test_dismissing_one_jobs_prompt_does_not_silence_the_others():
+async def test_dismissing_one_jobs_prompt_does_not_silence_the_others():
     """Three scrapes run at once. Closing the modal on one used to suppress OTP
     globally for fifteen minutes, so the other two silently stopped collecting
     phone numbers with nothing on screen to say why."""
     from app.scraper import otp_store
 
-    otp_store.request("jobA:ad1", "0911")
-    otp_store.request("jobB:ad2", "0922")
-    otp_store.request("jobC:ad3", "0933")
+    await otp_store.request("jobA:ad1", "0911")
+    await otp_store.request("jobB:ad2", "0922")
+    await otp_store.request("jobC:ad3", "0933")
 
-    dropped = otp_store.cancel_all("jobB")
+    dropped = await otp_store.cancel_all("jobB")
     assert dropped == 1, "cancelling one job took another job's pending request"
 
-    assert otp_store.is_cancelled("jobB:ad2") is True
-    assert otp_store.is_cancelled("jobA:ad1") is False, "jobA was silenced by jobB's dismissal"
-    assert otp_store.is_cancelled("jobC:ad3") is False, "jobC was silenced by jobB's dismissal"
+    assert await otp_store.is_cancelled("jobB:ad2") is True
+    assert await otp_store.is_cancelled("jobA:ad1") is False, "jobA was silenced by jobB's dismissal"
+    assert await otp_store.is_cancelled("jobC:ad3") is False, "jobC was silenced by jobB's dismissal"
 
     # and the untouched jobs keep their pending prompts
-    keys = {p["key"] for p in otp_store.get_pending()}
+    keys = {p["key"] for p in await otp_store.get_pending()}
     assert keys == {"jobA:ad1", "jobC:ad3"}
 
 
-def test_starting_a_job_does_not_lift_another_jobs_dismissal():
+async def test_starting_a_job_does_not_lift_another_jobs_dismissal():
     """reset_cancel runs when a scrape starts. Unscoped, launching one job
     re-enabled prompts on a job the user had just dismissed."""
     from app.scraper import otp_store
 
-    otp_store.cancel_all("jobA")
-    assert otp_store.is_cancelled("jobA:x") is True
+    await otp_store.cancel_all("jobA")
+    assert await otp_store.is_cancelled("jobA:x") is True
 
-    otp_store.reset_cancel("jobB")                 # a different job starts
-    assert otp_store.is_cancelled("jobA:x") is True, "starting jobB lifted jobA's dismissal"
+    await otp_store.reset_cancel("jobB")                 # a different job starts
+    assert await otp_store.is_cancelled("jobA:x") is True, "starting jobB lifted jobA's dismissal"
 
-    otp_store.reset_cancel("jobA")                 # jobA restarts
-    assert otp_store.is_cancelled("jobA:x") is False
+    await otp_store.reset_cancel("jobA")                 # jobA restarts
+    assert await otp_store.is_cancelled("jobA:x") is False
 
 
-def test_is_cancelled_accepts_a_full_key_or_a_bare_job_id():
+async def test_is_cancelled_accepts_a_full_key_or_a_bare_job_id():
     from app.scraper import otp_store
-    otp_store.cancel_all("job7")
-    assert otp_store.is_cancelled("job7") is True
-    assert otp_store.is_cancelled("job7:whatever") is True
-    assert otp_store.is_cancelled("") is False
-    assert otp_store.is_cancelled(None) is False
+    await otp_store.cancel_all("job7")
+    assert await otp_store.is_cancelled("job7") is True
+    assert await otp_store.is_cancelled("job7:whatever") is True
+    assert await otp_store.is_cancelled("") is False
+    assert await otp_store.is_cancelled(None) is False
 
 
 # ── image download limits ────────────────────────────────────────────────────
