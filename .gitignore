@@ -21,6 +21,9 @@ env/
 .env_/
 ENV/
 
+# Node (eslint + its config packages — see package.json/eslint.config.js)
+node_modules/
+
 # Environment variables
 .env
 .env.local
