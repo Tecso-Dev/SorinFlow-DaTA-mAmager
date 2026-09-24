@@ -294,8 +294,13 @@ class TestPanelWiring:
         called = set()
         for match in re.finditer(r"apiCall\(\s*[`'\"](/email/[^`'\"?$]+)", js):
             called.add(match.group(1).rstrip("/"))
-        served = {r.path[len("/api"):] for r in m.app.routes
-                  if getattr(r, "path", "").startswith("/api/email")}
+        # fastapi>=0.141 nests an included router's routes behind a lazy
+        # _IncludedRouter wrapper, so app.routes no longer holds flattened
+        # APIRoute objects with a usable .path — iter_route_contexts resolves
+        # the wrapper down to the real registered routes.
+        from fastapi.routing import iter_route_contexts
+        served = {rc.path[len("/api"):] for rc in iter_route_contexts(m.app.routes)
+                  if (rc.path or "").startswith("/api/email")}
         # the preview route is templated in the UI, so compare its prefix
         missing = {c for c in called
                    if c not in served and not c.startswith("/email/preview")}

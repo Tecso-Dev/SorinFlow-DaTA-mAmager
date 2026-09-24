@@ -1,6 +1,11 @@
 # FastAPI and ASGI
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
+# 0.109.0 carried PYSEC-2024-38 (ReDoS parsing multipart Content-Type) and
+# pulled in a starlette old enough to still have the form-parsing DoS and
+# request.url/Host-header bugs fixed across starlette 0.40-1.3.1 (PYSEC-2026-1943,
+# -1941, -161, -2281, -2280, -249, -248). starlette itself is not pinned here;
+# it comes in transitively at whatever this fastapi version requires.
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
 # Starlette parses the login form with this. Kept current for CVE-2024-53981
 # (unbounded multipart allocation) — it is on an unauthenticated path.
 python-multipart==0.0.32
@@ -41,7 +46,9 @@ opencv-python==4.9.0.80
 numpy==1.26.4
 
 # Data Processing
-pydantic==2.5.3
+# fastapi==0.141.1 requires pydantic>=2.9.0; bumped only to the earliest patch
+# release on that minor (2.9.2), not the current pydantic release.
+pydantic==2.9.2
 pydantic-settings==2.1.0
 
 # Utilities
