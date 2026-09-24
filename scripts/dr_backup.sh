@@ -143,15 +143,27 @@ gpg --batch --yes --pinentry-mode loopback --no-symkey-cache \
   -o "$WORK/enc.gpg" "$WORK/plain.tar"
 rm -f "$WORK/plain.tar"
 
+# The outbox lives on the data volume, which the backend pod owns and can
+# write as it likes. This script is root on the host: a dr-outbox the pod
+# replaced with a symlink (to /, or to the Postgres volume) would have root
+# delete and write wherever it points. Only a real directory is used, and
+# nothing below it is ever followed.
+OUTBOX="$DDIR/dr-outbox"
+[ -L "$OUTBOX" ] && fail "dr-outbox یک symlink است — اجرا متوقف شد"
+mkdir -p "$OUTBOX"
+
 # A bundle stays in the outbox until Telegram takes it. With Telegram out
 # of reach for a week, every night would add another full bundle to the
 # data volume until it filled; the newest undelivered one is all a retry
-# needs. (Stamps sort by time; nullglob is on from step 4.)
-STALE=( "$DDIR"/dr-outbox/*/ )
-for ((i = 0; i < ${#STALE[@]} - 1; i++)); do rm -rf "${STALE[i]}"; done
+# needs. Stamps sort by time; -P and -type d never follow a link.
+STALE=()
+while IFS= read -r d; do STALE+=("$d"); done \
+  < <(find -P "$OUTBOX" -mindepth 1 -maxdepth 1 -type d | sort)
+for ((i = 0; i < ${#STALE[@]} - 1; i++)); do rm -rf -- "${STALE[i]}"; done
 
-OUTDIR="$DDIR/dr-outbox/$STAMP"
-mkdir -p "$OUTDIR"
+OUTDIR="$OUTBOX/$STAMP"
+{ [ -e "$OUTDIR" ] || [ -L "$OUTDIR" ]; } && fail "$OUTDIR از قبل وجود دارد"
+mkdir "$OUTDIR"
 PART_PREFIX="sorinflow-dr-$STAMP.tar.gpg.part"
 # -d: numeric suffixes (readable, sorts correctly); -a4: room for up to
 # 10000 parts (450GB at 45MB each) without ever needing a wider suffix.

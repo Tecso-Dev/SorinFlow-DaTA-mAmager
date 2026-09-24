@@ -375,6 +375,28 @@ class TestRestore:
         original = (pipeline["base"] / "traefik" / "acme.json").read_text()
         assert (pipeline["outdir"] / "k8s" / "traefik-acme.json").read_text() == original
 
+    def test_a_symlinked_outbox_is_refused_and_nothing_is_touched(self, pipeline, tmp_path):
+        """The pod owns the data volume; this script is root on the host. A
+        dr-outbox the pod swapped for a link to / would have root delete and
+        write wherever it points."""
+        pvc = pipeline["pvc"]
+        victim = tmp_path / "victim"
+        (victim / "etc").mkdir(parents=True)
+        (victim / "etc" / "passwd").write_text("keep")
+        (victim / "home").mkdir()
+        real, aside = pvc / "dr-outbox", pvc / "dr-outbox.real"
+        real.rename(aside)
+        try:
+            real.symlink_to(victim)
+            r = subprocess.run(["bash", str(REPO / "scripts" / "dr_backup.sh")],
+                               env=pipeline["env"], capture_output=True, text=True, timeout=300)
+        finally:
+            real.unlink()
+            aside.rename(real)
+        assert r.returncode != 0, r.stdout
+        assert (victim / "etc" / "passwd").read_text() == "keep" and (victim / "home").is_dir()
+        assert sorted(x.name for x in victim.iterdir()) == ["etc", "home"]
+
     def test_undelivered_bundles_do_not_pile_up(self, pipeline):
         left = sorted(d.name for d in (pipeline["pvc"] / "dr-outbox").iterdir())
         assert left == ["20200102-000000"], left

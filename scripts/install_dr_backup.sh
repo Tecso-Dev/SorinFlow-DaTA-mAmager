@@ -22,9 +22,11 @@ NAMESPACE=sorinflow
 
 # dr_backup.sh needs these on the host; new_server.sh installs jq, an older
 # box may not have it. Better to learn it now than at 04:00.
+UPDATED=0
 for tool in jq gpg split sha256sum; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "  $tool missing — installing"
+    [ "$UPDATED" = 1 ] || { apt-get update -qq >/dev/null; UPDATED=1; }
     apt-get install -y -qq "$( [ "$tool" = gpg ] && echo gnupg || echo "$tool" )" >/dev/null
   fi
 done
