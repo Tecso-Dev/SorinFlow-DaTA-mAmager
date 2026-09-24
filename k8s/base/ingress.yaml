@@ -1,0 +1,92 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  labels:
+    app.kubernetes.io/component: ingress
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sorinflow-ingress-http
+  labels:
+    app.kubernetes.io/component: ingress
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: "web"
+    # Traefik's cross-namespace middleware reference is "<namespace>-<name>":
+    # the production overlay's namespace is "sorinflow", so this is correct
+    # as written; the staging overlay patches it to match "sorinflow-staging".
+    traefik.ingress.kubernetes.io/router.middlewares: "sorinflow-redirect-https@kubernetescrd"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: sorinflow.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sorinflow-ingress-https
+  labels:
+    app.kubernetes.io/component: ingress
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: "letsencrypt"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: sorinflow.com
+      http:
+        paths:
+          # Exact, and listed before the catch-all Prefix rule for a human
+          # reading this file — Ingress path precedence does not actually
+          # depend on order (Exact always outranks Prefix per the spec, and
+          # Traefik follows it), but relying on that is not a reason to make
+          # the file confusing to read.
+          #
+          # These three are the only Divar-login HTTP routes the panel calls
+          # (frontend/js/app.js: apiCall('/auth/login'), apiCall('/auth/verify
+          # ?phone_number=...'), apiCall('/auth/refresh'); API_BASE is '/api').
+          # They need worker's Chromium/cookie machinery, which api does not
+          # have — see worker.yaml.
+          - path: /api/auth/login
+            pathType: Exact
+            backend:
+              service:
+                name: worker
+                port:
+                  number: 8000
+          - path: /api/auth/verify
+            pathType: Exact
+            backend:
+              service:
+                name: worker
+                port:
+                  number: 8000
+          - path: /api/auth/refresh
+            pathType: Exact
+            backend:
+              service:
+                name: worker
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
