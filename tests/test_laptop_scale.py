@@ -76,7 +76,11 @@ class TestTheUsersList:
 
     def test_it_is_a_full_width_table_with_the_form_in_a_modal(self):
         html = Path("frontend/index.html").read_text(encoding="utf-8")
-        sec = html[html.index('id="section-users"'):html.index('<!-- /.content-wrapper -->')]
+        # up to the next section (رویدادها), not the page's closing wrapper —
+        # section-users is no longer the last one, and that next section's own
+        # table legitimately uses table-responsive, which the assertion below
+        # would otherwise (wrongly) catch as belonging to the users table.
+        sec = html[html.index('id="section-users"'):html.index('id="section-audit"')]
         assert 'class="table users-table"' in sec and 'id="users-table"' in sec
         assert "table-responsive" not in sec[sec.index("users-card"):]
         assert 'id="user-create-form"' not in sec, "the form lives in the modal now"

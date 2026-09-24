@@ -1159,7 +1159,7 @@ function copyTotpSecret() {
 }
 
 // ═══ Hash router: #/login, #/dashboard, #/properties, ... ═══════
-const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'insights', 'auth', 'forwarder', 'proxies', 'portal', 'monitoring', 'ai', 'sms', 'email', 'users', 'profile'];
+const ROUTE_SECTIONS = ['dashboard', 'properties', 'scraper', 'crm', 'insights', 'auth', 'forwarder', 'proxies', 'portal', 'monitoring', 'ai', 'sms', 'email', 'users', 'audit', 'profile'];
 let _currentSection = null;
 let _intendedRoute = null;   // deep link requested before login
 let _suppressHashNav = false;
@@ -1246,7 +1246,8 @@ const NAV_PERMISSION = {
     'nav-link-email':      'email',
 };
 // Sections that are not permission-gated but role-gated.
-const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'], 'nav-link-ai': ['root', 'super_admin'] };
+const NAV_ROLE_ONLY = { 'nav-users': ['root', 'super_admin'], 'nav-link-ai': ['root', 'super_admin'],
+                        'nav-link-audit': ['root', 'super_admin'] };
 
 const SECTION_PERMISSION = {
     dashboard: 'stats', properties: 'properties', scraper: 'scraper',
@@ -1357,6 +1358,7 @@ const SECTION_META = {
     email:      { title: 'ایمیل',                subtitle: 'تنظیمات SMTP، قالب‌های سایت و گزارش ارسال' },
     sms:        { title: 'پیامک',                subtitle: 'تنظیمات کاوه‌نگار، ارسال تکی و گروهی، و گزارش تحویل' },
     users:      { title: 'مدیریت کاربران',       subtitle: 'حساب‌ها، دسترسی‌ها و درخواست‌های ارتقا' },
+    audit:      { title: 'رویدادها',             subtitle: 'چه کسی، چه کاری، کِی — فقط برای root و مدیر ارشد' },
     profile:    { title: 'پروفایل من',           subtitle: 'مشخصات، تماس و تأیید، امنیت حساب' },
 };
 
@@ -1371,7 +1373,7 @@ const NAV_GROUPS = {
     daily:  ['dashboard', 'properties', 'crm', 'portal'],
     scrape: ['scraper', 'auth', 'proxies', 'insights'],
     comms:  ['sms', 'email', 'forwarder'],
-    system: ['ai', 'monitoring', 'users'],
+    system: ['ai', 'monitoring', 'users', 'audit'],
 };
 const _NAV_SHUT_KEY = 'sf_nav_shut';
 
@@ -1423,6 +1425,7 @@ const PALETTE_EXTRA_WORDS = {
     ai:         'هوش ایجنت مدل توکن سورین دستیار',
     monitoring: 'لاگ سلامت سرور منابع مانیتور',
     users:      'کاربر دسترسی نقش حساب',
+    audit:      'رویداد لاگ گزارش ورود تغییر حذف audit log',
     profile:    'پروفایل من رمز عبور دو مرحله‌ای امنیت',
 };
 
@@ -1485,7 +1488,8 @@ const NAV_ICONS = {
     dashboard: 'speedometer2', properties: 'house-door', crm: 'people', portal: 'inbox',
     scraper: 'robot', auth: 'key', proxies: 'shield-check', insights: 'graph-up-arrow',
     sms: 'chat-left-text', email: 'envelope-at', forwarder: 'phone-vibrate',
-    ai: 'stars', monitoring: 'activity', users: 'person-gear', profile: 'person-circle',
+    ai: 'stars', monitoring: 'activity', users: 'person-gear', audit: 'shield-lock',
+    profile: 'person-circle',
 };
 
 function _navIcon(sec) {
@@ -1633,7 +1637,7 @@ function _defaultSection() {
 
 function _isSectionAllowed(sectionName) {
     const role = _currentUser?.role || 'visitor';
-    if (sectionName === 'users') return ['root', 'super_admin'].includes(role);
+    if (sectionName === 'users' || sectionName === 'audit') return ['root', 'super_admin'].includes(role);
     const perm = SECTION_PERMISSION[sectionName];
     return perm ? _hasPerm(perm) : true;
 }
@@ -1715,6 +1719,9 @@ function showSection(sectionName) {
         case 'email':      _applyCrmRoleVisibility(); loadEmail(); break;
         case 'users':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
                                loadUsers(); loadMaintenance(); loadBackup(); initPermsUI(); loadTickets();
+                           } break;
+        case 'audit':      if (['root', 'super_admin'].includes(_currentUser?.role)) {
+                               loadAuditActions(); loadAuditEvents();
                            } break;
     }
 }
@@ -11728,6 +11735,109 @@ async function decideTicket(id, approve) {
         if (typeof loadUsers === 'function') loadUsers();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
+
+// ── رویدادها: the audit trail (root/super_admin only) ─────────────────────────
+let _auditPage = 1;
+const AUDIT_PAGE_SIZE = 50;
+
+function _auditWhen(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return `${d.toLocaleDateString('fa-IR')} ${d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function _auditFilterChanged() {
+    _auditPage = 1;
+    loadAuditEvents();
+}
+
+async function loadAuditActions() {
+    const sel = document.getElementById('audit-filter-action');
+    if (!sel || sel.dataset.loaded) return;
+    try {
+        const { items } = await apiCall('/audit/actions');
+        sel.insertAdjacentHTML('beforeend',
+            items.map(a => `<option value="${esc(a.key)}">${esc(a.label)}</option>`).join(''));
+        sel.dataset.loaded = '1';
+    } catch (e) {
+        // the filter list is a nicety; the table itself still works without it
+    }
+}
+
+function goToAuditPage(page) {
+    _auditPage = Math.max(page, 1);
+    loadAuditEvents();
+}
+
+async function loadAuditEvents() {
+    const body = document.getElementById('audit-rows');
+    const empty = document.getElementById('audit-empty');
+    const countEl = document.getElementById('audit-count');
+    if (!body) return;
+
+    const actor = document.getElementById('audit-filter-actor')?.value.trim() || '';
+    const action = document.getElementById('audit-filter-action')?.value || '';
+    const sinceJ = document.getElementById('audit-filter-since')?.value.trim() || '';
+    const untilJ = document.getElementById('audit-filter-until')?.value.trim() || '';
+    const since = sinceJ ? jalaliToGregorian(sinceJ) : '';
+    const until = untilJ ? jalaliToGregorian(untilJ) : '';
+    if ((sinceJ && !since) || (untilJ && !until)) {
+        showToast('خطا', 'تاریخ را به شکل ۱۴۰۵/۰۱/۰۱ وارد کنید', 'danger');
+        return;
+    }
+
+    const qs = new URLSearchParams({
+        limit: String(AUDIT_PAGE_SIZE),
+        offset: String((_auditPage - 1) * AUDIT_PAGE_SIZE),
+    });
+    if (actor) qs.set('actor', actor);
+    if (action) qs.set('action', action);
+    if (since) qs.set('since', since);
+    if (until) qs.set('until', until);
+
+    body.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-4">در حال بارگذاری…</td></tr>';
+    empty.classList.add('d-none');
+    try {
+        const { items, total } = await apiCall(`/audit/events?${qs.toString()}`);
+        if (countEl) countEl.textContent = `${formatNumber(total)} رویداد`;
+        body.innerHTML = items.map(row => html`
+            <tr>
+                <td class="text-nowrap">${_auditWhen(row.created_at)}</td>
+                <td>${row.actor_username || '—'}</td>
+                <td>${row.action_label}</td>
+                <td>${row.target_type ? `${row.target_type} #${row.target_id ?? ''}` : '—'}</td>
+                <td class="text-nowrap" dir="ltr">${row.ip || '—'}</td>
+            </tr>`).join('');
+        empty.classList.toggle('d-none', items.length > 0);
+        _renderAuditPagination(total);
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="5" class="text-center text-danger p-4">${esc(e.message)}</td></tr>`;
+    }
+}
+
+function _renderAuditPagination(total) {
+    const wrap = document.getElementById('audit-pagination');
+    if (!wrap) return;
+    const pages = Math.max(Math.ceil(total / AUDIT_PAGE_SIZE), 1);
+    if (pages <= 1) { wrap.innerHTML = ''; return; }
+    const add = (label, page, opts = {}) =>
+        `<li class="page-item ${opts.active ? 'active' : ''} ${opts.disabled ? 'disabled' : ''}">`
+        + (opts.gap ? `<span class="page-link">…</span>`
+                    : `<a class="page-link" href="#" onclick="goToAuditPage(${page}); return false;">${label}</a>`)
+        + '</li>';
+    let out = add('‹', Math.max(_auditPage - 1, 1), { disabled: _auditPage === 1 });
+    let last = 0;
+    for (let i = 1; i <= pages; i++) {
+        if (i === 1 || i === pages || Math.abs(i - _auditPage) <= 2) {
+            if (i - last > 1) out += add('', 0, { gap: true });
+            out += add(formatNumber(i), i, { active: i === _auditPage });
+            last = i;
+        }
+    }
+    out += add('›', Math.min(_auditPage + 1, pages), { disabled: _auditPage === pages });
+    wrap.innerHTML = `<ul class="pagination pagination-sm justify-content-center mb-0">${out}</ul>`;
+}
+
 
 // ── visitor property requests ────────────────────────────────────────────────
 const PORTAL_STATUS = {
