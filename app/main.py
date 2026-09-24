@@ -23,6 +23,7 @@ import sys
 from app.config import get_settings
 from app.database import init_db, close_db, close_redis
 from app.api.routes import router as api_router
+from app.services.supervisor import beat
 
 # Configure logging
 #
@@ -728,6 +729,7 @@ app.include_router(api_router, prefix="/api")
 async def _reminder_checker():
     """Every 60 s: fire due reminders (send SMS if channel=sms, mark as sent)."""
     while True:
+        beat("reminders")
         try:
             await asyncio.sleep(60)
             await _fire_due_reminders()
@@ -843,6 +845,7 @@ async def _lease_expiry_checker():
     """Every 6h: leads marked اجاره شده whose lease year is over go back to
     the fresh pool (status=new) so the file resurfaces automatically."""
     while True:
+        beat("lease_expiry")
         try:
             await asyncio.sleep(6 * 3600)
             await _reactivate_expired_leases()
@@ -878,6 +881,7 @@ async def _reactivate_expired_leases():
 async def _audit_retention_checker():
     """Once a day: drop audit_events rows older than a year (app/services/audit.py)."""
     while True:
+        beat("audit_retention")
         try:
             await asyncio.sleep(24 * 3600)
             from app.services import audit as _audit

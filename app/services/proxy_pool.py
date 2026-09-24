@@ -162,7 +162,9 @@ async def refresh_loop() -> None:
     if hours <= 0:
         return
     await asyncio.sleep(120)  # let the app come up first
+    from app.services.supervisor import beat
     while True:
+        beat("proxy_pool")
         await refresh_all()
         await asyncio.sleep(hours * 3600)
 

@@ -155,7 +155,9 @@ async def watch_loop() -> None:
         logger.info("[forwarder-watch] disabled")
         return
     await asyncio.sleep(90)          # let startup finish
+    from app.services.supervisor import beat
     while True:
+        beat("forwarder_watch")
         res = await sweep()
         if res["warned"]:
             logger.info(f"[forwarder-watch] {res}")

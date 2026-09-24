@@ -118,6 +118,8 @@ async def scheduler_loop() -> None:
         logger.info("[schedule] disabled")
         return
     await asyncio.sleep(120)         # let startup finish
+    from app.services.supervisor import beat
     while True:
+        beat("scrape_scheduler")
         await tick()
         await asyncio.sleep(TICK_SECONDS)

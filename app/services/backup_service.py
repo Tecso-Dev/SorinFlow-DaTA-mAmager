@@ -586,7 +586,9 @@ def _seconds_until_next_run() -> float:
 async def backup_scheduler():
     """Background task: run the backup every night."""
     logger.info(f"[backup] nightly scheduler armed — next run in {_seconds_until_next_run()/3600:.1f}h")
+    from app.services.supervisor import beat
     while True:
+        beat("backup")
         try:
             await asyncio.sleep(_seconds_until_next_run())
             await run_backup()

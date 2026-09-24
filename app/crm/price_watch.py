@@ -199,6 +199,8 @@ async def watch_loop() -> None:
         return
     await asyncio.sleep(120)
     logger.info(f"[price] watch armed — every {TICK_SECONDS // 60} min, cuts of {MIN_DROP_PCT}٪ and more")
+    from app.services.supervisor import beat
     while True:
+        beat("price_watch")
         await tick()
         await asyncio.sleep(TICK_SECONDS)

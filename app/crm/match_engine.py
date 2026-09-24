@@ -209,6 +209,8 @@ async def engine_loop() -> None:
         return
     await asyncio.sleep(90)          # let startup finish
     logger.info(f"[match] engine armed — every {TICK_SECONDS // 60} min, threshold {MIN_SCORE}٪")
+    from app.services.supervisor import beat
     while True:
+        beat("match_engine")
         await tick()
         await asyncio.sleep(TICK_SECONDS)

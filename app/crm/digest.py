@@ -206,7 +206,9 @@ async def digest_loop() -> None:
         return
     await asyncio.sleep(120)         # let startup finish
     logger.info(f"[digest] armed — every day after {HOUR:02d}:00 Tehran")
+    from app.services.supervisor import beat
     while True:
+        beat("digest")
         await tick()
         # ponytail: a failed delivery is retried every minute until it lands;
         # back off here if Telegram outages ever make the log noisy
