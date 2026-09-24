@@ -404,3 +404,51 @@ def test_alembic_stamps_at_boot_and_models_match_the_schema():
 
     assert fresh == [head]
     assert established == [head]
+
+
+def test_a_second_0009_that_added_cookies_enabled_does_not_strand_is_enabled():
+    """Local main once held an unpushed revision «0009» that added
+    cookies.enabled; sorinflow-v2's 0009 adds cookies.is_enabled. Had the
+    first reached production, Alembic would read 0009 as applied and never
+    add is_enabled — every cookies query failing, /health still green. The
+    boot must build the column anyway."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    import app.database as db
+
+    saved_engine, saved_maker = db.engine, db.async_session_maker
+    db.engine = create_async_engine(PG_URL)
+    db.async_session_maker = async_sessionmaker(
+        db.engine, expire_on_commit=False, autocommit=False, autoflush=False)
+
+    async def _cols(eng):
+        async with eng.begin() as c:
+            return {r[0] for r in (await c.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='cookies' AND table_schema=current_schema()"))).all()}
+
+    async def _go():
+        await db.init_db()                    # a database at head
+        eng = create_async_engine(PG_URL)
+        async with eng.begin() as c:          # ...as the other 0009 would have left it
+            await c.execute(text("ALTER TABLE cookies DROP COLUMN IF EXISTS is_enabled"))
+            await c.execute(text(
+                "ALTER TABLE cookies ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE"))
+            await c.execute(text("UPDATE alembic_version SET version_num = '0009'"))
+        assert "is_enabled" not in await _cols(eng)
+        await eng.dispose()
+
+        await db.init_db()                    # sorinflow-v2 boots on it
+
+        eng = create_async_engine(PG_URL)
+        cols = await _cols(eng)
+        await eng.dispose()
+        return cols
+
+    try:
+        cols = _run(_go())
+    finally:
+        _run(db.engine.dispose())
+        db.engine, db.async_session_maker = saved_engine, saved_maker
+
+    assert "is_enabled" in cols

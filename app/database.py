@@ -124,6 +124,7 @@ async def init_db():
                  _migrate_contact_channel,
                  _migrate_cookie_owner,
                  _migrate_identity_required,
+                 _migrate_cookie_is_enabled,
                  _backfill_cookie_owner,
                  _backfill_forwarder_permission,
                  _migrate_profile,
@@ -349,6 +350,22 @@ async def _migrate_identity_required(conn):
             "ALTER TABLE cookies ADD COLUMN IF NOT EXISTS identity_required_at TIMESTAMPTZ"))
     except Exception as e:
         print(f"identity_required migration skipped: {e}")
+
+
+async def _migrate_cookie_is_enabled(conn):
+    """The owner's on/off switch for a Divar number (Alembic 0009 adds it too).
+
+    A second, unpushed revision «0009» once added `cookies.enabled` instead.
+    Had it reached production, Alembic would have recorded 0009 as applied,
+    never added is_enabled, and every cookies query would have failed with
+    /health still green. Adding it here as well makes that harmless.
+    """
+    try:
+        from sqlalchemy import text
+        await conn.execute(text(
+            "ALTER TABLE cookies ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT TRUE"))
+    except Exception as e:
+        print(f"cookie is_enabled migration skipped: {e}")
 
 
 async def _migrate_cookie_owner(conn):
