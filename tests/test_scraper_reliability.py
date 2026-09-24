@@ -670,7 +670,7 @@ class TestCiAppliesWhatTheBudgetAssumes:
         d = yaml.safe_load(self._workflow())
         # test moved to ci.yml (called from here as the "ci" job) so a plain
         # push and a pull request run the exact same gate; build now also
-        # waits on the e2e and k8s workflows other streams own.
+        # waits on the browser (e2e) and manifest (k8s) gates.
         assert set(d["jobs"]) >= {"ci", "e2e", "k8s", "build", "deploy"}
 
 
