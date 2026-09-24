@@ -40,7 +40,14 @@ BUNDLE="$WORK/bundle"
 PASS_FILE=""
 STAGE="راه‌اندازی"
 
-cleanup() { rm -rf "$WORK"; [ -n "$PASS_FILE" ] && rm -f "$PASS_FILE"; }
+# gpg's own home for this run, in the private /tmp the systemd unit gives it:
+# its agent socket and random seed go there — not into /root/.gnupg, nor to a
+# runtime directory the unit's read-only filesystem would refuse — and the
+# directory goes with the run. A short path, as a socket's must be.
+GNUPGHOME="$(mktemp -d)"
+export GNUPGHOME
+
+cleanup() { rm -rf "$WORK" "$GNUPGHOME"; [ -n "$PASS_FILE" ] && rm -f "$PASS_FILE"; }
 trap cleanup EXIT
 
 fail() {

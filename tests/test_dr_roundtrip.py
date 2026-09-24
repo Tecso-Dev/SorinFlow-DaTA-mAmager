@@ -499,7 +499,7 @@ class TestTamperIsRefused:
 class TestInstall:
     """install_dr_backup.sh on a fake host: systemd is a logging stub."""
 
-    def _run(self, tmp_path):
+    def _run(self, tmp_path, data_dir=True):
         fakebin = tmp_path / "bin"
         fakebin.mkdir(exist_ok=True)
         log = tmp_path / "systemctl.log"
@@ -510,6 +510,8 @@ class TestInstall:
                    DR_SYSTEMD_UNIT_DIR=str(tmp_path / "units"),
                    DR_BIN_DIR=str(tmp_path / "opt"),
                    DR_DATA_DIR=str(tmp_path / "pvc"))
+        if not data_dir:        # a fresh box: the volume does not exist yet
+            env.pop("DR_DATA_DIR")
         r = subprocess.run(["bash", str(REPO / "scripts" / "install_dr_backup.sh")],
                            env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
@@ -528,3 +530,28 @@ class TestInstall:
         assert f"PathExists={tmp_path / 'pvc'}/dr-request" in \
             (tmp_path / "units" / "dr-backup.path").read_text()
         assert "daemon-reload" not in self._run(tmp_path)
+
+    def test_the_unit_can_write_only_where_the_script_writes(self, tmp_path):
+        """Root, but on a read-only filesystem except the work directory
+        under /root and the data volume itself — so what the pod leaves on
+        the volume cannot steer a write anywhere else."""
+        self._run(tmp_path)
+        directives = [line.strip() for line in (tmp_path / "units" / "dr-backup.service").read_text().splitlines()
+                      if line.strip() and not line.startswith("#")]
+        for need in ("NoNewPrivileges=yes", "PrivateTmp=yes", "ProtectSystem=strict",
+                     "ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectKernelLogs=yes",
+                     "ProtectControlGroups=yes", "ProtectClock=yes", "RestrictSUIDSGID=yes",
+                     "RestrictRealtime=yes", "LockPersonality=yes"):
+            assert need in directives, need
+        assert [d for d in directives if d.startswith("ReadWritePaths=")] == [
+            "ReadWritePaths=/root", f"ReadWritePaths=-{tmp_path / 'pvc'}"]
+        # the script writes its work directory under /root, as the unit allows
+        script = (REPO / "scripts" / "dr_backup.sh").read_text()
+        assert '"${DR_WORK_DIR:-/root}/.sorinflow-dr-work.XXXXXX"' in script
+        assert "ExecStopPost=/bin/sh -c 'rm -rf /root/.sorinflow-dr-work.*'" in directives
+
+    def test_before_the_volume_exists_the_storage_directory_stands_in(self, tmp_path):
+        self._run(tmp_path, data_dir=False)
+        service = (tmp_path / "units" / "dr-backup.service").read_text()
+        assert "ReadWritePaths=-/var/lib/rancher/k3s/storage\n" in service
+        assert not (tmp_path / "units" / "dr-backup.path").exists(), "no watcher without the volume"

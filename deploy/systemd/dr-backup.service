@@ -16,3 +16,31 @@ TimeoutStartSec=30m
 # A run killed at the timeout never reaches its own cleanup trap: the
 # plaintext dump and the secrets file would stay under /root.
 ExecStopPost=/bin/sh -c 'rm -rf /root/.sorinflow-dr-work.*'
+
+# ── sandbox ──────────────────────────────────────────────────────────────────
+# Root, for the cluster's admin kubeconfig — but a root that can write only
+# where this job writes. The data volume is the backend pod's to shape, so
+# whatever the script could be steered into by what it finds there cannot
+# land outside the paths below: the rest of the filesystem is read-only.
+NoNewPrivileges=yes
+# /tmp and /var/tmp of its own: the passphrase file and gpg's home for the
+# run (both mktemp) never sit in the host's /tmp, and go when the run ends.
+PrivateTmp=yes
+ProtectSystem=strict
+# /root — the work directory, /root/.sorinflow-dr-work.XXXXXX (the dump, the
+# Secret, the tar and its encrypted copy; removed by the script's own trap or
+# by ExecStopPost above), and kubectl's cache (~/.kube/cache).
+ReadWritePaths=/root
+# The data volume: dr-request is consumed, dr-outbox/<stamp> is written and
+# older undelivered bundles are removed. install_dr_backup.sh fills in the
+# volume's own directory; on a box where it did not exist yet at install
+# time, the whole storage directory, until the next deploy's install.
+ReadWritePaths=-@@DATA_RW@@
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
