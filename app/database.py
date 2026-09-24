@@ -118,8 +118,15 @@ async def close_redis():
         redis_client = None
 
 
-async def init_db():
+async def init_db(strict: bool = False):
     """Create tables, apply migrations, seed the first accounts.
+
+    strict is `python -m app.migrate` (app/migrate.py), the step a rollout
+    runs once before any new pod starts: there an Alembic failure raises
+    instead of being printed, and the result is checked against the head, so
+    the Job fails and the rollout never begins. A boot (strict=False) keeps
+    going as it always has, because a pod that will not start is a worse
+    outage than one skipped migration.
 
     Each migration runs in **its own transaction**. Sharing one was the cause
     of the 65048fc deploy failure, and the mechanism is worth spelling out
@@ -213,12 +220,18 @@ async def init_db():
     try:
         await _alembic_sync(fresh)
     except Exception as e:
+        if strict:
+            raise
         print(f"alembic skipped: {e}")
 
     # A clean transaction for the check, so it reads the real schema rather
     # than inheriting the wreckage of a failed migration and mis-reporting why.
     async with engine.begin() as conn:
         await _verify_auth_v2(conn)
+    if strict:
+        # What the app pods will check before they serve: said here, the Job
+        # fails with the reason instead of every new pod refusing to start.
+        await assert_schema_current()
 
     # Seeding creates the *first* accounts. On an established database both are
     # no-ops, so a failure here — a lock timeout, a transient database blip —
@@ -240,19 +253,14 @@ async def _alembic_sync(fresh: bool) -> None:
                       upgrade to head.
     versioned       → upgrade to head (a no-op when nothing is newer).
     """
-    from pathlib import Path
     from alembic import command
-    from alembic.config import Config
     from alembic.runtime.migration import MigrationContext
-    from alembic.script import ScriptDirectory
 
-    ini = Path(__file__).resolve().parent.parent / "alembic.ini"
-    if not ini.exists():
+    cfg = _alembic_config()
+    if cfg is None:
         print("alembic skipped: alembic.ini not found")
         return
-    cfg = Config(str(ini))
-    cfg.set_main_option("script_location", str(ini.parent / "migrations"))
-    head = ScriptDirectory.from_config(cfg).get_current_head()
+    head = _script_head(cfg)
 
     def _run(sync_conn):
         cfg.attributes["connection"] = sync_conn
@@ -271,6 +279,57 @@ async def _alembic_sync(fresh: bool) -> None:
     async with engine.begin() as conn:
         await _guard(conn)
         await conn.run_sync(_run)
+
+
+def _alembic_config():
+    """This image's Alembic config, or None when alembic.ini is not shipped."""
+    from pathlib import Path
+    from alembic.config import Config
+
+    ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+    if not ini.exists():
+        return None
+    cfg = Config(str(ini))
+    cfg.set_main_option("script_location", str(ini.parent / "migrations"))
+    return cfg
+
+
+def _script_head(cfg) -> str | None:
+    from alembic.script import ScriptDirectory
+    return ScriptDirectory.from_config(cfg).get_current_head()
+
+
+async def assert_schema_current(eng=None) -> None:
+    """Refuse to start unless the database is at this image's Alembic head.
+
+    For a pod started with DB_MIGRATE_ON_BOOT=false, which leaves the schema
+    to `python -m app.migrate`. A database behind the image means the Job did
+    not run or failed; one at a revision this image does not know is ahead of
+    it — a rollback onto a newer schema, which DB_MIGRATE_ON_BOOT=true (the
+    old boot path) still allows. Either way, serving now would fail requests
+    on a pod that reported Ready, so this raises and the pod never becomes
+    ready: the rollout halts with the previous pods still serving.
+    """
+    from alembic.runtime.migration import MigrationContext
+
+    cfg = _alembic_config()
+    if cfg is None:
+        raise RuntimeError("alembic.ini not found — cannot tell whether the schema is current")
+    head = _script_head(cfg)
+
+    def _read(sync_conn):
+        if not inspect(sync_conn).has_table("users"):
+            return False, None
+        return True, MigrationContext.configure(sync_conn).get_current_revision()
+
+    async with (eng or engine).begin() as conn:
+        if conn.dialect.name == "postgresql":
+            await _guard(conn)      # a migration holding alembic_version must not hang the boot
+        has_users, current = await conn.run_sync(_read)
+    if not has_users or current != head:
+        raise RuntimeError(
+            f"database schema is at {current or 'nothing'}{'' if has_users else ' (no users table)'}, "
+            f"this image needs {head} — run `python -m app.migrate` first. Refusing to start.")
 
 
 async def _guard(conn):

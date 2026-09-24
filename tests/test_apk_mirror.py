@@ -113,9 +113,9 @@ class TestItIsWiredIn:
         assert 'request.url.path.startswith("/downloads")' in src, "the API-key gate would 401 the phone"
 
     def test_the_loop_starts_with_the_app(self):
-        src = Path("app/main.py").read_text(encoding="utf-8")
-        assert "apk_task = asyncio.create_task(_apk_mirror())" in src
-        assert "apk_task.cancel()" in src
+        import app.main as main
+        loops = {name: fn for name, fn, _stall, _roles in main._loops()}
+        assert loops["apk_mirror"] is m.mirror_loop
 
     def test_the_guide_gets_the_version_and_the_source(self):
         src = Path("app/api/routes/forwarder.py").read_text(encoding="utf-8")

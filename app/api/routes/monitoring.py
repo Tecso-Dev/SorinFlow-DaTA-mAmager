@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import metrics as mx
 from app.config import get_settings
 from app.database import get_db, get_redis
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_super_admin
 from app.models.user import User
 from app.models.property import Property
 from app.models.lead import Lead
@@ -634,3 +634,50 @@ async def cookie_check(phone: str, db: AsyncSession = Depends(get_db),
         raise HTTPException(status_code=404, detail="no stored session for that number")
 
     return await divar_session.check_and_record(db, row)
+
+
+@router.get("/runtime", dependencies=[require_super_admin])
+async def runtime():
+    """Which processes are alive, what every background loop is doing, and
+    the scrape queue — read from Redis, where each process reports itself
+    (app/services/supervisor.py, scrape_queue.py), so the answer is the same
+    whichever api replica gives it. root and super_admin only: it names hosts
+    and job ids.
+    """
+    import json
+    from app import database
+    from app.services import scrape_queue, supervisor
+
+    now = time.time()
+    try:
+        r = await database.get_redis()     # the same lookup the processes report through
+        procs = []
+        async for key in r.scan_iter(match="sf:proc:*", count=100):
+            raw = await r.get(key)
+            if raw:
+                p = json.loads(raw)
+                p["age_seconds"] = round(now - (p.get("at") or now), 1)
+                procs.append(p)
+        loops = []
+        for name, raw in (await r.hgetall(supervisor.LOOPS_KEY)).items():
+            loop = {"name": name, **json.loads(raw)}
+            since = loop.get("last_beat") or loop.get("started_at") or now
+            # The supervisor's own test, seen from outside. A loop whose
+            # process died stops beating too, and that is exactly what this
+            # should then say.
+            loop["stale"] = not loop.get("off") and now - since > (loop.get("stall_after") or 0)
+            loops.append(loop)
+        queue_length = await r.llen(scrape_queue.QUEUE)
+        claims = await scrape_queue.claims()
+    except Exception as e:
+        logger.warning(f"[monitoring] runtime state unreadable: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=503,
+                            detail="Redis در دسترس نیست — وضعیت پردازه‌ها خوانده نشد") from e
+    procs.sort(key=lambda p: (p.get("role") or "", p.get("host") or ""))
+    loops.sort(key=lambda loop: loop["name"])
+    return {
+        "processes": procs,
+        "loops": loops,
+        "queue_length": queue_length,
+        "running": [{"job_id": j, "worker": w} for j, w in sorted(claims.items())],
+    }

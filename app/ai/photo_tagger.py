@@ -313,7 +313,9 @@ async def photo_loop() -> None:
         return
     await asyncio.sleep(240)         # let startup and the first scrape settle
     logger.info(f"[photo] tagger armed — every {TICK_SECONDS // 60} min, {BATCH} listings a pass")
+    from app.services.supervisor import beat
     while True:
+        beat("photo_tagger")
         r = await tick() or {}
         # a pass where every listing failed is a prompt or a model problem,
         # not a listing problem: paying for the same failures again in two

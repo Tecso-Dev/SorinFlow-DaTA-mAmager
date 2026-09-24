@@ -104,8 +104,10 @@ class TestItIsReachable:
         assert "key: PROXY_ENABLED, optional: true" in text
 
     def test_the_refresh_loop_is_started(self):
-        text = open("app/main.py", encoding="utf-8").read()
-        assert "refresh_loop" in text and "proxy_task" in text
+        import app.main as main
+        from app.services import proxy_pool
+        loops = {name: fn for name, fn, _stall, _roles in main._loops()}
+        assert loops["proxy_pool"] is proxy_pool.refresh_loop
 
     def test_the_scraper_picks_per_account(self):
         import inspect

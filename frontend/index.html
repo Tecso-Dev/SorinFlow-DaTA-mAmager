@@ -3074,6 +3074,20 @@
                     </div>
                 </div>
 
+                <!-- every process and background loop as it reports itself to Redis,
+                     and the scrape queue; root and super_admin only -->
+                <div class="card mb-3 d-none" id="mon-runtime-card">
+                    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+                        <i class="bi bi-diagram-3"></i> پردازه‌ها و کارهای پس‌زمینه
+                        <span class="small text-muted ms-auto" id="mon-rt-queue"></span>
+                    </div>
+                    <div class="card-body">
+                        <div id="mon-rt-procs" class="rt-procs"></div>
+                        <div id="mon-rt-running" class="rt-dim mt-2"></div>
+                        <div id="mon-rt-loops" class="rt-loops mt-3"></div>
+                    </div>
+                </div>
+
                 <!-- errors that happened in users' browsers, with the browser -->
                 <div class="card mb-3" id="mon-client-errors-card">
                     <div class="card-header d-flex align-items-center gap-2">

@@ -21,8 +21,9 @@ from loguru import logger
 import sys
 
 from app.config import get_settings
-from app.database import init_db, close_db, close_redis
+from app.database import init_db, close_db, close_redis, assert_schema_current
 from app.api.routes import router as api_router
+from app.services.supervisor import beat
 
 # Configure logging
 #
@@ -72,69 +73,6 @@ except Exception as _log_err:  # pragma: no cover - environment dependent
     logger.warning(f"file logging disabled ({_log_err})")
 
 settings = get_settings()
-
-
-async def _release_orphaned_jobs() -> None:
-    """Close out scrapes this process was running when it last stopped.
-
-    Runs once at startup, before anything can create a new job, so every
-    running/paused row it finds necessarily belongs to a dead process.
-    Failures here must not stop the app booting — a stale row is a cosmetic
-    problem, a pod that will not start is not.
-    """
-    try:
-        from sqlalchemy import update, or_
-        from app.database import async_session_maker
-        from app.models.scraping_job import ScrapingJob
-
-        async with async_session_maker() as db:
-            result = await db.execute(
-                update(ScrapingJob)
-                .where(or_(ScrapingJob.status == "running",
-                           ScrapingJob.status == "paused"))
-                .values(
-                    status="failed",
-                    completed_at=datetime.now(),
-                    finish_reason=(
-                        "سرور در میانهٔ اجرا ری‌استارت شد — این تسک ادامه پیدا "
-                        "نکرد. آگهی‌های ذخیره‌شده سر جایشان هستند؛ با دکمهٔ "
-                        "«ادامه» از همان‌جا دنبال می‌شود"
-                    ),
-                )
-            )
-            await db.commit()
-            if result.rowcount:
-                logger.warning(
-                    f"{result.rowcount} scraping job(s) were left running by a "
-                    "previous process and have been marked failed")
-
-                # Say it in the run log too, not only in finish_reason.
-                #
-                # The گزارش timeline is where anyone looks first when a run
-                # stops, and a job killed by a deploy otherwise ends with its
-                # last ordinary event — which reads as though the scraper gave
-                # up on its own. It did not; the pod it was running in was
-                # replaced. That has now happened twice, both times during an
-                # unrelated deploy.
-                try:
-                    from app.services import job_log
-                    from app.models.scraping_job import ScrapingJob as _SJ
-                    from sqlalchemy import select as _select
-                    rows = (await db.execute(
-                        _select(_SJ.job_id).where(
-                            _SJ.finish_reason.like("سرور در میانهٔ اجرا%"))
-                        .order_by(_SJ.id.desc()).limit(result.rowcount)
-                    )).scalars().all()
-                    for jid in rows:
-                        await job_log.record(
-                            jid, job_log.ERROR,
-                            "سرور در میانهٔ این اسکرپ ری‌استارت شد (استقرار نسخهٔ "
-                            "جدید یا ری‌استارت سرویس) — تسک ادامه پیدا نکرد",
-                            level="error")
-                except Exception as e:
-                    logger.warning(f"could not log the orphan reason: {e}")
-    except Exception as e:
-        logger.warning(f"Could not release orphaned scraping jobs: {e}")
 
 
 # SECRET_KEY values printed in this repository: the default, the examples and
@@ -191,10 +129,123 @@ async def _refuse_default_secrets() -> None:
         raise RuntimeError("Refusing to start in production: " + "; ".join(why))
 
 
+# ─── what each process runs ─────────────────────────────────────────────────
+_EVERY_ROLE = ("all", "api", "worker", "scheduler")
+_PERIODIC = ("all", "scheduler")
+
+
+def _loops():
+    """Every periodic loop: the name its beat() uses, what to run, how long
+    a silence means it is wedged, and the roles that run it.
+
+    stall_after is the loop's longest honest gap between two beats — its
+    start-up delay or its sleep, plus a generous pass — so the supervisor
+    restarts only a loop that is genuinely stuck, never one that is slow or
+    asleep. Configurable intervals are read from the settings, not assumed.
+    """
+    from app.services.backup_service import backup_scheduler
+    from app.services.divar_session import verifier_loop
+    from app.services.proxy_pool import refresh_loop as proxy_refresh
+    from app.services.forwarder_watch import watch_loop as forwarder_watch
+    from app.services.apk_mirror import mirror_loop
+    from app.services.scrape_scheduler import scheduler_loop
+    from app.crm.match_engine import engine_loop
+    from app.crm.price_watch import watch_loop as price_watch
+    from app.crm.digest import digest_loop
+    from app.ai.listing_reader import reader_loop
+    from app.ai.embeddings import embed_loop
+    from app.ai.photo_tagger import photo_loop
+    from app.ai.assistant import assistant_loop
+    from app.services.gcp import pipeline as gcp_pipeline
+
+    m, h = 60, 3600
+    return [
+        # Due reminders and appointment texts: a minute's sleep, then the sends.
+        ("reminders", _reminder_checker, 15 * m, _PERIODIC),
+        # Nightly snapshot plus the Telegram offsite copy: sleeps up to a day,
+        # then dumps and ships it; an hour's sleep after a failure.
+        ("backup", backup_scheduler, 27 * h, _PERIODIC),
+        # Rented leads come back as fresh files when the lease year ends.
+        ("lease_expiry", _lease_expiry_checker, 7 * h, _PERIODIC),
+        # The audit trail (app/services/audit.py) is kept deliberately, not by
+        # however long disk happens to last.
+        ("audit_retention", _audit_retention_checker, 25 * h, _PERIODIC),
+        # Keep the panel's session state true: is_valid is only a belief
+        # until somebody asks Divar, and for a day and a half nobody did.
+        # One probe per stored number, two seconds apart, then the interval.
+        ("divar_session", verifier_loop,
+         settings.divar_session_check_minutes * m + 30 * m, _PERIODIC),
+        # The proxy pool is re-tested for the same reason: «working» is a
+        # belief, and one only corrected by a button is wrong most of the time.
+        ("proxy_pool", proxy_refresh, settings.proxy_refresh_hours * h + 6 * h, _PERIODIC),
+        # A forwarder fails silently by nature: this tells the device's owner,
+        # once per outage, before a run needs the code.
+        ("forwarder_watch", forwarder_watch,
+         settings.forwarder_watch_minutes * m + 15 * m, _PERIODIC),
+        # The forwarder APK kept on this site, because the phone that needs it
+        # is the one that cannot reach GitHub's download host from Iran.
+        ("apk_mirror", mirror_loop, settings.apk_mirror_hours * h + 1 * h, _PERIODIC),
+        # Saved scrapes fire at their hour, as their owner — into the queue.
+        ("scrape_scheduler", scheduler_loop, 10 * m, _PERIODIC),
+        # New listings scored against the customers' criteria; the fits land
+        # on the call queue and in the Telegram chat.
+        ("match_engine", engine_loop, 30 * m, _PERIODIC),
+        # A listing whose price came down is announced, and re-matched.
+        ("price_watch", price_watch, 30 * m, _PERIODIC),
+        # One message a day to the same chat: what came in overnight.
+        ("digest", digest_loop, 15 * m, _PERIODIC),
+        # The AI agents (app/ai/), each a pass over the listings since its
+        # last one: what the ad says, the text as a vector, what the photos
+        # show. A pass of model calls can be slow and a failed pass sleeps
+        # ten ticks, so theirs are the longest.
+        ("listing_reader", reader_loop, 90 * m, _PERIODIC),
+        ("embeddings", embed_loop, 30 * m, _PERIODIC),
+        ("photo_tagger", photo_loop, 2 * h, _PERIODIC),
+        # «سورین» long-polls Telegram. getUpdates from two processes is a 409
+        # for both — one reason every loop here runs in exactly one process,
+        # the scheduler (or all), never beside an api replica.
+        ("assistant", assistant_loop, 45 * m, _PERIODIC),
+        # Google Cloud export, in EVERY role: each process ships its own log
+        # buffer (the sink in lifespan), and no other process can. Returns at
+        # once while disabled, the shipped default.
+        ("gcp_exporter", gcp_pipeline.exporter_loop,
+         settings.gcp_export_interval + 15 * m, _EVERY_ROLE),
+    ]
+
+
+def _start_background(role: str):
+    """What this process runs besides HTTP, by SORINFLOW_ROLE.
+
+    Every role beats (sf:proc:{role}:{host} and the liveness file). all and
+    scheduler run the periodic loops, each under a supervisor; all and worker
+    run the scrape queue. api runs neither: two api replicas must not both
+    long-poll Telegram, ship the backup or text a reminder, and a request
+    must never wait behind a browser.
+
+    Returns (every task to cancel at shutdown, the worker's tasks to drain
+    before that).
+    """
+    from app.services import scrape_queue, supervisor
+    tasks = [asyncio.create_task(supervisor.heartbeat_loop(role), name="heartbeat")]
+    names = []
+    for name, fn, stall_after, roles in _loops():
+        if role in roles:
+            names.append(name)
+            tasks.append(asyncio.create_task(supervisor.supervise(name, fn, stall_after, role),
+                                             name=f"supervise:{name}"))
+    worker = []
+    if role in ("all", "worker") and settings.scrape_worker_enabled:
+        worker = scrape_queue.start(role)
+    logger.info(f"[role {role}] loops: {', '.join(names) or 'none'} · "
+                f"scrape worker: {'on' if worker else 'off'}")
+    return tasks, worker
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    logger.info("Starting SorinFlow Divar Scraper...")
+    role = settings.sorinflow_role
+    logger.info(f"Starting SorinFlow Divar Scraper (role {role})...")
 
     # Before init_db, which would seed the placeholder password.
     await _refuse_default_secrets()
@@ -221,118 +272,36 @@ async def lifespan(app: FastAPI):
     if not settings.metrics_token:
         logger.info("METRICS_TOKEN is not set — /metrics is disabled and answers 404")
 
-    # Initialize database
-    await init_db()
-    logger.info("Database initialized")
+    if settings.db_migrate_on_boot:
+        await init_db()
+        logger.info("Database initialized")
+    else:
+        # One of several processes: `python -m app.migrate`, run once before
+        # the rollout, owns the schema. A database that is not at this image's
+        # head means that step did not run or failed — refusing to start is
+        # what halts the rollout with the previous pods still serving.
+        await assert_schema_current()
+        logger.info("Database schema is at this image's Alembic head")
 
-    # A scrape lives in an asyncio task inside this process. When the process
-    # goes — a deploy, a restart, the node rebooting — the task dies and the
-    # row it was updating is left saying «running» forever, at whatever
-    # percentage it had reached. It is indistinguishable on screen from a
-    # scrape that is genuinely working, so the panel shows a job that will
-    # never move and offers a stop button that stops nothing.
-    #
-    # Nothing can resume it: the browser, its Divar session and its place in
-    # the feed are all gone. So say what happened and let it be re-run.
-    await _release_orphaned_jobs()
-
-    # Start reminder background checker
-    reminder_task = asyncio.create_task(_reminder_checker())
-
-    # Start nightly backup scheduler (local snapshot + Telegram offsite copy)
-    from app.services.backup_service import backup_scheduler
-    backup_task = asyncio.create_task(backup_scheduler())
-
-    # Rented leads come back as fresh files when the lease year ends
-    lease_task = asyncio.create_task(_lease_expiry_checker())
-
-    # The audit trail (app/services/audit.py) is kept deliberately, not by
-    # however long disk happens to last.
-    audit_retention_task = asyncio.create_task(_audit_retention_checker())
-
-    # Keep the panel's session state true. is_valid is only a belief until
-    # somebody asks Divar, and for a day and a half nobody did.
-    from app.services.divar_session import verifier_loop
-    session_task = asyncio.create_task(verifier_loop())
-    # The proxy pool is re-tested on a schedule for the same reason sessions
-    # are: «working» is a belief, and one only corrected by a button is wrong
-    # most of the time.
-    from app.services.proxy_pool import refresh_loop as _proxy_refresh_loop
-    proxy_task = asyncio.create_task(_proxy_refresh_loop())
-    # A forwarder fails silently by nature: the phone reports success to
-    # itself and the panel shows a prompt nobody answers. This tells the
-    # device's owner, once per outage, before a run needs the code.
-    from app.services.forwarder_watch import watch_loop as _fw_watch
-    forwarder_task = asyncio.create_task(_fw_watch())
-
-    # Keeps a copy of the forwarder APK on this site, because the phone that
-    # needs it is the one that cannot reach GitHub's download host from Iran.
-    from app.services.apk_mirror import mirror_loop as _apk_mirror
-    apk_task = asyncio.create_task(_apk_mirror())
-
-    # Saved scrapes fire at their hour, as their owner.
-    from app.services.scrape_scheduler import scheduler_loop as _sched
-    schedule_task = asyncio.create_task(_sched())
-
-    # Every new listing is scored against the customers' criteria; the fits
-    # land on the call queue and in the Telegram chat.
-    from app.crm.match_engine import engine_loop as _match_loop
-    match_task = asyncio.create_task(_match_loop())
-
-    # A listing whose price came down is announced, and re-matched — it may
-    # fit a budget it did not fit last week.
-    from app.crm.price_watch import watch_loop as _price_loop
-    price_task = asyncio.create_task(_price_loop())
-
-    # One message a day to the same chat: what came in overnight, what fits
-    # whom, what got cheaper, how many calls wait, whether the backup arrived.
-    from app.crm.digest import digest_loop as _digest_loop
-    digest_task = asyncio.create_task(_digest_loop())
-
-    # The AI agents (app/ai/), each a background pass over the listings that
-    # arrived since its last one, all through app/services/llm.py and all
-    # gated on MATCH_ENGINE like the engine: what the ad's text says, the
-    # text as a vector (semantic search, duplicates), what the photos show.
-    from app.ai.listing_reader import reader_loop as _reader_loop
-    reader_task = asyncio.create_task(_reader_loop())
-    from app.ai.embeddings import embed_loop as _embed_loop
-    embed_task = asyncio.create_task(_embed_loop())
-    from app.ai.photo_tagger import photo_loop as _photo_loop
-    photo_task = asyncio.create_task(_photo_loop())
-    # «سورین»: the office asks its own database in Telegram — the backup's
-    # bot, the backup's route, the backup's chats; read-only tools.
-    from app.ai.assistant import assistant_loop as _assistant_loop
-    assistant_task = asyncio.create_task(_assistant_loop())
-
-    # Google Cloud export. Returns immediately when disabled, which is the
-    # shipped default — and when enabled on a host that cannot reach Google it
-    # backs off rather than retrying every interval.
+    # Google Cloud export: the sink buffers this process's log records and
+    # the exporter loop (every role — see _loops) ships them.
     from app.services.gcp import pipeline as gcp_pipeline
     if settings.gcp_enabled:
         logger.add(gcp_pipeline.sink, level="INFO", filter=redact_filter,
                    backtrace=False, diagnose=False)
-    gcp_task = asyncio.create_task(gcp_pipeline.exporter_loop())
+
+    background, worker = _start_background(role)
 
     yield
 
-    # Cleanup
-    assistant_task.cancel()
-    photo_task.cancel()
-    embed_task.cancel()
-    reader_task.cancel()
-    digest_task.cancel()
-    price_task.cancel()
-    match_task.cancel()
-    schedule_task.cancel()
-    apk_task.cancel()
-    reminder_task.cancel()
-    backup_task.cancel()
-    lease_task.cancel()
-    audit_retention_task.cancel()
-    session_task.cancel()
-    proxy_task.cancel()
-    forwarder_task.cancel()
-    gcp_task.cancel()
+    # A worker drains first: nothing new is taken and the runs in flight
+    # finish, while the heartbeat and every other loop keep going around them.
+    if worker:
+        from app.services import scrape_queue
+        await scrape_queue.drain(worker)
+    for task in background:
+        task.cancel()
+    await asyncio.wait(background, timeout=10)
     from app.services.gcp import gcp_client as _gcp
     await _gcp.close()
     logger.info("Shutting down...")
@@ -728,6 +697,7 @@ app.include_router(api_router, prefix="/api")
 async def _reminder_checker():
     """Every 60 s: fire due reminders (send SMS if channel=sms, mark as sent)."""
     while True:
+        beat("reminders")
         try:
             await asyncio.sleep(60)
             await _fire_due_reminders()
@@ -843,6 +813,7 @@ async def _lease_expiry_checker():
     """Every 6h: leads marked اجاره شده whose lease year is over go back to
     the fresh pool (status=new) so the file resurfaces automatically."""
     while True:
+        beat("lease_expiry")
         try:
             await asyncio.sleep(6 * 3600)
             await _reactivate_expired_leases()
@@ -878,6 +849,7 @@ async def _reactivate_expired_leases():
 async def _audit_retention_checker():
     """Once a day: drop audit_events rows older than a year (app/services/audit.py)."""
     while True:
+        beat("audit_retention")
         try:
             await asyncio.sleep(24 * 3600)
             from app.services import audit as _audit

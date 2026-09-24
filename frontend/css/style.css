@@ -4122,3 +4122,27 @@ body.palette-open { overflow: hidden; }
 .scraper-more.has-filters > summary { border-color: var(--accent); color: var(--text); }
 #scraper-more-count { color: var(--accent2); font-size: .78rem; }
 .scraper-more-body { padding-top: .85rem; }
+
+/* پردازه‌ها و کارهای پس‌زمینه — the runtime card on پایش سامانه (loadRuntime) */
+.rt-procs { display: flex; flex-wrap: wrap; gap: .6rem; }
+.rt-proc {
+  display: flex; flex-direction: column; gap: .25rem; min-width: 200px;
+  padding: .55rem .75rem; border-radius: 10px; font-size: .82rem;
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+}
+.rt-proc.is-draining { border-color: rgba(245,158,11,.5); }
+.rt-loops { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .5rem; }
+.rt-loop {
+  padding: .45rem .65rem; border-radius: 10px; font-size: .8rem;
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+}
+.rt-loop-head { display: flex; align-items: center; justify-content: space-between; gap: .4rem; }
+.rt-dim { color: var(--text-muted); font-size: .74rem; }
+.rt-tag {
+  display: inline-block; align-self: flex-start; padding: .1rem .55rem; border-radius: 20px;
+  font-size: .72rem; background: var(--surface3); border: 1px solid var(--border); color: var(--text-dim);
+}
+.rt-tag.is-ok { color: var(--accent3); border-color: rgba(16,185,129,.35); }
+.rt-tag.is-warn { color: var(--warning); border-color: rgba(245,158,11,.45); }
+.rt-tag.is-bad { color: var(--danger); border-color: rgba(239,68,68,.45); }
+.rt-tag.is-off { opacity: .6; }

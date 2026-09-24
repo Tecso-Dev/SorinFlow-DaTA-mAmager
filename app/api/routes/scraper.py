@@ -4,12 +4,11 @@ SorinFlow Divar Scraper - Scraper API Routes
 import re
 import json
 import time
-from fastapi import Request, APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import Request, APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, false, delete
 from typing import Optional, List
 from datetime import datetime
-import asyncio
 import sys
 import os
 import uuid
@@ -44,9 +43,6 @@ machine_router = APIRouter()
 # itself. Any signed-in staff member may read them.
 lookup_router = APIRouter()
 settings = get_settings()
-
-# Store active scraping job IDs for tracking
-active_tasks = {}
 
 
 async def run_scraping_job(
@@ -264,29 +260,22 @@ async def run_scraping_job(
         except Exception:
             pass
 
-        # Cleanup tracking
-        if job_id in active_tasks:
-            del active_tasks[job_id]
-            logger.info(f"[{job_id}] Removed from active tasks")
-        
         logger.info(f"[{job_id}] Background task completed")
 
 
 @router.post("/start", response_model=ScrapingJobResponse, dependencies=[Depends(require_verified_phone)])
 async def start_scraping_job(
     job_config: ScrapingJobCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Start a new scraping job"""
-    return await _launch_job(job_config, background_tasks, db, current_user)
+    return await _launch_job(job_config, db, current_user)
 
 
 @router.post("/jobs/{job_id}/resume", response_model=ScrapingJobResponse, dependencies=[Depends(require_verified_phone)])
 async def resume_scraping_job(
     job_id: str,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -339,7 +328,7 @@ async def resume_scraping_job(
 
     config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
                                   if k in ScrapingJobCreate.model_fields})
-    resp = await _launch_job(config, background_tasks, db, run_as,
+    resp = await _launch_job(config, db, run_as,
                              resumed_from=job.job_id, interactive=False)
     await job_log.record(
         resp.job_id, job_log.START,
@@ -350,7 +339,6 @@ async def resume_scraping_job(
 
 async def _launch_job(
     job_config: ScrapingJobCreate,
-    background_tasks: Optional[BackgroundTasks],
     db: AsyncSession,
     current_user: Optional[User],
     resumed_from=None,
@@ -457,50 +445,20 @@ async def _launch_job(
                          f"شمارهٔ ذخیره‌شدهٔ {fell_back_from} خاموش است — اجرا با «خودکار» انجام می‌شود",
                          level="warning", phone=fell_back_from)
 
-    # Store a placeholder to track active jobs
-    active_tasks[job_id] = {"status": "starting", "city": job_config.city, "category": job_config.category}
+    # Queued, not run here: a worker process takes it from Redis and runs
+    # run_scraping_job with the row's config (app/services/scrape_queue.py),
+    # so a request, a schedule and a resume all start a run the same way, and
+    # an api process restarting no longer takes a scrape down with it. With
+    # Redis down the row just waits as pending — the worker's sweep queues it
+    # once Redis is back — so the answer here is the same either way.
+    from app.services import scrape_queue
+    try:
+        await scrape_queue.enqueue(job_id)
+        logger.info(f"Queued scraping job {job_id}")
+    except Exception as e:
+        logger.warning(f"[queue] could not queue {job_id} ({type(e).__name__}: {e}) — "
+                       "it stays pending and the worker's sweep queues it when Redis is back")
 
-    # From a request, the job runs after the response goes out; from the
-    # scheduler there is no request, and the loop is the same one, so a task
-    # on it is the same thing.
-    _spawn = background_tasks.add_task if background_tasks is not None else \
-        (lambda fn, *a: asyncio.create_task(fn(*a)))
-    _spawn(
-        run_scraping_job,
-        job_id,
-        job_config.city,
-        job_config.category,
-        job_config.max_items,
-        job_config.download_images,
-        settings.database_url,
-        job_config.divar_phone or None,
-        job_config.min_price,
-        job_config.max_price,
-        job_config.min_deposit,
-        job_config.max_deposit,
-        job_config.min_rent,
-        job_config.max_rent,
-        job_config.min_price_per_meter,
-        job_config.max_price_per_meter,
-        job_config.min_area,
-        job_config.max_area,
-        job_config.min_rooms,
-        job_config.max_rooms,
-        job_config.has_images,
-        job_config.has_elevator,
-        job_config.has_parking,
-        job_config.has_storage,
-        job_config.has_balcony,
-        job_config.advertiser_type,
-        job_config.max_age_hours,
-        job_config.posted_date,
-        job_config.rotate_every,
-        current_user.id if current_user else None,
-        job_config.urls,
-    )
-    
-    logger.info(f"Started background task for job {job_id}")
-    
     return ScrapingJobResponse(
         id=job.id,
         job_id=job_id,
@@ -918,10 +876,7 @@ async def cancel_scraping_job(
     from app.scraper import otp_store
     freed = await otp_store.clear_job(job_id)
 
-    # Remove from active tasks tracking
-    # The scraper will check job status in the database and stop
-    if job_id in active_tasks:
-        del active_tasks[job_id]
+    # The run itself sees the status in the database and stops.
     logger.info(f"Job {job_id} marked for cancellation (was {was}, otp cleared={freed})")
 
     return {"message": "Job cancelled successfully", "was": was, "otp_cleared": freed}
@@ -1668,7 +1623,6 @@ class SingleScrapeRequest(BaseModel):
 @router.post("/scrape-single", dependencies=[Depends(require_verified_phone)])
 async def scrape_single_property(
     request: SingleScrapeRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1690,7 +1644,7 @@ async def scrape_single_property(
         raise HTTPException(status_code=400, detail="Invalid Divar property URL")
     cfg = ScrapingJobCreate(city="—", category="اسکرپ تکی", urls=[url], max_items=1,
                             download_images=True)
-    return await _launch_job(cfg, background_tasks, db, current_user)
+    return await _launch_job(cfg, db, current_user)
 
 
 class RescrapeRequest(BaseModel):
@@ -1701,7 +1655,6 @@ class RescrapeRequest(BaseModel):
 @router.post("/rescrape", dependencies=[Depends(require_verified_phone)])
 async def rescrape_listings(
     body: RescrapeRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1716,13 +1669,16 @@ async def rescrape_listings(
         raise HTTPException(status_code=400, detail="هیچ لینک آگهی معتبری داده نشد")
     cfg = ScrapingJobCreate(city="—", category=body.label or "بازاسکرپ",
                             urls=urls, max_items=len(urls), download_images=True)
-    return await _launch_job(cfg, background_tasks, db, current_user)
+    return await _launch_job(cfg, db, current_user)
 
 
 @router.get("/active-tasks")
 async def get_active_tasks():
-    """Get list of currently active scraping tasks"""
+    """The runs some worker holds right now — its claims in Redis, since
+    the run is no longer in the process answering this."""
+    from app.services import scrape_queue
+    ids = sorted(await scrape_queue.claims())
     return {
-        "active_count": len(active_tasks),
-        "task_ids": list(active_tasks.keys())
+        "active_count": len(ids),
+        "task_ids": ids
     }

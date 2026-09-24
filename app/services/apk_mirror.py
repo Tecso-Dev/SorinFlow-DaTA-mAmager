@@ -102,7 +102,9 @@ async def mirror_loop() -> None:
         logger.info("[apk-mirror] disabled")
         return
     await asyncio.sleep(120)         # let startup finish
+    from app.services.supervisor import beat
     while True:
+        beat("apk_mirror")
         try:
             await refresh()
         except Exception as e:

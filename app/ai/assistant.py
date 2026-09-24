@@ -712,7 +712,9 @@ async def assistant_loop() -> None:
         return
     await asyncio.sleep(60)
     logger.info(f"[assistant] «{NAME}» armed — long-polling Telegram, answers linked users in private chats")
+    from app.services.supervisor import beat
     while True:
+        beat("assistant")
         try:
             async with async_session_maker() as db:
                 res = await poll_once(db)

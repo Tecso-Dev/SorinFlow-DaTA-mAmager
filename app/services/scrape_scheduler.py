@@ -76,7 +76,7 @@ async def fire(schedule: ScrapeSchedule, db) -> dict:
     else:
         try:
             job = await _launch_job(ScrapingJobCreate(**config_for_run(schedule.config)),
-                                    None, db, owner, interactive=False)
+                                    db, owner, interactive=False)
             schedule.last_job_id = str(job.job_id)
             result = {"status": "started", "detail": f"اسکرپ {str(job.job_id)[:8]} شروع شد"}
         except HTTPException as e:
@@ -118,6 +118,8 @@ async def scheduler_loop() -> None:
         logger.info("[schedule] disabled")
         return
     await asyncio.sleep(120)         # let startup finish
+    from app.services.supervisor import beat
     while True:
+        beat("scrape_scheduler")
         await tick()
         await asyncio.sleep(TICK_SECONDS)

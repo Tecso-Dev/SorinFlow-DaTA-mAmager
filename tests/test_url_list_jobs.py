@@ -105,14 +105,14 @@ class TestTheApi:
 
     def test_single_scrape_is_a_job_of_one(self):
         src = inspect.getsource(sr.scrape_single_property)
-        assert "_launch_job(cfg, background_tasks, db, current_user)" in src
+        assert "_launch_job(cfg, db, current_user)" in src
         assert "urls=[url]" in src
         assert "DivarScraper(" not in src, "no browser inside the request any more"
 
     def test_rescrape_is_a_job_of_many(self):
         assert "/rescrape" in [r.path for r in sr.router.routes]
         src = inspect.getsource(sr.rescrape_listings)
-        assert "_launch_job(cfg, background_tasks, db, current_user)" in src
+        assert "_launch_job(cfg, db, current_user)" in src
 
     def test_the_jobs_list_labels_a_list_run(self):
         src = inspect.getsource(sr)

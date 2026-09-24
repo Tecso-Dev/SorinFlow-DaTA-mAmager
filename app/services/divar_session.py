@@ -509,7 +509,9 @@ async def verifier_loop():
     # and tells us nothing we need in the first minute.
     await asyncio.sleep(45)
 
+    from app.services.supervisor import beat
     while True:
+        beat("divar_session")
         try:
             async with async_session_maker() as db:
                 rows = (await db.execute(

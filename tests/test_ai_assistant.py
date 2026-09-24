@@ -274,8 +274,11 @@ class TestTheShape:
         assert "شمارهٔ تلفن مالک یا مشتری را هرگز ننویس" in assistant.PERSONA
 
     def test_it_is_wired_like_the_other_agents(self):
-        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
-        assert "assistant_task = asyncio.create_task(_assistant_loop())" in main and "assistant_task.cancel()" in main
+        import app.main as m
+        loops = {name: (fn, roles) for name, fn, _stall, roles in m._loops()}
+        # one process long-polls Telegram: getUpdates from two is a 409 for both
+        assert loops["assistant"][0] is assistant.assistant_loop
+        assert set(loops["assistant"][1]) == {"all", "scheduler"}
         mounted = (ROOT / "app/api/routes/__init__.py").read_text(encoding="utf-8")
         assert 'router.include_router(ai_assistant.router, prefix="/ai/assistant"' in mounted
         rev = (ROOT / "migrations/versions/0008_ai_chats.py").read_text(encoding="utf-8")
