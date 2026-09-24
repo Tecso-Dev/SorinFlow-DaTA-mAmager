@@ -50,7 +50,7 @@ async def _dispose_db_pool_after_test():
 
 @pytest.fixture(autouse=True, scope="module")
 def _restore_redis_after_module():
-    """Roughly fifteen test modules stub Redis for the app by assigning
+    """About eighteen test modules stub Redis for the app by assigning
     app.database.get_redis (and, separately, app.services.verification's own
     name for it — imported once with `from app.database import get_redis`, so
     reassigning the first name never touches the second) directly to a
