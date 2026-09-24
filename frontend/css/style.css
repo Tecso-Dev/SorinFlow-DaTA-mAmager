@@ -2055,7 +2055,7 @@ html:not([data-theme="light"]) .topbar {
   font-size: .76rem; transition: opacity .15s ease;
 }
 .acct-row.is-off { opacity: .55; }
-.acct-row .acct-phone { font-variant-numeric: tabular-nums; unicode-bidi: isolate; font-weight: 600; }
+.acct-row .acct-phone { unicode-bidi: isolate; font-weight: 600; letter-spacing: 0; }
 .acct-row .acct-meta { color: var(--text-muted); margin-inline-start: auto; white-space: nowrap; }
 .acct-flag { font-size: .64rem; padding: .05rem .4rem; border-radius: 20px; white-space: nowrap; }
 .acct-flag.warn { color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); }
