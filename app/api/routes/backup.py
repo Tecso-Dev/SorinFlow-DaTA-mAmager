@@ -11,9 +11,11 @@ where a shipment can be fired right now to see it arrive.
 super_admin and root only: it is the whole database.
 """
 import re
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -297,3 +299,17 @@ async def dr_run_now(user: User = _super_admin):
         raise HTTPException(503, "درخواست ثبت نشد — فضای داده در دسترس نیست")
     logger.info(f"[dr] full backup requested by {user.username}")
     return {"requested": True}
+
+
+_RELAY_WORKER = Path(__file__).resolve().parents[3] / "deploy" / "telegram-relay" / "worker.js"
+
+
+@router.get("/relay-worker", response_class=PlainTextResponse)
+async def relay_worker_code(_: User = _super_admin):
+    """The Worker the panel tells people to paste into Cloudflare — read from
+    deploy/telegram-relay/worker.js, so the panel can never show a copy that
+    has drifted from the one that is tested."""
+    try:
+        return _RELAY_WORKER.read_text(encoding="utf-8")
+    except OSError:
+        raise HTTPException(404, "فایل Worker روی سرور پیدا نشد")

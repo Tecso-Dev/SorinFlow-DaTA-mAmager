@@ -22,7 +22,7 @@
 # compose-side interpolation: exec, logs and down work without --env-file.
 # Only `up` wants it, and only so BACKEND_PORT from .env.local applies.
 #
-# app/, frontend/, migrations/, scripts/ and alembic.ini are bind-mounted so
+# app/, frontend/, migrations/, scripts/, deploy/ and alembic.ini are bind-mounted so
 # edits hot-reload under --reload; everything else (installed deps, data/,
 # logs/) stays inside the image/container. The app migrates itself on boot
 # (app/database.py:init_db — create_all, the boot-time ALTERs, then
@@ -69,6 +69,7 @@ services:
       - ./frontend:/app/frontend
       - ./migrations:/app/migrations
       - ./scripts:/app/scripts
+      - ./deploy:/app/deploy
       - ./alembic.ini:/app/alembic.ini
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"

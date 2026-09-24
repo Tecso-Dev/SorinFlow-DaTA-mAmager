@@ -4639,6 +4639,91 @@ async function loadBackup() {
     } catch (e) {
         badge.textContent = 'نامشخص'; badge.className = 'badge bg-secondary';
     }
+    loadDr();
+}
+
+// ── the full bundle (بکاپ کامل): built and shipped by the host, not the pod ──
+const _drVia = v => v === 'direct' ? 'مستقیم' : v === 'relay' ? 'رله' : v;
+
+async function loadDr() {
+    const badge = document.getElementById('dr-badge');
+    if (!badge) return null;
+    let s;
+    try { s = await apiCall('/backup/dr'); }
+    catch (e) { badge.textContent = 'نامشخص'; badge.className = 'badge bg-secondary'; return null; }
+    const run = s.last_run || {}, sent = run.sent || {};
+    // a run that died before shipping only leaves an alert; newer than the
+    // last shipment means the last shipment is not the current state
+    const failed = s.last_alert && (!sent.at || s.last_alert.at > sent.at);
+    const last = document.getElementById('dr-last');
+    if (!sent.at) {
+        last.innerHTML = html`<span class="text-muted">هنوز اجرا نشده — ${s.schedule_fa}</span>`;
+    } else if (sent.ok) {
+        const size = run.bytes ? ` · ${formatNumber(Math.max(1, Math.round(run.bytes / 1048576)))} مگابایت در ${formatNumber(run.parts || 1)} تکه` : '';
+        last.innerHTML = html`<span class="text-success">✓ ${_bkWhen(sent.at)}</span> <span class="text-muted">· به ${formatNumber((sent.delivered || []).length)} چت · ${(sent.via || []).map(_drVia).join('، ')}${size}</span>`
+            + (sent.error ? html` <span class="text-warning">— نرسید: ${sent.error}</span>` : '');
+    } else {
+        last.innerHTML = html`<span class="text-danger">✗ ${_bkWhen(sent.at)} — ${sent.error || 'ارسال نشد'}</span>`;
+    }
+    const state = [];
+    if (failed) state.push(html`<div class="text-danger">✗ ${_bkWhen(s.last_alert.at)} — ${s.last_alert.text}</div>`);
+    if (s.requested) state.push('<div class="text-info">در صف — سرور تا چند دقیقهٔ دیگر شروع می‌کند</div>');
+    if ((s.undelivered || []).length) state.push(html`<div class="text-warning">${formatNumber(s.undelivered.length)} بستهٔ ارسال‌نشده منتظر تلاش بعدی</div>`);
+    document.getElementById('dr-state').innerHTML = state.join('')
+        || html`<span class="text-muted">${s.schedule_fa}</span>`;
+    const bad = failed || (sent.at && !sent.ok);
+    badge.textContent = bad ? 'ناموفق' : s.requested ? 'در صف' : sent.ok ? 'فعال' : 'در انتظار اولین اجرا';
+    badge.className = 'badge ' + (bad ? 'bg-danger' : s.requested ? 'bg-info text-dark' : sent.ok ? 'bg-success' : 'bg-secondary');
+    return s;
+}
+
+/** «همین حالا»: the pod only drops a request; the host's watcher builds the bundle. */
+async function drRunNow() {
+    const btn = document.getElementById('dr-run');
+    btn.disabled = true;
+    try {
+        await apiCall('/backup/dr/run', { method: 'POST' });
+        showToast('درخواست ثبت شد', 'سرور بکاپ کامل را می‌سازد و به تلگرام می‌فرستد — چند دقیقه طول می‌کشد', 'success');
+    } catch (e) {
+        showToast('ثبت نشد', e.message, 'warning');
+    }
+    btn.disabled = false;
+    // follow the host for a few minutes, until it has picked the request up
+    for (let i = 0; i < 12; i++) {
+        const s = await loadDr();
+        if (!s || !s.requested) break;
+        await new Promise(r => setTimeout(r, 15000));
+    }
+}
+
+/** «تست همهٔ راه‌ها»: getMe straight, through the relay, and through each proxy. */
+async function drDiagnose() {
+    const btn = document.getElementById('dr-diag');
+    const box = document.getElementById('dr-diag-rows');
+    btn.disabled = true;
+    box.innerHTML = '<span class="text-muted">هر راه جدا امتحان می‌شود…</span>';
+    try {
+        const r = await apiCall('/backup/diagnose', { method: 'POST' });
+        const name = { direct: 'مستقیم', relay: 'رله', proxy: 'پراکسی' };
+        box.innerHTML = (r.rows || []).map(x => html`<div class="${x.ok ? 'text-success' : 'text-danger'}">${x.ok ? '✓' : '✗'} ${name[x.route] || x.route} <span dir="ltr" class="text-muted">${x.target}</span> · ${formatNumber(x.ms)} ms${x.ok ? '' : ' — ' + (x.error || 'نرسید')}</div>`).join('')
+            || '<span class="text-muted">هیچ راهی تنظیم نشده است</span>';
+    } catch (e) {
+        box.innerHTML = html`<span class="text-danger">${e.message}</span>`;
+    }
+    btn.disabled = false;
+}
+
+/** The Worker's code, read from the one the repo tests (deploy/telegram-relay/worker.js). */
+async function bkToggleWorker() {
+    const pre = document.getElementById('bk-relay-code');
+    pre.classList.toggle('d-none');
+    if (pre.classList.contains('d-none') || pre.textContent) return;
+    pre.textContent = 'در حال خواندن…';
+    try {
+        pre.textContent = await apiCall('/backup/relay-worker', { raw: true });
+    } catch (e) {
+        pre.textContent = `کد Worker خوانده نشد: ${e.message}`;
+    }
 }
 
 // ── the morning digest ──

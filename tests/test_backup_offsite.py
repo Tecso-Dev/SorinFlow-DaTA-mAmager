@@ -409,7 +409,9 @@ class TestTheThreeWaysOut:
         for v in ("manual", "pool", "relay"):
             assert f'name="bk-mode" value="{v}"' in html
         assert 'id="bk-pool-list"' in html and 'id="bk-relay"' in html and 'id="bk-relay-code"' in html
-        assert "https://api.telegram.org" in html[html.index('id="bk-relay-code"'):html.index('id="bk-relay-code"') + 900]
+        # the Worker is not copied into the page: it is fetched from the one
+        # deploy/telegram-relay tests (see TestTheFullBackupCard)
+        assert "apiCall('/backup/relay-worker', { raw: true })" in js
         assert "apiCall('/proxies?active_only=true')" in js and "function _bkRouteBody" in js
         src = Path("app/api/routes/backup.py").read_text(encoding="utf-8")
         assert 'if route["mode"] == "pool":' in src and '"results": results' in src, "the pool is tested one proxy at a time"
@@ -605,13 +607,49 @@ class TestTheFullBackupCard:
         st = asyncio.run(routes.dr_status(self._user()))
         assert st["last_run"]["stamp"] == "20260923-040000"
         assert "pg_dump" in st["last_alert"]["text"]
+        # with its offset: the container's bare clock is UTC, and the panel's
+        # browser would have shown it as Tehran time, 3½ hours early
+        assert st["last_alert"]["at"].endswith("+00:00")
 
-    def test_the_three_routes_are_root_or_super_admin_only(self):
+    def test_the_new_routes_are_root_or_super_admin_only(self):
         from app.api.routes import backup as routes
         role_dep = routes._super_admin.dependency
+        seen = set()
         for r in routes.router.routes:
-            if r.path in ("/diagnose", "/dr", "/dr/run"):
+            if r.path in ("/diagnose", "/dr", "/dr/run", "/relay-worker"):
                 assert role_dep in [d.call for d in r.dependant.dependencies], r.path
+                seen.add(r.path)
+        assert len(seen) == 4
+
+    def test_the_panel_shows_the_worker_that_is_tested(self):
+        from app.api.routes import backup as routes
+        code = asyncio.run(routes.relay_worker_code(self._user()))
+        assert code == (Path(__file__).resolve().parent.parent / "deploy/telegram-relay/worker.js").read_text(encoding="utf-8")
+        assert "X-Relay-Key" in code and "ALLOWED_BOTS" in code
+
+    def test_a_proxy_is_recorded_without_its_password(self, dr, tmp_path, monkeypatch):
+        bundle = tmp_path / "20260924-040000"
+        bundle.mkdir()
+        (bundle / "part0000").write_bytes(b"x" * 10)
+        (bundle / "manifest.json").write_text(json.dumps(
+            {"stamp": "20260924-040000", "row_counts": "users 3", "parts": [{"name": "part0000", "size": 10}]}))
+        monkeypatch.setattr(bk, "resolve_telegram", lambda db: _async({"token": "1:x", "chat_id": "42"}))
+        monkeypatch.setattr(bk, "resolve_route", lambda db: _async(bk._route("manual", ["socks5://u:s3cret@h:1080"])))
+        monkeypatch.setattr(bk, "_direct_first", lambda: False)
+        real = httpx.AsyncClient
+
+        class Fake(real):                         # the proxy is recorded, not dialled
+            def __init__(self, *a, **kw):
+                kw.pop("proxy", None)
+                kw["transport"] = httpx.MockTransport(
+                    lambda req: httpx.Response(200, json={"ok": True, "result": {}}))
+                super().__init__(*a, **kw)
+        monkeypatch.setattr(bk.httpx, "AsyncClient", Fake)
+        res = asyncio.run(dr.ship(bundle, db=object()))
+        assert res["ok"] and not bundle.exists()
+        st = dr.read_status()["last_run"]
+        assert "s3cret" not in json.dumps(st)
+        assert st["parts"] == 1 and st["bytes"] == 10
 
 
 async def _async(v):

@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260924a">
+    <link rel="stylesheet" href="css/style.css?v=20260924b">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -3873,21 +3873,10 @@
                                 <div class="form-text small" id="bk-relay-hint">
                                     یک Worker در حساب Cloudflare که درخواست‌ها را به api.telegram.org می‌رساند؛ سرور مستقیم به Cloudflare وصل می‌شود و پراکسی لازم ندارد.
                                     آدرس workers.dev از ایران گاهی بسته است — یک زیردامنهٔ خودتان (مثل tg.sorinflow.com) را به Worker وصل کنید.
-                                    <a href="#" onclick="event.preventDefault(); document.getElementById('bk-relay-code').classList.toggle('d-none')">کد Worker</a>
+                                    <a href="#" onclick="event.preventDefault(); bkToggleWorker()">کد Worker</a>
                                 </div>
-                                <pre id="bk-relay-code" class="bk-code d-none" dir="ltr">export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    if (!url.pathname.startsWith('/bot')) return new Response('not found', { status: 404 });
-    if (env.RELAY_KEY && request.headers.get('X-Relay-Key') !== env.RELAY_KEY)
-      return new Response('forbidden', { status: 403 });
-    const upstream = 'https://api.telegram.org' + url.pathname + url.search;
-    const headers = new Headers(request.headers);
-    headers.delete('X-Relay-Key'); headers.delete('host');
-    return fetch(upstream, { method: request.method, headers, body: request.method === 'GET' ? undefined : request.body });
-  }
-};</pre>
-                                <div class="form-text small">Workers &amp; Pages ← Create ← این کد ← Deploy؛ در Settings ← Variables اگر خواستید <code>RELAY_KEY</code> بگذارید و همان را اینجا بنویسید؛ یک Custom Domain اضافه کنید و آدرسش را بالا بگذارید.</div>
+                                <pre id="bk-relay-code" class="bk-code d-none" dir="ltr"></pre>
+                                <div class="form-text small">Workers &amp; Pages ← Create ← این کد ← Deploy. در Settings ← Variables دو مقدار لازم است: <code>RELAY_KEY</code> (همان کلید رلهٔ بالا؛ بدون آن Worker هر درخواستی را رد می‌کند) و <code>ALLOWED_BOTS</code> (شناسهٔ ربات، یعنی عددهای پیش از «:» در توکن). یک Custom Domain اضافه کنید و آدرسش را بالا بگذارید. راهنمای کامل: <code dir="ltr">deploy/telegram-relay/README.fa.md</code></div>
                             </div>
                             <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
                                 <button class="btn btn-sm btn-outline-primary text-nowrap" id="bk-proxy-test" onclick="bkProxyTest()">
@@ -3917,6 +3906,46 @@
                                 <i class="bi bi-eye"></i> پیش‌نمایش و ارسال الان
                             </button>
                         </div>
+                    </div>
+                </div>
+                <!-- بکاپ کامل: the host's nightly disaster-recovery bundle (scripts/dr_backup.sh) -->
+                <div class="card mb-3" id="dr-card">
+                    <div class="card-header d-flex align-items-center gap-2">
+                        <i class="bi bi-shield-lock"></i> بکاپ کامل (بازیابی فاجعه)
+                        <span id="dr-badge" class="badge bg-secondary">در حال بررسی...</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadDr()" title="تازه‌سازی">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-2">
+                            هر شب ساعت ۰۴:۰۰ به وقت تهران، خود سرور <b>همه‌چیز</b> را — پایگاه داده، کلیدها و رمزهای سرور،
+                            نشست‌های دیوار، پروفایل مرورگرها و گواهی SSL — رمزگذاری‌شده به تلگرام می‌فرستد. اگر سرور از دست برود،
+                            با همین بسته روی سرور تازه همه‌چیز برمی‌گردد، بی‌آنکه کلیدی را دوباره بگیرید.
+                        </p>
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-6">
+                                <div class="bk-stat">
+                                    <div class="bk-lbl"><i class="bi bi-send-check"></i> آخرین بکاپ کامل</div>
+                                    <div class="bk-val" id="dr-last">—</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="bk-stat">
+                                    <div class="bk-lbl"><i class="bi bi-activity"></i> وضعیت</div>
+                                    <div class="bk-val" id="dr-state">—</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap align-items-center">
+                            <button class="btn btn-sm btn-outline-success" id="dr-run" onclick="drRunNow()">
+                                <i class="bi bi-cloud-upload"></i> همین حالا
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary" id="dr-diag" onclick="drDiagnose()">
+                                <i class="bi bi-diagram-3"></i> تست همهٔ راه‌ها
+                            </button>
+                        </div>
+                        <div id="dr-diag-rows" class="small mt-2"></div>
                     </div>
                 </div>
                 <!-- اعضای تیم — one full-width table: who, role, access, contact, state,
@@ -5204,12 +5233,12 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260924a"></script>
+<script src="js/app.js?v=20260924b"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
-<script src="js/ai/reader.js?v=20260924a"></script>
-<script src="js/ai/embed.js?v=20260924a"></script>
-<script src="js/ai/photo.js?v=20260924a"></script>
-<script src="js/ai/need.js?v=20260924a"></script>
+<script src="js/ai/reader.js?v=20260924b"></script>
+<script src="js/ai/embed.js?v=20260924b"></script>
+<script src="js/ai/photo.js?v=20260924b"></script>
+<script src="js/ai/need.js?v=20260924b"></script>
 
 <!-- Role / permission editor (super_admin) -->
 <div class="modal fade" id="permsEditorModal" tabindex="-1" aria-labelledby="permsEditorLabel" aria-hidden="true">

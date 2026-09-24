@@ -31,7 +31,7 @@ import json
 import os
 import shutil
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -45,6 +45,12 @@ REQUEST = DATA / "dr-request"
 # Telegram's Bot API takes documents up to 50 MB; the parts are 45 MB.
 PART_LIMIT = 50 * 1024 * 1024
 HISTORY = 10
+
+
+def _now() -> str:
+    # With its offset: the container has no tzdata, so a bare local time is
+    # UTC, and the panel's browser read it as Tehran time — 3½ hours early.
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def read_status() -> dict:
@@ -82,7 +88,7 @@ def request_run() -> bool:
     """Ask the host for a bundle now (the panel's button)."""
     try:
         REQUEST.parent.mkdir(parents=True, exist_ok=True)
-        REQUEST.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+        REQUEST.write_text(datetime.now(timezone.utc).isoformat(timespec="seconds"), encoding="utf-8")
         return True
     except Exception as e:
         logger.warning(f"[dr] could not drop the request file: {e}")
@@ -133,7 +139,7 @@ async def ship(bundle_dir: Path, db=None) -> dict:
     missing = [p.name for p in parts if not p.exists()]
     too_big = [p.name for p in parts if p.exists() and p.stat().st_size > PART_LIMIT]
     if missing or too_big or not parts:
-        out = {"ok": False, "at": datetime.now().isoformat(timespec="seconds"),
+        out = {"ok": False, "at": _now(),
                "error": ("بخش‌ها ناقص است: " + ", ".join(missing)) if missing else
                         ("بخش بزرگ‌تر از ۵۰ مگابایت: " + ", ".join(too_big)) if too_big else "هیچ بخشی نیست"}
         _write_status({"stamp": stamp, "sent": out})
@@ -175,8 +181,10 @@ async def ship(bundle_dir: Path, db=None) -> dict:
             except Exception as e:
                 failures.append(f"{chat}: {type(e).__name__}: {str(e)[:120]}")
                 logger.error(f"[dr] bundle {stamp} to {chat} failed: {e}")
+        # A proxy is recorded masked: the status file sits on the data volume
+        # and reaches the panel, and a proxy URL can carry its password.
         return {"ok": bool(delivered), "delivered": delivered, "error": "؛ ".join(failures)[:300],
-                "via": sorted(v for v in via if v)}
+                "via": sorted(v if v in ("direct", "relay") else bk.mask_url(v) for v in via if v)}
 
     try:
         if db is not None:
@@ -186,8 +194,9 @@ async def ship(bundle_dir: Path, db=None) -> dict:
                 res = await _go(session)
     except Exception as e:
         res = {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
-    res["at"] = datetime.now().isoformat(timespec="seconds")
-    _write_status({"stamp": stamp, "sent": res})
+    res["at"] = _now()
+    _write_status({"stamp": stamp, "sent": res, "parts": len(parts),
+                   "bytes": sum(p.stat().st_size for p in parts if p.exists())})
     if res.get("ok"):
         shutil.rmtree(bundle_dir, ignore_errors=True)
         logger.info(f"[dr] bundle {stamp} delivered to {res['delivered']} via {res.get('via')}")
@@ -200,7 +209,7 @@ async def alert(text: str) -> bool:
     # The panel's card reads the status file; without this a run that died
     # before shipping left yesterday's success on it as if all were well.
     cur = read_status()
-    cur["last_alert"] = {"text": text[:500], "at": datetime.now().isoformat(timespec="seconds")}
+    cur["last_alert"] = {"text": text[:500], "at": _now()}
     _save(cur)
     from app.database import async_session_maker
     from app.services import backup_service as bk
