@@ -427,7 +427,10 @@ async def _llm_rerank(prompt_items: List[Dict[str, Any]], context: str) -> Dict[
 # and the request answers with the deterministic ranking right away. A Redis
 # outage is treated exactly like a model outage: quietly nothing extra, ever.
 REASON_CACHE_TTL = 7 * 24 * 3600      # a week — candidates turn over faster than this
-SEMANTIC_CACHE_TTL = 7 * 24 * 3600
+# The reasons' key carries the candidates, so a new listing is a new key; the
+# semantic key carries only the need text, so a week-old answer would hide
+# every listing embedded since. The embed pass runs every few minutes.
+SEMANTIC_CACHE_TTL = 6 * 3600
 LOCK_TTL = 200                        # a reasoning model's 90s, twice (chat()'s one retry on a malformed answer)
 
 _background_tasks: set = set()
