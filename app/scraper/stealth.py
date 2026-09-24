@@ -529,6 +529,47 @@ def sandbox_status() -> dict:
     }
 
 
+async def _launch_per_sandbox_mode(launch):
+    """`launch(use_sandbox)` under CHROMIUM_SANDBOX, with auto's one fallback,
+    recording what actually ran for sandbox_status(). Shared by open_browser
+    and probe_sandbox so the two can never decide differently."""
+    from app.config import get_settings
+    mode = (getattr(get_settings(), "chromium_sandbox", "auto") or "auto").lower()
+    sandbox = _resolve_sandbox(mode)
+    try:
+        result = await launch(sandbox)
+    except Exception as e:
+        if not (mode == "auto" and sandbox and _is_sandbox_failure(e)):
+            raise
+        logger.error(f"[stealth] Chromium's sandbox failed to launch, falling back to "
+                     f"unsandboxed for the rest of this process: {e}")
+        _sandbox_state["fallback_reason"] = str(e)
+        sandbox = False
+        result = await launch(sandbox)
+    _sandbox_state["mode"], _sandbox_state["active"] = mode, sandbox
+    return result
+
+
+async def probe_sandbox() -> None:
+    """Launch and close one throwaway Chromium at worker start, so
+    sandbox_status() — and the monitoring card — says whether this host lets
+    the sandbox run from the first minute after a deploy, not from the first
+    scrape. That is the one thing a new server or kernel can change and no
+    test here can see. Never raises: a browser that cannot start at all is the
+    first scrape's error to report, with its own log."""
+    from playwright.async_api import async_playwright
+    try:
+        async with async_playwright() as p:
+            browser = await _launch_per_sandbox_mode(
+                lambda use_sandbox: p.chromium.launch(
+                    headless=False, args=get_browser_args(headless=True),
+                    chromium_sandbox=use_sandbox))
+            await browser.close()
+        logger.info(f"[stealth] sandbox probe: {sandbox_status()}")
+    except Exception as e:
+        logger.warning(f"[stealth] sandbox probe could not launch Chromium: {e}")
+
+
 async def open_browser(playwright, *, headless: bool, proxy=None,
                        account: Optional[str] = None,
                        stealth_config: Optional[StealthConfig] = None):
@@ -574,9 +615,6 @@ async def open_browser(playwright, *, headless: bool, proxy=None,
 
     opts = get_context_options(sc, proxy, device)
     args = get_browser_args(headless=headless)
-    from app.config import get_settings
-    mode = (getattr(get_settings(), "chromium_sandbox", "auto") or "auto").lower()
-    sandbox = _resolve_sandbox(mode)
 
     async def _launch(use_sandbox: bool):
         return await playwright.chromium.launch_persistent_context(
@@ -595,22 +633,10 @@ async def open_browser(playwright, *, headless: bool, proxy=None,
         )
 
     try:
-        context = await _launch(sandbox)
-    except Exception as e:
-        if mode == "auto" and sandbox and _is_sandbox_failure(e):
-            logger.error(f"[stealth] Chromium's sandbox failed to launch, falling back to "
-                        f"unsandboxed for the rest of this process: {e}")
-            _sandbox_state["fallback_reason"] = str(e)
-            sandbox = False
-            try:
-                context = await _launch(sandbox)
-            except Exception:
-                await _release_profile_lock(fs_key, rkey, token, fallback)
-                raise
-        else:
-            await _release_profile_lock(fs_key, rkey, token, fallback)
-            raise
-    _sandbox_state["mode"], _sandbox_state["active"] = mode, sandbox
+        context = await _launch_per_sandbox_mode(_launch)
+    except Exception:
+        await _release_profile_lock(fs_key, rkey, token, fallback)
+        raise
 
     # A persistent context opens with one page already.
     page = context.pages[0] if context.pages else await context.new_page()

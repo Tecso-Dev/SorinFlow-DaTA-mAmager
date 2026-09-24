@@ -240,6 +240,12 @@ def _start_background(role: str):
     worker = []
     if role in ("all", "worker") and settings.scrape_worker_enabled:
         worker = scrape_queue.start(role)
+    if role == "worker":
+        # Whether this host lets Chromium's sandbox run shows on the card from
+        # the start, not from the first scrape (not in «all»: a dev box boots
+        # often and usually runs as root, where there is nothing to learn).
+        from app.scraper import stealth
+        tasks.append(asyncio.create_task(stealth.probe_sandbox(), name="sandbox-probe"))
     logger.info(f"[role {role}] loops: {', '.join(names) or 'none'} · "
                 f"scrape worker: {'on' if worker else 'off'}")
     return tasks, worker

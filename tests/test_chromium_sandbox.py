@@ -207,3 +207,54 @@ class TestGetBrowserArgsNoLongerHardcodesIt:
         also carry a hard-coded copy that would fight that."""
         assert "--no-sandbox" not in st.get_browser_args(headless=True)
         assert "--no-sandbox" not in st.get_browser_args(headless=False)
+
+
+class TestTheWorkerStartProbe:
+    """probe_sandbox() is what makes the monitoring card say, minutes after a
+    deploy, whether the new host lets Chromium's sandbox run — before any
+    scrape has launched a browser."""
+
+    class _Browser:
+        async def close(self):
+            pass
+
+    def _patch_playwright(self, monkeypatch, fail_times=0, fail_text="No usable sandbox! see docs"):
+        calls = []
+
+        class _Chromium:
+            async def launch(self, **kw):
+                calls.append(kw.get("chromium_sandbox"))
+                if len(calls) <= fail_times:
+                    raise RuntimeError(fail_text)
+                return TestTheWorkerStartProbe._Browser()
+
+        class _Ctx:
+            async def __aenter__(self):
+                return _FakePlaywright(_Chromium())
+
+            async def __aexit__(self, *exc):
+                return False
+
+        import playwright.async_api as pa
+        monkeypatch.setattr(pa, "async_playwright", lambda: _Ctx())
+        monkeypatch.setattr(get_settings(), "chromium_sandbox", "auto", raising=False)
+        monkeypatch.setattr(os, "geteuid", lambda: 1000)
+        return calls
+
+    async def test_a_working_sandbox_shows_as_active(self, monkeypatch):
+        calls = self._patch_playwright(monkeypatch)
+        await st.probe_sandbox()
+        assert calls == [True]
+        assert st.sandbox_status()["active"] is True
+
+    async def test_a_refused_sandbox_shows_the_fallback_and_why(self, monkeypatch):
+        calls = self._patch_playwright(monkeypatch, fail_times=1)
+        await st.probe_sandbox()
+        assert calls == [True, False]
+        status = st.sandbox_status()
+        assert status["active"] is False and "No usable sandbox" in status["fallback_reason"]
+
+    async def test_a_browser_that_cannot_start_at_all_never_raises(self, monkeypatch):
+        self._patch_playwright(monkeypatch, fail_times=5, fail_text="Executable doesn't exist")
+        await st.probe_sandbox()       # logs, does not raise into the worker's startup
+        assert st.sandbox_status()["active"] is None
