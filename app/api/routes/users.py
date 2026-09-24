@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, func
+from sqlalchemy import select, update, or_, func
 from typing import Optional
 
 from loguru import logger
@@ -81,6 +81,40 @@ PURPOSE_EMAIL_2FA = "email_2fa"
 PURPOSE_PWD_RESET = "pwd_reset"
 PURPOSE_PHONE = "phone_verify"
 PURPOSE_EMAIL = "email_verify"
+
+
+def _totp_step(secret: str, code: str) -> int | None:
+    """The 30-second step `code` belongs to, or None.
+
+    Its own step or one either side, for a phone clock that drifts — the
+    same leeway valid_window=1 gave. The step, not a yes, because the caller
+    has to record which one was spent.
+    """
+    totp = pyotp.TOTP(secret)
+    now = totp.timecode(datetime.now(timezone.utc))
+    for step in (now - 1, now, now + 1):
+        if pyotp.utils.strings_equal(str(code or ""), totp.generate_otp(step)):
+            return step
+    return None
+
+
+async def _claim_totp_step(db: AsyncSession, user: User, step: int) -> bool:
+    """Spend `step` for this account; False if it, or a later one, already was.
+
+    One conditional UPDATE rather than read-then-write, so two requests racing
+    with the same code cannot both see «not used yet»: the second waits on the
+    first's row lock and then matches nothing.
+    """
+    res = await db.execute(
+        update(User)
+        .where(User.id == user.id,
+               or_(User.totp_last_step.is_(None), User.totp_last_step < step))
+        .values(totp_last_step=step)
+        .execution_options(synchronize_session=False))
+    return res.rowcount == 1
+
+
+TOTP_REUSED = "این کد قبلاً استفاده شده است — کد بعدی برنامه را وارد کنید"
 
 
 def _mask_email(addr: str) -> str:
@@ -376,8 +410,11 @@ async def verify_totp_login(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="کاربر یافت نشد")
 
-    if not user.totp_secret or not pyotp.TOTP(user.totp_secret).verify(data.code, valid_window=1):
+    step = _totp_step(user.totp_secret, data.code) if user.totp_secret else None
+    if step is None:
         raise HTTPException(status_code=401, detail="کد احراز هویت اشتباه است")
+    if not await _claim_totp_step(db, user, step):
+        raise HTTPException(status_code=401, detail=TOTP_REUSED)
 
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
@@ -886,8 +923,13 @@ async def totp_enable(
 ):
     if not current_user.totp_secret:
         raise HTTPException(status_code=400, detail="ابتدا TOTP را راه‌اندازی کنید")
-    if not pyotp.TOTP(current_user.totp_secret).verify(data.code, valid_window=1):
+    # Spent here too: otherwise the code that switched TOTP on also finishes
+    # the next login, for the same minute and a half.
+    step = _totp_step(current_user.totp_secret, data.code)
+    if step is None:
         raise HTTPException(status_code=400, detail="کد احراز هویت اشتباه است")
+    if not await _claim_totp_step(db, current_user, step):
+        raise HTTPException(status_code=400, detail=TOTP_REUSED)
 
     current_user.totp_enabled = True
     await db.commit()
