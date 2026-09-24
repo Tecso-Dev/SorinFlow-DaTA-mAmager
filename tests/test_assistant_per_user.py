@@ -481,22 +481,20 @@ class TestNamesStayHome:
                                      {12: "سارا امیری"})
         assert back == f"سارا امیری، سارا امیری، سارا امیری، سارا امیری، مشتری-7، مشتری{ZWNJ}ها ۱۲ نفر، مشتری-123"
 
-    def test_a_tool_gets_the_words_the_model_only_saw_as_tokens(self, world, monkeypatch):
-        """A customer named like a street: the model sees the token, the
-        listing search still gets the street."""
+    def test_a_search_the_model_writes_with_a_token_embeds_the_token(self, world, monkeypatch):
+        """search_listings sends its query to the embedding model — another
+        model: a token the model put in it must not turn back into the name."""
         sara = world["ids"]["sara"]
+        embedded = []
 
-        async def rename():
-            async with world["maker"]() as db:
-                c = await db.get(Customer, sara)
-                c.full_name = PLACE
-                await db.commit()
-        asyncio.run(rename())
+        async def nearest(db, text, **kw):
+            embedded.append(text)
+            return []
+        monkeypatch.setattr(embeddings, "semantic_candidates", nearest)
         _link(world, "mina", 111)
-        seen = _script(monkeypatch, ("count_listings", {"district": f"مشتری-{sara}"}), "دو آگهی")
-        _tg(world, f"در {PLACE} چند آگهی هست؟", tid=111)
-        assert PLACE not in "\n".join(seen)
-        assert '"count": 2' in json.loads(seen[1])[-1]["content"]
+        _script(monkeypatch, ("search_listings", {"query": f"خانهٔ حیاط‌دار برای مشتری-{sara}"}), "چیزی نیست")
+        _tg(world, "یک خانهٔ حیاط‌دار برای سارا امیری پیدا کن", tid=111)
+        assert embedded == [f"خانهٔ حیاط‌دار برای مشتری-{sara}"]
 
 
 # ── the panel did not change ─────────────────────────────────────────────────

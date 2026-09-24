@@ -274,8 +274,8 @@ def _hide_names(text: str, names: Dict[int, str]) -> str:
     """Each name in `names` that appears in `text` → its token, longest name
     first, as whole words — a suffix after a zero-width non-joiner
     («امیری‌ها») does not save it. A one-word name that is also a street's
-    («بهشتی») is swapped too: tools get their arguments back with names in
-    them (answer()), so only the model's view of the text is odd."""
+    («بهشتی») is swapped too: a search for that street then finds nothing,
+    which is the price of the name never leaving."""
     text = text.translate(_FA)
     low = text.lower()
     for cid, name in sorted(names.items(), key=lambda kv: -len(kv[1])):
@@ -579,10 +579,9 @@ async def answer(db, question: str, *, user, chat_id: str = "") -> Dict[str, Any
                 fn = call.get("function") or {}
                 name = fn.get("name") or ""
                 used.append(name)
-                # the model only ever saw tokens; the tool reads the real words
-                args = fn.get("arguments")
-                args = _show_names(args if isinstance(args, str) else json.dumps(args or {}, ensure_ascii=False), names)
-                result = await run_tool(db, user, name, args)
+                # the arguments keep their tokens: search_listings sends its
+                # query to the embedding model, which is a model too
+                result = await run_tool(db, user, name, fn.get("arguments"))
                 messages.append({"role": "tool", "tool_call_id": call.get("id"),
                                  "content": llm.mask_pii(_hide_names(json.dumps(result, ensure_ascii=False),
                                                                      names))[:6000]})
