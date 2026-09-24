@@ -194,7 +194,7 @@ async def proxy_test(payload: ProbeIn, db: AsyncSession = Depends(get_db),
     except Exception as e:
         blocked = not (route["proxies"] or route["mode"] == "relay")
         raise HTTPException(503, ("بدون پراکسی به تلگرام نرسید — از این سرور تلگرام مسدود است" if blocked else
-                                  f"از این راه به تلگرام نرسید ({bk.describe_route(route)})") + f" ({type(e).__name__})")
+                                  f"از این راه به تلگرام نرسید ({bk.describe_route(route)})") + f" ({e if isinstance(e, bk.RelayError) else type(e).__name__})")
     info["proxy"] = bk.describe_route(route)
     return info
 
@@ -220,7 +220,7 @@ async def probe_bot(payload: ProbeIn, db: AsyncSession = Depends(get_db),
     except Exception as e:
         blocked = not (route["proxies"] or route["mode"] == "relay")
         raise HTTPException(503, ("بدون پراکسی به تلگرام نرسید — از این سرور تلگرام مسدود است؛ پراکسی را تنظیم کنید" if blocked else
-                                  f"از این راه به تلگرام نرسید ({bk.describe_route(route)})") + f" ({type(e).__name__})")
+                                  f"از این راه به تلگرام نرسید ({bk.describe_route(route)})") + f" ({e if isinstance(e, bk.RelayError) else type(e).__name__})")
     if not info["chats"]:
         info["hint_fa"] = ("هنوز هیچ چتی به ربات پیام نداده. در تلگرام ربات را باز کنید، "
                            "Start را بزنید و یک پیام بفرستید، بعد دوباره «پیدا کن» را بزنید.")

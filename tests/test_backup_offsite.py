@@ -488,3 +488,62 @@ class TestDirectFirst:
         assert [r["route"] for r in rows] == ["direct", "relay"]
         assert rows[0]["ok"] is False and rows[0]["error"] == "ConnectTimeout"
         assert rows[1]["ok"] is True and rows[1]["http"] == 200
+
+
+class TestTheRelaysOwnRefusals:
+    """The Worker answers a wrong key, a bot it does not serve, or a Telegram
+    it cannot reach with its own JSON ({"ok": false, "relay": ...}). Those
+    used to come back as Telegram's own 401/403/502: no proxy was tried and
+    the panel said «HTTP 401» as if the bot token were wrong."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self, monkeypatch):
+        monkeypatch.setattr(bk, "_direct_down_until", 0.0)
+        monkeypatch.setattr(bk.settings, "telegram_direct_first", "1", raising=False)
+
+    def _fake(self, monkeypatch, relay_answer):
+        used = []
+        real = httpx.AsyncClient
+
+        class Fake(real):
+            def __init__(self, *a, **kw):
+                proxy = kw.pop("proxy", None)
+
+                def handler(req):
+                    url = str(req.url)
+                    if url.startswith(bk.TELEGRAM_API) and proxy is None:
+                        raise httpx.ConnectTimeout("filtered")
+                    used.append(proxy or url.split("/bot")[0])
+                    if url.startswith("https://tg.example"):
+                        return relay_answer
+                    return httpx.Response(200, json={"ok": True, "result": {"username": "b"}})
+                kw["transport"] = httpx.MockTransport(handler)
+                super().__init__(*a, **kw)
+        monkeypatch.setattr(bk.httpx, "AsyncClient", Fake)
+        return used
+
+    def test_a_refusal_falls_through_to_the_proxies(self, monkeypatch):
+        used = self._fake(monkeypatch, httpx.Response(401, json={"ok": False, "relay": "unauthorized"}))
+        route = bk._route("relay", ["http://a:1"], "https://tg.example", "wrong")
+        resp, via = asyncio.run(bk.tg_request("1:x", "getMe", route))
+        assert via == "http://a:1" and resp.status_code == 200
+        assert used == ["https://tg.example", "http://a:1"]
+
+    def test_with_nowhere_left_it_says_what_the_relay_said(self, monkeypatch):
+        self._fake(monkeypatch, httpx.Response(403, json={"ok": False, "relay": "forbidden_bot"}))
+        route = bk._route("relay", [], "https://tg.example", "k")
+        with pytest.raises(bk.RelayError, match="ALLOWED_BOTS"):
+            asyncio.run(bk.tg_request("1:x", "getMe", route))
+
+    def test_telegrams_own_401_still_reaches_the_caller(self, monkeypatch):
+        tg401 = httpx.Response(401, json={"ok": False, "error_code": 401, "description": "Unauthorized"})
+        self._fake(monkeypatch, tg401)
+        route = bk._route("relay", ["http://a:1"], "https://tg.example", "k")
+        resp, via = asyncio.run(bk.tg_request("1:x", "getMe", route))
+        assert via == "relay" and resp.status_code == 401
+
+    def test_the_route_test_names_the_relays_reason(self, monkeypatch):
+        self._fake(monkeypatch, httpx.Response(401, json={"ok": False, "relay": "unauthorized"}))
+        rows = asyncio.run(bk.diagnose("1:x", bk._route("relay", [], "https://tg.example", "wrong")))
+        relay = next(r for r in rows if r["route"] == "relay")
+        assert relay["ok"] is False and "X-Relay-Key" in relay["error"]

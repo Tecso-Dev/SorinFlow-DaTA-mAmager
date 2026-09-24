@@ -255,6 +255,33 @@ def _legs(route: dict, *, direct: bool) -> list:
     return legs
 
 
+class RelayError(RuntimeError):
+    """The relay itself refused, not Telegram: its own JSON body carries a
+    "relay" reason (deploy/telegram-relay/worker.js)."""
+
+
+# What the Worker's reasons mean for whoever reads the panel.
+RELAY_REASONS_FA = {
+    "unauthorized": "رله درخواست را رد کرد: کلید رله (X-Relay-Key) با RELAY_KEY در Worker یکی نیست",
+    "forbidden_bot": "رله این ربات را نمی‌پذیرد: شناسهٔ ربات را به ALLOWED_BOTS در Worker اضافه کنید",
+    "upstream_unreachable": "رله هم به تلگرام نرسید",
+    "not_found": "آدرس رله درست نیست",
+}
+
+
+def relay_refusal(resp) -> Optional[str]:
+    """The relay's own refusal as a Persian sentence, or None when the answer
+    is Telegram's — whose 401/403 must still reach the caller unchanged."""
+    if resp.status_code == 200:
+        return None
+    try:
+        body = resp.json()
+    except Exception:
+        return None
+    reason = body.get("relay") if isinstance(body, dict) else None
+    return RELAY_REASONS_FA.get(reason, f"رله خطا داد ({reason})") if reason else None
+
+
 async def tg_request(token: str, method: str, route: Optional[dict] = None, *, json=None,
                      data=None, files=None, params=None, timeout: float = 20,
                      direct: Optional[bool] = None):
@@ -287,6 +314,13 @@ async def tg_request(token: str, method: str, route: Optional[dict] = None, *, j
                     resp = await client.get(url, params=params, headers=headers)
             if label == "direct":
                 _note_direct(True)
+            refused = relay_refusal(resp) if label == "relay" else None
+            if refused:
+                # A wrong key or a bot the Worker does not serve used to come
+                # back as Telegram's own 401/403, and no proxy was tried.
+                last = RelayError(refused)
+                logger.warning(f"[telegram] {method} via relay refused: {refused}")
+                continue
             return resp, label
         except (httpx.TransportError, OSError) as e:
             last = e
@@ -315,7 +349,9 @@ async def diagnose(token: str, route: dict) -> list:
             except Exception:
                 pass
             row.update(ok=bool(r.status_code == 200 and body.get("ok")), http=r.status_code,
-                       error=None if body.get("ok") else (body.get("description") or f"HTTP {r.status_code}"))
+                       error=None if body.get("ok") else (
+                           (relay_refusal(r) if label == "relay" else None)
+                           or body.get("description") or f"HTTP {r.status_code}"))
         except Exception as e:
             row.update(ok=False, http=None, error=type(e).__name__)
         row["ms"] = int((time.monotonic() - started) * 1000)
