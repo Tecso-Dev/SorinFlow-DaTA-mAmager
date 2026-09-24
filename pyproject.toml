@@ -1,0 +1,25 @@
+[tool.ruff]
+# The container image is Python 3.10 (see requirements*.lock); lint the
+# syntax that version actually accepts, not whatever runs this check.
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "ASYNC"]
+# Persian strings make a long line normal here — half the panel's API
+# responses and log messages are one Persian sentence, and wrapping them
+# buys nothing.
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+# Most of this codebase (and everything it imports) has no type stubs; without
+# this every third-party import is its own error before a single real one.
+ignore_missing_imports = true
+# Only check the files actually passed in — otherwise mypy walks into every
+# module a changed file imports and reports on code the gate never asked
+# about. No strict flags: this is a gate on new code, not a rewrite of the
+# existing (untyped) codebase.
+follow_imports = "silent"
+
+[tool.coverage.run]
+source = ["app"]
