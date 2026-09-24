@@ -328,7 +328,8 @@ class TestTheCodeNeededEmailDiagnosesThePhone:
         import inspect
         from app.scraper.contact_extractor import ContactExtractor
         src = inspect.getsource(ContactExtractor._notify_code_needed)
-        assert "same_phone(d.sim_phone, self.account_phone)" in src
+        # either SIM of the phone — see test_forwarder_many_phones.py
+        assert "same_phone(p, self.account_phone) for p in d.sims()" in src
 
     def test_it_says_when_no_phone_is_registered_at_all(self):
         import inspect

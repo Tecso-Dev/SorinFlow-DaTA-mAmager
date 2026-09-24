@@ -574,8 +574,10 @@ class ContactExtractor:
                     from app.models.forwarder import ForwarderDevice as _FD
                     devs = (await db.execute(select(_FD).where(
                         _FD.is_active == True))).scalars().all()   # noqa: E712
+                    # Either SIM: a code for a dual-SIM phone's second number
+                    # was reported as «no phone registered for this number».
                     mine = [d for d in devs
-                            if _fw.same_phone(d.sim_phone, self.account_phone)]
+                            if any(_fw.same_phone(p, self.account_phone) for p in d.sims())]
                     if not mine:
                         fw_line = ("\n\nهیچ گوشی‌ای برای این شماره ثبت نشده — "
                                    "با ثبت آن در پنل، کدها خودکار وارد می‌شوند.")

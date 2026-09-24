@@ -77,6 +77,37 @@ class DeviceEdit(DeviceIn):
     is_active: Optional[bool] = None
 
 
+async def _check_sims(db: AsyncSession, user: User, sims, *, device_id: Optional[int] = None) -> None:
+    """A SIM is in one phone, and is the registering person's own number.
+
+    One person may have many phones, each with two SIMs — but a number cannot
+    sit in two of them (which phone forwards its code?), and it cannot be a
+    colleague's: a forwarder SIM is a claim on the number, and registering
+    somebody else's would let their Divar codes land on your phone.
+    """
+    from app.models.cookie import Cookie
+    sims = [s for s in sims if s]
+    if not sims:
+        return
+    others = (await db.execute(select(ForwarderDevice).where(
+        ForwarderDevice.is_active == True))).scalars().all()   # noqa: E712
+    for d in others:
+        if device_id is not None and d.id == device_id:
+            continue
+        for s in sims:
+            if any(fw.same_phone(s, p) for p in d.sims()):
+                if d.user_id == user.id:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"شمارهٔ {s} قبلاً روی گوشی «{d.label or d.device_id}» شما ثبت شده — "
+                               "یک سیم‌کارت فقط در یک گوشی است")
+                raise HTTPException(status_code=403,
+                                    detail=f"شمارهٔ {s} متعلق به کاربر دیگری است")
+    for ph, owner in (await db.execute(select(Cookie.phone_number, Cookie.owner_user_id))).all():
+        if owner and owner != user.id and any(fw.same_phone(s, ph) for s in sims):
+            raise HTTPException(status_code=403, detail=f"شمارهٔ {ph} متعلق به کاربر دیگری است")
+
+
 async def _mine(db: AsyncSession, user: User, device_id: int) -> ForwarderDevice:
     """One of MY devices, or 404.
 
@@ -115,6 +146,7 @@ async def create_device(data: DeviceIn, db: AsyncSession = Depends(get_db),
     sim1, sim2 = _phone(data.sim_phone), _phone(data.sim_phone2)
     if sim1 and sim2 and fw.same_phone(sim1, sim2):
         raise HTTPException(status_code=400, detail="دو سیم‌کارت نمی‌توانند یک شماره باشند")
+    await _check_sims(db, user, (sim1, sim2))
     row = ForwarderDevice(
         user_id=user.id,
         label=(data.label or "").strip() or "گوشی من",
@@ -142,6 +174,8 @@ async def edit_device(device_id: int, data: DeviceEdit,
         row.sim_phone2 = _phone(data.sim_phone2)
     if row.sim_phone and row.sim_phone2 and fw.same_phone(row.sim_phone, row.sim_phone2):
         raise HTTPException(status_code=400, detail="دو سیم‌کارت نمی‌توانند یک شماره باشند")
+    if data.sim_phone is not None or data.sim_phone2 is not None:
+        await _check_sims(db, user, (row.sim_phone, row.sim_phone2), device_id=row.id)
     if data.note is not None:
         row.note = data.note
     if data.is_active is not None:

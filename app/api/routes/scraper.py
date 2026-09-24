@@ -1199,7 +1199,7 @@ async def get_otp_pending(
         # Accounts Divar wants identified — national ID, birth date. No
         # code answers it; the panel opens a dialog naming the number.
         otp_store.identity_required())
-    return {"forwarders": await list_forwarders(), "pending": pending,
+    return {"forwarders": await _my_forwarders(db, current_user), "pending": pending,
             "timeout": otp_store.wait_window(),
             "identity_required": identity}
 
@@ -1498,13 +1498,22 @@ async def forwarder_heartbeat(request: Request, db: AsyncSession = Depends(get_d
     acct = otp_store._digits(body.account)
     if not acct:
         raise HTTPException(status_code=422, detail="account is required")
+    # Every SIM in the phone is alive when the phone is. The app reports one
+    # account per heartbeat, so on a dual-SIM phone the second number was
+    # never marked online — its code prompt said «گوشی آفلاین» about a phone
+    # that had checked in seconds earlier.
+    accts = [acct]
+    if device is not None:
+        accts += [otp_store._digits(p) for p in device.sims()
+                  if otp_store._digits(p) and otp_store._digits(p) != acct]
     try:
         from app.database import get_redis
         r = await get_redis()
-        await r.set(f"forwarder:{acct}", json.dumps({
-            "account": acct, "battery": body.battery, "network": body.network,
-            "version": body.version, "last_seen": time.time(),
-        }), ex=_HB_TTL)
+        for a in accts:
+            await r.set(f"forwarder:{a}", json.dumps({
+                "account": a, "battery": body.battery, "network": body.network,
+                "version": body.version, "last_seen": time.time(),
+            }), ex=_HB_TTL)
     except Exception as e:
         logger.warning(f"[forwarder] heartbeat not stored: {e}")
         raise HTTPException(status_code=503, detail="store unavailable")
@@ -1530,10 +1539,32 @@ async def list_forwarders() -> dict:
     return out
 
 
+async def _my_forwarders(db, user) -> dict:
+    """list_forwarders(), narrowed to the numbers this person may see: the
+    SIMs of their own phones and their own Divar numbers. Everybody's phones —
+    number, battery, network — were on every panel."""
+    from app.scraper.otp_store import _digits
+    from app.models.forwarder import ForwarderDevice
+    from app.models.cookie import Cookie
+    alive = await list_forwarders()
+    if (user.role or "") in FULL_ACCESS_ROLES:
+        return alive
+    mine = set()
+    for d in (await db.execute(select(ForwarderDevice).where(
+            ForwarderDevice.user_id == user.id))).scalars().all():
+        mine |= {_digits(p) for p in d.sims()}
+    for (ph,) in (await db.execute(select(Cookie.phone_number).where(
+            Cookie.owner_user_id == user.id))).all():
+        mine.add(_digits(ph))
+    return {k: v for k, v in alive.items() if _digits(k) in mine}
+
+
 @router.get("/forwarders")
-async def get_forwarders():
-    """Which phones are forwarding, and whether each is alive."""
-    return {"forwarders": await list_forwarders(), "online_after_seconds": _HB_ONLINE}
+async def get_forwarders(db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """Which of MY phones are forwarding, and whether each is alive."""
+    return {"forwarders": await _my_forwarders(db, current_user),
+            "online_after_seconds": _HB_ONLINE}
 
 
 @router.get("/login-code/{account}")
