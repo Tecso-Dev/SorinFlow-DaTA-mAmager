@@ -4131,6 +4131,12 @@ body.palette-open { overflow: hidden; }
   background: var(--surface2); border: 1px solid var(--border); color: var(--text);
 }
 .rt-proc.is-draining { border-color: rgba(245,158,11,.5); }
+.rt-loops { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .5rem; }
+.rt-loop {
+  padding: .45rem .65rem; border-radius: 10px; font-size: .8rem;
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+}
+.rt-loop-head { display: flex; align-items: center; justify-content: space-between; gap: .4rem; }
 .rt-dim { color: var(--text-muted); font-size: .74rem; }
 .rt-tag {
   display: inline-block; align-self: flex-start; padding: .1rem .55rem; border-radius: 20px;

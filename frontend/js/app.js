@@ -12302,16 +12302,17 @@ function _rtLoop(l) {
         : l.stale ? ['گیرکرده', 'is-bad']
         : l.restarts ? [`${faNum(l.restarts)} بار ری‌استارت`, 'is-warn']
         : ['سالم', 'is-ok'];
-    const beatAgo = l.off || !l.last_beat ? '—' : _rtAgo(Date.now() / 1000 - l.last_beat);
+    const beat = l.off ? '' : `تپش: ${l.last_beat ? _rtAgo(Date.now() / 1000 - l.last_beat) : 'هنوز نه'}`;
     const err = l.last_error_at
-        ? html`${new Date(l.last_error_at * 1000).toLocaleString('fa-IR')}<div class="rt-dim" dir="ltr">${l.last_error || ''}</div>`
-        : '—';
-    return html`<tr>
-        <td>${RT_LOOP_FA[l.name] || l.name}<div class="rt-dim" dir="ltr">${l.name} · ${l.role || ''}</div></td>
-        <td><span class="rt-tag ${cls}">${label}</span></td>
-        <td class="small">${beatAgo}</td>
-        <td class="small">${raw(err)}</td>
-    </tr>`;
+        ? html`<div class="rt-dim">خطای آخر: ${new Date(l.last_error_at * 1000).toLocaleString('fa-IR')}</div>`
+        : '';
+    // the internal name, the role and the error's type and line stay in the
+    // tooltip: the cell is for reading the state at a glance
+    return html`<div class="rt-loop" title="${l.name} · ${l.role || ''}${l.last_error ? ' · ' + l.last_error : ''}">
+        <div class="rt-loop-head"><span>${RT_LOOP_FA[l.name] || l.name}</span><span class="rt-tag ${cls}">${label}</span></div>
+        ${raw(beat ? html`<div class="rt-dim">${beat}</div>` : '')}
+        ${raw(err)}
+    </div>`;
 }
 
 async function loadRuntime() {
@@ -12335,11 +12336,8 @@ async function loadRuntime() {
     document.getElementById('mon-rt-running').innerHTML = running.map(r =>
         html`<span class="rt-tag" dir="ltr" title="${r.worker}">${String(r.job_id).slice(0, 8)}</span>`).join(' ');
     const loops = d.loops || [];
-    document.getElementById('mon-rt-loops').innerHTML = loops.length
-        ? html`<table class="table table-sm mb-0 align-middle">
-            <thead><tr><th>کار</th><th>وضعیت</th><th>آخرین تپش</th><th>آخرین خطا</th></tr></thead>
-            <tbody>${raw(loops.map(_rtLoop).join(''))}</tbody></table>`
-        : '<span class="text-muted small">هنوز هیچ کار پس‌زمینه‌ای گزارش نداده است</span>';
+    document.getElementById('mon-rt-loops').innerHTML = loops.map(_rtLoop).join('')
+        || '<span class="text-muted small">هنوز هیچ کار پس‌زمینه‌ای گزارش نداده است</span>';
 }
 
 async function loadMonitoringLogs() {
