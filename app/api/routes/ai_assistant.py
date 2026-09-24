@@ -46,7 +46,7 @@ async def assistant_settings(payload: AssistantSettingsIn, db: AsyncSession = De
 async def assistant_ask(payload: AskIn, db: AsyncSession = Depends(get_db), user: User = _super_admin):
     """The assistant, from the panel: the same tools, the same ledger row, the
     same log — with the panel user as the asker."""
-    res = await assistant.answer(db, payload.text, who=user.full_name or user.username, chat_id="")
+    res = await assistant.answer(db, payload.text, user=user, chat_id="")
     if not res["ok"]:
         raise HTTPException(status_code=502, detail=res["text"])
     return res
