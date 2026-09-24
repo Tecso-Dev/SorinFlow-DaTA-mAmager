@@ -107,13 +107,15 @@ spec:
             # shared-app-env patch below — one definition for api, worker,
             # scheduler and the migrate Job instead of four copies to keep in
             # sync.
-          # api serves already-downloaded property images straight off
-          # data-pvc (StaticFiles in app/main.py); read-only because api
-          # itself never downloads or writes one — only worker does.
+          # Read-write, not read-only: api serves the downloaded images off
+          # data-pvc (StaticFiles in app/main.py) but also writes there itself
+          # — avatars (routes/users.py), manual listing photos (routes/crm.py),
+          # imported Divar cookie files, and the panel's «backup now» request
+          # the host's DR watcher picks up. Read-only turned every one of those
+          # into a 500.
           volumeMounts:
             - name: app-data
               mountPath: /app/data
-              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: logs
