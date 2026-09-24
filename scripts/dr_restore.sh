@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+#
+# Turn a folder of downloaded DR parts back into the plaintext bundle
+# scripts/new_server.sh restores from. Needs no network: every check here
+# is local (sha256, gpg, tar).
+#
+# usage: scripts/dr_restore.sh <dir-with-parts>
+#
+# <dir-with-parts> holds everything pulled out of the Telegram chat for one
+# backup: the numbered .part#### files, and the manifest — either as
+# manifest.json (a bundle straight off the data-pvc) or as
+# sorinflow-dr-<stamp>.manifest.json (the filename it has once downloaded
+# from Telegram, per app/services/dr_backup.py's ship()).
+set -euo pipefail
+
+PASS_FILE=""
+WORK_ENC=""
+cleanup() { rm -f "$PASS_FILE" "$WORK_ENC"; }
+trap cleanup EXIT
+
+DIR="${1:?usage: dr_restore.sh <dir-with-parts>}"
+[ -d "$DIR" ] || { echo "no such directory: $DIR" >&2; exit 1; }
+
+MANIFEST="$DIR/manifest.json"
+if [ ! -f "$MANIFEST" ]; then
+  MANIFEST="$(ls "$DIR"/*.manifest.json 2>/dev/null | head -1 || true)"
+fi
+[ -n "$MANIFEST" ] && [ -f "$MANIFEST" ] || { echo "no manifest.json (or *.manifest.json) in $DIR" >&2; exit 1; }
+
+STAMP="$(jq -r '.stamp' "$MANIFEST")"
+echo "== bundle $STAMP — $(jq -r '.created_at' "$MANIFEST") =="
+
+# ── 1. verify every part before touching anything ──────────────────────────
+FAIL=0
+PART_COUNT=0
+while IFS=$'\t' read -r name size want_sha; do
+  PART_COUNT=$((PART_COUNT + 1))
+  f="$DIR/$name"
+  if [ ! -f "$f" ]; then
+    echo "MISSING part: $name" >&2
+    FAIL=1
+    continue
+  fi
+  got_size="$(wc -c < "$f" | tr -d ' ')"
+  got_sha="$(sha256sum "$f" | awk '{print $1}')"
+  if [ "$got_size" != "$size" ] || [ "$got_sha" != "$want_sha" ]; then
+    echo "CHECKSUM MISMATCH: $name (refusing to restore)" >&2
+    FAIL=1
+  fi
+done < <(jq -r '.parts[] | [.name, .size, .sha256] | @tsv' "$MANIFEST")
+
+[ "$PART_COUNT" -gt 0 ] || { echo "manifest lists no parts" >&2; exit 1; }
+[ "$FAIL" -eq 0 ] || { echo "one or more parts failed verification — nothing was restored" >&2; exit 1; }
+echo "sha256 OK — $PART_COUNT part(s)"
+
+# ── 2. the passphrase, safely ───────────────────────────────────────────────
+if [ -n "${DR_BACKUP_PASSPHRASE:-}" ]; then
+  PASSPHRASE="$DR_BACKUP_PASSPHRASE"
+elif [ -n "${DR_PASSPHRASE_FILE:-}" ]; then
+  PASSPHRASE="$(cat "$DR_PASSPHRASE_FILE")"
+else
+  read -r -s -p "DR_BACKUP_PASSPHRASE: " PASSPHRASE
+  echo
+fi
+[ -n "$PASSPHRASE" ] || { echo "empty passphrase" >&2; exit 1; }
+
+PASS_FILE="$(mktemp)"
+chmod 600 "$PASS_FILE"
+printf '%s' "$PASSPHRASE" > "$PASS_FILE"
+unset PASSPHRASE
+
+# ── 3. decrypt (parts back together, in manifest order) ────────────────────
+OUTDIR="$DIR/restored-$STAMP"
+mkdir -p "$OUTDIR"
+WORK_ENC="$DIR/.sorinflow-dr-$STAMP.tar.gpg"
+: > "$WORK_ENC"
+while IFS= read -r name; do
+  cat "$DIR/$name" >> "$WORK_ENC"
+done < <(jq -r '.parts[].name' "$MANIFEST")
+
+GPG_LOG="$(mktemp)"
+if ! gpg --batch --yes --pinentry-mode loopback --no-symkey-cache \
+     --passphrase-file "$PASS_FILE" --decrypt -o "$OUTDIR/.plain.tar" "$WORK_ENC" 2>"$GPG_LOG"; then
+  echo "gpg could not decrypt — wrong passphrase, or the parts are corrupt:" >&2
+  cat "$GPG_LOG" >&2
+  rm -f "$GPG_LOG"
+  exit 1
+fi
+rm -f "$GPG_LOG"
+
+tar -xf "$OUTDIR/.plain.tar" -C "$OUTDIR"
+rm -f "$OUTDIR/.plain.tar"
+
+# ── 4. sanity — what new_server.sh itself insists on ────────────────────────
+for need in db/divar_scraper.dump db/globals.sql k8s/sorinflow-secrets.env data-pvc.tar; do
+  [ -e "$OUTDIR/$need" ] || { echo "restored bundle is missing $need" >&2; exit 1; }
+done
+
+echo
+echo "restored into: $OUTDIR"
+[ -f "$OUTDIR/db/row-counts.txt" ] && { echo "row counts at the time of the backup:"; sed 's/^/   /' "$OUTDIR/db/row-counts.txt"; }
+echo
+echo "next, on the new box:"
+echo "  bash scripts/new_server.sh $OUTDIR [github-runner-registration-token]"
