@@ -378,6 +378,11 @@ _BREAKER_BASE_COOLDOWN = 30.0
 _BREAKER_MAX_COOLDOWN = 600.0   # 10 minutes — the escalating ceiling
 _BREAKER_FAIL_THRESHOLD = 5
 _RETRY_AFTER_CAP = 900.0        # 15 minutes — Liara's own word wins, capped
+# A half-open trial that never reports back — cancelled, or failed somewhere
+# no outcome is recorded — must not hold the one slot for the life of the
+# process: after this long another trial goes through. Longer than the
+# slowest call (a reasoning model's 90 s timeout, and its one retry).
+_BREAKER_TRIAL_LEASE = 200.0
 
 
 class _Breaker:
@@ -387,16 +392,22 @@ class _Breaker:
         self._next_cooldown = _BREAKER_BASE_COOLDOWN
         self.until_monotonic = 0.0
         self.until_at: Optional[datetime] = None
+        self.trial_at = 0.0
 
     def allow(self) -> bool:
+        now = time.monotonic()
         if self.state == "closed":
             return True
         if self.state == "open":
-            if time.monotonic() < self.until_monotonic:
+            if now < self.until_monotonic:
                 return False
-            self.state = "half_open"   # cooldown passed — one trial call through
+            self.state, self.trial_at = "half_open", now   # cooldown passed — one trial call through
             return True
-        return False   # half_open: the one trial is already out
+        # half_open: the one trial is out — unless it never came back
+        if now - self.trial_at > _BREAKER_TRIAL_LEASE:
+            self.trial_at = now
+            return True
+        return False
 
     def on_success(self) -> None:
         self.state, self.fails = "closed", 0
@@ -604,6 +615,10 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
                     raise RateLimited(last_error, retry_after)
                 if resp.status_code == 429 or resp.status_code >= 500:
                     _breaker.on_failure()
+                else:
+                    # the gateway answered: the request was wrong (a key, a
+                    # credit, a body), not the road — the breaker is for the road
+                    _breaker.on_success()
                 raise LLMError(last_error)
             _breaker.on_success()
             data = resp.json()
@@ -694,6 +709,8 @@ async def embed(texts: List[str], *, agent: str, db=None, timeout: float = TIMEO
             raise RateLimited(err, retry_after)
         if resp.status_code == 429 or resp.status_code >= 500:
             _breaker.on_failure()
+        else:
+            _breaker.on_success()   # answered — see chat()
         raise LLMError(err)
     _breaker.on_success()
     data = resp.json()

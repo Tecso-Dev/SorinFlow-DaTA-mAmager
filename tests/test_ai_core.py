@@ -653,6 +653,44 @@ class TestCircuitBreaker:
         assert llm._breaker.state == "open"
         assert llm._breaker._next_cooldown > first_cooldown
 
+    def test_a_half_open_trial_answered_with_a_4xx_does_not_wedge_it(self, configured, monkeypatch):
+        """The gateway comes back refusing the key (401) or the credit (402):
+        the road is open, the request was wrong. The trial must not leave
+        the breaker half-open — with no outcome recorded, every later call
+        was refused without a request until the process restarted."""
+        state = {"n": 0}
+
+        def handler(r):
+            state["n"] += 1
+            if state["n"] <= 5:
+                return httpx.Response(503, json={"error": "down"})
+            if state["n"] == 6:
+                return httpx.Response(401, json={"error": "bad key"})
+            return _answer("ok")
+        _gateway(monkeypatch, handler)
+        for _ in range(5):
+            with pytest.raises(llm.LLMError):
+                asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        llm._breaker.until_monotonic = 0.0            # the cooldown has passed
+        with pytest.raises(llm.LLMError) as e:
+            asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert not isinstance(e.value, llm.CircuitOpen) and "401" in str(e.value)
+        assert llm._breaker.state == "closed"
+        out = asyncio.run(llm.chat("write", [{"role": "user", "content": "x"}], agent="t", db=object()))
+        assert out["content"] == "ok"
+
+    def test_a_trial_that_never_reports_back_frees_its_slot(self, monkeypatch):
+        """A cancelled trial records nothing. Its slot is leased, not owned."""
+        b = llm._Breaker()
+        b._open(1.0)
+        now = [1000.0]
+        monkeypatch.setattr(llm.time, "monotonic", lambda: now[0])
+        b.until_monotonic = 0.0
+        assert b.allow() is True and b.state == "half_open"     # the trial goes out…
+        assert b.allow() is False                              # …and holds the slot
+        now[0] += llm._BREAKER_TRIAL_LEASE + 1                 # …and never comes back
+        assert b.allow() is True
+
     def test_429_with_a_numeric_retry_after_opens_immediately(self, configured, monkeypatch):
         _gateway(monkeypatch, lambda r: httpx.Response(429, headers={"Retry-After": "5"}, json={"error": "slow"}))
         with pytest.raises(llm.RateLimited) as e:
