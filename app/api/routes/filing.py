@@ -17,6 +17,9 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.permissions import STAFF_ROLES
 from app.auth.dependencies import get_current_user
+# who sees which file and which cabinet: shared with the assistant
+from app.auth.visibility import (actor as _actor, files_visible_to as _visible_to,
+                                 cabinets_visible_to as _cabinets_visible_to)
 from app.database import get_db
 from app.models.crm_models import Binder, Cabinet
 from app.models.property import Property
@@ -58,28 +61,6 @@ def join_tags(names: List[str]) -> Optional[str]:
     return TAG_SEP.join(kept) or None
 
 
-def _actor(user) -> Optional[str]:
-    return getattr(user, "full_name", None) or getattr(user, "username", None)
-
-
-def _is_super(user) -> bool:
-    # root outranks super_admin everywhere else; it must not be the one
-    # account that cannot see a private file (roadmap #11)
-    return getattr(user, "role", None) in ("root", "super_admin")
-
-
-def _visible_to(query, user):
-    """Private files belong to whoever filed them (and to a super_admin)."""
-    if _is_super(user):
-        return query
-    actor = _actor(user)
-    if not actor:
-        # No name to match on — «شخصی» must mean hidden, not "matches NULL"
-        return query.where(Property.is_private == False)     # noqa: E712
-    return query.where(or_(Property.is_private == False,      # noqa: E712
-                           Property.created_by == actor))
-
-
 def require_filing_admin(current_user: User = Depends(get_current_user)) -> User:
     """Guards the two destructive structural calls.
 
@@ -95,17 +76,6 @@ def require_filing_admin(current_user: User = Depends(get_current_user)) -> User
             status_code=403,
             detail="حذف کمد و زونکن فقط با دسترسی مدیر انجام می‌شود")
     return current_user
-
-
-def _cabinets_visible_to(query, user):
-    """A کمد شخصی belongs to whoever made it; a cabinet with no owner is
-    the agency's and everyone sees it."""
-    if _is_super(user):
-        return query
-    actor = _actor(user)
-    if not actor:
-        return query.where(Cabinet.owner.is_(None))
-    return query.where(or_(Cabinet.owner.is_(None), Cabinet.owner == actor))
 
 
 # ── cabinets ────────────────────────────────────────────────────────────
