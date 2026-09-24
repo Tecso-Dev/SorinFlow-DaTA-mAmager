@@ -56,10 +56,11 @@ _super_admin = Depends(_role_dep(ROLE_ROOT, "super_admin"))
 async def _guard_name_is_free(db: AsyncSession, name, exclude_id=None) -> None:
     """A display name another account already goes by is refused.
 
-    Ownership in this panel is by name (app/auth/visibility.py: a private
-    file's filer, a match's consultant, a lead's assignee, and «سورین»'s
-    customer scope all compare against full_name, else username), so taking
-    a colleague's name would hand over their files, matches and customers.
+    Ownership is by account (app/auth/visibility.py), but a colleague is
+    still named in a form — a task's assignee, a customer's consultant — and
+    a typed name is resolved to the one account that goes by it. Two
+    accounts with one name would leave every such row nobody's, and two
+    people the panel shows the same would be told apart by nothing.
     """
     name = (name or "").strip()
     if not name:
@@ -1274,7 +1275,7 @@ async def update_user(
         await _guard_name_is_free(db, data.full_name, exclude_id=user.id)
         user.full_name = data.full_name
     elif data.role in STAFF_ROLES and user.role not in STAFF_ROLES:
-        # a visitor made staff joins the name-based ownership rules with the
+        # a visitor made staff joins the colleagues a form names, with the
         # name they picked at sign-up — the same check as the portal ticket
         await _guard_name_is_free(db, user.full_name or user.username, exclude_id=user.id)
     if data.role is not None:

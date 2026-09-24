@@ -45,7 +45,7 @@ from loguru import logger
 from sqlalchemy import delete, func, or_, select
 
 from app.auth.permissions import STAFF_ROLES, has_permission
-from app.auth.visibility import actor, customers_visible_to, is_super, listings_visible_to, matches_visible_to
+from app.auth.visibility import customers_visible_to, is_super, listings_visible_to, matches_visible_to
 from app.config import get_settings
 from app.database import async_session_maker
 from app.models.telegram_link import TelegramLink
@@ -417,7 +417,7 @@ async def tool_queue_status(db, user=None) -> Dict[str, Any]:
     active = select(Property.id).where(Property.is_active == True)   # noqa: E712
     if user is not None:
         from app.api.routes.crm import _queue_query
-        due = _queue_query(actor(user))
+        due = _queue_query(user)
         matches = matches_visible_to(matches, user)
         drops, today, active = (listings_visible_to(q, user) for q in (
             drops.join(Property, Property.id == PriceAlert.property_id), today, active))

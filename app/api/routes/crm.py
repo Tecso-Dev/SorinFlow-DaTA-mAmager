@@ -27,8 +27,8 @@ from app.crm.notification import notify
 from app.services.sms_service import send_sms
 from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
 # who sees which match and which task: shared with the assistant
-from app.auth.visibility import (actor as _agent_name, assign_owner, stamp_actor,
-                                 matches_visible_to as _matches_visible_to,
+from app.auth.visibility import (actor as _agent_name, assign_owner, stamp_actor, is_super,
+                                 call_queue_for, matches_visible_to as _matches_visible_to,
                                  tasks_visible_to as _tasks_visible_to)
 from app.services.dpa_service import record_activity, record_lead_status
 from app.services import audit
@@ -605,14 +605,15 @@ def _now_utc() -> datetime:
     return datetime.now(_tz.utc)
 
 
-def _queue_query(agent: Optional[str]):
+def _queue_query(user):
+    """The due leads in `user`'s queue — theirs and nobody's; with no user,
+    only nobody's (the summary's «unassigned» count)."""
     now = _now_utc()
-    q = select(Lead).where(
+    q = call_queue_for(select(Lead).where(
         Lead.status.in_(("new", "contacted")),
         Lead.phone_number.isnot(None),
         or_(Lead.next_call_at.is_(None), Lead.next_call_at <= now),
-        or_(Lead.assigned_to.is_(None), Lead.assigned_to == "", Lead.assigned_to == agent),
-    )
+    ), user)
     # Callbacks whose time has come first, then never-dialled before retries,
     # newest listing first — the freshest number is the likeliest to answer.
     return q.order_by(
@@ -625,7 +626,7 @@ async def calls_today(limit: int = Query(30, ge=1, le=100),
                       db: AsyncSession = Depends(get_db),
                       current_user: User = Depends(get_current_user)):
     agent = _agent_name(current_user)
-    q = _queue_query(agent)
+    q = _queue_query(current_user)
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
     leads = (await db.execute(q.limit(limit))).scalars().all()
     now = _now_utc()
@@ -651,8 +652,7 @@ async def log_call(lead_id: int, data: CallOutcomeIn,
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     agent = _agent_name(current_user)
-    if lead.assigned_to and lead.assigned_to != agent and \
-            (current_user.role or "") not in ("root", "super_admin"):
+    if lead.assigned_to and lead.assigned_to_user_id != current_user.id and not is_super(current_user):
         raise HTTPException(status_code=403, detail=f"این لید با {lead.assigned_to} است")
     now = _now_utc()
     try:

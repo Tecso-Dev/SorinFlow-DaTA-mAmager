@@ -1,8 +1,9 @@
 """
 A display name another account already goes by is refused — in the
 profile, in the owner's user editor, and when a visitor is approved into
-staff. Ownership is by name (app/auth/visibility.py), so a colleague's name
-would carry their private files, matches and — in «سورین» — customers.
+staff. Ownership is by account (app/auth/visibility.py), but a colleague is
+named in a form and resolved to the one account that goes by the name: two
+accounts sharing one would leave every row typed with it nobody's.
 """
 import asyncio
 import os

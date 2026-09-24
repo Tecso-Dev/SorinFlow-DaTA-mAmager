@@ -6,23 +6,26 @@ this person see this row? — and must never answer it two ways, so the
 rules are here and everything else imports them (CLAUDE.md: «منطق چه کسی
 چه چیزی را می‌بیند فقط در یک helper یا dependency مشترک باشد»).
 
-Ownership is by name, as it always has been: the name a person files a
-listing under, is assigned leads and tasks under and consults customers
-under is their full_name, else their username. root and super_admin see
-everything. Beside each name, every owned row now also records the account
-that name meant when it was written (OWNERSHIP below) — the column the
-checks are moving to.
+Ownership is by account id. Every owned row keeps two things side by side
+(OWNERSHIP below): the name it was filed, assigned or consulted under — the
+display name, full_name else username, shown on screen and still read by
+the release before this one — and the account that name meant when it was
+written. Every check reads the account, so a person's display name can
+change, or be taken by somebody else, without one row changing hands. root
+and super_admin see everything; a row whose name meant nobody, or more than
+one person, belongs to nobody, and only they see it.
 
-Each helper takes a select() and returns it narrowed, so a caller keeps
-its own columns, joins and ordering.
+Each *_visible_to helper takes a select() and returns it narrowed, so a
+caller keeps its own columns, joins and ordering.
 """
 from typing import Optional
 
 import sqlalchemy as sa
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, false, func, or_, select
 
 from app.auth.permissions import FULL_ACCESS_ROLES, STAFF_ROLES
 from app.models.crm_models import Cabinet, Customer, CustomerMatch, Task
+from app.models.lead import Lead
 from app.models.property import Property
 from app.models.user import User
 
@@ -36,6 +39,14 @@ def is_super(user) -> bool:
     # root outranks super_admin everywhere else; it must not be the one
     # account that cannot see a private file (roadmap #11)
     return getattr(user, "role", None) in FULL_ACCESS_ROLES
+
+
+def _mine(column, user):
+    """`column` names this user's account — never true without one, so a
+    missing user cannot match every row nobody owns (column == None would
+    render IS NULL)."""
+    uid = getattr(user, "id", None)
+    return column == uid if uid is not None else false()
 
 
 # ── who owns a row ────────────────────────────────────────────────────────────
@@ -135,18 +146,14 @@ def backfill_owner_ids(conn) -> int:
     return touched
 
 
-# ── the panel's rules, moved here unchanged ──────────────────────────────────
+# ── the panel's rules ─────────────────────────────────────────────────────────
 
 def files_visible_to(query, user):
     """Private files belong to whoever filed them (and to a super_admin)."""
     if is_super(user):
         return query
-    me = actor(user)
-    if not me:
-        # No name to match on — «شخصی» must mean hidden, not "matches NULL"
-        return query.where(Property.is_private == False)     # noqa: E712
-    return query.where(or_(Property.is_private == False,      # noqa: E712
-                           Property.created_by == me))
+    return query.where(or_(Property.is_private == False,       # noqa: E712
+                           _mine(Property.created_by_user_id, user)))
 
 
 def cabinets_visible_to(query, user):
@@ -154,10 +161,7 @@ def cabinets_visible_to(query, user):
     the agency's and everyone sees it."""
     if is_super(user):
         return query
-    me = actor(user)
-    if not me:
-        return query.where(Cabinet.owner.is_(None))
-    return query.where(or_(Cabinet.owner.is_(None), Cabinet.owner == me))
+    return query.where(or_(Cabinet.owner.is_(None), _mine(Cabinet.owner_user_id, user)))
 
 
 def matches_visible_to(query, user):
@@ -166,7 +170,7 @@ def matches_visible_to(query, user):
     if is_super(user):
         return query
     return query.where(or_(CustomerMatch.consultant.is_(None), CustomerMatch.consultant == "",
-                           CustomerMatch.consultant == actor(user)))
+                           _mine(CustomerMatch.consultant_user_id, user)))
 
 
 def tasks_visible_to(query, user):
@@ -178,10 +182,16 @@ def tasks_visible_to(query, user):
     """
     if is_super(user):
         return query
-    me = actor(user)
-    if not me:
-        return query.where(Task.assigned_to.is_(None))
-    return query.where(or_(Task.assigned_to.is_(None), Task.assigned_to == me))
+    return query.where(or_(Task.assigned_to.is_(None), _mine(Task.assigned_to_user_id, user)))
+
+
+def call_queue_for(query, user):
+    """The call queue is «mine or nobody's»: the leads assigned to this
+    account and the unassigned ones, whose first dial claims them. Everybody
+    queues this way, root included — the queue is a person's day, not a
+    view of the office."""
+    return query.where(or_(Lead.assigned_to.is_(None), Lead.assigned_to == "",
+                           _mine(Lead.assigned_to_user_id, user)))
 
 
 # ── the assistant's rules ────────────────────────────────────────────────────
@@ -196,15 +206,13 @@ def listings_visible_to(query, user):
     if is_super(user):
         return query
     shared = and_(Property.is_private == False, Property.is_draft == False)   # noqa: E712
-    me = actor(user)
-    # no name: nothing is "mine", rather than every file nobody signed
-    return query.where(or_(shared, Property.created_by == me) if me else shared)
+    return query.where(or_(shared, _mine(Property.created_by_user_id, user)))
 
 
 def customers_visible_to(query, user):
     """A consultant's own customers and the ones nobody is assigned to —
-    the name rule the matches use; root and super_admin see all."""
+    the rule the matches use; root and super_admin see all."""
     if is_super(user):
         return query
     return query.where(or_(Customer.consultant_name.is_(None), Customer.consultant_name == "",
-                           Customer.consultant_name == actor(user)))
+                           _mine(Customer.consultant_user_id, user)))

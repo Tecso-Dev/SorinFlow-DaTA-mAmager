@@ -2,10 +2,9 @@
 Who owns a row is an account, not a display name.
 
 Private files, personal cabinets, matches, tasks, the call queue and
-«سورین»'s customers used to be attributed by the owner's display name —
-full_name, else username — and a display name is something anyone edits in
-their own profile. Each owned row now also names the account
-(app/auth/visibility.py OWNERSHIP): written with the name by this release,
+«سورین»'s customers keep the owner's display name — full_name, else
+username — for the screen, and the owner's account for every check
+(app/auth/visibility.py OWNERSHIP): written with the name by the panel,
 resolved from the name for what an older release wrote.
 
 A sqlite database of this file's own — foreign keys on, so deleting an
@@ -366,3 +365,142 @@ def test_stamp_owner_writes_the_name_the_account_is_for():
     for model in (Property, Cabinet, CustomerMatch, Task, Lead, Customer):
         name_col, id_col = OWNERSHIP[model.__tablename__]
         assert hasattr(model, name_col) and hasattr(model, id_col) and hasattr(model, "owner_resolved_from")
+
+
+# ── who sees what, by account ─────────────────────────────────────────────────
+
+def _holdings(office, who):
+    """What a consultant owns, made the way the panel makes it: a private
+    file, a personal cabinet, a task, a lead handed to them, a customer they
+    consult (and that customer's match)."""
+    api, p = office["api"], office["people"]
+    name = p[who].full_name
+    serial = 9200 + p[who].id * 10
+
+    async def seed(s):
+        prop = await _add(s, _prop(serial))
+        lead_prop = await _add(s, _prop(serial + 1))
+        lead = await _add(s, Lead(property_id=lead_prop, phone_number=f"0914{serial:07d}", status="new"))
+        return prop, lead
+    prop, lead = office["run"](seed)
+    assert api("PATCH", f"/filing/files/{prop}", who, json={"is_private": True}).status_code == 200
+    cab = api("POST", "/filing/cabinets", who, json={"name": f"کمد {name}", "personal": True}).json()["id"]
+    task = api("POST", "/crm/tasks", who, json={"title": f"کار {name}"}).json()["id"]
+    assert api("PATCH", f"/crm/leads/{lead}", "boss", json={"assigned_to": name}).json()["assigned_to_user_id"] == p[who].id
+    cust = api("POST", "/crm/customers", "boss", json={"full_name": f"مشتری {name}", "consultant_name": name}).json()
+
+    async def match(s):
+        m = CustomerMatch(property_id=prop, customer_id=cust["id"], score=70, status="new")
+        stamp_owner(m, cust["consultant_name"], cust["consultant_user_id"])      # as the engine does
+        return await _add(s, m)
+    return {"files": prop, "cabinets": cab, "tasks": task, "queue": lead,
+            "matches": office["run"](match), "customers": cust["id"]}
+
+
+def _seen(office, who):
+    """Every owned thing `who` is shown: the panel's lists and «سورین»'s."""
+    from app.ai import assistant
+    api, user = office["api"], office["people"][who]
+
+    def ids(path):
+        r = api("GET", path, who)
+        assert r.status_code == 200, (path, r.text)
+        return {x["id"] for x in r.json()["items"]}
+    customers = office["run"](lambda s: assistant.tool_customers(s, user, limit=15))["customers"]
+    return {
+        "files": ids("/filing/files?limit=300"),
+        "cabinets": ids("/filing/cabinets"),
+        "tasks": ids("/crm/tasks?limit=500"),
+        "queue": ids("/crm/calls/today?limit=100"),
+        "matches": ids("/crm/matches?status=all&limit=200"),
+        "customers": {int(c["customer"].split("-")[1]) for c in customers},
+    }
+
+
+def _shown(seen, held):
+    return {kind for kind, row in held.items() if row in seen[kind]}
+
+
+ALL = {"files", "cabinets", "tasks", "queue", "matches", "customers"}
+
+
+class TestWhoSeesWhat:
+
+    def test_a_consultant_sees_their_own_and_a_colleague_does_not(self, office):
+        mina = _holdings(office, "mina")
+        assert _shown(_seen(office, "mina"), mina) == ALL
+        assert _shown(_seen(office, "reza"), mina) == set()
+        # the queue is a person's day, root's included; everything else is theirs to see
+        assert _shown(_seen(office, "boss"), mina) == ALL - {"queue"}
+        assert _shown(_seen(office, "root"), mina) == ALL - {"queue"}
+
+    def test_renaming_changes_nothing_anyone_sees(self, office):
+        mina = _holdings(office, "mina")
+        before = {who: _seen(office, who) for who in ("mina", "reza", "boss")}
+        assert office["api"]("PATCH", "/users/me", "mina", json={"full_name": "مینا رضایی (فروش)"}).status_code == 200
+        office["boot"]()
+        assert {who: _seen(office, who) for who in ("mina", "reza", "boss")} == before
+        assert _shown(before["mina"], mina) == ALL
+
+    def test_a_former_colleagues_name_inherits_nothing(self, office):
+        """reza leaves and his account is deleted; nima later goes by the
+        same name, and the pods restart. What was reza's is nobody's: the
+        manager and root see it, nima does not."""
+        api, p = office["api"], office["people"]
+        reza = _holdings(office, "reza")
+        assert api("DELETE", f"/users/{p['reza'].id}", "boss").status_code == 200
+        assert api("PATCH", "/users/me", "nima", json={"full_name": "رضا کریمی"}).status_code == 200
+        office["boot"]()
+        assert _shown(_seen(office, "nima"), reza) == set()
+        assert _shown(_seen(office, "boss"), reza) == ALL - {"queue"}
+        # his lead is not «nobody's yet» either: it stays out of every queue
+        # until a manager hands it on
+        lead = _get(office, Lead, reza["queue"])
+        assert (lead.assigned_to, lead.assigned_to_user_id) == ("رضا کریمی", None)
+        assert api("POST", f"/crm/leads/{lead.id}/call", "nima", json={"outcome": "answered"}).status_code == 403
+        assert api("POST", f"/crm/leads/{lead.id}/call", "boss", json={"outcome": "answered"}).status_code == 200
+
+    def test_a_name_two_people_went_by_belongs_to_nobody(self, office):
+        """Two accounts with one display name (from before the profile
+        refused it), and rows the previous release wrote by that name."""
+        async def twins(s):
+            for u in ("twin1", "twin2"):
+                office["people"][u] = User(username=f"own_{u}", full_name="دوقلو", role="admin",
+                                           permissions=PERMS, hashed_password="x", is_active=True)
+                s.add(office["people"][u])
+            prop = await _add(s, _prop(9301, is_private=True, created_by="دوقلو"))
+            lead_prop = await _add(s, _prop(9302))
+            cust = await _add(s, Customer(full_name="مشتری دوقلو", consultant_name="دوقلو"))
+            return {"files": prop,
+                    "cabinets": await _add(s, Cabinet(name="کمد دوقلو", owner="دوقلو")),
+                    "tasks": await _add(s, Task(title="کار دوقلو", assigned_to="دوقلو")),
+                    "queue": await _add(s, Lead(property_id=lead_prop, phone_number="09149302000",
+                                                status="new", assigned_to="دوقلو")),
+                    "matches": await _add(s, CustomerMatch(property_id=prop, customer_id=cust, score=70,
+                                                           status="new", consultant="دوقلو")),
+                    "customers": cust}
+        held = office["run"](twins)
+        office["boot"]()
+        assert _shown(_seen(office, "twin1"), held) == set()
+        assert _shown(_seen(office, "twin2"), held) == set()
+        assert _shown(_seen(office, "boss"), held) == ALL - {"queue"}
+        assert _shown(_seen(office, "root"), held) == ALL - {"queue"}
+
+    def test_what_the_previous_release_wrote_is_its_owners_after_the_boot(self, office):
+        async def by_name(s):
+            lead_prop = await _add(s, _prop(9401))
+            return {"queue": await _add(s, Lead(property_id=lead_prop, phone_number="09149401000",
+                                                status="new", assigned_to="مینا رضایی")),
+                    "tasks": await _add(s, Task(title="کار قدیمی", assigned_to="مینا رضایی"))}
+        held = office["run"](by_name)
+        assert _shown(_seen(office, "mina"), held) == set(), "a name alone is nobody's until the boot step"
+        office["boot"]()
+        assert _shown(_seen(office, "mina"), held) == {"queue", "tasks"}
+
+    def test_the_assistant_counts_the_same_queue(self, office):
+        from app.ai import assistant
+        mina = _holdings(office, "mina")
+        _holdings(office, "reza")
+        status = office["run"](lambda s: assistant.tool_queue_status(s, office["people"]["mina"]))
+        assert status["calls_due"] == len(_seen(office, "mina")["queue"])
+        assert mina["queue"] in _seen(office, "mina")["queue"]
