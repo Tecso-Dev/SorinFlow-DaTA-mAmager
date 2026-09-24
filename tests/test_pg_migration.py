@@ -58,6 +58,7 @@ def _run(coro):
 @pytest.fixture(scope="module")
 def migrated():
     """Apply the migration to a pre-migration table and hand back the rows."""
+    saved_url = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = PG_URL
     os.environ.setdefault("SECRET_KEY", "0123456789abcdef0123456789abcdef")
     os.environ.setdefault("LOGS_PATH", "/tmp")
@@ -93,7 +94,16 @@ def migrated():
         await eng.dispose()
         return rows, cols, idx, nulls
 
-    return _run(_go())
+    try:
+        return _run(_go())
+    finally:
+        # Later modules build their own engines from DATABASE_URL. Left
+        # pointing here, they seeded their users into this database while the
+        # app looked for them in the real one: 46 logins answered 401.
+        if saved_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = saved_url
 
 
 def test_columns_are_added(migrated):
