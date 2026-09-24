@@ -3,7 +3,7 @@ SorinFlow Divar Scraper - Application Configuration
 """
 from pydantic_settings import BaseSettings
 from pydantic import Field, AliasChoices
-from typing import Optional, List
+from typing import Literal, List
 from functools import lru_cache
 
 class Settings(BaseSettings):
@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     
     # Scraper Settings
     scraper_headless: bool = Field(default=True, validation_alias=AliasChoices("SCRAPER_HEADLESS", "scraper_headless"))
+    # Chromium's own sandbox (namespaces + seccomp), separate from anything
+    # this app does. The container runs as pwuser, not root, so it can use
+    # it: `auto` sandboxes unless running as root (root cannot anyway) and
+    # falls back once, loudly, if the runtime refuses it — see
+    # app/scraper/stealth.py's sandbox_status(). `on`/`off` skip that
+    # decision entirely. Literal, not a plain str, so a typo in the env is a
+    # boot-time error instead of a silently-ignored "auto".
+    chromium_sandbox: Literal["auto", "on", "off"] = Field(
+        default="auto", validation_alias=AliasChoices("CHROMIUM_SANDBOX", "chromium_sandbox"))
     scraper_delay_min: float = Field(default=2.0, validation_alias=AliasChoices("SCRAPER_DELAY_MIN", "scraper_delay_min"))
     scraper_delay_max: float = Field(default=5.0, validation_alias=AliasChoices("SCRAPER_DELAY_MAX", "scraper_delay_max"))
     # Max seconds to wait for a Divar SMS-OTP code before giving up on a phone.
