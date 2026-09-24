@@ -120,8 +120,9 @@ class TestTheScraperSetsTheAccountAside:
         assert "self._force_rotate = True" in self.SRC
 
     def test_rotation_never_offers_it_back(self):
-        src = inspect.getsource(DivarScraper._load_rotation_pool)
+        src = inspect.getsource(DivarScraper._usable_accounts_query)
         assert "CookieModel.identity_required_at.is_(None)" in src
+        assert "_usable_accounts_query" in inspect.getsource(DivarScraper._load_rotation_pool)
 
     def test_the_column_and_its_migration(self):
         assert "identity_required_at" in Cookie.__table__.c

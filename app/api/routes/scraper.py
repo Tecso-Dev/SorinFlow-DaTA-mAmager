@@ -121,6 +121,9 @@ async def run_scraping_job(
                 headless=settings.scraper_headless
             )
             scraper.owner_user_id = owner_user_id
+            # So what initialize() says about the account it chose — or could
+            # not choose — lands in this run's log, not only the server's.
+            scraper._job_id_str = job_id
             
             logger.info(f"[{job_id}] Initializing Playwright browser (divar_phone={divar_phone or 'auto'})")
             # Ask Divar about every stored session before choosing one. The
@@ -129,7 +132,7 @@ async def run_scraping_job(
             # it — is one Divar accepted moments ago.
             try:
                 from app.services import divar_session as _ds
-                _sw = await _ds.sweep(reason="pre-run")
+                _sw = await _ds.sweep(reason="pre-run", owner_user_id=owner_user_id)
                 from app.services import job_log as _jl
                 await _jl.record(job_id, _jl.SESSION,
                                  f"بررسی نشست‌ها پیش از شروع: {_sw['alive']} فعال، "
@@ -302,9 +305,19 @@ async def resume_scraping_job(
             and (current_user.role or "") not in ("root", "super_admin"):
         raise HTTPException(status_code=403, detail="این اسکرپ را کاربر دیگری شروع کرده است")
 
+    # The continuation runs AS the run's owner, like a schedule does. When
+    # root pressed «ادامه» on a colleague's run it relaunched as root — with
+    # root's numbers, and as root's run from then on.
+    run_as = current_user
+    if owner and current_user and current_user.id != owner:
+        run_as = (await db.execute(select(User).where(User.id == owner))).scalar_one_or_none()
+        if run_as is None or not run_as.is_active:
+            raise HTTPException(status_code=409,
+                                detail="صاحب این اسکرپ دیگر فعال نیست — ادامه ممکن نیست")
+
     config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
                                   if k in ScrapingJobCreate.model_fields})
-    resp = await _launch_job(config, background_tasks, db, current_user,
+    resp = await _launch_job(config, background_tasks, db, run_as,
                              resumed_from=job.job_id)
     await job_log.record(
         resp.job_id, job_log.START,
@@ -354,11 +367,19 @@ async def _launch_job(
         owned = (await db.execute(
             select(_Cookie).where(_Cookie.owner_user_id == current_user.id)
         )).scalars().all()
-        if not any("".join(ch for ch in str(c.phone_number) if ch.isdigit()) == _digits
-                   for c in owned):
+        mine = next((c for c in owned
+                     if "".join(ch for ch in str(c.phone_number) if ch.isdigit()) == _digits),
+                    None)
+        if mine is None:
             raise HTTPException(
                 status_code=403,
                 detail="این شمارهٔ دیوار به حساب کاربری شما تعلق ندارد")
+        # Yours, but switched off: the owner said this SIM is out of reach,
+        # and a run started on it would send its first code nowhere.
+        if mine.is_enabled is False:
+            raise HTTPException(
+                status_code=409,
+                detail=f"شمارهٔ {mine.phone_number} خاموش است — روشنش کنید یا «خودکار» را انتخاب کنید")
 
     # Check for existing running jobs
     result = await db.execute(
@@ -823,9 +844,15 @@ _STATUS_FA = {"completed": "تکمیل شده", "cancelled": "لغو شده", "f
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_scraping_job(
     job_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """Cancel a scraping job that has not finished yet."""
+    """Cancel a scraping job that has not finished yet.
+
+    The run's owner, or root/super_admin — the same rule as deleting one.
+    It used to take anybody with the scraper permission, so one person could
+    stop every colleague's run from the list.
+    """
     result = await db.execute(
         select(ScrapingJob).where(ScrapingJob.job_id == job_id)
     )
@@ -833,6 +860,9 @@ async def cancel_scraping_job(
 
     if not job:
         raise HTTPException(status_code=404, detail="تسک یافت نشد")
+    owner = (job.config or {}).get("owner_user_id")
+    if user.role not in FULL_ACCESS_ROLES and owner not in (None, user.id):
+        raise HTTPException(status_code=403, detail="این تسک را کاربر دیگری اجرا کرده است")
 
     if job.status in _FINISHED_JOB_STATUSES:
         raise HTTPException(
@@ -857,6 +887,77 @@ async def cancel_scraping_job(
     logger.info(f"Job {job_id} marked for cancellation (was {was}, otp cleared={freed})")
 
     return {"message": "Job cancelled successfully", "was": was, "otp_cleared": freed}
+
+
+class SwitchAccountIn(BaseModel):
+    # A number of the run owner's, or empty for «the next one of mine».
+    phone: Optional[str] = Field(None, max_length=20)
+
+
+@router.post("/jobs/{job_id}/switch-account")
+async def switch_job_account(
+    job_id: str,
+    body: SwitchAccountIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Move a running scrape onto another of its owner's Divar numbers.
+
+    «وقتی با یک شماره در حال اسکرپ به مشکل خورد، بتوان شماره را در حین
+    اسکرپ عوض کرد و ادامه را با شمارهٔ جدید ادامه داد.»
+
+    The run does not stop and nothing is lost. The request is picked up at
+    the next safe point — between listings, or at once if the run is parked
+    on a code prompt for the current number — and the run carries on with
+    the new number from there, OTP prompts re-enabled for it.
+
+    The run's owner only, and only onto the owner's own numbers: a number
+    is its owner's, and a run is its owner's, whoever is looking at it.
+    """
+    from app.models.cookie import Cookie
+    from app.scraper import otp_store
+    from app.services import job_log
+
+    job_uuid = await _job_uuid_from(job_id, db)
+    job = (await db.execute(
+        select(ScrapingJob).where(ScrapingJob.job_id == job_uuid))).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="تسک یافت نشد")
+    owner = (job.config or {}).get("owner_user_id")
+    if owner != user.id:
+        raise HTTPException(status_code=403,
+                            detail="فقط کسی که این اسکرپ را شروع کرده می‌تواند شماره‌اش را عوض کند")
+    if job.status not in ("running", "paused", "pending"):
+        raise HTTPException(status_code=409, detail="این اسکرپ در حال اجرا نیست")
+
+    _d = otp_store._digits
+    mine = [c for c in (await db.execute(
+        select(Cookie).where(Cookie.owner_user_id == user.id))).scalars().all()
+        if c.is_valid and c.is_enabled is not False and not c.identity_required_at]
+    current = _d(job.divar_phone)
+    target = None
+    if body.phone:
+        target = next((c for c in mine if _d(c.phone_number) == _d(body.phone)), None)
+        if target is None:
+            raise HTTPException(
+                status_code=403,
+                detail="این شماره از شماره‌های روشن و معتبر شما نیست")
+        if _d(target.phone_number) == current:
+            raise HTTPException(status_code=409, detail="اسکرپ همین حالا روی همین شماره است")
+    elif not any(_d(c.phone_number) != current for c in mine):
+        raise HTTPException(
+            status_code=409,
+            detail="شمارهٔ روشن و معتبر دیگری ندارید — اول یک شمارهٔ دیوار دیگر اضافه یا روشن کنید")
+
+    otp_store.request_switch(str(job.job_id), target.phone_number if target else None,
+                             by=user.id)
+    to = target.phone_number if target else "شمارهٔ بعدی شما"
+    await job_log.record(
+        str(job.job_id), job_log.SESSION,
+        f"درخواست تعویض شماره از {job.divar_phone or '—'} به {to} ثبت شد",
+        previous=job.divar_phone, requested=target.phone_number if target else None)
+    return {"success": True, "requested": target.phone_number if target else None,
+            "message": f"تعویض به {to} ثبت شد — در اولین فرصت انجام می‌شود"}
 
 
 @router.delete("/jobs/{job_id}")
@@ -1396,11 +1497,24 @@ async def get_forwarders():
 
 
 @router.get("/login-code/{account}")
-async def take_login_code(account: str):
+async def take_login_code(
+    account: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """A forwarded LOGIN code parked for this account, consumed on read, so
     the login form can fill itself in instead of the person re-typing what
-    the phone already sent. None if nothing arrived in the last 3 minutes."""
+    the phone already sent. None if nothing arrived in the last 3 minutes.
+
+    Only for a number that is not somebody else's. It used to hand the code
+    to anyone with the scraper permission — and a Divar login code for the
+    root account's number, forwarded by root's own phone, was then all a
+    colleague needed to log that number in as theirs.
+    """
     from app.scraper import otp_store
+    owner = (await _owner_of_account(db, [account])).get(otp_store._digits(account))
+    if owner is not None and owner != current_user.id:
+        return {"code": None}
     return {"code": otp_store.take_login_code(account)}
 
 

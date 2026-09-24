@@ -204,8 +204,11 @@ async def get_system_health(
     # Check cookie status — prefer user's permanent phone, then active session, then any valid
     cookie_status = "no session"
     try:
-        phone_to_check = current_user.divar_phone or settings.divar_phone_number
-        query = select(Cookie).where(Cookie.is_valid == True)
+        # The caller's own sessions only — never the configured default or
+        # «any valid row», which reported a colleague's session as yours.
+        phone_to_check = current_user.divar_phone
+        query = select(Cookie).where(Cookie.is_valid == True,  # noqa: E712
+                                     Cookie.owner_user_id == current_user.id)
         if phone_to_check:
             query = query.where(Cookie.phone_number == phone_to_check)
         else:

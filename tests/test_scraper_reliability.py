@@ -812,7 +812,8 @@ class TestOneChallengedAccountDoesNotKillThePool:
         assert hasattr(DivarScraper, "_usable_account_count")
         import inspect
         src = inspect.getsource(DivarScraper._usable_account_count)
-        assert "is_valid == True" in src
+        assert "_usable_accounts_query" in src
+        assert "is_valid == True" in inspect.getsource(DivarScraper._usable_accounts_query)
         assert "max(1," in src, "a pool of zero would disable the budget entirely"
 
     def test_the_counter_survives_a_failure_to_count(self):
@@ -948,8 +949,8 @@ class TestRotationIsVisibleWhileItHappens:
         set in __init__ may be assumed to exist."""
         import inspect
         from app.scraper.divar_scraper import DivarScraper
-        src = inspect.getsource(DivarScraper.maybe_rotate_account)
-        assert 'getattr(self, "_job_id_str", None)' in src
+        for fn in (DivarScraper._switch_to, DivarScraper._take_switch_request):
+            assert 'getattr(self, "_job_id_str", None)' in inspect.getsource(fn), fn.__name__
 
 
 class TestWeDoNotLearnTheSameFactFiveTimes:
@@ -1009,7 +1010,8 @@ class TestANewRoundStartsOnlyWhenNothingIsLeft:
     def test_the_decision_is_counted_not_inferred(self):
         import inspect
         from app.scraper.divar_scraper import DivarScraper
-        src = _code_only(inspect.getsource(DivarScraper.maybe_rotate_account))
+        src = _code_only(inspect.getsource(DivarScraper.maybe_rotate_account)
+                         + inspect.getsource(DivarScraper._switch_to))
         assert "_unspent_account_count(every) == 0" in src
         assert "await self._account_reveals(candidate) >= every > 0" not in src, \
             "one spent candidate is treated as an empty pool again"
@@ -1018,7 +1020,8 @@ class TestANewRoundStartsOnlyWhenNothingIsLeft:
         import inspect
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper._unspent_account_count)
-        assert "is_valid == True" in src
+        assert "_usable_accounts_query" in src
+        assert "is_valid == True" in inspect.getsource(DivarScraper._usable_accounts_query)
         assert "< every" in src
 
     def test_a_failed_count_assumes_there_is_budget_left(self):

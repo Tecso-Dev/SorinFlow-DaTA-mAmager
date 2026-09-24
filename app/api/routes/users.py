@@ -921,6 +921,17 @@ async def update_my_divar_phone(
         phone = normalize_mobile(raw)
         if not phone:
             raise HTTPException(400, "شمارهٔ دیوار معتبر نیست (مثل 09123456789)")
+        # Not somebody else's. This field is «this number is mine», and the
+        # boot-time backfill hands an unowned session to whoever's field
+        # names it — so claiming a colleague's number here was a slow way of
+        # getting it.
+        from app.models.cookie import Cookie
+        want = "".join(ch for ch in phone if ch.isdigit())[-10:]
+        for ph, owner in (await db.execute(
+                select(Cookie.phone_number, Cookie.owner_user_id))).all():
+            if owner and owner != current_user.id \
+                    and "".join(ch for ch in str(ph) if ch.isdigit())[-10:] == want:
+                raise HTTPException(403, "این شمارهٔ دیوار متعلق به کاربر دیگری است")
     if phone != current_user.divar_phone:
         logger.info(f"[profile] {current_user.username} primary Divar number: "
                     f"{current_user.divar_phone or '—'} -> {phone or '—'}")

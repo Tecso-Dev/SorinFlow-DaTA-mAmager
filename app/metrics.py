@@ -58,7 +58,7 @@ scrape_reveals = Counter(
 )
 scrape_rotations = Counter(
     "sorinflow_scraper_account_rotations_total", "Divar account switches",
-    ["reason"], registry=REGISTRY,           # threshold | challenged
+    ["reason"], registry=REGISTRY,           # threshold | challenged | manual
 )
 # SMS sent by Divar -> code typed into the modal by the extractor. The number
 # a forwarder is judged by: carrier delivery is in here too, and only the

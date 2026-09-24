@@ -2,7 +2,7 @@
 SorinFlow Divar Scraper - Cookie Model
 """
 from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, JSON, ForeignKey
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, true as sql_true
 from app.database import Base
 
 
@@ -50,7 +50,16 @@ class Cookie(Base):
     # human typing six digits: somebody has to log in on Divar and do it.
     # Rotation skips the account while this is set; the panel clears it.
     identity_required_at = Column(DateTime(timezone=True))
-    
+    # The owner's own switch: «this number is not reachable right now».
+    #
+    # Every other flag here is Divar's verdict about the session. This one is
+    # a person's: the SIM is in a drawer, the phone is off, the line is being
+    # moved. Rotation that lands on such a number gets a code sent to a phone
+    # nobody can read, and a run parks for hours waiting on it. Off means
+    # rotation, «خودکار» and a manual pick all pass it by; the session itself
+    # is kept, so switching it back on costs nothing.
+    is_enabled = Column(Boolean, default=True, server_default=sql_true(), nullable=False)
+
     def __repr__(self):
         return f"<Cookie(id={self.id}, phone={self.phone_number}, valid={self.is_valid})>"
     
@@ -68,4 +77,5 @@ class Cookie(Base):
             "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
             "owner_user_id": self.owner_user_id,
             "identity_required_at": self.identity_required_at.isoformat() if self.identity_required_at else None,
+            "is_enabled": self.is_enabled is not False,
         }

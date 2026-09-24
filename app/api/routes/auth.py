@@ -38,6 +38,10 @@ settings = get_settings()
 # single-replica box a handful of those is most of the CPU.
 auth_instances = {}
 _auth_started = {}          # phone -> monotonic time the browser was launched
+# phone -> the user who started that login. The OTP step is only theirs to
+# finish: it used to be keyed by the number alone, so anybody who knew a
+# login was in flight could complete it and walk off with the session.
+_auth_by = {}
 
 # A login nobody finished. Generous: the OTP itself has a 30s wait and people
 # go and find their phone.
@@ -49,6 +53,7 @@ async def _discard_auth_instance(phone_number: str, why: str):
     already gone must not turn into a 500 on somebody else's request."""
     auth = auth_instances.pop(phone_number, None)
     _auth_started.pop(phone_number, None)
+    _auth_by.pop(phone_number, None)
     if auth is None:
         return
     try:
@@ -68,15 +73,63 @@ async def _sweep_auth_instances():
         await _discard_auth_instance(phone, f"abandoned for {AUTH_INSTANCE_TTL}s")
 
 
+def _digits10(p) -> str:
+    return "".join(ch for ch in str(p or "") if ch.isdigit())[-10:]
+
+
+async def _session_row_for(db, phone):
+    """The stored session for this number, compared on digits so 0912… and
+    +98912… are the same phone."""
+    want = _digits10(phone)
+    if not want:
+        return None
+    rows = (await db.execute(select(Cookie))).scalars().all()
+    for r in rows:
+        if _digits10(r.phone_number) == want:
+            return r
+    return None
+
+
+async def _refuse_somebody_elses(db, user, phone):
+    """403 when this number's session belongs to another user.
+
+    «هر حساب فقط می‌تواند از شماره‌های دیوار خودش استفاده کند». Logging a
+    number in is using it — and it used to be the one way a number changed
+    hands: whoever answered Divar's code became the owner. With an SMS
+    forwarder on the owner's phone the code answers itself, so «proof of
+    holding the phone» proved nothing; a colleague could start a login on
+    the root account's number and end up owning it. No role is exempt.
+    """
+    row = await _session_row_for(db, phone)
+    if row is not None and row.owner_user_id and (not user or row.owner_user_id != user.id):
+        raise HTTPException(
+            status_code=403,
+            detail="این شمارهٔ دیوار متعلق به کاربر دیگری است — هر کاربر فقط با شماره‌های خودش کار می‌کند")
+    return row
+
+
 @router.post("/login", response_model=AuthResponse)
 async def initiate_login(
     request: LoginRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Initiate login with phone number"""
     
     phone_number = request.phone_number
-    
+    await _refuse_somebody_elses(db, current_user, phone_number)
+
+    # Somebody else's login in flight for this number is not ours to end.
+    # Superseding it used to be free for anyone, which is a way to cancel a
+    # colleague's login on every attempt.
+    other = _auth_by.get(phone_number)
+    if other is not None and other != current_user.id and phone_number in auth_instances:
+        await _sweep_auth_instances()
+        if phone_number in auth_instances:
+            raise HTTPException(
+                status_code=409,
+                detail="کاربر دیگری همین حالا در حال ورود با این شماره است")
+
     # Anything left from a previous attempt for this number is finished with;
     # replacing the dict entry without closing it leaks the browser.
     await _discard_auth_instance(phone_number, "superseded by a new login")
@@ -86,6 +139,7 @@ async def initiate_login(
     auth = DivarAuth(db)
     auth_instances[phone_number] = auth
     _auth_started[phone_number] = _time.monotonic()
+    _auth_by[phone_number] = current_user.id
     
     try:
         result = await auth.login_with_phone(phone_number)
@@ -114,6 +168,13 @@ async def verify_otp(
             status_code=400,
             detail="No login session found. Please initiate login first."
         )
+    # Only the person who started this login finishes it — and only onto a
+    # number that is not somebody else's. Checked BEFORE the code goes in:
+    # submit_otp_code saves the jar to the row itself, so a refusal after it
+    # would already have overwritten the owner's session.
+    if not current_user or _auth_by.get(phone_number) not in (None, current_user.id):
+        raise HTTPException(status_code=403, detail="این ورود را کاربر دیگری شروع کرده است")
+    await _refuse_somebody_elses(db, current_user, phone_number)
     
     auth = auth_instances[phone_number]
     
@@ -159,14 +220,10 @@ async def verify_otp(
                     existing_cookie.is_valid = True
                     existing_cookie.expires_at = expires_at
                     existing_cookie.updated_at = datetime.now()
-                    # Whoever answered Divar's code holds the phone; the
-                    # session it bought is theirs even if a previous owner
-                    # had logged this number in before.
-                    if current_user and existing_cookie.owner_user_id != current_user.id:
-                        if existing_cookie.owner_user_id:
-                            logger.warning(
-                                f"[auth] session {phone_number} changes hands: "
-                                f"user {existing_cookie.owner_user_id} -> {current_user.id}")
+                    # An unclaimed number becomes the caller's. A claimed
+                    # one never changes hands here: _refuse_somebody_elses
+                    # stopped anyone but its owner getting this far.
+                    if current_user and not existing_cookie.owner_user_id:
                         existing_cookie.owner_user_id = current_user.id
                 else:
                     new_cookie = Cookie(
@@ -210,8 +267,9 @@ async def get_cookie_status(
     then logged that number in and spent its reveals. Ownership enforced on
     the list and the pool but not here was ownership with a side door.
     """
-    phone = phone_number or (current_user.divar_phone if current_user else None) \
-        or settings.divar_phone_number
+    # Never DIVAR_PHONE_NUMBER: that setting names one person's number, and
+    # offering it as everybody's default is how it ended up in their runs.
+    phone = phone_number or (current_user.divar_phone if current_user else None)
 
     auth = DivarAuth(db)
 
@@ -255,15 +313,18 @@ async def _own_session_or_403(db, user, phone: Optional[str]) -> str:
     """Resolve the number an action is about, and refuse it unless the
     session behind it belongs to the caller. Refresh and logout used to take
     any number at all — a valid way for one person to log another out."""
-    phone = phone or (user.divar_phone if user else None) or settings.divar_phone_number
+    phone = phone or (user.divar_phone if user else None)
     if not phone:
         raise HTTPException(status_code=400, detail="No phone number provided")
-    row = (await db.execute(
-        select(Cookie).where(Cookie.phone_number == phone))).scalar_one_or_none()
-    if row and (not user or row.owner_user_id != user.id):
+    row = await _session_row_for(db, phone)
+    if row is None:
+        # No row is not «free to act on»: refresh and logout fall back to the
+        # jar on disk, which has no owner to check against.
+        raise HTTPException(status_code=404, detail="نشستی برای این شماره ذخیره نشده است")
+    if not user or row.owner_user_id != user.id:
         raise HTTPException(
             status_code=403, detail="این شماره به حساب کاربری دیگری تعلق دارد")
-    return phone
+    return row.phone_number
 
 
 @router.post("/refresh")
@@ -390,6 +451,9 @@ async def list_cookies(
                 "last_used_at": c.last_used_at.isoformat() if c.last_used_at else None,
                 "owner_user_id": c.owner_user_id,
                 "identity_required_at": c.identity_required_at.isoformat() if c.identity_required_at else None,
+                # The owner's own on/off. Off: rotation, «خودکار» and a manual
+                # pick all pass the number by.
+                "is_enabled": c.is_enabled is not False,
                 # Only filled for an admin — nobody else is shown a list that
                 # could include somebody else's row in the first place.
                 "owner_name": owners.get(c.owner_user_id),
@@ -518,6 +582,64 @@ async def import_cookies(
 
     return {"success": True, "alive": alive, "message": msg,
             "expires_at": expires_at.isoformat() if expires_at else None}
+
+
+class CookieEnabledIn(BaseModel):
+    enabled: bool
+
+
+@router.patch("/cookies/{cookie_id}")
+async def set_cookie_enabled(
+    cookie_id: int,
+    body: CookieEnabledIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Switch one Divar number on or off for scraping.
+
+    Off is «this SIM is not in anybody's hand right now». A code Divar sends
+    to it goes nowhere, and a rotation that lands on it parks the run for
+    hours. So an off number is skipped by rotation, by «خودکار» and by a
+    manual pick — and a run that is ON it right now is asked to move to
+    another of the owner's numbers at its next safe point, not left to find
+    out from the next unanswered code.
+
+    The owner's switch. root/super_admin may flip it too — the same reach
+    they have for deleting a session — because a colleague's dead SIM can
+    stall a shared schedule; switching a number off never lets anybody else
+    use it.
+    """
+    cookie = (await db.execute(select(Cookie).where(Cookie.id == cookie_id))).scalar_one_or_none()
+    if not cookie:
+        raise HTTPException(status_code=404, detail="نشست پیدا نشد")
+    if not _sees_every_session(user) and cookie.owner_user_id != user.id:
+        raise HTTPException(status_code=403, detail="این شماره به حساب کاربری دیگری تعلق دارد")
+
+    cookie.is_enabled = bool(body.enabled)
+    await db.commit()
+    logger.info(f"[cookies] {user.username} switched Divar number {cookie.phone_number} "
+                f"{'on' if body.enabled else 'off'}")
+
+    moved = []
+    if not body.enabled:
+        # Runs on it right now: move them off at the next listing, or at once
+        # if one is parked on a code prompt for it.
+        from app.models.scraping_job import ScrapingJob
+        from app.scraper import otp_store
+        from app.services import job_log
+        want = _digits10(cookie.phone_number)
+        live = (await db.execute(select(ScrapingJob).where(
+            ScrapingJob.status.in_(("running", "paused", "pending"))))).scalars().all()
+        for j in live:
+            if _digits10(j.divar_phone) == want:
+                otp_store.request_switch(str(j.job_id), None, by=user.id, reason="disabled")
+                moved.append(str(j.job_id))
+                await job_log.record(
+                    str(j.job_id), job_log.SESSION,
+                    f"شمارهٔ {cookie.phone_number} خاموش شد — اجرا به شمارهٔ دیگر صاحبش منتقل می‌شود",
+                    level="warning", phone=cookie.phone_number)
+    return {"success": True, "id": cookie.id, "phone_number": cookie.phone_number,
+            "is_enabled": cookie.is_enabled, "moved_jobs": moved}
 
 
 @router.post("/cookies/{cookie_id}/identity-cleared")

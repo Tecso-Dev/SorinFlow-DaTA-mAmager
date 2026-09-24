@@ -244,6 +244,19 @@ class DivarScraper:
         self.auth.browser = self.browser
         self.auth.context = self.context
         self.auth.page = self.page
+        # Whose profile the browser is actually in — which is not always
+        # active_phone: rotation opens a candidate's before it knows the
+        # candidate's session works.
+        self._browser_account = account
+        if not account and self.context is not None:
+            # No account: the shared «_anonymous» profile. It is on the data
+            # volume and older code left real sessions in it — so a run with
+            # no number of its own browsed, and revealed, as whoever had last
+            # logged in there. Nobody's session, then: an empty jar.
+            try:
+                await self.context.clear_cookies()
+            except Exception as e:
+                logger.warning(f"[browser] could not empty the anonymous profile: {e}")
 
     async def initialize(self, restore_session: bool = True, phone_number: str = None) -> bool:
         """Initialize scraper with browser and optional session restoration"""
@@ -260,9 +273,30 @@ class DivarScraper:
 
             # Restore authentication session
             if restore_session:
-                # Explicit phone takes priority, then env var, then auto-select from DB
-                phone_number = phone_number or settings.divar_phone_number
-                # If DIVAR_PHONE_NUMBER not configured, find any valid cookie in DB
+                owner = getattr(self, "owner_user_id", None)
+                # A number named for the run has to be one the run may use:
+                # the owner's own, switched on. _launch_job refuses anything
+                # else at the door; this is the same rule where the browser
+                # actually opens, so a caller that skips the route (a resume
+                # of an old config, a schedule saved before a number was
+                # switched off) cannot carry somebody else's session in.
+                if phone_number and not await self._account_usable(phone_number):
+                    logger.warning(
+                        f"[rotate] {phone_number} is not usable by this run "
+                        f"(owner {owner or '—'}) — choosing from the owner's own pool")
+                    await self._log_run(
+                        f"شمارهٔ {phone_number} برای این اجرا قابل استفاده نیست "
+                        "(متعلق به شما نیست یا خاموش است) — از شماره‌های خودتان انتخاب می‌شود",
+                        level="warning", phone=phone_number)
+                    phone_number = None
+                # DIVAR_PHONE_NUMBER is a single-operator install's default,
+                # and it names ONE person's number. Applied to every run it was
+                # how a colleague's scrape logged the root account's number in
+                # and spent its reveals: the owner's pool was never consulted.
+                # Only an ownerless, internally started run may fall back to it.
+                if not phone_number and not owner:
+                    phone_number = settings.divar_phone_number or None
+                # Otherwise the least-spent number the owner has switched on
                 if not phone_number and self.db_session:
                     try:
                         from app.models.cookie import Cookie as CookieModel
@@ -298,47 +332,51 @@ class DivarScraper:
                     restored = await self.auth.restore_session(phone_number)
                     if not restored:
                         logger.warning(f"Session not restored for {phone_number}. Trying other saved sessions...")
-                        # Fall back to any other valid session in DB
+                        # Fall back to the owner's OTHER numbers, in the order
+                        # rotation would reach for them.
+                        #
+                        # This used to take «the most recently updated valid
+                        # session» from the whole table — anybody's — so a run
+                        # whose own number had expired carried on, silently, on
+                        # a colleague's. Every candidate now comes from the same
+                        # owner-scoped, switched-on pool as rotation.
+                        failed = phone_number
                         phone_number = None
+                        candidates = []
                         if self.db_session:
                             try:
-                                from app.models.cookie import Cookie as CookieModel
-                                from sqlalchemy import select as _select
-                                _res = await self.db_session.execute(
-                                    _select(CookieModel)
-                                    .where(CookieModel.is_valid == True)
-                                    .order_by(CookieModel.updated_at.desc())
-                                    .limit(1)
-                                )
-                                _rec = _res.scalar_one_or_none()
-                                if _rec:
-                                    phone_number = _rec.phone_number
-                                    logger.info(f"Falling back to session for {phone_number}")
-                                    # A different person, so a different laptop.
-                                    await apply_device(self.page, Device.for_account(phone_number))
-                                    from app.services import job_log
-                                    await job_log.record(
-                                        self.current_job.job_id if self.current_job else None,
-                                        job_log.SESSION,
-                                        f"نشست اصلی کار نکرد — با شمارهٔ {phone_number} ادامه می‌دهیم",
-                                        level="warning", phone=phone_number)
+                                candidates = [p for p in await self._load_rotation_pool()
+                                              if p != failed]
                             except Exception as _e:
-                                logger.warning(f"Could not find fallback session: {_e}")
+                                logger.warning(f"Could not load fallback sessions: {_e}")
+                        for cand in candidates:
+                            logger.info(f"Falling back to session for {cand}")
+                            try:
+                                # A different person, so a different laptop.
+                                if self.proxy_enabled:
+                                    proxy = await self._get_working_proxy(cand)
+                                await self._open_browser_for(cand, proxy)
+                                if await self.auth.restore_session(cand):
+                                    phone_number = cand
+                                    break
+                            except Exception as _e:
+                                logger.warning(f"Fallback to {cand} failed: {_e}")
+                        if phone_number:
+                            await self._log_run(
+                                f"نشست {failed} کار نکرد — با شمارهٔ دیگر خودتان {phone_number} ادامه می‌دهیم",
+                                level="warning", phone=phone_number, previous=failed)
 
                         if phone_number:
-                            restored = await self.auth.restore_session(phone_number)
-                            if not restored:
-                                logger.warning("Fallback session also failed. Phone numbers will not be extracted.")
-                                return False
                             self.active_phone = phone_number
                             logger.info(f"Session restored successfully using fallback: {phone_number}")
+                        elif candidates:
+                            logger.warning("Fallback sessions also failed. Phone numbers will not be extracted.")
+                            return False
                         else:
                             logger.warning("No valid session found. Phone numbers will not be extracted.")
-                            from app.services import job_log
-                            await job_log.record(
-                                self.current_job.job_id if self.current_job else None,
-                                job_log.SESSION,
-                                "هیچ نشست معتبر دیواری پیدا نشد — شمارهٔ تماس آگهی‌ها استخراج نمی‌شود",
+                            await self._log_run(
+                                "هیچ نشست معتبر دیواری از شماره‌های خودتان پیدا نشد — "
+                                "شمارهٔ تماس آگهی‌ها استخراج نمی‌شود",
                                 level="warning")
                             return False
                     else:
@@ -346,6 +384,14 @@ class DivarScraper:
                         logger.info("Session restored successfully")
                 else:
                     logger.warning("No Divar session configured — phone numbers will not be extracted.")
+                    # Said in the run, not only the server log: with ownership
+                    # enforced, «no session» now usually means «none of YOUR
+                    # numbers is on», and that is something the owner can fix.
+                    await self._log_run(
+                        "هیچ شمارهٔ دیوار روشن و معتبری به نام شما نیست — آگهی‌ها بدون "
+                        "شمارهٔ تماس ذخیره می‌شوند. در «احراز هویت دیوار» شمارهٔ خودتان را "
+                        "وارد کنید یا شمارهٔ خاموش را روشن کنید.",
+                        level="warning")
 
             if self.context is None:
                 # The CONTEXT, not the browser: a persistent context leaves
@@ -2615,6 +2661,64 @@ class DivarScraper:
 
         return local_paths
     
+    async def _log_run(self, message: str, *, level: str = "info", **extra) -> None:
+        """One line in this run's own log, if the run is known. Never raises.
+
+        initialize() runs before start_scraping_job sets current_job, so the
+        job id comes from _job_id_str, which the route sets first."""
+        jid = getattr(self, "_job_id_str", None) or (
+            str(self.current_job.job_id) if getattr(self, "current_job", None) else None)
+        if not jid:
+            return
+        try:
+            from app.services import job_log as _jl
+            await _jl.record(jid, _jl.SESSION, message, level=level, **extra)
+        except Exception as e:
+            logger.debug(f"[rotate] could not write to the run log: {e}")
+
+    def _usable_accounts_query(self, query):
+        """Narrow a cookies query to the numbers THIS run may use.
+
+        One definition for every place that chooses, counts or resets
+        accounts. Four of them used to write their own filter and two forgot
+        the owner — so a colleague's numbers were counted as «still unspent»
+        and had their counters wiped by a run that could never reach them.
+
+        Owner-scoped when the run has one (every run started from the panel
+        or a schedule does); switched-on only; and never a number Divar has
+        asked to verify its identity.
+        """
+        from app.models.cookie import Cookie as CookieModel
+        query = (query
+                 .where(CookieModel.is_valid == True)          # noqa: E712
+                 .where(CookieModel.is_enabled == True)        # noqa: E712
+                 .where(CookieModel.identity_required_at.is_(None)))
+        owner = getattr(self, "owner_user_id", None)
+        if owner:
+            query = query.where(CookieModel.owner_user_id == owner)
+        return query
+
+    async def _account_usable(self, phone: Optional[str]) -> bool:
+        """Whether this run may put `phone` in the browser: the owner's own,
+        valid, switched on, and not waiting on an identity check."""
+        if not phone:
+            return False
+        db = getattr(self, "db_session", None)
+        if db is None:
+            # Nothing to check against (tests, a bare scraper): the caller
+            # named it, and there is no pool it could be stealing from.
+            return True
+        try:
+            from app.models.cookie import Cookie as CookieModel
+            want = "".join(ch for ch in str(phone) if ch.isdigit())[-10:]
+            rows = (await db.execute(self._usable_accounts_query(
+                select(CookieModel.phone_number)))).scalars().all()
+            return any("".join(ch for ch in str(p) if ch.isdigit())[-10:] == want
+                       for p in rows)
+        except Exception as e:
+            logger.warning(f"[rotate] could not check {phone}: {e}")
+            return False
+
     async def _load_rotation_pool(self) -> List[str]:
         """Valid saved Divar accounts, least-spent first — the rotation
         candidates, in the order they should be reached for."""
@@ -2622,20 +2726,15 @@ class DivarScraper:
             return []
         try:
             from app.models.cookie import Cookie as CookieModel
-            query = (select(CookieModel)
-                     .where(CookieModel.is_valid == True)
-                     # An account Divar wants identified is not a candidate.
-                     # Handing it back would spend a reveal to hit the same
-                     # wall and re-alarm the panel.
-                     .where(CookieModel.identity_required_at.is_(None)))
             # Rotation must stay inside the pool the run's owner owns.
             # Without this it would log somebody else's number in and spend
             # their reveals — and a reveal is charged to the account, not to
-            # us. A run with no known owner keeps the old behaviour so an
-            # internally-started scrape does not lose its pool.
-            owner = getattr(self, "owner_user_id", None)
-            if owner:
-                query = query.where(CookieModel.owner_user_id == owner)
+            # us. An account Divar wants identified is not a candidate either:
+            # handing it back would spend a reveal to hit the same wall. And a
+            # number its owner switched off is not reachable — a code sent to
+            # it parks the run. A run with no known owner keeps the old
+            # behaviour so an internally-started scrape does not lose its pool.
+            query = self._usable_accounts_query(select(CookieModel))
             rows = (await self.db_session.execute(
                 query.order_by(CookieModel.reveals.asc(),
                                CookieModel.last_used_at.asc().nullsfirst())
@@ -2677,13 +2776,9 @@ class DivarScraper:
         try:
             from app.models.cookie import Cookie
             from sqlalchemy import func, select as _select
-            q = (_select(func.count()).select_from(Cookie)
-                 .where(Cookie.is_valid == True))  # noqa: E712
             # Same pool rotation actually draws from, or the run absorbs
             # prompts for accounts it will never be allowed to reach.
-            owner = getattr(self, "owner_user_id", None)
-            if owner:
-                q = q.where(Cookie.owner_user_id == owner)
+            q = self._usable_accounts_query(_select(func.count()).select_from(Cookie))
             n = (await self.db_session.execute(q)).scalar() or 0
             return max(1, int(n))
         except Exception as e:
@@ -2876,11 +2971,14 @@ class DivarScraper:
         try:
             from app.models.cookie import Cookie as CookieModel
             from sqlalchemy import func as _func
+            # The run's own pool. Counting everybody's numbers meant a
+            # colleague's fresh account kept «something unspent» true for a
+            # run that could never reach it, and the round never turned over.
             return int((await db.execute(
-                select(_func.count()).select_from(CookieModel).where(
-                    CookieModel.is_valid == True,          # noqa: E712
-                    _func.coalesce(CookieModel.reveals, 0) < every,
-                ))).scalar() or 0)
+                self._usable_accounts_query(
+                    select(_func.count()).select_from(CookieModel))
+                .where(_func.coalesce(CookieModel.reveals, 0) < every)
+            )).scalar() or 0)
         except Exception as e:
             logger.warning(f"[rotate] could not count unspent accounts: {e}")
             # Assume something is left: a miscount that starts a new round
@@ -2898,8 +2996,12 @@ class DivarScraper:
             return
         try:
             from app.models.cookie import Cookie as CookieModel
+            # Only the run's own pool. This reset every valid session in the
+            # table, so one person's exhausted round wiped the counters —
+            # and with them the «least spent first» order — of everybody
+            # else's numbers.
             rows = (await db.execute(
-                select(CookieModel).where(CookieModel.is_valid == True))).scalars().all()  # noqa: E712
+                self._usable_accounts_query(select(CookieModel)))).scalars().all()
             for r in rows:
                 r.reveals = 0
             await db.commit()
@@ -3091,6 +3193,14 @@ class DivarScraper:
 
         Returns True when the active account actually changed.
         """
+        # Somebody asked, from the panel, for a different number — or switched
+        # the current one off. Before any threshold, and before the pin
+        # below: that is a person saying the phone is not in their hand, not
+        # a budget question.
+        requested = self._take_switch_request()
+        if requested is not None:
+            return await self._switch_on_request(requested)
+
         override = getattr(self, "_rotate_every_override", None)
         every = override if override is not None else (getattr(settings, "cookie_rotate_every", 0) or 0)
 
@@ -3216,98 +3326,8 @@ class DivarScraper:
             candidate = self._rotation_pool[(idx + offset) % len(self._rotation_pool)]
             if candidate == self.active_phone:
                 continue
-            try:
-                # Switch the WHOLE identity, not just the user agent.
-                #
-                # Each account owns a browser profile now, and that profile is
-                # where Divar's «this device already verified» lives. Swapping
-                # only the UA would carry account B's cookies into account A's
-                # localStorage, IndexedDB and device id — one machine claiming
-                # to be two people, which is worse than not rotating at all.
-                #
-                # So: hand the outgoing account's jar back, close its profile,
-                # open the candidate's. _open_browser_for does the device, the
-                # proxy and the auth hand-off in one place.
-                #
-                # getattr throughout: the rotation tests build this object with
-                # __new__, so nothing set in __init__ can be assumed.
-                if getattr(self, "playwright", None) is not None:
-                    try:
-                        _px = (await self._get_working_proxy(candidate)
-                               if getattr(self, "proxy_enabled", False) else None)
-                        await self._open_browser_for(candidate, _px)
-                    except Exception as e:
-                        logger.warning(f"[rotate] could not open {candidate}'s profile: {e}")
-                        continue
-                else:
-                    _pg = getattr(self, "page", None)
-                    if _pg is not None and not _pg.is_closed():
-                        await apply_device(_pg, Device.for_account(candidate))
-                restored = await self.auth.restore_session(candidate)
-            except Exception as e:
-                logger.warning(f"[rotate] restore failed for {candidate}: {e}")
-                restored = False
-            if restored:
-                previous = self.active_phone
-                self.active_phone = candidate
-                # Say which account we moved to, in the run log, so rotation
-                # can be watched live instead of inferred from reveal counts
-                # after the fact.
-                # getattr: the rotation tests build this object with __new__,
-                # so nothing set in __init__ can be assumed to exist — the same
-                # reason _persist_active_session guards its own attributes.
-                _jid = getattr(self, "_job_id_str", None)
-                if _jid:
-                    from app.services import job_log as _jl
-                    await _jl.record(
-                        _jid, _jl.SESSION,
-                        f"چرخش شماره: از {previous or '—'} به {candidate}",
-                        previous=previous, now=candidate)
-
-                # Save the jar the browser just refreshed.
-                #
-                # Restoring a session makes Divar hand back a new sAccessToken —
-                # the short-lived half of a SuperTokens session, good for about
-                # an hour. Persisting it immediately means the stored jar is the
-                # fresh one, so the panel stops reporting a session it cannot
-                # verify and, more usefully, the direct httpx calls that replay
-                # /postlist/w/search carry a token Divar will still accept.
-                #
-                # Without this the stored jar kept whatever token it had at
-                # login, and every request made outside the browser used it.
-                await self._persist_active_session()
-                # Reset here, not before the attempt. Resetting up front meant a
-                # rotation that could not find a working session still consumed
-                # the whole window, so the next try was a full threshold away —
-                # on the very account that had just proved it needed replacing.
-                from app import metrics as _mx
-                _mx.scrape_rotations.labels("challenged" if forced else "threshold").inc()
-                self._reveals_since_rotation = 0
-                self._force_rotate = False
-                # Begin a new round only when there is genuinely nothing left.
-                #
-                # This used to infer it: "if the one we just moved to is already
-                # spent, every account is". With five accounts that is simply
-                # not true, and it was wrong on the very first challenge —
-                #
-                #   [rotate] Divar challenged 09017852452 after 1 reveals
-                #   [rotate] 09017852452 marked spent after a Divar challenge
-                #   [rotate] every account had spent its budget — new round for 5
-                #
-                # Resetting every counter to zero erases the "least reveals
-                # first" ordering that rotation is built on, so the pool stops
-                # spreading load and ping-pongs between whichever two accounts
-                # it happens to pick. Two of five accounts were never used at
-                # all across an entire run.
-                if every > 0 and await self._unspent_account_count(every) == 0:
-                    await self._rest_all_accounts()
-                logger.info(
-                    f"[rotate] switched Divar account {previous} → {candidate}"
-                    f"{' (Divar asked it for a code)' if forced else ''}")
-                # Let the restored session settle before it starts opening ads.
-                # A switch followed instantly by a page load is the part that
-                # reads as automated, not the overall pace.
-                await self._human_like_delay(3.0, 6.0)
+            if await self._switch_to(candidate, why="challenged" if forced else "threshold",
+                                     every=every):
                 return True
             logger.warning(f"[rotate] session for {candidate} not usable — trying next")
 
@@ -3315,9 +3335,214 @@ class DivarScraper:
         # retries, but back it off a little: restoring a session navigates the
         # browser, and retrying that on every single listing would cost more
         # than the rotation saves.
+        await self._return_to_active_browser()
         self._reveals_since_rotation = max(every - 5, 0) if every > 0 else 0
         self._force_rotate = False
         logger.info("[rotate] no alternative account could be restored; staying on current")
+        return False
+
+    async def _switch_to(self, candidate: str, *, why: str, every: int = 0) -> bool:
+        """Move the run onto `candidate`: its browser profile, its session.
+
+        True when the run is now on it. Shared by rotation and by a person
+        asking for a number from the panel, so the two cannot drift — the
+        manual switch is the same identity change, not a cheaper one.
+        """
+        try:
+            # Switch the WHOLE identity, not just the user agent.
+            #
+            # Each account owns a browser profile now, and that profile is
+            # where Divar's «this device already verified» lives. Swapping
+            # only the UA would carry account B's cookies into account A's
+            # localStorage, IndexedDB and device id — one machine claiming
+            # to be two people, which is worse than not rotating at all.
+            #
+            # So: hand the outgoing account's jar back, close its profile,
+            # open the candidate's. _open_browser_for does the device, the
+            # proxy and the auth hand-off in one place.
+            #
+            # getattr throughout: the rotation tests build this object with
+            # __new__, so nothing set in __init__ can be assumed.
+            if getattr(self, "playwright", None) is not None:
+                try:
+                    _px = (await self._get_working_proxy(candidate)
+                           if getattr(self, "proxy_enabled", False) else None)
+                    await self._open_browser_for(candidate, _px)
+                except Exception as e:
+                    logger.warning(f"[rotate] could not open {candidate}'s profile: {e}")
+                    return False
+            else:
+                _pg = getattr(self, "page", None)
+                if _pg is not None and not _pg.is_closed():
+                    await apply_device(_pg, Device.for_account(candidate))
+            restored = await self.auth.restore_session(candidate)
+        except Exception as e:
+            logger.warning(f"[rotate] restore failed for {candidate}: {e}")
+            restored = False
+        if not restored:
+            return False
+
+        previous = self.active_phone
+        self.active_phone = candidate
+        # Say which account we moved to, in the run log, so rotation
+        # can be watched live instead of inferred from reveal counts
+        # after the fact.
+        # getattr: the rotation tests build this object with __new__,
+        # so nothing set in __init__ can be assumed to exist — the same
+        # reason _persist_active_session guards its own attributes.
+        _jid = getattr(self, "_job_id_str", None)
+        if _jid:
+            from app.services import job_log as _jl
+            msg = (f"تعویض دستی شماره: از {previous or '—'} به {candidate}"
+                   if why == "manual" else
+                   f"چرخش شماره: از {previous or '—'} به {candidate}")
+            await _jl.record(_jid, _jl.SESSION, msg,
+                             previous=previous, now=candidate, why=why)
+
+        # Save the jar the browser just refreshed.
+        #
+        # Restoring a session makes Divar hand back a new sAccessToken —
+        # the short-lived half of a SuperTokens session, good for about
+        # an hour. Persisting it immediately means the stored jar is the
+        # fresh one, so the panel stops reporting a session it cannot
+        # verify and, more usefully, the direct httpx calls that replay
+        # /postlist/w/search carry a token Divar will still accept.
+        #
+        # Without this the stored jar kept whatever token it had at
+        # login, and every request made outside the browser used it.
+        await self._persist_active_session()
+        # Reset here, not before the attempt. Resetting up front meant a
+        # rotation that could not find a working session still consumed
+        # the whole window, so the next try was a full threshold away —
+        # on the very account that had just proved it needed replacing.
+        from app import metrics as _mx
+        _mx.scrape_rotations.labels(why).inc()
+        self._reveals_since_rotation = 0
+        self._force_rotate = False
+        # Begin a new round only when there is genuinely nothing left.
+        #
+        # This used to infer it: "if the one we just moved to is already
+        # spent, every account is". With five accounts that is simply
+        # not true, and it was wrong on the very first challenge —
+        #
+        #   [rotate] Divar challenged 09017852452 after 1 reveals
+        #   [rotate] 09017852452 marked spent after a Divar challenge
+        #   [rotate] every account had spent its budget — new round for 5
+        #
+        # Resetting every counter to zero erases the "least reveals
+        # first" ordering that rotation is built on, so the pool stops
+        # spreading load and ping-pongs between whichever two accounts
+        # it happens to pick. Two of five accounts were never used at
+        # all across an entire run.
+        if every > 0 and await self._unspent_account_count(every) == 0:
+            await self._rest_all_accounts()
+        logger.info(
+            f"[rotate] switched Divar account {previous} → {candidate}"
+            f"{' (Divar asked it for a code)' if why == 'challenged' else ''}"
+            f"{' (asked for from the panel)' if why == 'manual' else ''}")
+        # Let the restored session settle before it starts opening ads.
+        # A switch followed instantly by a page load is the part that
+        # reads as automated, not the overall pace.
+        await self._human_like_delay(3.0, 6.0)
+        return True
+
+    async def _return_to_active_browser(self) -> None:
+        """After every candidate failed, put the browser back on the account
+        the run is still on.
+
+        _switch_to opens each candidate's profile before trying its session,
+        so a round of failures left the browser in the LAST candidate's
+        profile, with that candidate's jar, while active_phone still named the
+        old account. Every save after that — _persist_active_session on the
+        next rotation, on a verified code, on a recycle — wrote the
+        candidate's cookies onto the old account's row, and the next code
+        prompt typed the old number into a session that was not its own.
+        """
+        if getattr(self, "playwright", None) is None:
+            return
+        active = getattr(self, "active_phone", None)
+        if getattr(self, "_browser_account", active) == active:
+            return
+        try:
+            _px = (await self._get_working_proxy(active)
+                   if getattr(self, "proxy_enabled", False) else None)
+            await self._open_browser_for(active, _px)
+            if active and not await self.auth.restore_session(active):
+                logger.warning(f"[rotate] {active}'s session did not come back after a "
+                               "failed rotation — reveals will be challenged")
+        except Exception as e:
+            logger.warning(f"[rotate] could not return to {active}'s profile: {e}")
+
+    def _take_switch_request(self):
+        """A switch somebody asked for from the panel, consumed once."""
+        jid = getattr(self, "_job_id_str", None)
+        if not jid:
+            return None
+        from app.scraper import otp_store as _os
+        return _os.take_switch(jid)
+
+    async def _switch_on_request(self, req: dict) -> bool:
+        """Honour «use a different number» from the panel, at a safe point.
+
+        The person asking is the one who knows what the pool does not: the
+        SIM behind the current number is not in their hand, and every code
+        Divar sends it goes nowhere. So this moves even when rotation is
+        pinned (rotate_every = 0) and even when no threshold was reached —
+        and after it, OTP prompts that were suppressed for this run are
+        allowed again, because the new number can be answered.
+
+        `phone` names a number, or is empty for «the next one of mine».
+        Either way it must be the run owner's own, switched-on, valid number:
+        the request is checked where it is made and again here, because the
+        pool can change between the two.
+        """
+        target = (req or {}).get("phone") or None
+        previous = self.active_phone
+        _d = lambda p: "".join(ch for ch in str(p or "") if ch.isdigit())[-10:]  # noqa: E731
+
+        pool = await self._load_rotation_pool()
+        if pool:
+            self._rotation_pool = pool
+        if target:
+            if previous and _d(target) == _d(previous):
+                await self._log_run(f"اجرا همین حالا روی {previous} است — تعویضی لازم نبود")
+                return False
+            if not await self._account_usable(target):
+                await self._log_run(
+                    f"تعویض به {target} انجام نشد: این شماره متعلق به صاحب اجرا نیست، "
+                    "خاموش است یا نشستش معتبر نیست", level="warning", phone=target)
+                return False
+            candidates = [target]
+        else:
+            candidates = [p for p in pool if _d(p) != _d(previous)]
+        if not candidates:
+            await self._log_run(
+                "تعویض شماره انجام نشد: شمارهٔ روشن و معتبر دیگری به نام صاحب اجرا نیست",
+                level="warning")
+            return False
+
+        await self._persist_active_session()
+        if not self.auth.browser_alive():
+            await self._log_run("تعویض شماره انجام نشد: مرورگر اسکرپر بسته شده است",
+                                level="warning")
+            return False
+
+        for cand in candidates:
+            if await self._switch_to(cand, why="manual"):
+                jid = getattr(self, "_job_id_str", None)
+                if jid:
+                    # The previous number's unanswered prompts said nothing
+                    # about this one. Let it be asked, and answered.
+                    from app.scraper import otp_store as _os
+                    _os.reset_cancel(jid)
+                    _os.clear_timeouts(jid)
+                return True
+            logger.warning(f"[rotate] manual switch: {cand} not usable — trying next")
+
+        await self._return_to_active_browser()
+        await self._log_run(
+            f"تعویض شماره انجام نشد: نشست {'، '.join(candidates)} بازیابی نشد — "
+            f"اجرا روی {previous or '—'} ادامه می‌دهد", level="warning")
         return False
 
     # Filter names as the person who set them sees them in the panel. The

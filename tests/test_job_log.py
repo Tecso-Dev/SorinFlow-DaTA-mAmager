@@ -103,7 +103,8 @@ class TestTheScraperActuallyReports:
         import inspect
         from app.scraper.divar_scraper import DivarScraper
         src = inspect.getsource(DivarScraper)
-        assert "job_log.SESSION" in src
+        assert "_jl.SESSION" in src
+        assert "هیچ نشست معتبر دیواری از شماره‌های خودتان پیدا نشد" in src
 
     def test_events_are_pruned_so_the_table_cannot_grow_without_bound(self):
         import inspect
