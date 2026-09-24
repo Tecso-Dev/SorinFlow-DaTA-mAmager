@@ -38,6 +38,12 @@ class Lead(Base):
     # new | contacted | qualified | closed | rejected
     notes = Column(Text)
     assigned_to = Column(String(200))
+    # the account assigned_to names — whose call queue the lead is in
+    # (app/auth/visibility.py OWNERSHIP)
+    assigned_to_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL",
+                                                     name="fk_leads_assigned_to_user"),
+                                 nullable=True, index=True)
+    owner_resolved_from = Column(String(200))
 
     # The call queue. A lead is «due» when next_call_at is empty (never
     # called, or answered) or has passed (a callback, an unanswered retry).
@@ -80,6 +86,7 @@ class Lead(Base):
             "status": self.status,
             "notes": self.notes,
             "assigned_to": self.assigned_to,
+            "assigned_to_user_id": self.assigned_to_user_id,
             "rented_at": self.rented_at.isoformat() if self.rented_at else None,
             "notified": self.notified,
             "notified_at": self.notified_at.isoformat() if self.notified_at else None,

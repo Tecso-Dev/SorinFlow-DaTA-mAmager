@@ -190,7 +190,8 @@ async def init_db():
                  _migrate_properties_ai_pipeline,
                  _migrate_phone_normalized,
                  _backfill_ai_pipeline_fingerprints,
-                 _seed_reference_data):
+                 _seed_reference_data,
+                 _backfill_owner_ids):
         try:
             async with engine.begin() as conn:
                 await _guard(conn)
@@ -667,6 +668,25 @@ async def _backfill_cookie_owner(conn):
                   f"{rest.rowcount or 0} to the super admin")
     except Exception as e:
         print(f"cookie owner backfill skipped: {e}")
+
+
+async def _backfill_owner_ids(conn):
+    """Owned rows the previous release wrote carry a name and no account.
+
+    During a rolling deploy (and after a rollback) the old pods keep
+    assigning leads, tasks and customers by name. Alembic 0016 resolved
+    everything before it; this resolves what came after — only rows whose
+    name changed since their account was last resolved, never a row already
+    judged ownerless (see OWNERSHIP in app/auth/visibility.py). Before 0016
+    has added the columns it has nothing to do. Plain SQL, both dialects.
+    """
+    try:
+        from app.auth.visibility import backfill_owner_ids
+        touched = await conn.run_sync(backfill_owner_ids)
+        if touched:
+            print(f"owner accounts resolved for {touched} row(s) written by name")
+    except Exception as e:
+        print(f"owner account backfill skipped: {e}")
 
 
 async def _migrate_forwarder_sim2(conn):

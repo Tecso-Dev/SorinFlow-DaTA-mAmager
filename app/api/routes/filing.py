@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 from app.auth.permissions import STAFF_ROLES
 from app.auth.dependencies import get_current_user
 # who sees which file and which cabinet: shared with the assistant
-from app.auth.visibility import (actor as _actor, files_visible_to as _visible_to,
+from app.auth.visibility import (stamp_actor, stamp_owner, files_visible_to as _visible_to,
                                  cabinets_visible_to as _cabinets_visible_to)
 from app.database import get_db
 from app.models.crm_models import Binder, Cabinet
@@ -161,8 +161,9 @@ async def create_cabinet(
         color=data.get("color") or Cabinet.PALETTE[0],
         icon=data.get("icon") or "bi-archive",
         sort_order=nxt + 1,
-        owner=_actor(current_user) if data.get("personal") else None,
     )
+    if data.get("personal"):
+        stamp_actor(cabinet, current_user)
     db.add(cabinet)
     await db.commit()
     await db.refresh(cabinet)
@@ -191,8 +192,11 @@ async def update_cabinet(
         cabinet.icon = data["icon"]
     if "personal" in data:
         # turning it personal stamps the maker, otherwise the cabinet would
-        # be one nobody at all could open
-        cabinet.owner = (cabinet.owner or _actor(current_user)) if data["personal"] else None
+        # be one nobody at all could open; one already personal keeps its owner
+        if not data["personal"]:
+            stamp_owner(cabinet, None, None)
+        elif not cabinet.owner:
+            stamp_actor(cabinet, current_user)
     if "sort_order" in data:
         try:
             cabinet.sort_order = int(data["sort_order"])
@@ -527,7 +531,7 @@ async def bulk_file_action(
             p.is_private = action == "private"
             if action == "private" and not p.created_by:
                 # otherwise nobody but a super_admin could ever see it again
-                p.created_by = _actor(current_user)
+                stamp_actor(p, current_user)
     elif action in ("draft", "undraft"):
         for p in props:
             p.is_draft = action == "draft"
@@ -666,7 +670,7 @@ async def update_file(
                 raise HTTPException(status_code=400, detail="زونکن مقصد یافت نشد")
         prop.binder_id = target or None
     if prop.is_private and not prop.created_by:
-        prop.created_by = _actor(current_user)
+        stamp_actor(prop, current_user)
     await db.commit()
     await db.refresh(prop)
     return _file_full(prop)

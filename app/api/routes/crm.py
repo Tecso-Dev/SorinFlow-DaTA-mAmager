@@ -27,7 +27,7 @@ from app.crm.notification import notify
 from app.services.sms_service import send_sms
 from app.auth.dependencies import get_current_user, get_current_user_optional, require_super_admin
 # who sees which match and which task: shared with the assistant
-from app.auth.visibility import (actor as _agent_name, actor as _task_actor,
+from app.auth.visibility import (actor as _agent_name, assign_owner, stamp_actor,
                                  matches_visible_to as _matches_visible_to,
                                  tasks_visible_to as _tasks_visible_to)
 from app.services.dpa_service import record_activity, record_lead_status
@@ -282,8 +282,8 @@ async def create_lead(
         property_title=data.property_title,
         status=data.status or "new",
         notes=data.notes,
-        assigned_to=data.assigned_to,
     )
+    await assign_owner(db, lead, data.assigned_to, by=current_user)
     db.add(lead)
 
     agent = (data.assigned_to or "").strip() or (
@@ -570,7 +570,7 @@ async def update_lead(
     if data.notes is not None:
         lead.notes = data.notes
     if data.assigned_to is not None:
-        lead.assigned_to = data.assigned_to
+        await assign_owner(db, lead, data.assigned_to, by=current_user)
     if data.district is not None:
         # District belongs to the linked property (street search reads it there)
         prop = (await db.execute(
@@ -668,7 +668,7 @@ async def log_call(lead_id: int, data: CallOutcomeIn,
     lead.last_call_at = change["last_call_at"]
     lead.last_call_outcome = data.outcome
     if not (lead.assigned_to or "").strip():
-        lead.assigned_to = agent
+        stamp_actor(lead, current_user)
     if data.note:
         stamp = now.astimezone(_cq.TEHRAN).strftime("%Y-%m-%d %H:%M")
         lead.notes = ((lead.notes or "").rstrip() + f"\n[{stamp}] {data.note.strip()}").strip()
@@ -1667,12 +1667,14 @@ class CustomerIn(_BaseModel):
 
 
 @router.post("/customers")
-async def create_customer(data: CustomerIn, db: AsyncSession = Depends(get_db)):
+async def create_customer(data: CustomerIn, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
     data = data.model_dump(exclude_unset=True)
     if not str(data.get("full_name") or "").strip():
         raise HTTPException(status_code=400, detail="full_name is required")
     customer = Customer(full_name=str(data["full_name"]).strip())
     _apply_customer_payload(customer, data)
+    await assign_owner(db, customer, customer.consultant_name, by=current_user)
     db.add(customer)
     await db.commit()
     await db.refresh(customer)
@@ -1689,13 +1691,15 @@ async def get_customer(customer_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/customers/{customer_id}")
-async def update_customer(customer_id: int, data: CustomerIn, db: AsyncSession = Depends(get_db)):
+async def update_customer(customer_id: int, data: CustomerIn, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
     data = data.model_dump(exclude_unset=True)
     result = await db.execute(select(Customer).where(Customer.id == customer_id))
     customer = result.scalar_one_or_none()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     _apply_customer_payload(customer, data)
+    await assign_owner(db, customer, customer.consultant_name, by=current_user)
     customer.updated_at = datetime.now()
     await db.commit()
     await db.refresh(customer)
@@ -1944,8 +1948,7 @@ async def delete_note(note_id: int, db: AsyncSession = Depends(get_db)):
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── وظایف: who may see which task — _tasks_visible_to, app/auth/visibility.py.
-# _task_actor is the name tasks are assigned under, the same string the task
-# form puts in assigned_to.
+# The task form puts a name in assigned_to; assign_owner resolves the account.
 
 @router.get("/tasks")
 async def list_tasks(
@@ -2010,9 +2013,13 @@ async def create_task(
         status=data.get("status", "todo"),
         contact_id=data.get("contact_id"),
         deal_id=data.get("deal_id"),
-        # falls back to the creator, so a task always has someone it belongs to
-        assigned_to=(data.get("assigned_to") or "").strip() or _task_actor(current_user),
     )
+    # falls back to the creator, so a task always has someone it belongs to
+    typed = (data.get("assigned_to") or "").strip()
+    if typed:
+        await assign_owner(db, task, typed, by=current_user)
+    else:
+        stamp_actor(task, current_user)
     db.add(task)
     await db.commit()
     await db.refresh(task)
@@ -2049,9 +2056,11 @@ async def update_task(
 ):
     data = data.model_dump(exclude_unset=True)
     task = await _own_task_or_404(task_id, db, current_user)
-    for field in ("title", "description", "priority", "status", "contact_id", "deal_id", "assigned_to"):
+    for field in ("title", "description", "priority", "status", "contact_id", "deal_id"):
         if field in data:
             setattr(task, field, data[field])
+    if "assigned_to" in data:
+        await assign_owner(db, task, data["assigned_to"], by=current_user)
     if "due_date" in data and data["due_date"]:
         try:
             task.due_date = _parse_datetime(data["due_date"])
