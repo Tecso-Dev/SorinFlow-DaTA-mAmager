@@ -702,7 +702,7 @@ async function showTotpSetup() {
                 correctLevel: QRCode.CorrectLevel.M,
             });
         } else {
-            qrContainer.innerHTML = `<div class="small text-muted">${data.qr_uri}</div>`;
+            qrContainer.innerHTML = `<div class="small text-muted">${esc(data.qr_uri)}</div>`;
         }
     } catch(e) {
         showToast('خطا', 'خطا در دریافت اطلاعات 2FA', 'danger');
@@ -760,7 +760,7 @@ function avatarHtml(u, size = 34, cls = 'avatar', id = '') {
     const initial = name.trim().charAt(0) || '?';
     const presence = (u && u.presence) || 'available';
     const inner = (u && u.avatar_url)
-        ? `<img src="${esc(u.avatar_url)}" alt="${esc(name)}" loading="lazy">`
+        ? `<img src="${safeUrl(u.avatar_url)}" alt="${esc(name)}" loading="lazy">`
         : `<span class="av-initial">${esc(initial)}</span>`;
     return `<span class="${cls} av av-${presence}" ${id ? `id="${id}"` : ''}
                   style="--av:${size}px" title="${esc(name)} — ${PRESENCE_FA[presence] || ''}">${inner}<i class="av-dot"></i></span>`;
@@ -1733,14 +1733,25 @@ function showToast(title, message, type = 'info') {
 }
 
 
-// A URL from the database is not safe to put in href just because it is
+// A URL from the database is not safe to put in href/src just because it is
 // escaped: «javascript:alert(1)» contains nothing that needs escaping, and
-// clicking the link runs it in the panel's origin — where the token lives.
-// Only http(s) survives; anything else becomes an inert '#'.
+// clicking the link (or, for some tags, even loading it) runs it in the
+// panel's origin — where the token lives. Only http(s) and our own relative
+// paths survive; anything else becomes an inert '#'.
 function safeUrl(u) {
     const raw = String(u ?? '').trim();
-    if (!/^https?:\/\//i.test(raw)) return '#';
+    if (!/^https?:\/\//i.test(raw) && !/^\/(?!\/)/.test(raw)) return '#';
     return esc(raw);
+}
+
+// The manual lead photo is narrower still: it only ever needs to reproduce
+// exactly what POST /crm/upload-image hands back, so anything else —
+// including a path-traversal attempt riding along in the field — becomes
+// an empty (broken-image, harmless) src instead of '#'.
+const MANUAL_PHOTO_RE = /^\/images\/manual\/[0-9a-f]{32}\.jpg$/;
+function safeManualPhoto(u) {
+    const raw = String(u ?? '');
+    return MANUAL_PHOTO_RE.test(raw) ? raw : '';
 }
 
 // tel: has the same problem in a smaller way. Phone numbers here come from
@@ -1770,11 +1781,31 @@ function _tagList(tags) {
     return [];
 }
 
-// Escape user/scraped content before injecting into innerHTML templates
+// Escape user/scraped content before injecting into innerHTML templates.
+// Covers both text and attribute context (& < > " ') plus the backtick, so
+// an escaped value can never close out of either an HTML attribute or a
+// template literal it ends up quoted inside of.
 function esc(s) {
     if (s === null || s === undefined) return '';
-    return String(s).replace(/[&<>"']/g, m =>
-        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    return String(s).replace(/[&<>"'`]/g, m =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[m]));
+}
+
+// html`...` — a tagged template that escapes every interpolated value by
+// default, so a call site has to opt out on purpose instead of forgetting
+// to opt in. Existing code mostly calls esc() by hand inline; this is for
+// new/rewritten spots where that got missed often enough to matter. Wrap
+// markup that is already safe (built from esc()'d parts, or another html`` )
+// in raw(...) — that keeps the one opt-out greppable as `raw(`.
+function raw(s) { return { __html: String(s ?? '') }; }
+function html(strings, ...values) {
+    let out = strings[0];
+    for (let i = 0; i < values.length; i++) {
+        const v = values[i];
+        out += (v && typeof v === 'object' && '__html' in v) ? v.__html : esc(v);
+        out += strings[i + 1];
+    }
+    return out;
 }
 
 // Format Price — keeps one decimal so ۳٫۵ میلیارد doesn't round to ۴
@@ -2170,7 +2201,7 @@ async function _loadDashboardWidgets() {
         try {
             const data = await apiCall('/crm/leads?limit=5');
             leadsEl.innerHTML = data.items.length ? data.items.map(l => {
-                const st = CRM_STATUS_LABELS[l.status] || { label: l.status, cls: 'bg-secondary' };
+                const st = CRM_STATUS_LABELS[l.status] || { label: esc(l.status), cls: 'bg-secondary' };
                 return `
                 <div class="mini-item" onclick="viewLead(${l.id})">
                     <div class="mi-ico"><i class="bi bi-person"></i></div>
@@ -2515,7 +2546,7 @@ async function viewProperty(id) {
                             <div class="carousel-inner">
                                 ${property.images.map((img, idx) => `
                                     <div class="carousel-item ${idx === 0 ? 'active' : ''}">
-                                        <img src="${img}" class="d-block w-100 rounded" alt="تصویر ${idx + 1}"
+                                        <img src="${safeUrl(img)}" class="d-block w-100 rounded" alt="تصویر ${idx + 1}"
                                              style="max-height: 400px; object-fit: cover;"
                                              onclick="openImageLightbox(this.src)" title="کلیک برای بزرگ‌نمایی">
                                     </div>
@@ -2760,8 +2791,8 @@ async function viewProperty(id) {
                             <div class="col-md-6">
                                 <label class="text-muted small">شماره تماس</label>
                                 <div class="h5 mb-0">
-                                    ${property.phone_number 
-                                        ? `<a href="tel:${safeTel(property.phone_number)}" class="text-success">${property.phone_number}</a>` 
+                                    ${property.phone_number
+                                        ? `<a href="tel:${safeTel(property.phone_number)}" class="text-success">${esc(property.phone_number)}</a>`
                                         : noPhoneCell(property)}
                                 </div>
                             </div>
@@ -5145,7 +5176,7 @@ async function checkAuthStatus() {
             statusDiv.innerHTML = `
                 <i class="bi bi-check-circle"></i>
                 <strong>وضعیت: متصل</strong><br>
-                شماره فعال: <strong>${session.phone_number}</strong>
+                شماره فعال: <strong>${esc(session.phone_number)}</strong>
             `;
         } else {
             // check if any (expired) cookies exist
@@ -5255,8 +5286,8 @@ function _renderJobsTable(items) {
     };
     items.forEach(job => {
         const row = document.createElement('tr');
-        const statusClass = `status-${job.status}`;
-        const statusLabel = JOB_STATUS_FA[job.status] || job.status;
+        const statusClass = `status-${esc(job.status)}`;
+        const statusLabel = JOB_STATUS_FA[job.status] || esc(job.status);
         row.innerHTML = `
             <td><code class="job-id" title="${esc(job.job_id)}">${job.job_id.substring(0, 6)}</code></td>
             <td>${job.category_name ? `<span class="badge bg-primary">${esc(job.category_name)}</span>` : '—'}</td>
@@ -5661,7 +5692,7 @@ async function initiateLogin() {
                 verifyForm.insertBefore(el, verifyForm.firstChild);
                 return el;
             })();
-            waitMsg.innerHTML = `<i class="bi bi-phone"></i> کد تأیید به <strong>${phone}</strong> ارسال شد.<br>
+            waitMsg.innerHTML = `<i class="bi bi-phone"></i> کد تأیید به <strong>${esc(phone)}</strong> ارسال شد.<br>
                 <small class="text-muted">ممکن است تا ۳۰ ثانیه طول بکشد. منتظر SMS باشید.</small>`;
 
             _clearOtpBoxes();
@@ -6698,7 +6729,7 @@ async function loadProxies() {
         data.items.forEach(proxy => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${proxy.address}</td>
+                <td>${esc(proxy.address)}</td>
                 <td>${proxy.port}</td>
                 <td>
                     <span class="badge ${proxy.is_working ? 'bg-success' : 'bg-danger'}">
@@ -6926,7 +6957,7 @@ function _renderLeadPhotos() {
     if (!wrap) return;
     wrap.innerHTML = _leadPhotos.map((u, i) => `
         <div class="lead-photo-thumb">
-            <img src="${u}" alt="">
+            <img src="${safeManualPhoto(u)}" alt="">
             <button type="button" onclick="_removeLeadPhoto(${i})">✕</button>
         </div>`).join('');
 }
@@ -7531,7 +7562,7 @@ async function loadLeads() {
                 <td class="leads-spec">${_leadSpecChips(lead)}</td>
                 <td class="leads-phone">
                     ${lead.phone_number
-                        ? `<a href="tel:${safeTel(lead.phone_number)}" class="text-success fw-bold">${lead.phone_number}</a>`
+                        ? `<a href="tel:${safeTel(lead.phone_number)}" class="text-success fw-bold">${esc(lead.phone_number)}</a>`
                         : noPhoneCell(lead)}
                 </td>
                 <td>
@@ -7729,7 +7760,7 @@ function _renderPropertyDetails(p) {
                 <div class="lead-photo-strip">
                     ${p.images.map((img, i) => `
                         <div class="lead-photo-thumb" style="width:92px;height:92px;cursor:zoom-in">
-                            <img src="${img}" alt="تصویر ${i + 1}" onclick="openImageLightbox(this.src)">
+                            <img src="${safeUrl(img)}" alt="تصویر ${i + 1}" onclick="openImageLightbox(this.src)">
                         </div>`).join('')}
                 </div>
             </div>
@@ -7856,7 +7887,7 @@ function _matchCard(m) {
                 <i class="bi bi-eye"></i> جزئیات
             </button>
             ${m.phone_number ? `<a href="tel:${safeTel(m.phone_number)}" class="btn btn-sm btn-outline-success">
-                <i class="bi bi-telephone"></i> ${m.phone_number}</a>` : ''}
+                <i class="bi bi-telephone"></i> ${esc(m.phone_number)}</a>` : ''}
         </div>
     </div>`;
 }
@@ -7869,7 +7900,7 @@ const MATCH_TYPE_FA = { apartment: 'آپارتمان', house: 'ویلایی / خ
 function _matchCriteria(intent) {
     if (!intent) return '';
     const bits = [intent.listing_type === 'rent' ? 'رهن و اجاره' : 'خرید'];
-    if (intent.family) bits.push(MATCH_TYPE_FA[intent.family] || intent.family);
+    if (intent.family) bits.push(MATCH_TYPE_FA[intent.family] || esc(intent.family));
     if (intent.city) bits.push(esc(intent.city));
     return bits.join(' • ');
 }
@@ -7965,7 +7996,7 @@ async function viewLead(id) {
                     <label class="text-muted small">شماره تماس</label>
                     <div class="h5 text-success mb-0">
                         ${lead.phone_number
-                            ? `<a href="tel:${safeTel(lead.phone_number)}">${lead.phone_number}</a>`
+                            ? `<a href="tel:${safeTel(lead.phone_number)}">${esc(lead.phone_number)}</a>`
                             : '---'}
                     </div>
                 </div>
@@ -7975,7 +8006,7 @@ async function viewLead(id) {
                 </div>
                 <div class="col-md-4">
                     <label class="text-muted small">شهر</label>
-                    <div>${lead.city_name || '---'}</div>
+                    <div>${esc(lead.city_name) || '---'}</div>
                 </div>
                 <div class="col-md-4">
                     <label class="text-muted small">قیمت</label>
@@ -7993,7 +8024,7 @@ async function viewLead(id) {
                     <label class="text-muted small">اطلاع‌رسانی</label>
                     <div>
                         ${lead.notified
-                            ? `<span class="badge bg-success">بله (${lead.notification_channel})</span>`
+                            ? `<span class="badge bg-success">بله (${esc(lead.notification_channel)})</span>`
                             : '<span class="badge bg-secondary">خیر</span>'}
                     </div>
                 </div>
@@ -8020,7 +8051,7 @@ async function viewLead(id) {
                 <div class="col-md-6">
                     <label class="form-label">منطقه</label>
                     <input type="text" id="lead-edit-district" class="form-control"
-                           value="${lead.district || ''}" placeholder="مثلاً: خیابان کاشانی">
+                           value="${esc(lead.district || '')}" placeholder="مثلاً: خیابان کاشانی">
                 </div>
                 <div class="col-12">
                     <label class="form-label">یادداشت</label>
@@ -8202,9 +8233,9 @@ async function loadDpa() {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${d.id}</td>
-                <td>${d.date_jalali || '---'}</td>
+                <td>${esc(d.date_jalali) || '---'}</td>
                 <td class="fw-bold">${esc(d.agent_name)}</td>
-                <td>${DPA_ROLE_LABELS[d.role] || d.role || '---'}</td>
+                <td>${DPA_ROLE_LABELS[d.role] || esc(d.role) || '---'}</td>
                 <td>${d.base_score}</td>
                 <td class="text-info">+${formatNumber(d.activity_score ?? 0)}</td>
                 <td class="text-success">+${d.bonus_score}</td>
@@ -8394,7 +8425,7 @@ async function loadCustomers() {
         }
 
         data.items.forEach(c => {
-            const t = CUSTOMER_TEMP_LABELS[c.temperature] || { label: c.temperature || '---', cls: 'bg-secondary' };
+            const t = CUSTOMER_TEMP_LABELS[c.temperature] || { label: esc(c.temperature) || '---', cls: 'bg-secondary' };
             const nextFollowup = (c.followups && c.followups.length)
                 ? `${c.followups[0].date || ''} ${c.followups[0].time || ''}`.trim() || '---'
                 : '---';
@@ -8404,13 +8435,13 @@ async function loadCustomers() {
             row.innerHTML = `
                 <td>${c.id}</td>
                 <td class="fw-bold">${esc(c.full_name)}${isNew ? ' <span class="badge bg-success" style="font-size:.6rem;vertical-align:middle">جدید</span>' : ''}</td>
-                <td>${c.mobile1 ? `<a href="tel:${safeTel(c.mobile1)}" class="text-success">${c.mobile1}</a>` : '---'}</td>
+                <td>${c.mobile1 ? `<a href="tel:${safeTel(c.mobile1)}" class="text-success">${esc(c.mobile1)}</a>` : '---'}</td>
                 <td><span class="badge ${t.cls}">${t.label}</span></td>
                 <td>${CUSTOMER_SOURCE_LABELS[c.source] || '---'}</td>
                 <td>${c.budget_max ? formatPrice(c.budget_max) : '---'}</td>
-                <td>${c.desired_district || '---'}</td>
-                <td>${c.consultant_name || '---'}</td>
-                <td>${nextFollowup}</td>
+                <td>${esc(c.desired_district) || '---'}</td>
+                <td>${esc(c.consultant_name) || '---'}</td>
+                <td>${esc(nextFollowup)}</td>
                 <td>
                     <button class="btn btn-sm btn-match" onclick="showMatchesForCustomer(${c.id})" title="ملک‌های پیشنهادی">
                         <i class="bi bi-magic"></i>
@@ -8434,14 +8465,14 @@ function _custRemoveRow(btn) { btn.closest('tr').remove(); }
 function addShowingRow(data = {}) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-        <td><input type="text" class="form-control form-control-sm cust-sh-code" value="${data.file_code || ''}" placeholder="SF-..."></td>
-        <td><input type="text" class="form-control form-control-sm cust-sh-desc" value="${data.description || ''}" placeholder="شرح ملک"></td>
-        <td><input type="text" class="form-control form-control-sm cust-sh-feedback" value="${data.feedback || ''}" placeholder="بازخورد"></td>
+        <td><input type="text" class="form-control form-control-sm cust-sh-code" value="${esc(data.file_code || '')}" placeholder="SF-..."></td>
+        <td><input type="text" class="form-control form-control-sm cust-sh-desc" value="${esc(data.description || '')}" placeholder="شرح ملک"></td>
+        <td><input type="text" class="form-control form-control-sm cust-sh-feedback" value="${esc(data.feedback || '')}" placeholder="بازخورد"></td>
         <td>
             <select class="form-select form-select-sm cust-sh-step">
                 <option value="">---</option>
                 ${Object.entries(SHOWING_STEP_LABELS).map(([v, l]) =>
-                    `<option value="${v}" ${data.next_step === v ? 'selected' : ''}>${l}</option>`).join('')}
+                    `<option value="${esc(v)}" ${data.next_step === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
             </select>
         </td>
         <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="_custRemoveRow(this)"><i class="bi bi-x"></i></button></td>`;
@@ -8451,9 +8482,9 @@ function addShowingRow(data = {}) {
 function addFollowupRow(data = {}) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-        <td><input type="text" class="form-control form-control-sm cust-fu-date" value="${data.date || ''}" placeholder="۱۴۰۵/۰۵/۰۱"></td>
-        <td><input type="text" class="form-control form-control-sm cust-fu-time" value="${data.time || ''}" placeholder="۱۴:۳۰"></td>
-        <td><input type="text" class="form-control form-control-sm cust-fu-action" value="${data.action || ''}" placeholder="چه چیزی باید پیگیری یا ارائه شود؟"></td>
+        <td><input type="text" class="form-control form-control-sm cust-fu-date" value="${esc(data.date || '')}" placeholder="۱۴۰۵/۰۵/۰۱"></td>
+        <td><input type="text" class="form-control form-control-sm cust-fu-time" value="${esc(data.time || '')}" placeholder="۱۴:۳۰"></td>
+        <td><input type="text" class="form-control form-control-sm cust-fu-action" value="${esc(data.action || '')}" placeholder="چه چیزی باید پیگیری یا ارائه شود؟"></td>
         <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="_custRemoveRow(this)"><i class="bi bi-x"></i></button></td>`;
     document.getElementById('cust-followups-body').appendChild(tr);
 }
@@ -9046,8 +9077,8 @@ async function loadTasks() {
         if (!tbody) return;
         if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">وظیفه‌ای یافت نشد</td></tr>'; return; }
         tbody.innerHTML = data.items.map(t => {
-            const p = TASK_PRIORITY_LABELS[t.priority] || { label: t.priority, cls: 'bg-secondary' };
-            const s = TASK_STATUS_LABELS[t.status] || { label: t.status, cls: 'bg-secondary' };
+            const p = TASK_PRIORITY_LABELS[t.priority] || { label: esc(t.priority), cls: 'bg-secondary' };
+            const s = TASK_STATUS_LABELS[t.status] || { label: esc(t.status), cls: 'bg-secondary' };
             const due = t.due_date ? new Date(t.due_date).toLocaleDateString('fa-IR') : '—';
             return `<tr>
                 <td>${esc(t.title)}</td>
@@ -9156,20 +9187,20 @@ async function loadContacts() {
         if (!tbody) return;
         if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">مخاطبی یافت نشد</td></tr>'; return; }
         tbody.innerHTML = data.items.map(c => {
-            const typeInfo = CONTACT_TYPE_LABELS[c.contact_type] || { label: c.contact_type, cls: 'bg-secondary' };
+            const typeInfo = CONTACT_TYPE_LABELS[c.contact_type] || { label: esc(c.contact_type), cls: 'bg-secondary' };
             const catCls = c.category === 'VIP' ? 'bg-warning text-dark' : c.category === 'cold' ? 'bg-secondary' : 'bg-info text-white';
             const tags = _tagList(c.tags).map(t => `<span class="badge bg-dark me-1">${esc(t)}</span>`).join('');
             return `<tr>
                 <td>${esc(c.name)}</td>
-                <td>${c.phone || '—'}</td>
+                <td>${esc(c.phone) || '—'}</td>
                 <td><span class="badge ${typeInfo.cls}">${typeInfo.label}</span></td>
-                <td><span class="badge ${catCls}">${c.category || 'عادی'}</span></td>
+                <td><span class="badge ${catCls}">${esc(c.category) || 'عادی'}</span></td>
                 <td>${esc(c.city) || '—'}</td>
                 <td>${tags || '—'}</td>
                 <td>
                     <button class="btn btn-xs btn-outline-primary" onclick="openContactModal(${c.id})"><i class="bi bi-pencil"></i></button>
                     <button class="btn btn-xs btn-outline-danger" onclick="deleteContact(${c.id})"><i class="bi bi-trash"></i></button>
-                    <button class="btn btn-xs btn-outline-info" onclick="quickSmsToContact('${c.phone || ''}')"><i class="bi bi-chat-dots"></i></button>
+                    <button class="btn btn-xs btn-outline-info" onclick="quickSmsToContact('${esc(c.phone || '')}')"><i class="bi bi-chat-dots"></i></button>
                 </td>
             </tr>`;
         }).join('');
@@ -9283,8 +9314,8 @@ async function loadDeals() {
         if (!tbody) return;
         if (!data.items?.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">معامله‌ای یافت نشد</td></tr>'; return; }
         tbody.innerHTML = data.items.map(d => {
-            const s = DEAL_STATUS_LABELS[d.status] || { label: d.status, cls: 'bg-secondary' };
-            const dealTypeLabel = { buy: 'خرید', rent: 'اجاره', lease: 'رهن' }[d.deal_type] || d.deal_type;
+            const s = DEAL_STATUS_LABELS[d.status] || { label: esc(d.status), cls: 'bg-secondary' };
+            const dealTypeLabel = { buy: 'خرید', rent: 'اجاره', lease: 'رهن' }[d.deal_type] || esc(d.deal_type);
             const amount = d.amount ? formatNumber(d.amount) + ' ت' : '—';
             const date = d.contract_date ? new Date(d.contract_date).toLocaleDateString('fa-IR') : '—';
             return `<tr>
@@ -9547,9 +9578,9 @@ async function loadSmsLogs() {
             const dt = s.sent_at ? new Date(s.sent_at).toLocaleString('fa-IR') : '—';
             const msg = s.message?.length > 50 ? s.message.slice(0, 50) + '…' : (s.message || '—');
             return `<tr>
-                <td>${s.to_number}</td>
+                <td>${esc(s.to_number)}</td>
                 <td>${providerLabel}</td>
-                <td title="${s.message || ''}">${msg}</td>
+                <td title="${esc(s.message || '')}">${esc(msg)}</td>
                 <td><span class="badge ${statusCls}">${statusLabel}</span></td>
                 <td>${dt}</td>
             </tr>`;
@@ -9818,7 +9849,7 @@ function _matchQueueCard(m) {
         .filter(Boolean).map(esc).join(' · ');
     const wants = [c.desired_district, c.desired_specs, c.budget_max ? 'تا ' + formatPrice(c.budget_max) : '']
         .filter(Boolean).map(esc).join(' · ');
-    const temp = { hot: ['bg-danger', 'داغ'], warm: ['bg-warning text-dark', 'گرم'], cold: ['bg-secondary', 'سرد'] }[c.temperature] || ['bg-secondary', c.temperature || ''];
+    const temp = { hot: ['bg-danger', 'داغ'], warm: ['bg-warning text-dark', 'گرم'], cold: ['bg-secondary', 'سرد'] }[c.temperature] || ['bg-secondary', esc(c.temperature || '')];
     const reasons = (m.reasons || []).map(r => `<span class="mq-reason">${esc(r)}</span>`).join('');
     return `<div class="cq-card mq-card" id="mq-${m.id}">
         <div class="cq-head">
@@ -10501,7 +10532,7 @@ async function sendEventSmsNow() {
     if (!_editingEventId) return;
     const to = _smsRecipients();
     if (!to.length) { showToast('خطا', 'هیچ شماره‌ای برای این قرار وارد نشده است', 'warning'); return; }
-    const who = to.map(r => `${r.role} (${r.phone})`).join('\n');
+    const who = to.map(r => `${r.role} (${esc(r.phone)})`).join('\n');
     if (!await askConfirm({ icon: 'bi-question-lg', title: 'تأیید', okLabel: 'تأیید', body: `پیامک مشخصات این قرار برای ${to.length} نفر ارسال شود؟\n\n${who}` })) return;
 
     const btn = document.getElementById('ev-sms-now-btn');
@@ -10766,7 +10797,7 @@ function _renderTree() {
     const on = id => (_activeBinder ? _activeBinder.id === id : id === null) && !_filingArchived;
     const node = (b, depth) => `
         <div class="ftree-node${on(b.id) ? ' active' : ''} depth-${depth}" data-drop="${b.id}"
-             style="--c:${b.color}" onclick="openBinder(${b.id})" title="${esc(b.name)}${b.description ? ' — ' + esc(b.description) : ''}">
+             style="--c:${esc(b.color)}" onclick="openBinder(${b.id})" title="${esc(b.name)}${b.description ? ' — ' + esc(b.description) : ''}">
             <i class="bi ${depth === 2 ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i>
             <span class="ftree-name">${esc(b.name)}</span>
             <span class="ftree-count">${formatNumber(b.file_count || 0)}</span>
@@ -10786,7 +10817,7 @@ function _renderTree() {
         return;
     }
     wrap.innerHTML = tray + _cabinets.map(cab => `
-        <div class="ftree-cabinet" style="--c:${cab.color}">
+        <div class="ftree-cabinet" style="--c:${esc(cab.color)}">
             <div class="ftree-cabinet-head">
                 <i class="bi ${esc(cab.icon) || 'bi-archive'}"></i>
                 <b>${esc(cab.name)}</b>
@@ -10810,9 +10841,9 @@ function _renderCrumb() {
     else if (!_activeBinder) parts.push('<span class="crumb-here"><i class="bi bi-inbox"></i> فایل‌های بدون زونکن</span>');
     else {
         const cab = _cabinetOf(_activeBinder), parent = _parentOf(_activeBinder);
-        if (cab) parts.push(`<span class="crumb-link" style="--c:${cab.color}"><i class="bi ${esc(cab.icon)}"></i> ${esc(cab.name)}</span>`);
+        if (cab) parts.push(`<span class="crumb-link" style="--c:${esc(cab.color)}"><i class="bi ${esc(cab.icon)}"></i> ${esc(cab.name)}</span>`);
         if (parent) parts.push(`<a href="#" class="crumb-link" onclick="event.preventDefault(); openBinder(${parent.id})"><i class="bi bi-journal-bookmark"></i> ${esc(parent.name)}</a>`);
-        parts.push(`<span class="crumb-here" style="--c:${_activeBinder.color}"><i class="bi ${parent ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i> ${esc(_activeBinder.name)}</span>`);
+        parts.push(`<span class="crumb-here" style="--c:${esc(_activeBinder.color)}"><i class="bi ${parent ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i> ${esc(_activeBinder.name)}</span>`);
     }
     nav.innerHTML = parts.join('<i class="bi bi-chevron-left crumb-sep"></i>');
     // «پوشهٔ جدید» only inside a binder (folders do not nest); «ویرایش» for any open box
@@ -10827,7 +10858,7 @@ function _renderFolders() {
     const folders = (!_filingArchived && _activeBinder && !_activeBinder.parent_id) ? (_activeBinder.folders || []) : [];
     box.classList.toggle('d-none', !folders.length);
     box.innerHTML = folders.map(f => `
-        <div class="folder-chip" data-drop="${f.id}" style="--c:${f.color}" onclick="openBinder(${f.id})" title="باز کردن پوشه">
+        <div class="folder-chip" data-drop="${f.id}" style="--c:${esc(f.color)}" onclick="openBinder(${f.id})" title="باز کردن پوشه">
             <i class="bi bi-folder-fill"></i> ${esc(f.name)} <span class="ftree-count">${formatNumber(f.file_count || 0)}</span>
         </div>`).join('') + (folders.length ? `
         <div class="folder-chip is-own" data-drop="${_activeBinder.id}" title="فایل‌هایی که مستقیم در زونکن‌اند">
@@ -11016,7 +11047,7 @@ function _fileCard(f) {
             ${f.district ? ' • ' + esc(f.district) : (f.city_name ? ' • ' + esc(f.city_name) : '')}
         </div>
         <div class="file-card-price">${price}</div>
-        ${where ? `<div class="file-where" style="--c:${where.color}"><i class="bi ${where.parent_id ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i> ${esc(where.name)}</div>` : ''}
+        ${where ? `<div class="file-where" style="--c:${esc(where.color)}"><i class="bi ${where.parent_id ? 'bi-folder-fill' : 'bi-journal-bookmark-fill'}"></i> ${esc(where.name)}</div>` : ''}
         ${tags ? `<div class="file-tags">${tags}</div>` : ''}
         <div class="file-card-actions" onclick="event.stopPropagation()">
             <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${f.id})" title="جزئیات"><i class="bi bi-eye"></i></button>
@@ -11422,7 +11453,7 @@ async function shareFile(propertyId) {
         const strip = document.getElementById('share-images');
         strip.innerHTML = (card.images || []).map(src =>
             `<div class="lead-photo-thumb" style="width:80px;height:80px;cursor:zoom-in">
-                <img src="${src}" alt="تصویر" onclick="openImageLightbox(this.src)"></div>`).join('');
+                <img src="${safeUrl(src)}" alt="تصویر" onclick="openImageLightbox(this.src)"></div>`).join('');
 
         const enc = encodeURIComponent(_shareText);
         document.getElementById('share-whatsapp').href = `https://wa.me/?text=${enc}`;

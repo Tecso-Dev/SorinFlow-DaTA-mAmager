@@ -439,10 +439,13 @@ class TestThePanelSide:
             assert "if (r.access_token) setToken(r.access_token);" in body
 
     def test_the_avatar_helper_escapes_what_it_shows(self):
-        """full_name is attacker-reachable: a visitor picks it at sign-up."""
+        """full_name is attacker-reachable: a visitor picks it at sign-up.
+        avatar_url goes through safeUrl(), not bare esc(): it is an href/src,
+        so a stored «javascript:» value has to be rejected outright, not just
+        HTML-escaped."""
         js = self._js()
         fn = js[js.index("function avatarHtml"):js.index("// ═══ My profile")]
-        assert "esc(u.avatar_url)" in fn and "esc(name)" in fn and "esc(initial)" in fn
+        assert "safeUrl(u.avatar_url)" in fn and "esc(name)" in fn and "esc(initial)" in fn
 
     def test_the_upload_does_not_force_a_json_content_type(self):
         js = self._js()
