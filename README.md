@@ -431,6 +431,8 @@ API_KEY=
 # Leave disabled until intentionally configured.
 PROXY_ENABLED=false
 PROXY_LIST=
+# Only for a single-operator install: runs started from the panel or a
+# schedule always use their owner's own Divar numbers, never this one.
 DIVAR_PHONE_NUMBER=
 ```
 
@@ -649,7 +651,7 @@ Application settings live in [`app/config.py`](app/config.py). `.env.example` co
 | Database | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL` |
 | Redis | `REDIS_PASSWORD`, `REDIS_URL` |
 | Bootstrap admin | `SUPER_ADMIN_USERNAME`, `SUPER_ADMIN_PASSWORD` |
-| Scraper | `SCRAPER_HEADLESS`, `SCRAPER_DELAY_MIN`, `SCRAPER_DELAY_MAX`, `OTP_WAIT_TIMEOUT`, `DIVAR_PHONE_NUMBER`, `SCRAPE_SCHEDULER` (0 disables the saved-schedule loop) |
+| Scraper | `SCRAPER_HEADLESS`, `SCRAPER_DELAY_MIN`, `SCRAPER_DELAY_MAX`, `OTP_WAIT_TIMEOUT`, `DIVAR_PHONE_NUMBER` (ownerless internal runs only), `SCRAPE_SCHEDULER` (0 disables the saved-schedule loop) |
 | Proxies | `PROXY_ENABLED`, `PROXY_LIST` |
 | SMS | `KAVENEGAR_API_KEY`, `KAVENEGAR_SENDER`, `MELIPAYAMAK_API_KEY`, `MELIPAYAMAK_FROM` |
 | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — or entered on the admin panel's backup card (token stored encrypted); the environment wins when set |
