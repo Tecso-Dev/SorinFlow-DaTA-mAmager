@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel as _BaseModel, Field as _Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_, not_
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, undefer
 import io
 from loguru import logger
 
@@ -1247,7 +1247,10 @@ async def match_similar_properties(
     current_user: User = Depends(get_current_user),
 ):
     """Listings similar to this one — «مشتری این ملک را پسندید، مشابهش را نشان بده»."""
-    prop = (await db.execute(select(Property).where(Property.id == property_id))).scalar_one_or_none()
+    # ai_embedding is deferred; the target's own vector is the other half of
+    # score_similarity's «متن مشابه», so it is loaded with the row
+    prop = (await db.execute(select(Property).where(Property.id == property_id)
+                             .options(undefer(Property.ai_embedding)))).scalar_one_or_none()
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
     items, pending = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)
@@ -1279,7 +1282,8 @@ async def match_similar_for_lead(
     lead = (await db.execute(select(Lead).where(Lead.id == lead_id))).scalar_one_or_none()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    prop = (await db.execute(select(Property).where(Property.id == lead.property_id))).scalar_one_or_none()
+    prop = (await db.execute(select(Property).where(Property.id == lead.property_id)
+                             .options(undefer(Property.ai_embedding)))).scalar_one_or_none()
     if not prop:
         raise HTTPException(status_code=404, detail="Linked property not found")
     items, pending = await similar_to_property(db, prop, limit=limit, use_llm=use_llm)

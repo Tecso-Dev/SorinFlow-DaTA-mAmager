@@ -672,3 +672,24 @@ class TestTheShape:
         md = (ROOT / "app/ai/EMBED.INTEGRATION.md").read_text(encoding="utf-8")
         for needle in ("embed_loop", "0006", "text_similarity", "semantic_candidates", "aiDuplicateBadge", "pgvector"):
             assert needle in md
+
+
+# ── the similar-listings route loads the target's own vector ─────────────────
+
+class TestSimilarRouteReadsBothVectors:
+
+    def test_the_route_gives_text_similarity_its_target_vector(self, maker):
+        """ai_embedding is deferred, so a plain select of the target listing
+        leaves its vector unloaded and score_similarity's «متن مشابه» would
+        silently drop out of /match/property — the candidates' vectors
+        loaded for nothing. The route loads the target's with the row."""
+        from app.api.routes.crm import match_similar_properties
+        a, _b = asyncio.run(_add(maker, [_vec(P(1, "آپارتمان ۱۰۰ متری گلها"), U),
+                                          _vec(P(2, "آپارتمان ۱۰۰ متری گلها نوساز"), V)]))
+
+        async def _go():
+            async with maker() as s:
+                return await match_similar_properties(a, limit=12, use_llm=False, db=s, current_user=None)
+        out = asyncio.run(_go())
+        assert out["items"], "the twin listing must be offered"
+        assert "متن مشابه" in out["items"][0]["reasons"]
