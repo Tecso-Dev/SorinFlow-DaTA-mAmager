@@ -504,3 +504,26 @@ class TestWhoSeesWhat:
         status = office["run"](lambda s: assistant.tool_queue_status(s, office["people"]["mina"]))
         assert status["calls_due"] == len(_seen(office, "mina")["queue"])
         assert mina["queue"] in _seen(office, "mina")["queue"]
+
+
+class TestCalendar:
+
+    def test_the_calendar_overlays_only_the_tasks_the_board_shows(self, office):
+        """The grid draws tasks with a due date beside the appointments —
+        the same tasks the وظایف tab shows the viewer, no more."""
+        from datetime import datetime, timedelta
+        api = office["api"]
+        due = (datetime.now() + timedelta(days=2)).replace(microsecond=0).isoformat()
+        mine = api("POST", "/crm/tasks", "mina", json={"title": "بازدید مینا", "due_date": due}).json()["id"]
+        theirs = api("POST", "/crm/tasks", "reza", json={"title": "بازدید رضا", "due_date": due}).json()["id"]
+        window = {"date_from": datetime.now().date().isoformat(),
+                  "date_to": (datetime.now() + timedelta(days=7)).date().isoformat()}
+
+        def tasks_on(path, who, **params):
+            r = api("GET", path, who, params=params)
+            assert r.status_code == 200, r.text
+            return {i["id"] for i in r.json()["items"] if i["kind"] == "task"}
+        assert tasks_on("/crm/calendar", "mina", **window) & {mine, theirs} == {mine}
+        assert tasks_on("/crm/calendar", "reza", **window) & {mine, theirs} == {theirs}
+        assert tasks_on("/crm/calendar", "boss", **window) & {mine, theirs} == {mine, theirs}
+        assert tasks_on("/crm/calendar/upcoming", "mina", days=7) & {mine, theirs} == {mine}

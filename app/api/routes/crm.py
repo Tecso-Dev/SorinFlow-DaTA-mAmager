@@ -2612,8 +2612,10 @@ def _reminder_as_event(r: Reminder) -> dict:
 async def _calendar_rows(db: AsyncSession, start: datetime, end: datetime,
                          include_overlay: bool = True,
                          event_type: Optional[str] = None,
-                         assigned_to: Optional[str] = None) -> List[dict]:
-    """Every dated row that falls inside [start, end)."""
+                         assigned_to: Optional[str] = None,
+                         user=None) -> List[dict]:
+    """Every dated row that falls inside [start, end) — the tasks among them
+    only as the task board would show them to `user`."""
     q = select(CalendarEvent).where(
         CalendarEvent.start_at >= start, CalendarEvent.start_at < end)
     if event_type:
@@ -2626,8 +2628,8 @@ async def _calendar_rows(db: AsyncSession, start: datetime, end: datetime,
 
     # A type filter is about appointment types, so it hides the overlays too
     if include_overlay and not event_type:
-        tasks = (await db.execute(select(Task).where(
-            Task.due_date >= start, Task.due_date < end))).scalars().all()
+        tasks = (await db.execute(_tasks_visible_to(select(Task).where(
+            Task.due_date >= start, Task.due_date < end), user))).scalars().all()
         rows += [_task_as_event(t) for t in tasks
                  if not assigned_to or t.assigned_to == assigned_to]
         if not assigned_to:
@@ -2647,6 +2649,7 @@ async def list_calendar(
     assigned_to: Optional[str] = None,
     include_overlay: bool = True,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Events (plus tasks/reminders) in a date window — what a grid page needs."""
     try:
@@ -2655,7 +2658,8 @@ async def list_calendar(
         raise HTTPException(status_code=400, detail="بازهٔ تاریخ نامعتبر است")
     if end <= start:
         raise HTTPException(status_code=400, detail="تاریخ پایان باید بعد از شروع باشد")
-    items = await _calendar_rows(db, start, end, include_overlay, event_type, assigned_to)
+    items = await _calendar_rows(db, start, end, include_overlay, event_type, assigned_to,
+                                 user=current_user)
     return {"items": items, "total": len(items)}
 
 
@@ -2664,10 +2668,11 @@ async def upcoming_events(
     days: int = Query(7, ge=1, le=90),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Next appointments from now — the dashboard strip and the «قرارهای پیشِ رو» box."""
     now = datetime.now()
-    rows = await _calendar_rows(db, now, now + timedelta(days=days))
+    rows = await _calendar_rows(db, now, now + timedelta(days=days), user=current_user)
     rows = [r for r in rows if r.get("status") != "canceled"]
     return {"items": rows[:limit], "total": len(rows)}
 
