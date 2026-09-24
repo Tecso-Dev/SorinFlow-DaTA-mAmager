@@ -321,9 +321,15 @@ def score_for_customer(customer, cand: Property) -> Dict[str, Any]:
     # neighbourhood and address and came back None — so a listing in the
     # WRONG district scored as if the district were unknown, and the engine
     # rang a گلها customer about a سعدی flat.
-    known = [o for o in (_text_overlap(customer.desired_district, cand.district),
-                         _text_overlap(customer.desired_district, cand.neighborhood),
-                         _text_overlap(customer.desired_district, cand.address)) if o is not None]
+    # Both sides go through district_key() first — rank_similar and
+    # find_duplicates already do, this did not. Raw _text_overlap on
+    # «خیابان والفجر» vs «خیابان دانشکده» shares the word «خیابان» and scored
+    # a real credit for two different streets; district_key strips exactly
+    # that noise before anything is compared.
+    want = district_key(customer.desired_district)
+    known = [o for o in (_text_overlap(want, district_key(cand.district)),
+                         _text_overlap(want, district_key(cand.neighborhood)),
+                         _text_overlap(want, district_key(cand.address))) if o is not None]
     loc = max(known) if known else None
     district_penalty = 1.0
     if loc is not None:
