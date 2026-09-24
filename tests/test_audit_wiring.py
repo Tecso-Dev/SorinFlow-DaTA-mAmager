@@ -38,7 +38,7 @@ async def _setup():
         customer = Customer(full_name="مشتری آزمایشی ممیزی", mobile1="09140009911")
         db.add_all([root, agent, customer])
         await db.commit()
-        db.add(TelegramLink(user_id=agent.id, telegram_user_id=900_000_000 + agent.id))
+        db.add(TelegramLink(user_id=agent.id, telegram_user_id=900_000_000 + uuid.uuid4().int % 99_999_999))
         await db.commit()
         return root, agent, customer.id
 

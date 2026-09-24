@@ -8,6 +8,7 @@ without `with` never starts it), and with only the two tables this needs
 created directly, not the whole app.
 """
 import os
+import uuid
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -26,7 +27,8 @@ os.environ.setdefault("IMAGES_PATH", "/tmp")
 # test files. Every user and query in this file is scoped under this
 # namespace so its assertions hold regardless of what else lands in the
 # table.
-NS = "auditz9k"
+# per run: the suite's sqlite file outlives a run, and these usernames are unique
+NS = f"audit{uuid.uuid4().hex[:6]}"
 
 
 def _q(params):
