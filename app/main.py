@@ -75,69 +75,6 @@ except Exception as _log_err:  # pragma: no cover - environment dependent
 settings = get_settings()
 
 
-async def _release_orphaned_jobs() -> None:
-    """Close out scrapes this process was running when it last stopped.
-
-    Runs once at startup, before anything can create a new job, so every
-    running/paused row it finds necessarily belongs to a dead process.
-    Failures here must not stop the app booting — a stale row is a cosmetic
-    problem, a pod that will not start is not.
-    """
-    try:
-        from sqlalchemy import update, or_
-        from app.database import async_session_maker
-        from app.models.scraping_job import ScrapingJob
-
-        async with async_session_maker() as db:
-            result = await db.execute(
-                update(ScrapingJob)
-                .where(or_(ScrapingJob.status == "running",
-                           ScrapingJob.status == "paused"))
-                .values(
-                    status="failed",
-                    completed_at=datetime.now(),
-                    finish_reason=(
-                        "سرور در میانهٔ اجرا ری‌استارت شد — این تسک ادامه پیدا "
-                        "نکرد. آگهی‌های ذخیره‌شده سر جایشان هستند؛ با دکمهٔ "
-                        "«ادامه» از همان‌جا دنبال می‌شود"
-                    ),
-                )
-            )
-            await db.commit()
-            if result.rowcount:
-                logger.warning(
-                    f"{result.rowcount} scraping job(s) were left running by a "
-                    "previous process and have been marked failed")
-
-                # Say it in the run log too, not only in finish_reason.
-                #
-                # The گزارش timeline is where anyone looks first when a run
-                # stops, and a job killed by a deploy otherwise ends with its
-                # last ordinary event — which reads as though the scraper gave
-                # up on its own. It did not; the pod it was running in was
-                # replaced. That has now happened twice, both times during an
-                # unrelated deploy.
-                try:
-                    from app.services import job_log
-                    from app.models.scraping_job import ScrapingJob as _SJ
-                    from sqlalchemy import select as _select
-                    rows = (await db.execute(
-                        _select(_SJ.job_id).where(
-                            _SJ.finish_reason.like("سرور در میانهٔ اجرا%"))
-                        .order_by(_SJ.id.desc()).limit(result.rowcount)
-                    )).scalars().all()
-                    for jid in rows:
-                        await job_log.record(
-                            jid, job_log.ERROR,
-                            "سرور در میانهٔ این اسکرپ ری‌استارت شد (استقرار نسخهٔ "
-                            "جدید یا ری‌استارت سرویس) — تسک ادامه پیدا نکرد",
-                            level="error")
-                except Exception as e:
-                    logger.warning(f"could not log the orphan reason: {e}")
-    except Exception as e:
-        logger.warning(f"Could not release orphaned scraping jobs: {e}")
-
-
 # SECRET_KEY values printed in this repository: the default, the examples and
 # the placeholders. Shorter ones are caught by the length check.
 _PUBLISHED_SECRET_KEYS = {
@@ -233,16 +170,12 @@ async def lifespan(app: FastAPI):
         await assert_schema_current()
         logger.info("Database schema is at this image's Alembic head")
 
-    # A scrape lives in an asyncio task inside this process. When the process
-    # goes — a deploy, a restart, the node rebooting — the task dies and the
-    # row it was updating is left saying «running» forever, at whatever
-    # percentage it had reached. It is indistinguishable on screen from a
-    # scrape that is genuinely working, so the panel shows a job that will
-    # never move and offers a stop button that stops nothing.
-    #
-    # Nothing can resume it: the browser, its Divar session and its place in
-    # the feed are all gone. So say what happened and let it be re-run.
-    await _release_orphaned_jobs()
+    # Scrapes run from a Redis queue (app/services/scrape_queue.py) that this
+    # process drains, unless SCRAPE_WORKER_ENABLED says not to. Its sweep
+    # closes out what a dead process left running — which used to happen
+    # here, once, at boot, when nothing else could be running a scrape.
+    from app.services import scrape_queue
+    worker = scrape_queue.start("all") if settings.scrape_worker_enabled else []
 
     # Start reminder background checker
     reminder_task = asyncio.create_task(_reminder_checker())
@@ -322,6 +255,10 @@ async def lifespan(app: FastAPI):
     gcp_task = asyncio.create_task(gcp_pipeline.exporter_loop())
 
     yield
+
+    # Drain first: nothing new is taken and the runs in flight finish.
+    if worker:
+        await scrape_queue.drain(worker)
 
     # Cleanup
     assistant_task.cancel()

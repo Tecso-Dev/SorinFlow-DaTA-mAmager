@@ -76,7 +76,7 @@ async def fire(schedule: ScrapeSchedule, db) -> dict:
     else:
         try:
             job = await _launch_job(ScrapingJobCreate(**config_for_run(schedule.config)),
-                                    None, db, owner, interactive=False)
+                                    db, owner, interactive=False)
             schedule.last_job_id = str(job.job_id)
             result = {"status": "started", "detail": f"اسکرپ {str(job.job_id)[:8]} شروع شد"}
         except HTTPException as e:

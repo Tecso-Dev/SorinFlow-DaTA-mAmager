@@ -1108,28 +1108,32 @@ class TestARunKilledByADeploySaysSo:
     last ordinary event, which reads as though the scraper gave up on its own.
     """
 
+    # The worker's sweep closes these out now (app/services/scrape_queue.py);
+    # the rows themselves are tested on Postgres in test_scrape_queue.py.
+
     def test_orphaned_jobs_get_a_reason(self):
         import inspect
-        from app import main
-        src = inspect.getsource(main._release_orphaned_jobs)
-        assert "سرور در میانهٔ اجرا ری‌استارت شد" in src
-        assert "finish_reason" in src
+        from app.services import scrape_queue as sq
+        assert "سرور در میانهٔ اجرا ری‌استارت شد" in sq.ORPHAN_REASON
+        assert "finish_reason=ORPHAN_REASON" in inspect.getsource(sq.release_orphans)
 
     def test_the_reason_also_reaches_the_run_log(self):
         import inspect
-        from app import main
-        src = inspect.getsource(main._release_orphaned_jobs)
-        assert "job_log.record" in src
-        assert "job_log.ERROR" in src
+        from app.services import scrape_queue as sq
+        src = inspect.getsource(sq.release_orphans)
+        assert "job_log.record" in src and "job_log.ERROR" in src
+        assert "ری‌استارت" in sq.ORPHAN_LOG
 
-    def test_logging_the_reason_cannot_stop_the_pod_booting(self):
-        """A stale row is cosmetic; a pod that will not start is not — the
-        function's own docstring says so."""
-        import inspect
-        from app import main
-        src = inspect.getsource(main._release_orphaned_jobs)
-        i = src.index("job_log.record")
-        assert "except Exception" in src[i:i + 500]
+    async def test_logging_the_reason_cannot_stop_the_sweep(self, monkeypatch):
+        """A stale row is cosmetic; a worker that stops sweeping is not. The
+        run log swallows its own failures."""
+        import uuid
+        from app.services import job_log
+
+        def _broken():
+            raise RuntimeError("database is down")
+        monkeypatch.setattr(job_log, "async_session_maker", _broken)
+        assert await job_log.record(uuid.uuid4(), job_log.ERROR, "x", level="error") is False
 
 
 class TestWeDoNotForgeHeadersChromiumComputesCorrectly:

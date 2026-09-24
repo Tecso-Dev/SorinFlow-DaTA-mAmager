@@ -50,11 +50,15 @@ def client():
     if not str(db.engine.url).startswith("postgresql"):
         pytest.skip("needs Postgres — see test_auth_roles.py", allow_module_level=True)
     cfg = get_settings()
-    saved = (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler, cfg.match_engine)
+    saved = (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler, cfg.match_engine,
+             cfg.scrape_worker_enabled)
     cfg.environment, cfg.api_key = "test", ""
     cfg.cookies_path = "/tmp/sorinflow-test-cookies"
     cfg.scrape_scheduler = False
     cfg.match_engine = False
+    # These tests make running and pending rows of their own to look at; a
+    # scrape worker in the app would take them for real work.
+    cfg.scrape_worker_enabled = False
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
 
     async def _get_redis():
@@ -66,7 +70,10 @@ def client():
     import app.main as m
     with TestClient(m.app) as c:
         yield c
-    (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler, cfg.match_engine) = saved
+    # Left pending, a later module's app — worker on — would take them for work.
+    _finish_all_runs()
+    (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler, cfg.match_engine,
+     cfg.scrape_worker_enabled) = saved
 
 
 def _engine():
@@ -793,27 +800,24 @@ class TestTheReviewThroughTheApp:
         from app.api.routes.scraper import _launch_job
         from app.schemas import ScrapingJobCreate
         from app.models.user import User
+        from app.models.scraping_job import ScrapingJob
+        from app.services import scrape_queue
         from sqlalchemy import select
-
-        class _BG:
-            def __init__(self):
-                self.calls = []
-
-            def add_task(self, fn, *a):
-                self.calls.append(a)
 
         async def _go(interactive):
             eng, maker = _engine()
             try:
                 async with maker() as s:
                     jan = (await s.execute(select(User).where(User.id == people["jan"]))).scalar_one()
-                    bg = _BG()
                     cfg = ScrapingJobCreate(city="urmia", category="rent-apartment", divar_phone=JAN_OFF)
                     try:
-                        resp = await _launch_job(cfg, bg, s, jan, interactive=interactive)
+                        resp = await _launch_job(cfg, s, jan, interactive=interactive)
                     except HTTPException as e:
                         return e.status_code, None, None
-                    return 200, resp.divar_phone, bg.calls[0][6]
+                    # what the worker will run it with: the row's saved config
+                    row = (await s.execute(select(ScrapingJob).where(
+                        ScrapingJob.job_id == resp.job_id))).scalar_one()
+                    return 200, resp.divar_phone, scrape_queue.job_kwargs(row)["divar_phone"]
             finally:
                 await eng.dispose()
         _finish_all_runs()

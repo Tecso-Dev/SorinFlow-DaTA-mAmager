@@ -97,10 +97,10 @@ class TestFiring:
     def test_it_launches_as_the_owner_through_the_real_launcher(self, monkeypatch):
         seen = {}
 
-        async def fake_launch(job_config, background_tasks, db, current_user, resumed_from=None,
+        async def fake_launch(job_config, db, current_user, resumed_from=None,
                               interactive=True):
             seen["cfg"] = job_config.model_dump(exclude_none=True)
-            seen["bg"] = background_tasks
+            seen["db"] = db
             seen["user"] = current_user
             # a schedule replays a saved form: nobody is there to pick again
             seen["interactive"] = interactive
@@ -113,7 +113,7 @@ class TestFiring:
         res = asyncio.run(sch.fire(s, db))
         assert res["status"] == "started"
         assert seen["user"] is owner, "a schedule must run as its owner — their pool, their permissions"
-        assert seen["bg"] is None, "no request, no BackgroundTasks"
+        assert seen["db"] is db, "the schedule's own session, as a request would pass its own"
         assert seen["interactive"] is False, "a number switched off since must fall back, not fail daily"
         assert seen["cfg"]["max_age_hours"] == 24 and seen["cfg"]["city"] == "urmia"
         assert s.last_job_id.startswith("1a5e5004") and s.last_result["status"] == "started"
@@ -147,10 +147,14 @@ class TestFiring:
 
 class TestItIsWiredIn:
 
-    def test_the_launcher_accepts_no_request(self):
-        src = Path("app/api/routes/scraper.py").read_text(encoding="utf-8")
-        assert "background_tasks: Optional[BackgroundTasks]" in src
-        assert "asyncio.create_task(fn(*a))" in src
+    def test_the_launcher_queues_whoever_calls_it(self):
+        """A request and a schedule start a run the same way: the row, then
+        its id on the queue a worker drains (tested in test_scrape_queue.py)."""
+        import inspect
+        import app.api.routes.scraper as routes
+        src = inspect.getsource(routes._launch_job)
+        assert "await scrape_queue.enqueue(job_id)" in src
+        assert "background_tasks" not in inspect.signature(routes._launch_job).parameters
 
     def test_the_table_is_created_at_startup_and_known_to_the_restore(self):
         assert "scrape_schedule" in Path("app/database.py").read_text(encoding="utf-8")
@@ -265,7 +269,7 @@ class TestThroughTheApp:
         # itself is replaced so no browser starts here
         seen = {}
 
-        async def fake_launch(job_config, background_tasks, db, current_user, resumed_from=None,
+        async def fake_launch(job_config, db, current_user, resumed_from=None,
                               interactive=True):
             seen["user"] = current_user.username
             seen["cfg"] = job_config.model_dump(exclude_none=True)

@@ -77,64 +77,65 @@ class TestTheRunSaysWhenNumbersAreMissing:
 
 
 class TestRestartsDoNotLeaveGhostJobs:
-    def test_startup_releases_them(self):
-        from app import main
-        assert hasattr(main, "_release_orphaned_jobs")
+    """A run's process can go away mid-scrape — a deploy, a crash. The row
+    it was updating must not say «running» forever. This used to happen once
+    at boot, which was only right while one process ran everything; now the
+    worker's sweep does it every minute, for runs whose claim is gone. The
+    rows themselves are tested on Postgres in test_scrape_queue.py."""
 
-    def test_it_runs_at_startup(self):
-        from app import main
-        src = inspect.getsource(main.lifespan)
-        assert "_release_orphaned_jobs" in src
+    def test_the_worker_releases_them(self):
+        from app.services import scrape_queue as sq
+        assert inspect.iscoroutinefunction(sq.release_orphans)
+        assert "release_orphans(orphans)" in inspect.getsource(sq.sweep)
 
-    def test_it_runs_after_init_db(self):
-        """The tables have to exist before it can update them."""
-        from app import main
-        src = inspect.getsource(main.lifespan)
-        assert src.index("init_db()") < src.index("_release_orphaned_jobs()")
+    def test_it_runs_as_soon_as_the_worker_starts(self):
+        """The sweep's first pass is its first statement after the beat, not
+        after a minute's sleep."""
+        from app.services import scrape_queue as sq
+        src = inspect.getsource(sq.sweep_loop)
+        assert src.index("await sweep()") < src.index("await asyncio.sleep(SWEEP_EVERY)")
 
     def test_it_covers_paused_too(self):
-        """A job paused waiting for a code is just as dead after a restart."""
-        from app import main
-        src = inspect.getsource(main._release_orphaned_jobs)
+        """A job paused waiting for a code is just as dead."""
+        from app.services import scrape_queue as sq
+        src = inspect.getsource(sq.release_orphans)
         assert '"paused"' in src and '"running"' in src
 
     def test_it_explains_itself_rather_than_vanishing(self):
-        from app import main
-        src = inspect.getsource(main._release_orphaned_jobs)
-        assert "finish_reason" in src
+        from app.services import scrape_queue as sq
+        assert "finish_reason=ORPHAN_REASON" in inspect.getsource(sq.release_orphans)
 
-    def test_it_cannot_stop_the_app_booting(self):
-        """A cosmetic row is not worth a pod that will not start."""
-        from app import main
-        src = inspect.getsource(main._release_orphaned_jobs)
-        assert "except Exception" in src
+    async def test_a_failing_sweep_cannot_stop_the_worker(self, monkeypatch):
+        """A cosmetic row is not worth a worker that stops sweeping."""
+        import asyncio
+        from app.services import scrape_queue as sq
+        calls = []
+
+        async def _broken():
+            calls.append(1)
+            raise RuntimeError("database is down")
+        monkeypatch.setattr(sq, "sweep", _broken)
+        monkeypatch.setattr(sq, "SWEEP_EVERY", 0.01)
+        task = asyncio.create_task(sq.sweep_loop())
+        await asyncio.sleep(0.1)
+        assert not task.done() and len(calls) > 1
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     def test_it_is_a_single_bulk_update(self):
-        """Row-by-row at boot is how a rollout times out."""
-        from app import main
-        src = inspect.getsource(main._release_orphaned_jobs)
+        """Row by row is how a sweep of many turns into a long one."""
+        from app.services import scrape_queue as sq
+        src = inspect.getsource(sq.release_orphans)
         assert "update(ScrapingJob)" in src
-        assert "for " not in src.split("async with")[1][:400]
+        assert "for " not in src[src.index("async with"):src.index("await db.commit()")]
 
 
 class TestTheStartupHookIsWiredCorrectly:
-    """It was inserted between @asynccontextmanager and lifespan, so the
-    decorator landed on it instead: awaiting it raised TypeError, and the
-    app's lifespan lost its decorator entirely. The counts in a test run
+    """A helper was once inserted between @asynccontextmanager and lifespan,
+    so the decorator landed on it instead: awaiting it raised TypeError, and
+    the app's lifespan lost its decorator entirely. The counts in a test run
     happened to match the usual baseline, which is why comparing numbers
     rather than reasons missed it."""
-
-    def test_the_helper_carries_no_decorator(self):
-        import ast
-        import app.main as m
-        tree = ast.parse(open(m.__file__, encoding="utf-8-sig").read())
-        for node in tree.body:
-            if getattr(node, "name", None) == "_release_orphaned_jobs":
-                assert node.decorator_list == [], (
-                    "a decorator here means it was inserted above the wrong def"
-                )
-                return
-        pytest.fail("_release_orphaned_jobs is not a module-level function")
 
     def test_lifespan_still_has_its_decorator(self):
         import ast
@@ -147,8 +148,3 @@ class TestTheStartupHookIsWiredCorrectly:
                 return
         pytest.fail("lifespan is not a module-level function")
 
-    def test_the_helper_is_actually_awaitable(self):
-        """The failure mode was a coroutine that could not be awaited."""
-        import inspect
-        import app.main as m
-        assert inspect.iscoroutinefunction(m._release_orphaned_jobs)
