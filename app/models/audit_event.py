@@ -19,11 +19,18 @@ from sqlalchemy.sql import func
 
 from app.database import Base
 
+# BigInteger everywhere it is actually deployed (Postgres: BIGSERIAL). Tests
+# also run this model against sqlite, whose autoincrement-by-rowid only
+# triggers for a column declared exactly INTEGER — a bare BigInteger PK
+# there silently inserts NULL ids. with_variant keeps Postgres unchanged and
+# gives sqlite the one type it will autoincrement.
+_ID = BigInteger().with_variant(Integer(), "sqlite")
+
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 
-    id = Column(BigInteger, primary_key=True)
+    id = Column(_ID, primary_key=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     actor_user_id = Column(Integer, nullable=True)
