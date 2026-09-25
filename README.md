@@ -32,13 +32,13 @@ SorinFlow is a FastAPI application for collecting real-estate listings from Diva
 - **CRM:** the **call queue** («تماس‌های امروز» — the leads whose turn it is, one tap per outcome, retries that come back on their own, calls per consultant), leads, contacts, structured customer profiles, tasks, deals, notes, reminders, calendar, SMS logs, lead notifications, reporting, and daily performance assessment (DPA).
 - **Dashboard security:** username/password JWT login, optional TOTP or emailed second factor, self-service password reset, a **profile page** (avatar, headline, bio, links, presence; email and phone verification by code; password change that signs other devices out via a token version), four roles (`root`, `super_admin`, `admin`, `visitor` — the first three reach the dashboard, the fourth is portal-only), a 12-key permission catalogue, and super-admin account management including «request verification» nudges.
 - **The panel on a phone:** a PWA (manifest, service worker that caches the shell and never the API, install hint), every asset served from the site rather than a CDN, thumb-sized controls, and browser errors reported home to the monitoring page with the browser's name.
-- **Operations:** PostgreSQL, Redis, Kubernetes (k3s) manifests, a GitHub Actions workflow that deploys through a self-hosted runner and rolls back on its own when the new pod never comes up, `/ready` with real database checks, nightly JSON backups sealed and shipped to Telegram, and a runbook that rebuilds the server from a backup bundle.
+- **Operations:** PostgreSQL, Redis, Kubernetes (k3s, kustomize) manifests split into `api`/`worker`/`scheduler` roles behind a Redis-backed scrape queue, a migrate Job that runs schema changes before any pod rolls, NetworkPolicies and non-root pods, a GitHub Actions pipeline (lint, tests, Playwright+axe E2E, manifest validation) that deploys through a self-hosted runner and rolls back on its own when the new pod never comes up, a manually-triggered staging deploy, `/ready` with real database checks, nightly JSON backups sealed and shipped to Telegram, and a runbook that rebuilds the server from a backup bundle.
 
 ## Project brain
 
 Read this before changing anything. Where this section and the rest of the README disagree, this section is the one that was checked against the code.
 
-**What it is.** One FastAPI process that scrapes Divar listings with Playwright, stores them as a property inventory, and works them through a CRM — plus a public customer portal bolted on the side. Persian/RTL throughout. It runs live at `sorinflow.com` on a single-node k3s cluster on an Iranian VPS behind Traefik. `main` is the only branch and pushing to it deploys to production, so the pytest gate in CI is the only pre-production environment that exists.
+**What it is.** One FastAPI codebase that scrapes Divar listings with Playwright, stores them as a property inventory, and works them through a CRM — plus a public customer portal bolted on the side. Persian/RTL throughout. It runs live at `sorinflow.com` on a single-node k3s cluster on an Iranian VPS behind Traefik, as three role-differentiated Deployments of the same image (`SORINFLOW_ROLE=api|worker|scheduler` — see below). `main` is the only branch and pushing to it deploys straight to production; a manually-triggered `staging.yml` can put the same image in front of a separate `sorinflow-staging` namespace first, and CI — lint, the pytest suite against real Postgres/Redis, the Playwright+axe E2E suite, and a kustomize/kubeconform manifest check — gates every push and pull request either way.
 
 **Moving parts.**
 
@@ -63,9 +63,9 @@ Read this before changing anything. Where this section and the rest of the READM
 
 Ordering is the tuple; idempotence is each step's own job. A new schema change is an Alembic revision, not a new step: change the model, `alembic revision --autogenerate -m "add x"`, read the file, commit it — the next deploy applies it under the same `lock_timeout` guard. `alembic check` must stay clean (`tests/test_pg_migration.py` enforces it on Postgres), which is why the models declare exactly the constraints the steps create (the partial `ix_users_phone_unique`, `fk_cookies_owner`, `ix_crm_sms_logs_campaign_sent`).
 
-**Phase 3: split into three roles, no longer one pod.** `SORINFLOW_ROLE` picks `api` (`k8s/base/backend.yaml`, 2 replicas, `RollingUpdate`, data-pvc mounted read-only, no migrations on boot), `worker` (`k8s/base/worker.yaml`, 1 replica, `RollingUpdate` with a 2-hour drain, data-pvc read-write, the only role that runs Chromium) or `scheduler` (`k8s/base/scheduler.yaml`, 1 replica, still `strategy: Recreate`, data-pvc read-write) — see each file's own comments for why. Three PVCs, all RWO (`k8s/base/data-pvc.yaml`, `postgres.yaml`, `redis.yaml`). A migrate Job runs the schema forward before any of the three roll out, so the single-pod deadlock this paragraph used to describe (two pods racing the same migration lock) no longer applies to `api`; `scheduler` keeps `Recreate` for a different reason — see its own comment. Whether the in-process state this section goes on to describe (running scrape tasks, Divar login sessions, OTP suppression) still lives exactly where the rest of this section says is a phase 3 runtime-stream question, not a k8s one — verify it against whichever role actually holds that code before trusting the rest of this paragraph. Comments in `app/database.py:740-742` and `SECRETS.md:245-248` still assume the old, single-pod behaviour; they were already wrong before this phase.
+**Phase 3: split into three roles, no longer one pod.** `SORINFLOW_ROLE` picks `api` (`k8s/base/backend.yaml`, 2 replicas, `RollingUpdate`, data-pvc mounted read-only, no migrations on boot), `worker` (`k8s/base/worker.yaml`, 1 replica, `RollingUpdate` with a 2-hour drain, data-pvc read-write, the only role that runs Chromium and the only one the Ingress sends `/api/auth/login|verify|refresh` to) or `scheduler` (`k8s/base/scheduler.yaml`, 1 replica, still `strategy: Recreate`, data-pvc read-write) — see each file's own comments for why. Three PVCs, all RWO (`k8s/base/data-pvc.yaml`, `postgres.yaml`, `redis.yaml`). A migrate Job runs the schema forward before any of the three roll out, so the single-pod deadlock this paragraph used to describe (two pods racing the same migration lock) no longer applies to `api`; `scheduler` keeps `Recreate` for a different reason — see its own comment. The in-process state the next paragraph used to describe moved almost entirely to Redis; the one piece that structurally cannot (a live Chromium handle cannot be handed to another process) is exactly why the Ingress pins those three login routes to `worker` — see `auth_instances`' own comment in `app/api/routes/auth.py`. Comments in `app/database.py:740-742` and `SECRETS.md:245-248` still assume the old, single-pod behaviour; they were already wrong before this phase and remain so.
 
-State that lives in the process, not the database, and therefore dies with the pod: running scrape tasks, Divar login sessions (`auth_instances`, `app/api/routes/auth.py:31`), and OTP suppression. A scrape runs in whichever process has the worker role: `_launch_job` writes the row and queues its id in Redis, a worker claims it (`sf:scrape:running:{job_id}`, TTL 90 s, refreshed while it runs) and runs it. The worker's sweep fails a `running` or `paused` row only when nobody holds its claim, so it is safe while other processes live (`app/services/scrape_queue.py`).
+State that used to live only in the process, and die with the pod, mostly moved to Redis in Phase 3: every OTP state machine (`app/scraper/otp_store.py` — code requests, the forwarder's early code, the login code, the cancel window, no-answer counts, number-switch requests, the identity wall; all TTL'd, a wait is a `BLPOP` so it wakes the instant a code lands, and code submission is atomic), the Divar-login registry (`sf:divar-login:{digits}` in Redis — who started a login and when; `app/api/routes/auth.py`), and the cross-process browser-profile lock (a token plus automatic renewal). What is still genuinely process-bound: a live Chromium handle for an in-flight Divar login (`auth_instances`, `app/api/routes/auth.py:31`) — one process cannot hand another its browser — and a running scrape's own asyncio task and browser session. Neither is fragile the way it sounds: `_launch_job` writes the row (`pending`) and pushes its id onto a Redis list; whichever process holds the worker role claims it (`sf:scrape:running:{job_id}`, TTL 90 s, refreshed every 30 s while it runs) and runs it; the sweep (`app/services/scrape_queue.py`, every 60 s) fails a `running`/`paused` row only once nobody holds its claim, so it is safe while any worker lives; and a `SIGTERM`'d worker drains — finishes what it holds, takes nothing new — instead of dropping it.
 
 **Verification channel semantics.** A signup code is delivered by whichever channel is available — `_deliver` prefers SMS only when Kavenegar has a key, otherwise email goes first (`app/services/verification.py:197-213`). With no provider credentials, that means **every code today travels by email**. The channel is written to Redis beside the code (`:143`) and returned by `verify_code` (`:216-260`), and only that channel is credited: `phone_verified` for SMS, `email_verified` for email (`app/api/routes/public_auth.py:279-282`). They are separate columns (`app/models/user.py:36-41`) because collapsing them puts a "verified phone" tick next to a number nobody has ever answered — and `phone_verified` is what the SMS marketing audience reads as consent (`app/api/routes/sms.py:252-256`). Those SMS audiences therefore read zero, which is the honest count.
 
@@ -86,7 +86,7 @@ State that lives in the process, not the database, and therefore dies with the p
 - **CI applies only two manifests** — `04-backend.yaml` and `05-ingress.yaml`. Namespace, Postgres, Redis and the Traefik ACME config drift silently.
 - **A Secret key with no matching `env` entry in `04-backend.yaml` never reaches the pod**, so `kubectl patch secret` for it is a silent no-op. `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL` and `SUPER_ADMIN_PASSWORD` are wired now; the `GCP_*` block is still in that state. The LLM trio is managed as GitHub Actions secrets — the deploy copies them into the cluster (`SECRETS.md` §2d).
 - **The nightly backup is every table** — password hashes, TOTP secrets, live Divar session JSON included — so the copy that leaves the server is sealed under a key derived from `SECRET_KEY` before it goes to Telegram (`app/services/backup_service.py`, `seal()`); the local copy stays plain on the volume that already holds the data. `scripts/restore_backup.py` imports every model module and opens the sealed `.enc` copy under the same key. Telegram credentials are entered on the admin panel (token encrypted) or via `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, environment first.
-- **Tests skip quietly on SQLite.** A local run is 739 passed / 31 skipped; the 22 skipped in `tests/test_auth_roles.py` are the behavioural role and permission attacks. CI supplies real Postgres and Redis. House rule, stated by the owner: leave a test that fails without the fix, and revert it once to watch it go red.
+- **Tests skip quietly on SQLite.** A default local run (no `DATABASE_URL`, so SQLite) is 3,407 passed / 238 skipped — most of the auth, Divar-number-ownership and migration suites need real Postgres. Point `DATABASE_URL` and `PG_TEST_URL` at Postgres and Redis at a real Redis, and the only skips left on this codebase's own development Mac are 6 `test_fingerprint.py` cases, because Playwright 1.41's Chromium build does not launch on this macOS version — they, and the Playwright+axe E2E suite, run in CI (Ubuntu) instead. CI runs everything against real Postgres and Redis on every push and pull request, plus lint, coverage, and the E2E and kustomize/kubeconform gates. House rule, stated by the owner: leave a test that fails without the fix, and revert it once to watch it go red.
 - **Untested surface is the request layer.** No test imports any route module; `app/api/routes/crm.py` alone is 2,177 lines. 28 handlers take a raw `dict` body with no schema.
 - The panel loads nine assets from jsDelivr and code.jquery.com with no fallback, while byte-real local copies of four of them sit unreferenced in `frontend/`. On an Iranian network that is the panel's most exposed dependency.
 - **The scraper's depth comes from one replayed request.** `_collect_from_browser_dom` scrolls to a cap of 200; everything past that is `_fetch_listings_direct_api` replaying the browser's own `/postlist/w/search` POST with an advanced cursor. That replay was gated on a cursor it could only obtain by first succeeding, so it produced nothing in any run until 2026-09-02 and every scrape was silently capped at whatever the scroll reached. The legacy `/v8/web-search` GET it fell through to is dead — it answers HTTP 200 with a `BLOCKING_VIEW` «نیاز به بروزرسانی» and zero listings — and is deleted. If depth breaks again, look at the cursor first: `self._dom_cursor`, captured in the response listener, seeds the API phase.
@@ -127,17 +127,19 @@ flowchart LR
     API --> Integrations
 ```
 
+This is the single-process shape Compose and local development run (`SORINFLOW_ROLE=all`). Production runs the same image three times instead — `api`, `worker` and `scheduler` — behind Traefik and Kubernetes NetworkPolicies, with Redis promoted from a stats cache to shared state that survives a pod restart: the scrape queue, OTP prompts, the Divar-login registry, and the browser-profile lock. See [System design map](#system-design-map) for the request path and [Operations → Kubernetes deployment](#kubernetes-deployment) for how the three roles are rolled out.
+
 ### Scrape-to-CRM lifecycle
 
 1. A user signs in to SorinFlow and starts a job through `POST /api/scraper/start`.
-2. FastAPI validates the city/category, enforces a maximum of three database-tracked running jobs, creates a job record, and starts an in-process background task.
-3. `DivarScraper` restores the selected Divar session, discovers listings through browser traffic and page markup, and opens each detail page.
+2. FastAPI validates the city/category, enforces a maximum of three concurrent running jobs, creates a job record (`status = pending`), and pushes its id onto a Redis list (`app/services/scrape_queue.py`).
+3. Whichever process holds the `worker` role (`SORINFLOW_ROLE=worker`, or `all` locally) pops the id, claims it in Redis (TTL 90 s, refreshed while the run lasts) and hands it to `DivarScraper`, which restores the selected Divar session, discovers listings through browser traffic and page markup, and opens each detail page.
 4. Parsers normalize Persian/Arabic digits and extract pricing, location, area, rooms, features, amenities, advertiser details, publication time, phone number, and images.
 5. Filters and validation run before the property is inserted or updated in PostgreSQL. Images are converted to JPEG and saved under `data/images/`.
 6. Every newly inserted property creates one CRM lead. Configured Telegram and SMTP notifications are attempted without failing the scrape if delivery is unavailable.
 7. The dashboard polls job progress, pending OTP requests, properties, CRM records, and cached statistics.
 
-Redis is used for dashboard/public-stat caching and health checks. It is **not** a Celery broker, and scrape jobs are not durable queue jobs.
+Redis is used for dashboard/public-stat caching and health checks, same as before Phase 3 — but it is now also the scrape queue itself, the OTP store, the Divar-login registry and the browser-profile lock. It is still **not** Celery: there is one plain list plus a claim key per running job, not a task broker, and Postgres stays the source of truth — a queue entry Redis loses is rebuilt from `scraping_jobs` rows by a sweep that runs at start and every 60 s (`scrape_queue.sweep()`).
 
 ### Core data model
 
@@ -175,7 +177,7 @@ Starlette runs the **last-registered** middleware first, so the registration ord
 flowchart TD
     B["Browser"] --> TR["Traefik ingress<br/>k8s/base/ingress.yaml"]
     TR --> ST["StaticFiles mounts<br/>/dashboard, /images<br/>main.py:885"]
-    TR --> MET
+    TR -->|"most paths: api Service<br/>3 Divar-login paths: worker Service"| MET
 
     MET["1. metrics_middleware<br/>main.py:464"] --> LOG
     MET -->|"path is /metrics"| MTOK["token check<br/>404 if METRICS_TOKEN unset<br/>401 if wrong"]
@@ -204,22 +206,24 @@ flowchart TD
     RD --> RESP
 ```
 
-Two consequences worth knowing before you touch the chain:
+Three consequences worth knowing before you touch the chain:
 
 - **Any** `Authorization: Bearer …` header satisfies `api_key_middleware` (`main.py:349`), so `API_KEY` gates unauthenticated non-public paths only — it is not a second factor for logged-in callers.
 - `maintenance_middleware` is the innermost of the four, and it fails **open** if its own check raises (`main.py:296-299`). A browser hitting `/dashboard` sends no bearer header, so the practical way in during a closure is the `/maintenance-access` bypass cookie, not the JWT branch.
+- Every request runs the identical chain above, but Traefik does not always hand it to the same pod: `/api/auth/login`, `/api/auth/verify` and `/api/auth/refresh` (`Exact` match, `k8s/base/ingress.yaml`) go to the `worker` Service, every other path to `api` — because only `worker` holds the live Chromium session a Divar login needs (`auth_instances` in `app/api/routes/auth.py`). Local dev and the test suite never see this split: `SORINFLOW_ROLE=all` runs every path in the one process.
 
 ### 2. Scrape to CRM lifecycle
 
 ```mermaid
 flowchart TD
-    UI["Panel: scraper section<br/>frontend/js/app.js"] --> START["POST /api/scraper/start<br/>routes/scraper.py:198"]
-    START --> JOB[("scraping_jobs row<br/>status = running")]
-    START --> TASK["asyncio task in the web process<br/>NOT a queue"]
+    UI["Panel: scraper section<br/>frontend/js/app.js"] --> START["POST /api/scraper/start<br/>routes/scraper.py: _launch_job"]
+    START --> JOB[("scraping_jobs row<br/>status = pending")]
+    START --> QUEUE["Redis list sf:scrape:queue<br/>services/scrape_queue.py"]
 
-    TASK --> ACC["Account pick: fewest reveals first<br/>scraper/divar_scraper.py:173"]
+    QUEUE --> CLAIM["worker role: BRPOP + claim<br/>sf:scrape:running:{job_id}<br/>TTL 90s, refreshed every 30s"]
+    CLAIM --> ACC["Account pick: fewest reveals first<br/>scraper/divar_scraper.py:173"]
     ACC --> SESS["Restore Divar session<br/>scraper/auth.py + cookies table"]
-    SESS -->|"session dead"| OTP["OTP prompt to the panel<br/>Redis-backed store<br/>services/verification.py"]
+    SESS -->|"session dead"| OTP["OTP prompt to the panel<br/>otp_store.py, all state in Redis"]
 
     SESS --> LOOP["Listing loop<br/>stealth delays: scraper/stealth.py:46"]
     LOOP --> PRE{"Pre-contact filter<br/>divar_scraper.py:1383"}
@@ -241,10 +245,10 @@ flowchart TD
     P --> MATCH["services/match_service.py<br/>customer criteria matching"]
     P --> FILE["Filing: binder_id (binder or folder), tags,<br/>is_private on the property row<br/>routes/filing.py"]
 
-    JOB --> ORPH["Startup sweep marks<br/>orphaned running jobs failed<br/>main.py:70, called at :147"]
+    JOB --> SWEEP["scrape_queue.sweep(), every 60s:<br/>orphaned running/paused rows failed;<br/>lost pending rows requeued<br/>(or failed past 24h stale)"]
 ```
 
-Historically the scrape lived inside the same web process that answered HTTP requests, which is why `strategy: Recreate` plus the orphan sweep existed together: a deploy killed the task, and without the sweep the row said «در حال اجرا» forever. Phase 3 gives the scrape its own `worker` role (`k8s/base/worker.yaml`) with a 2-hour drain on `RollingUpdate` instead — check where the orphan sweep and `auth_instances` actually run now before assuming this paragraph's reasoning still applies unchanged.
+Historically the scrape lived inside the same web process that answered HTTP requests, which is why `strategy: Recreate` plus a boot-time-only orphan sweep existed together: a deploy killed the task, and without the sweep the row said «در حال اجرا» forever. Phase 3 gives the scrape its own `worker` role (`k8s/base/worker.yaml`, `RollingUpdate` with a 2-hour drain — a rollout lets `worker` finish what it is running instead of killing it) and replaces the boot-time sweep with a continuous one: `scrape_queue.sweep()` runs at start and every 60 s, closes out a `running`/`paused` row only once nobody holds its Redis claim (safe the whole time other workers live, not just at boot), and re-pushes a queue entry that Redis itself lost — failing it instead, past 24 h, if nothing has ever claimed it. `auth_instances` (the live Divar-login browser) still lives in whichever process is running it — now always `worker`, since the Ingress pins those three routes there.
 
 ### 3. Sign-up and verification
 
@@ -369,9 +373,10 @@ Rules:
 | Media/data | Pillow, OpenCV, NumPy, openpyxl |
 | Authentication | JWT/HS256, bcrypt, optional TOTP via PyOTP |
 | Frontend | Static HTML, CSS, and JavaScript; Bootstrap RTL and Chart.js |
-| Operations | Docker Compose, Nginx, k3s/Kubernetes, GitHub Actions |
+| Operations | Docker Compose (local), k3s/Kubernetes with kustomize (`k8s/base` + overlays) in production, Traefik ingress, GitHub Actions |
 | Dependencies | `requirements.txt` in, hash-locked `requirements.lock` / `requirements-dev.lock` out (uv, universal); Docker and CI install with `--require-hashes`, CI runs `pip-audit` |
-| Tests | pytest and pytest-asyncio; `node --test` for the Telegram relay Worker and the panel's escaping helpers |
+| Lint / code quality | ruff, mypy (non-strict), eslint — all three gated only on changed lines (`scripts/lint_new_code.py`); pre-commit runs the same gate plus yaml/merge-conflict/private-key checks |
+| Tests | pytest, pytest-asyncio and pytest-cov; `node --test` for the Telegram relay Worker and the panel's escaping helpers; Playwright 1.41 + `@axe-core/playwright` for the panel E2E suite (`tests/e2e/`, its own Node project); kubeconform + shellcheck for the Kubernetes manifests and deploy scripts |
 
 The Docker image (the Playwright base) runs Python 3.10, which is why the locks are compiled for 3.10; development uses 3.11 from the same lock. Regenerate a lock after editing `requirements.txt`:
 
@@ -539,9 +544,10 @@ refused, so the second factor cannot be skipped.
   when it would actually be used.
 - The client address is real and unforgeable: Traefik's Service uses
   `externalTrafficPolicy: Local`, uvicorn trusts `X-Forwarded-For` only from the
-  pod network (`10.42.0.0/16`), and the backend is a `ClusterIP` reachable only
-  through Traefik. `GET /api/users/me/ip` (shown on the profile) says what the
-  server sees.
+  pod network (`10.42.0.0/16`), and `api` and `worker` are both `ClusterIP`,
+  reachable only through Traefik and (since Phase 3) only from it — a
+  NetworkPolicy refuses any other pod's attempt to call them directly. `GET
+  /api/users/me/ip` (shown on the profile) says what the server sees.
 - Verification-code SMS are capped per Tehran day across all callers
   (`AUTH_SMS_DAILY_CAP`, default 200); past it a code goes by email when an
   address is known, and one Telegram alert is sent.
@@ -696,7 +702,8 @@ Application settings live in [`app/config.py`](app/config.py). `.env.example` co
 | Database | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL` |
 | Redis | `REDIS_PASSWORD`, `REDIS_URL` |
 | Bootstrap admin | `SUPER_ADMIN_USERNAME`, `SUPER_ADMIN_PASSWORD` |
-| Scraper | `SCRAPER_HEADLESS`, `SCRAPER_DELAY_MIN`, `SCRAPER_DELAY_MAX`, `OTP_WAIT_TIMEOUT`, `DIVAR_PHONE_NUMBER` (ownerless internal runs only), `SCRAPE_SCHEDULER` (0 disables the saved-schedule loop) |
+| Scraper | `SCRAPER_HEADLESS`, `SCRAPER_DELAY_MIN`, `SCRAPER_DELAY_MAX`, `OTP_WAIT_TIMEOUT`, `DIVAR_PHONE_NUMBER` (ownerless internal runs only), `SCRAPE_SCHEDULER` (0 disables the saved-schedule loop), `CHROMIUM_SANDBOX` (`auto`\|`on`\|`off` — `auto` sandboxes unless running as root, falls back once and loudly on a launch failure; see `app/scraper/stealth.py`) |
+| Process roles (Phase 3) | `SORINFLOW_ROLE` (`all`\|`api`\|`worker`\|`scheduler` — which parts of the app this process runs; `all` is the default for local/tests), `DB_MIGRATE_ON_BOOT` (`true` runs `init_db()`/Alembic at boot as before; `false` only checks the schema is at this image's head — production pods, after the separate migrate Job), `SCRAPE_WORKER_ENABLED` (off only for a process that must never run a scrape), `SCRAPE_WORKER_CONCURRENCY` (Chromiums one worker runs at once, default 3), `HEARTBEAT_FILE` (liveness-probe file, touched every 15 s) |
 | Proxies | `PROXY_ENABLED`, `PROXY_LIST` |
 | SMS | `KAVENEGAR_API_KEY`, `KAVENEGAR_SENDER`, `MELIPAYAMAK_API_KEY`, `MELIPAYAMAK_FROM` |
 | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — or entered on the admin panel's backup card (token stored encrypted); the environment wins when set |
@@ -764,10 +771,11 @@ design that works from Iran and also the cheapest.
 
 | Surface | What it gives you |
 |---|---|
-| **پایش سامانه** (panel) | Postgres and Redis latency, disk usage, uptime, memory, scraper jobs by status, stale-job detection, live log viewer with level and text filters, Google Cloud status |
+| **پایش سامانه** (panel) | Postgres and Redis latency, disk usage, uptime, memory, scraper jobs by status, stale-job detection, live log viewer with level and text filters, Google Cloud status, and (Phase 3) a processes-and-loops card: every live `api`/`worker`/`scheduler` process and its heartbeat age, all 19 supervised loops with restart counts and staleness, the scrape queue's length and claims, and the Chromium sandbox status per host |
+| `GET /api/monitoring/runtime` | The processes-and-loops card's own data as JSON, read from Redis so every `api` replica answers the same thing. root/super_admin only — it names hosts and job ids (`app/services/supervisor.py`, `scrape_queue.py`) |
 | `GET /metrics` | Prometheus text — HTTP rate and latency by route group, scraper counters (contact reveals, rotations by reason, OTP challenges, image outcomes), process CPU/memory, disk. Guarded by `METRICS_TOKEN`; empty disables it and the path 404s |
 | `GET /api/monitoring/overview` | The same health data as JSON, for the panel |
-| `GET /api/stats/logs` | Windowed reverse scan over the rotating log, filterable by level and text |
+| `GET /api/stats/logs` | Windowed reverse scan over the rotating log, filterable by level and text. Each role writes its own file (`scraper.log`, `api.log`, `scheduler.log`) onto the shared data volume, so the viewer can read any role's log from any `api` replica |
 
 Logs are written through a redaction filter on **both** sinks
 ([`app/log_redaction.py`](app/log_redaction.py)) — Iranian mobile numbers in
@@ -818,23 +826,27 @@ closed.
 | `app/scraper/` | Browser automation, parsing, validation, contact extraction, OTP state, and images |
 | `app/crm/` | Automatic lead creation, the notification pipeline, and `call_queue.py` — what one dial does to a lead |
 | `app/models/` | SQLAlchemy models for core and CRM data |
-| `app/services/` | Backups (sealed, Telegram), SMS/email providers, verification codes, the forwarder and its watch, the scrape scheduler, the APK mirror, browser-error intake, DPA support |
+| `app/services/` | Backups (sealed, Telegram), SMS/email providers, verification codes, the forwarder and its watch, the scrape scheduler, the APK mirror, browser-error intake, DPA support, `scrape_queue.py` (the Redis scrape queue), `supervisor.py` (loop supervision and heartbeats), `net_guard.py` (public-address-only outbound guard) |
 | `frontend/` | Persian landing page and the static single-page dashboard; `vendor/` holds every third-party asset (no CDN), `sw.js` + `manifest.webmanifest` + `icons/` make it a PWA |
-| `tests/` | Parser, validator, captcha, settings, and auth unit tests |
-| `scripts/` | `new_server.sh` (rebuild a server from a backup bundle), `provision-host.sh` (host-level setup), `restore_backup.py`, deployment and survey helpers |
-| `k8s/` | k3s/Kubernetes resources for backend, PostgreSQL, Redis, ingress, and Traefik |
+| `tests/` | 182 `test_*.py` files: parsers, validators, auth/role behaviour, migrations, the scrape queue, supervisor, Chromium sandbox, Kubernetes manifests and the lint gate itself |
+| `tests/e2e/` | Its own Node project (Playwright 1.41 + `@axe-core/playwright`) driving the real panel in a real browser: smoke and accessibility specs, an axe baseline, and `scripts/e2e_up.sh` as the app-under-test's boot script |
+| `scripts/` | `new_server.sh` (rebuild a server from a backup bundle), `provision-host.sh` (host-level setup), `restore_backup.py`, `deploy_k8s.sh` (renders a kustomize overlay and rolls it out — the same script CI, staging and a person locally all call), `lint_new_code.py` (the changed-lines lint gate), `local_up.sh`/`e2e_up.sh` (dev and E2E app boot), deployment and survey helpers |
+| `k8s/` | kustomize: `base/` (Postgres, Redis, the `api`/`worker`/`scheduler` Deployments, the migrate and data-ownership Jobs, NetworkPolicies, ingress) and `overlays/production`, `overlays/staging` |
+| `deploy/seccomp/` | `sorinflow-chromium.json`, the seccomp profile the worker's Chromium sandbox runs under (installed onto the node by `deploy.yml`) |
 | `nginx/` | Local reverse proxy and TLS configuration |
 | `graphify-out/` | Generated project brain and machine-readable graph |
+| `.github/workflows/` | `ci.yml` (lint + tests, callable and run on every push/PR), `e2e.yml` (Playwright + axe), `k8s.yml` (kustomize render + kubeconform + shellcheck), `deploy.yml` (build, then all three gates, then the production rollout — `main` only), `staging.yml` (manual build + rollout to `sorinflow-staging`) |
 
 ### Key entry points
 
-- **Application lifecycle:** `app/main.py` creates FastAPI, installs middleware, mounts static files, and starts reminder, lease-expiry, and backup schedulers.
+- **Application lifecycle:** `app/main.py` — `lifespan()` picks what this process does by `SORINFLOW_ROLE` (`_start_background`), creates FastAPI, installs middleware, and mounts static files; `_loops()` is the registry of every periodic background loop.
 - **API composition:** `app/api/routes/__init__.py` mounts every domain router and applies shared JWT dependencies.
-- **Scrape orchestration:** `app/api/routes/scraper.py` creates jobs; `DivarScraper.start_scraping_job()` in `app/scraper/divar_scraper.py` performs collection and persistence.
+- **Scrape orchestration:** `app/api/routes/scraper.py` creates jobs and enqueues them; `app/services/scrape_queue.py` claims and drains them; `DivarScraper.start_scraping_job()` in `app/scraper/divar_scraper.py` performs collection and persistence.
+- **Background supervision:** `app/services/supervisor.py` restarts a loop that raised or stopped beating, and is what the monitoring page's processes-and-loops card reads.
 - **Property-to-CRM bridge:** `app/crm/pipeline.py` creates a lead and dispatches configured notifications after a new property is saved.
-- **Database startup:** `app/database.py` creates tables, applies idempotent patches, and seeds the first super admin.
+- **Database startup:** `app/database.py` creates tables, applies idempotent patches, and seeds the first super admin; `app/migrate.py` is the strict, standalone equivalent the Kubernetes migrate Job runs.
 - **Dashboard:** `frontend/index.html` contains the UI shell and forms; `frontend/js/app.js` owns routing, API calls, state, and rendering.
-- **Production delivery:** `Dockerfile`, `docker-compose.yml`, `k8s/`, and `.github/workflows/deploy.yml`.
+- **Production delivery:** `Dockerfile`, `docker-compose.yml` (local), `k8s/` (kustomize), `scripts/deploy_k8s.sh`, and `.github/workflows/deploy.yml`/`staging.yml`.
 
 ## Developer change map
 
@@ -868,19 +880,96 @@ closed.
 ```bash
 uv venv --python 3.11 ~/.venvs/sorinflow-v2
 uv pip install --python ~/.venvs/sorinflow-v2/bin/python --require-hashes -r requirements-dev.lock
-DATABASE_URL=postgresql+asyncpg://user@host/db REDIS_URL=redis://localhost:6379/9 \
-  ~/.venvs/sorinflow-v2/bin/python -m pytest tests/ -q
-(cd deploy/telegram-relay && node --test)
 ```
 
 The suite needs PostgreSQL: `scraping_jobs.job_id` is a `postgresql.UUID`
 column the pinned SQLAlchemy cannot render on SQLite, so schema-building tests
-skip with a message rather than failing cryptically. Add `PG_TEST_URL` to also
-run the migration DDL tests — the half SQLite can never cover, because
-`ALTER ... IF NOT EXISTS` is a no-op there.
+skip with a message rather than failing cryptically — a plain SQLite run still
+works, but silently covers less (see [What the suite covers](#what-the-suite-covers)).
+Redis is needed too, for the same reason: OTP state, the login registry and the
+scrape queue all live there now.
 
-CI runs both against real Postgres and Redis services on every push **and every
-pull request**, and nothing reaches the registry unless they pass.
+```bash
+LC_ALL=en_US.UTF-8 pg_ctl -D /usr/local/var/postgresql@16 -l /tmp/pg.log start   # any local Postgres 16
+redis-server --daemonize yes --save "" --appendonly no
+psql -h localhost -d postgres -tAc "DROP DATABASE IF EXISTS sorinflow_test"
+psql -h localhost -d postgres -tAc "CREATE DATABASE sorinflow_test"
+
+DATABASE_URL=postgresql+asyncpg://<user>@localhost:5432/sorinflow_test \
+  REDIS_URL=redis://localhost:6379/9 \
+  SECRET_KEY=$(python3 -c "import secrets;print(secrets.token_hex(32))") \
+  LOGS_PATH=/tmp IMAGES_PATH=/tmp \
+  ~/.venvs/sorinflow-v2/bin/python -m pytest tests/ -q --cov=app --cov-report=term:skip-covered
+
+PG_TEST_URL=postgresql+asyncpg://<user>@localhost:5432/sorinflow_test \
+  SECRET_KEY=x LOGS_PATH=/tmp IMAGES_PATH=/tmp \
+  ~/.venvs/sorinflow-v2/bin/python -m pytest tests/test_pg_migration.py -q   # the migration DDL SQLite can never cover
+
+(cd deploy/telegram-relay && node --test)
+```
+
+`SECRET_KEY` must be freshly random each run, not a fixed value: production
+refuses to boot on any key ever published in this repository, and the test
+suite's own old constant is now on that list (`app/main.py`'s
+`_PUBLISHED_SECRET_KEYS`). Rebuild `sorinflow_test` before every run — several
+tests create usernames that must be unique.
+
+(Without `LC_ALL=en_US.UTF-8`, this Postgres build dies at start with "postmaster became multithreaded" on macOS.)
+
+CI runs the full suite against real Postgres and Redis services — plus
+`pip-audit` and the Telegram relay Worker's own `node --test` — on every push
+**and every pull request**, and nothing reaches the registry unless it passes.
+
+### Linting
+
+```bash
+pre-commit install                          # once per clone — runs the same gate on every commit
+python scripts/lint_new_code.py             # by hand, diffed against origin/main
+python scripts/lint_new_code.py --staged    # only what is about to be committed
+```
+
+`ruff`, `mypy` (non-strict) and `eslint` each have hundreds of pre-existing
+findings on this codebase (`pyproject.toml`, `eslint.config.js` hold their
+configuration); `scripts/lint_new_code.py` runs all three but only reports a
+finding on a line the change itself added or touched, so nothing already there
+has to be fixed to get a commit in. CI runs the identical check before the test
+job. `pre-commit` adds `check-yaml`, `detect-private-key`,
+`check-merge-conflict` and `check-added-large-files` on top.
+
+### End-to-end (Playwright + axe)
+
+```bash
+cd tests/e2e && npm ci
+npx playwright install --with-deps chromium
+npx playwright test --config playwright.config.js
+```
+
+`playwright.config.js`'s `webServer` boots the real app itself
+(`scripts/e2e_up.sh` — its own Postgres/Redis, and everything that would dial
+out to Divar, Telegram, an LLM or Google switched off) and waits for `/health`
+before the suite runs; set `E2E_BASE_URL` to point at an already-running
+instance instead, e.g. while iterating on one spec. The axe gate fails only on
+a *new* critical or serious accessibility violation, compared against
+`tests/e2e/a11y-baseline.json`. **This suite, and 6 of the Python
+`test_fingerprint.py` cases, need a Chromium build that does not launch under
+Playwright 1.41 on this codebase's development macOS** — both run in CI
+(`ubuntu-22.04`, which the production image is also built on) instead.
+
+### Kubernetes manifest checks
+
+```bash
+kubectl kustomize k8s/overlays/production > /tmp/production.yaml
+kubectl kustomize k8s/overlays/staging > /tmp/staging.yaml
+kubeconform -strict -kubernetes-version 1.36.0 -summary \
+  -skip Middleware,HelmChartConfig \
+  /tmp/production.yaml /tmp/staging.yaml k8s/overlays/production/traefik-acme.yaml
+shellcheck scripts/deploy_k8s.sh scripts/new_server.sh
+```
+
+This only proves the manifests render and validate — it does not rehearse an
+actual rollout. Do that on a throwaway k3d cluster before pushing any change
+under `k8s/`, `scripts/deploy_k8s.sh`, or the deploy workflows' own deploy
+steps: see [Operations → Kubernetes deployment](#kubernetes-deployment).
 
 
 The frontend has no package manager or build step. `frontend/index.html`, `frontend/css/style.css`, and `frontend/js/app.js` are served directly. The dashboard loads nine files from CDNs — Bootstrap RTL, Bootstrap Icons,
@@ -903,27 +992,31 @@ Frontend edits normally need only a browser refresh.
 
 ### What the suite covers
 
-32 files, roughly 6,500 lines, 775 passing. Grouped by what would break:
+182 `test_*.py` files. Grouped by what would break:
 
 | Area | Files |
 |---|---|
 | Scraping and parsing | Persian/Arabic normalisation, listing parsers, sale-vs-rent validation, property quality and kind, advertiser type, pre-contact filtering, Divar counts |
-| Session and anti-bot | account rotation and selection, cookie deletion, challenge budget, puzzle captcha, OTP submission, scraper stalls and hardening |
-| Auth and roles | four-role model, the permission catalogue, TOTP, login/registration UX on both surfaces, the verification-channel round trip |
+| Session and anti-bot | account rotation and selection, cookie deletion, challenge budget, puzzle captcha, OTP submission against the Redis-backed `otp_store`, scraper stalls and hardening, the Chromium sandbox decision and its cross-process profile lock |
+| Auth and roles | four-role model, the permission catalogue, TOTP, login/registration UX on both surfaces, the verification-channel round trip, login-attempt races, ownership recorded by account id rather than display name |
+| Process architecture | `SORINFLOW_ROLE` boot behaviour for each role, the scrape queue (claims, sweep, drain), the loop supervisor and its heartbeats, per-role log files, `python -m app.migrate`, the kustomize manifests |
 | Panels | SMS panel, email panel and templates, maintenance mode, frontend wiring (parsed from the HTML/JS, so a missing handler fails the build) |
-| Infrastructure | PostgreSQL migration DDL against a live server, log redaction, config behaviour, GCP integration, resource reading |
+| Infrastructure | PostgreSQL migration DDL against a live server, log redaction, config behaviour, GCP integration, resource reading, security headers and the CSP-report endpoint, the lint gate's own test suite |
 
-`tests/test_auth_roles.py` **skips entirely** unless `DATABASE_URL` points at
-PostgreSQL, so a local SQLite run silently covers less than CI does — 31 of the
-skips are that. Run it against Postgres before trusting a green local suite.
+`tests/test_auth_roles.py` and several ownership/migration suites **skip
+entirely** unless `DATABASE_URL` points at PostgreSQL, so a local SQLite run
+covers less than CI does: **3,407 passed / 238 skipped** on SQLite at the end
+of Phase 3, versus **3,628 passed / 17 skipped** in CI against real Postgres
+and Redis with Chromium installed (58% line coverage). Run against Postgres
+before trusting a green local suite.
 
-Run it in a Python 3.10+ virtual environment:
+A plain venv also works for running the app or a quick local test, from the
+same `requirements-dev.lock` used above:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+pip install --require-hashes -r requirements-dev.lock
 python -m pytest -q
 ```
 
@@ -1047,19 +1140,40 @@ dashboard's proxies. «تست همهٔ راه‌ها» on the card tries each on
 
 ### Kubernetes deployment
 
-The `k8s/` manifests describe a single-replica backend, PostgreSQL and Redis StatefulSets, persistent volumes, Traefik ingress, and ACME TLS. The workflow in `.github/workflows/deploy.yml`:
+`k8s/` is a kustomize base plus two overlays: `k8s/base/` (Postgres and Redis, each on its own RWO PVC; the `api`, `worker` and `scheduler` Deployments and their Services; the shared `data-pvc`; NetworkPolicies; Traefik `Ingress`/`Middleware`), `k8s/overlays/production` (host `sorinflow.com`, namespace `sorinflow`) and `k8s/overlays/staging` (host `staging.sorinflow.com`, namespace `sorinflow-staging`, its own RBAC token scoped to that namespace, `worker` at 0 replicas, Pod Security **baseline**). The three roles differ in exactly the way their job requires:
 
-1. builds the Docker image on pushes to `main`;
-2. pushes SHA and `latest` tags to GHCR;
-3. deploys through a self-hosted runner labeled `sorinflow` — the datacenter blocks inbound SSH from abroad, so the runner on the box pulls the image and applies every manifest in `k8s/`;
-4. waits for the rollout and, if the new pod never becomes ready, **rolls back to the previous image on its own** before reporting the failure — under `strategy: Recreate` a bad image is an outage, not a canary.
+| Role | Replicas | Strategy | Grace period | Notes |
+|---|---|---|---|---|
+| `api` | 2 | `RollingUpdate` | 30 s | HTTP only; data-pvc read-only |
+| `worker` | 1 | `RollingUpdate` | 7200 s (2 h) | Chromium; the only role Ingress sends `/api/auth/login\|verify\|refresh` to; drains instead of dropping a running scrape |
+| `scheduler` | 1 | `Recreate` | 60 s | every periodic loop — two live at once would double-fire the Telegram long-poll and every other singleton loop |
 
-Cluster secrets and the self-hosted runner must already exist. To bring up a new server from a backup bundle — k3s, the old certificate, secrets, Postgres and the data volume restored before the app first starts, the runner registered — use [`scripts/new_server.sh`](scripts/new_server.sh); [`scripts/provision-host.sh`](scripts/provision-host.sh) does the host-level part (swap, journald cap, inotify limits, clock) and is what `new_server.sh` calls. The production image (the Playwright base) ships **no tz database**: use a fixed `+03:30` for Tehran, never `zoneinfo`, and keep `tests/test_no_system_tzdata.py` passing — an import-time `ZoneInfo` once crash-looped the only pod. Deployment scripts and manifests contain environment-specific hosts, domains, storage sizes, and assumptions; review them before use on another server.
+All rollout logic lives in one script that CI, staging and a person locally all call the same way, [`scripts/deploy_k8s.sh`](scripts/deploy_k8s.sh):
+
+```bash
+IMAGE=ghcr.io/tecso-dev/sorinflow-data-manager:<sha> OVERLAY=production \
+  SECRETS_HASH=<from the "sync secrets" step, or unset> KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
+  scripts/deploy_k8s.sh
+```
+
+Order, and why:
+
+1. Namespace, config, PVCs, Postgres, Redis and Services — nothing here depends on the app image, and the database must answer before anything tries to migrate.
+2. A **migrate Job** (`k8s/base/migrate-job.yaml`, named `migrate-<sha>` so every deploy gets its own) runs `python -m app.migrate` — strict, fails loudly on any Alembic error — before any pod on the new image can start. `api`/`worker`/`scheduler` boot with `DB_MIGRATE_ON_BOOT=false` and only check the schema is at this image's Alembic head, refusing to start otherwise; a database left *ahead* of the image (after a rollback) is accepted, because every migration stays expand/contract.
+3. A **data-ownership Job** (`k8s/base/ownership-job.yaml`) `chown`s the shared data volume to uid 1000 — the `local-path` PVCs are hostPath underneath, and Kubernetes does not apply a pod's `fsGroup` to those. A no-op once everything already belongs to `1000:1000`; on the one deploy that is still moving off the old root-run pod, it scales the old Deployment to 0 first so nothing writes new root-owned files while it runs.
+4. The `api`/`worker`/`scheduler` Deployments, Services and Ingress roll out, each under its own strategy from the table above.
+5. **NetworkPolicies last**, then a live check *from inside a backend pod, through Traefik* — the one kind of change here that can look perfectly healthy in `kubectl get` while it has actually cut the app off from DNS, Redis or the internet. A policy that fails that check is removed automatically rather than left half-applied.
+
+`deploy.yml` (pushes to `main` only, after the lint/test, E2E and manifest-validation gates all pass) additionally builds and pushes the image, installs the worker's Chromium seccomp profile onto the node and closes port 6443 to everything but the cluster's own pod/service networks — with its own live check, reopening 6443 automatically if a pod loses the API server — syncs GitHub-managed secrets into the cluster Secret, and refreshes the disaster-recovery backup timer. [`staging.yml`](.github/workflows/staging.yml) is **manual only** (`workflow_dispatch`) and skips the test gate on purpose, since staging is exactly where something not yet green gets looked at: it builds a distinct `staging-<sha>` image tag (never `:latest`, never a bare `<sha>`, so it can never collide with or be mistaken for a production tag) and runs the same script with `OVERLAY=staging`.
+
+**Rollback:** a rollout that never becomes ready is undone automatically — `scripts/deploy_k8s.sh` waits fail-fast at every step and, on the one-time move off the old single pod specifically, restores it if anything after that point fails. Afterwards, `kubectl rollout undo` works on any Deployment by itself, because the database only ever changes in a way an older image still understands.
+
+Cluster secrets and the self-hosted runner must already exist. To bring up a new server from a backup bundle — k3s, the old certificate, secrets, Postgres and the data volume restored before the app first starts, the runner registered — use [`scripts/new_server.sh`](scripts/new_server.sh); [`scripts/provision-host.sh`](scripts/provision-host.sh) does the host-level part (swap, journald cap, inotify limits, clock) and is what `new_server.sh` calls. The production image (the Playwright base) ships **no tz database**: use a fixed `+03:30` for Tehran, never `zoneinfo`, and keep `tests/test_no_system_tzdata.py` passing — an import-time `ZoneInfo` once crash-looped the only pod. Rehearse any change to `k8s/`, `scripts/deploy_k8s.sh` or `deploy.yml`'s deploy steps on a throwaway k3d cluster first (see [Kubernetes manifest checks](#kubernetes-manifest-checks)) — Phase 3's own rehearsal (old state → first transition → an ordinary deploy → a deliberately broken one) found seven real deploy bugs this way before any of them reached production. Deployment scripts and manifests contain environment-specific hosts, domains, storage sizes, and assumptions; review them before use on another server.
 
 ## Operational constraints
 
-- Scrape tasks, Divar login sessions, pending OTP state, and active-task tracking live in the backend process. Restarting the backend can interrupt them.
-- Compose intentionally runs one Uvicorn worker. Multiple workers or replicas require externalizing process-local session/job state.
+- Compose and local development intentionally run one process (`SORINFLOW_ROLE=all`, one Uvicorn worker). Production instead runs three role-differentiated processes (`api` ×2, `worker`, `scheduler`); OTP state, the Divar-login registry and the scrape queue live in Redis specifically so that split is safe. A live Chromium handle for an in-flight Divar login still lives in whichever process holds it (always `worker` in production, since the Ingress pins those routes there) — restarting that one process can interrupt a login or a running scrape, though a scrape resumes via «ادامه» rather than starting over.
+- The `scheduler` role, and any single `SORINFLOW_ROLE=all` process, must stay at exactly one replica: every periodic loop (Telegram long-poll, digest, matching, AI agents) assumes it is the only one running.
 - Schema changes after 2026-09-21 are Alembic revisions under `migrations/versions/`, applied by the app at boot; the hand-written steps in `app/database.py` only bring older databases up to the baseline.
 - Stored Divar cookies are JSON records/files and are not encrypted by the application. Protect the database, filesystem, snapshots, and logs accordingly.
 - Deleting a CRM lead also removes its linked property, related leads/notes, and downloaded images. Treat this as a destructive action.
@@ -1078,6 +1192,11 @@ Cluster secrets and the self-hosted runner must already exist. To bring up a new
   `SECRET_KEY` and `SUPER_ADMIN_PASSWORD` have no working fallback, so an unset
   one fails loudly instead of quietly accepting a published password.
 - `CORS_ORIGINS` is empty by default: the panel, portal and landing page are same-origin and need no CORS. List explicit origins only for a frontend served elsewhere; `*` is never combined with credentials.
+- Every pod (`api`, `worker`, `scheduler`, and the migrate/data-ownership Jobs) runs as a non-root user with `allowPrivilegeEscalation: false`, every Linux capability dropped, and a read-only root filesystem where the role allows it; `worker`'s Chromium runs under its own seccomp profile (`deploy/seccomp/sorinflow-chromium.json`) rather than the container-runtime default.
+- Kubernetes NetworkPolicies default-deny all ingress in the namespace: only `api`/`worker` accept traffic, only from Traefik; only the app's own pods reach Postgres or Redis; Postgres and Redis have no egress at all. Both are `ClusterIP` — unreachable from outside the cluster even before NetworkPolicy — and the node's Kubernetes API port (6443) is closed to everything but the cluster's own pod and service networks.
+- `Strict-Transport-Security` is set in production, and `Content-Security-Policy` ships in report-only mode with violations posted to `/api/public/csp-report` — unauthenticated by necessity, so it caps a report body at 8 KB and 20 reports per minute per address rather than trusting the browser not to abuse it.
+- A destination the panel lets someone type in — the proxy list, Telegram's API base, SMTP host — is resolved and checked against **every** address the name returns, and refuses loopback, private, link-local (including the cloud metadata address), carrier-grade-NAT, reserved and multicast ranges, following redirects by hand under the same check (`app/services/net_guard.py`). The cluster's own egress policy enforces the same boundary independently.
+- The staging deploy uses a token scoped by RBAC to the `sorinflow-staging` namespace alone — it cannot touch production — and that namespace enforces the Kubernetes Pod Security *baseline* policy.
 - Put the service behind HTTPS and trusted network controls.
 - Protect `data/cookies/`, `data/backups/`, `data/images/`, logs, and database volumes.
 - Treat phone numbers and listing/contact data according to applicable privacy and retention requirements.
@@ -1086,7 +1205,7 @@ Cluster secrets and the self-hosted runner must already exist. To bring up a new
 
 ## Roadmap
 
-This section is derived from a full-repository audit (2026-09-01), updated 2026-09-19 after the hardening pass. Every item below is a real gap found in the code, not a wish. Severity and effort are the auditor's; ownership follows the split we already work to — Sobhan owns product, accounts and business decisions; Sahand owns the server and anything needing `kubectl`; implementation lands through Claude in this repo.
+This section is derived from a full-repository audit (2026-09-01), updated 2026-09-19 after the hardening pass and again 2026-09-25 after Phase 3. Every item below is a real gap found in the code, not a wish. Severity and effort are the auditor's; ownership follows the split we already work to — Sobhan owns product, accounts and business decisions; Sahand owns the server and anything needing `kubectl`; everything else is implemented directly in this repository.
 
 Nothing here is tracked as a `TODO` in the source — the codebase contains zero debt markers. This section is the tracker.
 
@@ -1102,6 +1221,12 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 **Shipped 2026-09-22 — AI phase 4, «سورین».** `app/ai/assistant.py`: the office asks its own database in Telegram — the backup's bot, the backup's route, the backup's chats (nothing new to configure). The only true agent: the model picks among six read-only tools (count listings with filters, semantic search, the queue's state, customers by consultant or temperature, one property by serial, today's digest), reads the result, answers in Persian — at most four tool rounds, then it must speak; no tool carries a phone number out («شماره در پنل»), and an unknown chat gets no reply at all. Long polling (`getUpdates` through the proxy route, offset in `app_settings`); the chats it sees are handed to the backup card's «پیدا کن», which polling would otherwise starve. Every question lands in `ai_chats` (revision 0008); the AI card has the switch, «بپرس» (the same assistant from the panel) and «سؤال‌ها». `llm.chat` learned `tools` and returns the model's tool calls.
 
+**Shipped 2026-09-25 — Phase 3, quality and CI.** `ruff`, `mypy` (non-strict) and `eslint` gate every push and pull request, but only on the lines a change actually adds or touches (`scripts/lint_new_code.py`) — the hundreds of pre-existing findings on old code are left alone rather than blocking unrelated commits or getting the gate disabled; `pre-commit install` runs the identical check locally. CI split into three callable workflows (`ci.yml`, `e2e.yml`, `k8s.yml`), each running on every push and pull request, with `deploy.yml` calling all three again before it will build; `ci.yml` added `pytest-cov` coverage reporting and `pip-audit` against the locked dependencies. A new Playwright + axe end-to-end suite (`tests/e2e/`, its own Node project) drives the real panel as root and as an agent against an accessibility baseline that accepts no new critical or serious finding — which is how it caught a real bug: the cities/categories list needed the scraper permission, so the listing and CRM filters answered 403 for agents. `otp_store`, the Divar-login registry and the cross-process Chromium profile lock all moved from in-process state to Redis, so a restart no longer loses any of it. Every background loop (19 of them, including the scrape queue's own consumer and sweep) now runs under a supervisor that restarts one that raised or stopped beating and reports heartbeats, restarts and staleness to a new processes-and-loops card in «پایش سامانه». Test suite at the end of the phase: 3,628 passed / 17 skipped in CI (58% line coverage) against real Postgres and Redis with Chromium installed for the first time; 3,407 passed / 238 skipped on a default local SQLite run.
+
+**Shipped 2026-09-25 — Phase 3, process separation and Kubernetes.** The one process this used to be splits into three roles of the same image, `SORINFLOW_ROLE=api|worker|scheduler` (`app/main.py`): `api` (2 replicas, `RollingUpdate`, HTTP only — no browser, no background loop), `worker` (1 replica, `RollingUpdate` with a 2-hour drain, the only role that runs Chromium and the only one the Ingress sends the three Divar-login routes to), and `scheduler` (1 replica, `Recreate` — the periodic loops that must never run twice at once, such as the Telegram long-poll). Scrapes now go through a Redis queue with an atomic per-job claim, a global concurrency cap (was per-pod, so a rollout could briefly run six Chromiums instead of three), and a heartbeat-based sweep in place of the old boot-time-only one; a deploy no longer cuts a running scrape, and a worker that dies leaves its run closed with a clear message, continued with «ادامه». Chromium runs as uid 1000 under its own seccomp profile (`deploy/seccomp/sorinflow-chromium.json`), sandboxed rather than launched with `--no-sandbox`. `k8s/` moved to a kustomize base plus `production` and `staging` overlays; schema migrations run as a separate, strict `python -m app.migrate` Job before any pod rolls, instead of at each pod's own boot; every pod runs non-root with every capability dropped and, where the role allows it, a read-only root filesystem; NetworkPolicies default-deny inside the namespace on top of `api`/`worker` already being `ClusterIP`-only behind Traefik; HSTS and a report-only Content-Security-Policy shipped. Record ownership (Divar numbers, leads, customers, tasks, …) now keys on the account's user id instead of its display name (migration `0016`). An independent adversarial review and a full deploy rehearsal on a throwaway k3d cluster (old state → the one-time move off the single pod → an ordinary deploy → a deliberately broken one → rollback) together found and fixed several real deploy bugs before any reached production — among them a secrets fingerprint that never reached the pod template, a post-deploy health check that did not actually cross the new NetworkPolicy through Traefik, and a strict migrate Job that failed outright against a database left ahead by a rollback. Deployed to production 2026-09-25.
+
+**Next.** In-panel monitoring widens from the app's own processes (today's «پایش سامانه» card) to the server, the Kubernetes cluster, its pods and Services, and CI/CD itself, with Telegram alerts and an external uptime check run by GitHub Actions — from outside the cluster, the way a real outage would actually be noticed first. After that, Phase 4 rebuilds the panel.
+
 ---
 
 ### Now — blocking or near-blocking (days)
@@ -1116,7 +1241,7 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 **5. Self-host the dashboard's CDN assets.** ✅ **Closed** 2026-09-19 — every asset is served from the site (`frontend/vendor/`), pinned to the versions the page used to fetch.
 
-**6. Fix or delete the entry points that don't exist.** `README.md:155-175` and `CONTRIBUTING.md:11-13` both open with `./local/start.sh`, which is git-ignored (`.gitignore:80`) — the first instruction a new contributor follows fails on a fresh clone. `scripts/server-setup.sh:118` applies `k8s/06-cert-issuer.yaml`, which does not exist, and installs cert-manager, which `k8s/06-traefik-acme.yaml` explicitly replaced. `scripts/deploy_remote.py` targets a deployment name and a registry that are both gone. Commit the three `local/` scripts (keeping `pgdata/`, `logs/` and `local.env` ignored); delete or rewrite the two dead scripts. *Effort: small. Owner: Claude.*
+**6. Fix or delete the entry points that don't exist.** `README.md:155-175` and `CONTRIBUTING.md:11-13` both open with `./local/start.sh`, which is git-ignored (`.gitignore:80`) — the first instruction a new contributor follows fails on a fresh clone. `scripts/server-setup.sh:118` applies `k8s/06-cert-issuer.yaml`, which does not exist, and installs cert-manager, which `k8s/06-traefik-acme.yaml` explicitly replaced. `scripts/deploy_remote.py` targets a deployment name and a registry that are both gone. Commit the three `local/` scripts (keeping `pgdata/`, `logs/` and `local.env` ignored); delete or rewrite the two dead scripts. *Effort: small.*
 
 **7. Bound `GET /api/stats/property-trends`.** ✅ **Closed** 2026-09-19 — `days` is bounded 1–365.
 
@@ -1124,11 +1249,11 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 ### Next — weeks
 
-**9. Bring the remaining documents in line with the code.** The audit found 74 statements across the docs that contradict the source. This file was rewritten on 2026-09-02 and `tests/test_docs.py` now guards the claims that were wrong longest. Still outstanding: `INSTALL.md` describes a Docker-only mid-2026 system and its documented sequence fails, because Compose hard-errors without `POSTGRES_PASSWORD` and `REDIS_PASSWORD`, neither of which it tells you to set. `QUICK_START_GUIDE.md` is a June-era fix note written in the present tense, with two links to a file that never existed and an unwarned `docker compose down -v` — deleting it is a smaller diff than fixing it. *Effort: medium. Owner: Claude.*
+**9. Bring the remaining documents in line with the code.** The audit found 74 statements across the docs that contradict the source. This file was rewritten on 2026-09-02 and `tests/test_docs.py` now guards the claims that were wrong longest. Still outstanding: `INSTALL.md` describes a Docker-only mid-2026 system and its documented sequence fails, because Compose hard-errors without `POSTGRES_PASSWORD` and `REDIS_PASSWORD`, neither of which it tells you to set. `QUICK_START_GUIDE.md` is a June-era fix note written in the present tense, with two links to a file that never existed and an unwarned `docker compose down -v` — deleting it is a smaller diff than fixing it. *Effort: medium.*
 
 **9b. Write a Persian guide.** ✅ **Closed** 2026-09-19 — [`README.fa.md`](README.fa.md) covers every dashboard section as it is today (17 chapters, a troubleshooting table), and `tests/test_docs.py` checks it names every section and every permission.
 
-**10. Finish the email marketing panel.** ✅ **Closed** 2026-09-20 — «کمپین ایمیلی» on the email page: the four named audiences with live counts, a CSV export per audience, subject/message/CTA with a preview rendered by the very template the broadcast uses (`POST /api/email/broadcast/preview`), the count sent back for the server to verify, and a «کمپین‌ها» filter on the history. Originally: `/api/email/audiences`, `/api/email/broadcast` and `/api/email/export` exist, work, and read `marketing_opt_in` — and no UI calls any of them (`app/api/routes/email.py:278, :306, :345`). The SMS twin is fully wired (`frontend/js/app.js:8178, :8218`), so this is an unfinished port, not a design choice. Consent is being collected at every sign-up (`frontend/js/portal.js:124`) with no panel that can act on it. *Effort: medium. Owner: Claude.*
+**10. Finish the email marketing panel.** ✅ **Closed** 2026-09-20 — «کمپین ایمیلی» on the email page: the four named audiences with live counts, a CSV export per audience, subject/message/CTA with a preview rendered by the very template the broadcast uses (`POST /api/email/broadcast/preview`), the count sent back for the server to verify, and a «کمپین‌ها» filter on the history. Originally: `/api/email/audiences`, `/api/email/broadcast` and `/api/email/export` exist, work, and read `marketing_opt_in` — and no UI calls any of them (`app/api/routes/email.py:278, :306, :345`). The SMS twin is fully wired (`frontend/js/app.js:8178, :8218`), so this is an unfinished port, not a design choice. Consent is being collected at every sign-up (`frontend/js/portal.js:124`) with no panel that can act on it. *Effort: medium.*
 
 **11. Close the remaining permission asymmetries.** ✅ **Closed** 2026-09-19 — JSON exports match the Excel ones; root is no longer narrowed on the task board or private files; the free-form email send is super_admin's.
 
@@ -1136,7 +1261,7 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 **13. Cluster hygiene, bundled into one manifest pass.** ✅ **Closed** 2026-09-19 — `/ready` checks Postgres and Redis for readiness (liveness stays process-only); the Redis probe authenticates and greps PONG; `SUPER_ADMIN_PASSWORD` reaches the pod. Postgres and Redis have had requests since the 2026-09-02 pass.
 
-**14. Settle `COOKIE_ROTATE_EVERY` with the data we now collect.** The threshold is still 100, still a guess. Commit `79e1444` added a challenge-budget histogram specifically to answer "how many reveals before Divar challenges" and nobody has read it back. Separately, `app.js` persists `scraper-rotate-every` to `localStorage` — if anyone once typed 20, every run since has silently used it while the placeholder still shows ۱۰۰. That is a thirty-second check that has been raised twice and never done. *Effort: small. Owner: Sobhan to check the browser value, Claude to read back the histogram.*
+**14. Settle `COOKIE_ROTATE_EVERY` with the data we now collect.** The threshold is still 100, still a guess. Commit `79e1444` added a challenge-budget histogram specifically to answer "how many reveals before Divar challenges" and nobody has read it back. Separately, `app.js` persists `scraper-rotate-every` to `localStorage` — if anyone once typed 20, every run since has silently used it while the placeholder still shows ۱۰۰. That is a thirty-second check that has been raised twice and never done. *Effort: small. Owner: Sobhan — check the browser value; reading the histogram back is the other half.*
 
 **15. Delete or wire the remaining dead configuration.** ✅ **Closed** 2026-09-19 — `SCRAPER_TIMEOUT`, `DOMAIN_DNS_ONLY`, `DIVAR_BASE_URL`, `DEFAULT_CITY` deleted; `KAVENEGAR_OTP_TEMPLATE` is read by `sms_service` and stays.
 
@@ -1154,13 +1279,13 @@ Nothing here is tracked as a `TODO` in the source — the codebase contains zero
 
 **20. Schema management.** ✅ **Closed** 2026-09-21 — Alembic environment (`alembic.ini`, `migrations/`, async `env.py` reusable from the app's own guarded connection), baseline revision `0001` = the models as they stood, and `_alembic_sync` in `init_db()`: fresh → stamp head, pre-Alembic → stamp baseline then upgrade, versioned → upgrade. The thirty-odd hand-written steps stay, as the path from an older database to the baseline; new changes are revisions. `alembic check` is enforced on Postgres in CI, which cost three model corrections (the constraints the steps created but the models never declared). Left open: the baseline's `upgrade()` is `create_all` from the current models, so a bare `alembic upgrade head` on an *empty* database stops being valid once a second revision exists — an empty database boots through the app instead. Also known and left alone: `alembic check` **inside the production pod** lists the `init.sql` heritage of the seven oldest tables — `JSONB` where the models say `JSON`, `idx_*` index names, `UNIQUE` constraints where the models make unique indexes, no `ix_*_id` on primary keys, a handful of `index=True` columns that the boot steps added without their index, and two orphan columns (`properties.is_verified`, `properties.raw_data`). None of it is functional drift and rewriting `properties` under `ACCESS EXCLUSIVE` for cosmetics is the deploy-deadlock hazard again. Autogenerate against a **local** Postgres built by the app (that one is clean), never against production.
 
-**21. Single-replica ceiling.** One backend replica, no PodDisruptionBudget, Postgres and Redis on ReadWriteOnce local-path volumes that cannot migrate. Scrape tasks, Divar login sessions and OTP suppression state all live in the web process, so a second replica is impossible before that state moves to Redis. `strategy: Recreate` was chosen deliberately over this constraint, accepting a few seconds of real downtime per deploy. Revisit only if uptime becomes a commercial requirement. *Effort: large. Conditional.*
+**21. Single-replica ceiling.** ✅ **Closed** 2026-09-25 (Phase 3) — the state that made a second replica impossible (scrape tasks, Divar login sessions, OTP suppression) moved to Redis, and `api` now runs 2 replicas on `RollingUpdate` with no downtime per deploy. Left as designed, not a gap: `scheduler` stays a single `Recreate` replica (its loops must never run twice at once) and Postgres/Redis stay single-replica on ReadWriteOnce local-path volumes with no PodDisruptionBudget — revisit only if uptime becomes a commercial requirement past what the current rollout already gives (near-zero downtime except the one historical single-pod-to-three-roles transition).
 
 **22. Native `confirm()`/`prompt()` dialogs.** Thirty call sites render in the OS font, breaking the Persian typography the rest of the site now enforces. Deliberately deferred with a named hazard: the `prompt()` sites distinguish cancel from a deliberate clear, and a naive modal helper would wipe `divar_phone`. *Effort: medium. Conditional on it actually bothering anyone.*
 
 **23. Separate accounts for Sobhan and Sahand.** The four-role permission system exists to attribute actions, and both of you share one `admin` login, which defeats it. `updated_by` currently cannot say who did what. *Effort: trivial. Owner: Sobhan.*
 
-**24. Write the quality bar down.** "Leave a test that fails without the fix, and revert it to watch it go red" is the actual standard this project is held to, and it exists only in a GitHub issue comment. It belongs in `CONTRIBUTING.md`. *Effort: trivial. Owner: Claude.*
+**24. Write the quality bar down.** "Leave a test that fails without the fix, and revert it to watch it go red" is the actual standard this project is held to, and it exists only in a GitHub issue comment. It belongs in `CONTRIBUTING.md`. *Effort: trivial.*
 
 ## License
 
