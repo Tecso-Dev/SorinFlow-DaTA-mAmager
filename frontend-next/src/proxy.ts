@@ -5,10 +5,21 @@ import { NextResponse, type NextRequest } from "next/server";
 // more. Style *attributes* stay allowed (Radix and Recharts position things
 // with style="…"); a style attribute cannot run code.
 export function proxy(request: NextRequest) {
+  const { pathname, search } = request.nextUrl;
+
+  // public/sw.js, the per-scope manifests and the icon set it precaches:
+  // static or self-contained generated files with nothing to gate and no
+  // reason to carry a per-request nonce/CSP header.
+  if (pathname === "/sw.js" || pathname.endsWith("/manifest.webmanifest") || pathname.startsWith("/icons/")) {
+    return NextResponse.next();
+  }
+
   // Optimistic gate only: no session cookie at all → the login page. Whether
   // the cookie is still valid is the backend's call on every API request.
-  const { pathname, search } = request.nextUrl;
-  if (pathname.startsWith("/panel") && !pathname.startsWith("/panel/login")) {
+  // /panel/offline is exempt too: public/sw.js serves it with no network at
+  // all, so it must never redirect anywhere, session or not.
+  const isOfflinePage = pathname === "/panel/offline" || pathname === "/portal/offline";
+  if (pathname.startsWith("/panel") && !pathname.startsWith("/panel/login") && !isOfflinePage) {
     const hasSession = request.cookies.has("__Host-sf_session") || request.cookies.has("sf_session");
     if (!hasSession) {
       const url = request.nextUrl.clone();

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, CircleHelp, Command as CommandIcon, LogOut, Menu, Moon, Search, Sun, UserRound } from "lucide-react";
+import { Bell, CircleHelp, Command as CommandIcon, LogOut, Menu, Moon, Search, Share, Sun, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -23,8 +23,9 @@ import { can, displayName, ROLE_LABEL, SESSION_KEY, useSession, type User } from
 import type { SiteConfig } from "@/lib/site";
 import { toast } from "@/components/toaster";
 import { LogoMark } from "@/components/brand/logo";
+import { InstallMenuItem } from "@/components/pwa/install-menu-item";
 import { DivarOtpPopup } from "./divar-otp-popup";
-import { ConfirmProvider } from "./kit";
+import { ConfirmProvider, RingDialog } from "./kit";
 import { NAV, navItemFor } from "./nav";
 import { PhoneGate } from "./phone-gate";
 
@@ -78,7 +79,12 @@ function useLogout() {
 
 function UserMenu({ user, withName = false }: { user: User; withName?: boolean }) {
   const logout = useLogout();
+  // Lifted out of the dropdown on purpose: DropdownMenuContent unmounts on
+  // close, and would take the dialog's open state with it before it ever
+  // showed (see the comment in InstallMenuItem).
+  const [iosHint, setIosHint] = useState(false);
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
@@ -108,11 +114,25 @@ function UserMenu({ user, withName = false }: { user: User; withName?: boolean }
             <UserRound /> پروفایل و امنیت
           </Link>
         </DropdownMenuItem>
+        <InstallMenuItem onIosHint={() => setIosHint(true)} />
         <DropdownMenuItem variant="destructive" onSelect={() => void logout()}>
           <LogOut /> خروج
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    <RingDialog
+      open={iosHint}
+      onOpenChange={setIosHint}
+      icon={Share}
+      title="نصب روی صفحهٔ اصلی"
+      description={
+        <>
+          در نوار پایین سافاری روی دکمهٔ <b>اشتراک‌گذاری</b> بزنید، بعد
+          «Add to Home Screen» را انتخاب کنید.
+        </>
+      }
+    />
+    </>
   );
 }
 
