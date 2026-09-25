@@ -422,10 +422,24 @@ say "verifying $DOMAIN through Traefik, redis from inside a pod, and divar.ir re
 # own Traefik instead of whatever the name's real DNS answers, which is what
 # lets this run against a k3d rehearsal (see VERIFY_HOST/VERIFY_PORT above)
 # as well as the real node.
-code="$(curl -sk --max-time 10 --resolve "${DOMAIN}:${VERIFY_PORT}:${VERIFY_HOST}" \
-  -o /dev/null -w '%{http_code}' "https://${DOMAIN}:${VERIFY_PORT}/health" || true)"
+#
+# On the node itself, 127.0.0.1 reaches Traefik's hostPort only if the CNI's
+# localhost SNAT is on; the node's own address always goes through the same
+# DNAT a visitor's request does. So by default both are tried before this
+# counts as broken (a false alarm here removes the policies from a healthy
+# deploy). A scoped token cannot list nodes — then only VERIFY_HOST is tried.
+hosts="$VERIFY_HOST"
+if [ "$VERIFY_HOST" = 127.0.0.1 ]; then
+  hosts="$hosts $(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
+fi
+code=""
+for h in $hosts; do
+  code="$(curl -sk --max-time 10 --resolve "${DOMAIN}:${VERIFY_PORT}:${h}" \
+    -o /dev/null -w '%{http_code}' "https://${DOMAIN}:${VERIFY_PORT}/health" || true)"
+  [ "$code" = 200 ] && break
+done
 [ "$code" = 200 ] \
-  || verify_fail "https://${DOMAIN}:${VERIFY_PORT}/health returned '${code:-nothing}' through Traefik (the allow-traefik-to-app NetworkPolicy, or Traefik itself, is broken)"
+  || verify_fail "https://${DOMAIN}:${VERIFY_PORT}/health returned '${code:-nothing}' through Traefik via ${hosts} (the allow-traefik-to-app NetworkPolicy, or Traefik itself, is broken)"
 
 # A Ready pod that is not on its way out: right after a rollout the old pods
 # are still in their preStop pause, and checking from one of those failed a
