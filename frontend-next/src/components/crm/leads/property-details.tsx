@@ -104,7 +104,7 @@ export function PropertyFieldSelect({
   );
 }
 
-export function PropertyDetails({ p, invalidate, editable = true }: { p: PropertyDetail; invalidate?: unknown[][]; editable?: boolean }) {
+export function PropertyDetails({ p, invalidate, editable = true, photos = true }: { p: PropertyDetail; invalidate?: unknown[][]; editable?: boolean; photos?: boolean }) {
   const kind = p.property_type ? PROPERTY_KIND[p.property_type] ?? p.property_type : null;
   const images = p.images ?? [];
   const extras = Object.entries(p.extra_attrs ?? {}).filter(([, v]) => has(v));
@@ -112,7 +112,7 @@ export function PropertyDetails({ p, invalidate, editable = true }: { p: Propert
 
   return (
     <div className="grid gap-3">
-      {images.length > 0 && (
+      {photos && images.length > 0 && (
         <Block icon={Images} title={`تصاویر (${faNum(images.length)})`}>
           <PhotoStrip images={images} />
         </Block>

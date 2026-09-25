@@ -7,7 +7,7 @@
 // lead itself opens in a side drawer (?lead=<id>).
 
 import {
-  Bell, CalendarRange, Car, CheckSquare, Compass, Download, ExternalLink, FileText, FolderInput, Loader2,
+  Banknote, Bell, CalendarRange, ChevronDown, SlidersHorizontal, Car, CheckSquare, Compass, Download, ExternalLink, FileText, FolderInput, Loader2,
   MoreVertical, MoveUp, Network, Plus, RefreshCw, Search, Sparkles, SquareDashed, Target, Trash2, X,
 } from "lucide-react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -50,10 +50,6 @@ const PARAM: Record<string, string> = {
 };
 const FILTER_KEYS = Object.keys(PARAM);
 
-const TONE_TEXT: Record<Tone, string> = {
-  neutral: "text-muted-foreground", info: "text-info", warning: "text-warning", success: "text-success",
-  danger: "text-destructive", primary: "text-primary", violet: "text-chart-5",
-};
 const TONE_BG: Record<Tone, string> = {
   neutral: "bg-muted", info: "bg-info/10", warning: "bg-warning/12", success: "bg-success/10",
   danger: "bg-destructive/10", primary: "bg-primary/10", violet: "bg-chart-5/12",
@@ -422,12 +418,12 @@ function StatusStrip({ byStatus, total, active, onPick }: { byStatus?: Record<st
               className={cn(
                 "flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium outline-none transition",
                 "hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-                on ? cn(TONE_BG[l.tone], TONE_TEXT[l.tone], "border-current") : "text-muted-foreground",
+                on ? cn(TONE_BG[l.tone], "border-primary/50 text-foreground") : "text-muted-foreground",
               )}
             >
               <span className={cn("size-2 rounded-full", TONE_DOT[l.tone])} aria-hidden />
               {l.label}
-              <span className="tabular opacity-80">{faNum(byStatus[s] ?? 0)}</span>
+              <span className="tabular">{faNum(byStatus[s] ?? 0)}</span>
             </button>
           );
         })}
@@ -450,6 +446,9 @@ function Filters({
   const [pmax, setPmax] = useState<number | null>(filters.pmax ? Number(filters.pmax) : null);
   const [seen, setSeen] = useState({ q: filters.q, pmin: filters.pmin, pmax: filters.pmax });
   const [ai, setAi] = useState("");
+  const [more, setMore] = useState(false);
+  const extra = ["category", "kind", "adv", "status", "notified"].filter((k) => filters[k]).length
+    + (filters.from || filters.to ? 1 : 0) + (filters.pmin || filters.pmax ? 1 : 0);
   // the URL moved on its own (back, a chip, «پاک کردن»): follow it
   if (seen.q !== filters.q || seen.pmin !== filters.pmin || seen.pmax !== filters.pmax) {
     setSeen({ q: filters.q, pmin: filters.pmin, pmax: filters.pmax });
@@ -536,6 +535,21 @@ function Filters({
         </form>
       </div>
 
+      {/* on a phone the rest of the filters fold away behind one button */}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="justify-between md:hidden"
+        aria-expanded={more}
+        aria-controls="lead-filters-more"
+        onClick={() => setMore(!more)}
+      >
+        <span className="flex items-center gap-1.5"><SlidersHorizontal /> فیلترهای بیشتر{extra ? ` (${faNum(extra)})` : ""}</span>
+        <ChevronDown className={cn("transition-transform", more && "rotate-180")} />
+      </Button>
+
+      <div id="lead-filters-more" className={cn("grid gap-3", !more && "max-md:hidden")}>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         <NativeSelect aria-label="دسته‌بندی" value={filters.category} onChange={(e) => set({ category: e.target.value })}>
           <option value="">همهٔ دسته‌بندی‌ها</option>
@@ -580,13 +594,14 @@ function Filters({
         </fieldset>
         <fieldset className="grid gap-2">
           <legend className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-            <FileText className="size-3.5" aria-hidden /> بازهٔ قیمت (تومان) — برای اجاره، ودیعه سنجیده می‌شود
+            <Banknote className="size-3.5" aria-hidden /> بازهٔ قیمت (تومان) — برای اجاره، ودیعه سنجیده می‌شود
           </legend>
           <div className="grid grid-cols-2 gap-2">
             <MoneyInput aria-label="قیمت از" placeholder="از" value={pmin} onChange={setPmin} />
             <MoneyInput aria-label="قیمت تا" placeholder="تا" value={pmax} onChange={setPmax} />
           </div>
         </fieldset>
+      </div>
       </div>
 
       <AnimatePresence initial={false}>
@@ -625,16 +640,20 @@ function Filters({
 
 function StatusSelect({ lead, onChange }: { lead: Lead; onChange: (s: string) => void }) {
   const tone = LEAD_STATUS[lead.status]?.tone ?? "neutral";
+  // the colour rides on a dot and a faint tint; the text stays full contrast
   return (
-    <NativeSelect
-      aria-label="تغییر وضعیت لید"
-      value={lead.status}
-      onChange={(e) => onChange(e.target.value)}
-      className={cn("h-7 w-auto max-w-40 rounded-full border-transparent px-2.5 text-xs font-semibold", TONE_BG[tone], TONE_TEXT[tone])}
-    >
-      {LEAD_STATUS_ORDER.map((s) => <option key={s} value={s}>{LEAD_STATUS[s].label}</option>)}
-      {!LEAD_STATUS[lead.status] && <option value={lead.status}>{lead.status}</option>}
-    </NativeSelect>
+    <span className="relative inline-flex">
+      <span aria-hidden className={cn("pointer-events-none absolute start-2.5 top-1/2 size-2 -translate-y-1/2 rounded-full", TONE_DOT[tone])} />
+      <NativeSelect
+        aria-label="تغییر وضعیت لید"
+        value={lead.status}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn("h-7 w-auto max-w-40 rounded-full border-transparent ps-6 pe-2 text-xs font-semibold text-foreground", TONE_BG[tone])}
+      >
+        {LEAD_STATUS_ORDER.map((s) => <option key={s} value={s}>{LEAD_STATUS[s].label}</option>)}
+        {!LEAD_STATUS[lead.status] && <option value={lead.status}>{lead.status}</option>}
+      </NativeSelect>
+    </span>
   );
 }
 
