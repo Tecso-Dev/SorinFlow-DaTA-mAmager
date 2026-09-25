@@ -233,8 +233,8 @@ function Features({ stats, domain }: { stats: LandingStats; domain: string }) {
             const Icon = FEATURE_ICONS[it.key];
             const on = i === active;
             return (
-              <Reveal key={it.key} delay={i * 0.06}>
-                <li className="border-b">
+              <li key={it.key} className="border-b">
+                <Reveal delay={i * 0.06}>
                   <button
                     type="button"
                     aria-expanded={on}
@@ -255,10 +255,10 @@ function Features({ stats, domain }: { stats: LandingStats; domain: string }) {
                         {it.text}
                       </motion.span>
                     </span>
-                    <span className="text-xs tracking-widest text-muted-foreground/70 tabular-nums">{faNum(i + 1, { minimumIntegerDigits: 2 })}</span>
+                    <span className="text-xs tracking-widest text-muted-foreground tabular-nums">{faNum(i + 1, { minimumIntegerDigits: 2 })}</span>
                   </button>
-                </li>
-              </Reveal>
+                </Reveal>
+              </li>
             );
           })}
         </ul>
@@ -346,9 +346,9 @@ function How() {
         {h.steps.map((s, i) => {
           const Icon = STEP_ICONS[i];
           return (
-            <Reveal key={s.title} delay={i * 0.1}>
-              {/* each step stands one stair higher than the last */}
-              <li className="relative" style={{ marginBottom: `calc(var(--stair, 0px) * ${i})` }}>
+            // each step stands one stair higher than the last
+            <li key={s.title} className="relative" style={{ marginBottom: `calc(var(--stair, 0px) * ${i})` }}>
+              <Reveal delay={i * 0.1}>
                 <Tilt className="rounded-3xl">
                   <div className={cn(glass, "relative p-6 shadow-[5px_7px_0_0_rgb(99_102_241/0.28),9px_13px_0_0_rgb(79_70_229/0.14)] dark:shadow-[5px_7px_0_0_rgb(49_46_129/0.75),9px_13px_0_0_rgb(30_27_75/0.8)]")}>
                     <div className="flex items-center justify-between">
@@ -359,8 +359,8 @@ function How() {
                     <p className="mt-2 text-sm leading-7 text-muted-foreground">{s.text}</p>
                   </div>
                 </Tilt>
-              </li>
-            </Reveal>
+              </Reveal>
+            </li>
           );
         })}
       </ol>
@@ -384,15 +384,15 @@ function Ai() {
             {a.items.map((it, i) => {
               const Icon = AI_ICONS[i];
               return (
-                <Reveal key={it.title} delay={i * 0.07}>
-                  <li className={cn(glass, "flex h-full gap-3 rounded-2xl p-4")}>
+                <li key={it.title} className="h-full">
+                  <Reveal delay={i * 0.07} className={cn(glass, "flex h-full gap-3 rounded-2xl p-4")}>
                     <Icon className="mt-1 size-5 shrink-0 text-violet-600 dark:text-violet-300" aria-hidden />
                     <div>
                       <h3 className="font-extrabold">{it.title}</h3>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">{it.text}</p>
                     </div>
-                  </li>
-                </Reveal>
+                  </Reveal>
+                </li>
               );
             })}
           </ul>
@@ -456,15 +456,15 @@ function Security() {
             {s.items.map((it, i) => {
               const Icon = SEC_ICONS[i];
               return (
-                <Reveal key={it.title} delay={i * 0.07}>
-                  <li className={cn(glass, "flex h-full gap-3 rounded-2xl p-4")}>
+                <li key={it.title} className="h-full">
+                  <Reveal delay={i * 0.07} className={cn(glass, "flex h-full gap-3 rounded-2xl p-4")}>
                     <Icon className="mt-1 size-5 shrink-0 text-cyan-600 dark:text-cyan-300" aria-hidden />
                     <div>
                       <h3 className="font-extrabold">{it.title}</h3>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">{it.text}</p>
                     </div>
-                  </li>
-                </Reveal>
+                  </Reveal>
+                </li>
               );
             })}
           </ul>
@@ -534,8 +534,8 @@ function Contact({ site }: { site: LandingSite }) {
       {cards.length ? (
         <ul className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {cards.map((k, i) => (
-            <Reveal key={k.label} delay={i * 0.08}>
-              <li>
+            <li key={k.label}>
+              <Reveal delay={i * 0.08}>
                 <Tilt className="rounded-3xl">
                   <a
                     href={k.href}
@@ -548,8 +548,8 @@ function Contact({ site }: { site: LandingSite }) {
                     <span dir="ltr" className="max-w-full truncate text-sm text-muted-foreground">{k.value}</span>
                   </a>
                 </Tilt>
-              </li>
-            </Reveal>
+              </Reveal>
+            </li>
           ))}
         </ul>
       ) : (
@@ -583,7 +583,7 @@ function Footer({ brand, tagline, portalOpen, year }: { brand: string; tagline: 
           <Link href="/panel/login" className={link}>{f.panel}</Link>
           {portalOpen && <Link href="/portal" className={link}>{f.portal}</Link>}
         </nav>
-        <p className="text-xs text-muted-foreground/80">{fill(f.rights, brand).replace("{year}", year)}</p>
+        <p className="text-xs text-muted-foreground">{fill(f.rights, brand).replace("{year}", year)}</p>
       </div>
     </footer>
   );

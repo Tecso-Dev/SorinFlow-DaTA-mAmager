@@ -83,12 +83,18 @@ function Concept({ concept, site }: { concept: (typeof ORDER)[number]; site: Sit
 
         <div className="grid grid-cols-1 gap-3">
           {[DARK, LIGHT].map((bg) => (
-            <div key={bg} dir="ltr" className={cn("overflow-x-auto rounded-2xl p-4", bg)}>
+            <div
+              key={bg}
+              dir="ltr"
+              tabIndex={0}
+              aria-label={`${concept.letter}: اندازه‌ها روی زمینهٔ ${bg === DARK ? "تیره" : "روشن"}`}
+              className={cn("overflow-x-auto rounded-2xl p-4 outline-none focus-visible:ring-2 focus-visible:ring-ring", bg)}
+            >
               <div className="flex min-w-max items-end gap-5">
                 {SIZES.map((s) => (
                   <figure key={s} className="flex flex-col items-center gap-1.5">
                     <Mark size={s} />
-                    <figcaption className="text-[10px] opacity-60">{s}px</figcaption>
+                    <figcaption className="text-[10px]">{s}px</figcaption>
                   </figure>
                 ))}
               </div>
@@ -130,7 +136,7 @@ function Tile({ title, className, children }: { title: string; className: string
   return (
     <figure className={cn("flex min-h-40 flex-col items-center justify-center gap-3 rounded-2xl p-4", className)}>
       {children}
-      <figcaption className="text-xs opacity-60">{title}</figcaption>
+      <figcaption className="text-xs">{title}</figcaption>
     </figure>
   );
 }
