@@ -1643,6 +1643,13 @@ class DivarScraper:
         'buy', 'rent', 'residential', 'apartment', 'villa',
     ]
 
+    # A listing Divar no longer has: deleted by its poster, expired, or never
+    # there. Its page answers 410 Gone and says so in words, «این صفحه حذف
+    # شده یا وجود ندارد» as served and «در پایین، آگهی‌های مشابه با آگهی حذف
+    # شده را ببینید.» once the browser has put other people's ads under it.
+    GONE_FROM_DIVAR = "در دیوار حذف شده"
+    GONE_MARKERS = ("صفحه حذف شده", "آگهی حذف شده")
+
     async def scrape_property_detail(
         self, url: str, target_category: Optional[str] = None,
         source_title: Optional[str] = None,
@@ -1662,13 +1669,24 @@ class DivarScraper:
             logger.info(f"Scraping property detail: {url}")
 
             await self._check_rate_limit()
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            assert self.page is not None   # opened by initialize(); a None lands in the except below
+            response = await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
             # If Divar redirected to a CAPTCHA or home page, skip this property
             actual_url = self.page.url
             if '/v/' not in actual_url:
                 logger.warning(f"Detail page redirected away from property: {url} → {actual_url}, skipping")
                 self._last_detail_error = "صفحه باز نشد"
+                return None
+
+            # Gone from Divar. Everything past this point would have worked on
+            # the similar ads Divar shows in its place: job 076c865a looked for
+            # a contact button that was not there, counted a reveal for it,
+            # downloaded twenty of those ads' photos, and then filed the
+            # listing as «عنوان نبود». Stop before any of it.
+            if getattr(response, "status", None) == 410:
+                logger.info(f"{url}: Divar answered 410 — the listing is gone")
+                self._last_detail_error = self.GONE_FROM_DIVAR
                 return None
 
             from urllib.parse import unquote
@@ -1763,6 +1781,18 @@ class DivarScraper:
                 )
             except Exception:
                 pass
+
+            # The same page, said in words, for when the status did not say
+            # 410. Asked only of a page without an h1: every listing has its
+            # title there and this page has none, so an ad whose description
+            # merely mentions «آگهی حذف شده» is never taken for one.
+            if not await self.page.query_selector("h1"):
+                html = (await self.page.content()).replace("\u200c", " ")   # «حذف‌شده»
+                if any(m in html for m in self.GONE_MARKERS):
+                    logger.info(f"{url}: the page says the listing is gone")
+                    self._last_detail_error = self.GONE_FROM_DIVAR
+                    return None
+
             await self._simulate_scroll()
             await asyncio.sleep(0.3)
 
