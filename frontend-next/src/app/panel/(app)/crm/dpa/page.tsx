@@ -1,5 +1,5 @@
-import { ComingTab } from "@/components/crm/coming";
+import { DpaTab } from "@/components/crm/dpa/dpa-tab";
 
 export default function Page() {
-  return <ComingTab slug="dpa" />;
+  return <DpaTab />;
 }
