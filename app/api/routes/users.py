@@ -741,7 +741,8 @@ def _me_response(user: User) -> UserResponse:
 async def update_me(data: ProfileUpdate,
                     current_user: User = Depends(get_current_user),
                     db: AsyncSession = Depends(get_db),
-                    request: Request = None, response: Response = None):
+                    # None only when called directly (tests); FastAPI needs the bare type to inject
+                    request: Request = None, response: Response = None):  # type: ignore[assignment]
     """Edit my own profile. A changed username comes back with a fresh token,
     because the token names the user by username and the old one would stop
     resolving on the very next request."""
@@ -788,7 +789,8 @@ async def update_me(data: ProfileUpdate,
 async def change_my_password(data: PasswordChangeRequest,
                              current_user: User = Depends(get_current_user),
                              db: AsyncSession = Depends(get_db),
-                             request: Request = None, response: Response = None):
+                             # None only when called directly (tests); FastAPI needs the bare type to inject
+                    request: Request = None, response: Response = None):  # type: ignore[assignment]
     """Change my password. Every other device is signed out: token_version
     moves, and a token minted before it is refused from then on. This
     device gets a fresh token in the response so it stays in."""
