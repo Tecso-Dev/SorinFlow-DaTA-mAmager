@@ -114,6 +114,7 @@ export function HeroCard({ me }: { me: User }) {
               <input
                 ref={fileRef}
                 type="file"
+                aria-label="بارگذاری عکس پروفایل"
                 accept="image/jpeg,image/png,image/webp"
                 className="sr-only"
                 onChange={(e) => onUpload(e.target.files?.[0])}
