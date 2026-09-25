@@ -34,6 +34,9 @@ const fallback = (): SiteConfig => ({
   seoDescription: "",
 });
 
+// Fields that may never be blank; the rest (phone, email, ...) may be cleared.
+const REQUIRED = new Set<keyof SiteConfig>(["brandName", "brandNameLatin", "domain"]);
+
 /** Backend base for server-side calls: the k8s Service in production. */
 export const BACKEND = process.env.BACKEND_INTERNAL_URL ?? "http://127.0.0.1:8020";
 
@@ -44,7 +47,15 @@ export async function getSiteConfig(): Promise<SiteConfig> {
       signal: AbortSignal.timeout(1500),
     });
     if (!res.ok) return fallback();
-    return { ...fallback(), ...((await res.json()) as Partial<SiteConfig>) };
+    // An empty or missing field keeps its default (an empty domain would
+    // otherwise make "https://" URLs and break the landing page's metadata).
+    const got = (await res.json()) as Record<string, unknown>;
+    const base = fallback();
+    for (const k of Object.keys(base) as (keyof SiteConfig)[]) {
+      const v = got[k];
+      if (typeof v === "string" && (v.trim() || !REQUIRED.has(k))) base[k] = v.trim();
+    }
+    return base;
   } catch {
     return fallback();
   }
