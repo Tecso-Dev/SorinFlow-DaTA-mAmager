@@ -2,3 +2,13 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: sorinflow-staging
+  labels:
+    # Enforced: a hostPath volume, a privileged container, host networking —
+    # nothing this workload asks for, and staging-deployer's own Role (see
+    # rbac.yaml) is broad enough within the namespace that without this, a
+    # careless deploy_k8s.sh change could still apply a pod that asks for one.
+    # warn/audit at restricted (one step stricter) surface anything baseline
+    # still allows without blocking it outright yet.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
