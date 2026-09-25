@@ -24,7 +24,7 @@ jobs:
     # asks apt for jammy's package names (libasound2 …), which noble no longer
     # has — and jammy is what the production image is built on anyway.
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     services:
       postgres:
@@ -99,10 +99,27 @@ jobs:
         # with no baseURL and no webServer (every test «Invalid URL»).
         run: npx --prefix tests/e2e playwright test --config tests/e2e/playwright.config.js
 
+      - name: Install the new panel's dependencies
+        run: npm ci --prefix frontend-next
+
+      - name: Install Playwright's WebKit (the iPhone project)
+        run: npx --prefix tests/e2e playwright install --with-deps webkit
+
+      - name: Run the new panel's e2e + accessibility suite (desktop, Android, iPhone)
+        # A production build of frontend-next forwarding /api to the same
+        # backend setup (scripts/e2e_next_up.sh); the iPhone project on WebKit.
+        env:
+          DATABASE_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_e2e_local
+          REDIS_URL: redis://localhost:6379/12
+          E2E_WEBKIT: "1"
+        run: npx --prefix tests/e2e playwright test --config tests/e2e/playwright.next.config.js
+
       - name: Upload the Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: tests/e2e/playwright-report/
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/playwright-report-next/
           retention-days: 14

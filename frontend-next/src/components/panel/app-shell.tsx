@@ -28,7 +28,7 @@ export type ShellSite = Pick<SiteConfig, "brandName" | "brandNameLatin" | "tagli
 
 function BrandMark({ site, compact = false }: { site: ShellSite; compact?: boolean }) {
   return (
-    <Link href="/panel" className="flex items-center gap-2.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <Link href="/panel" aria-label={compact ? site.brandName : undefined} className="flex items-center gap-2.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <div
         aria-hidden
         className="grid size-9 place-items-center rounded-xl bg-linear-to-br from-indigo-500 to-violet-600 text-sm font-black text-white shadow-[0_0_24px_-4px_rgb(99_102_241/0.7)]"
@@ -127,7 +127,7 @@ function NavList({ user, onNavigate }: { user: User; onNavigate?: () => void }) 
         if (!items.length) return null;
         return (
           <div key={g.label} className="flex flex-col gap-0.5">
-            <div className="mb-1 px-3 text-[11px] font-semibold text-muted-foreground/80">{g.label}</div>
+            <div className="mb-1 px-3 text-[11px] font-semibold text-muted-foreground">{g.label}</div>
             {items.map((it) => {
               const on = it.key === active;
               return (
