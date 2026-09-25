@@ -534,10 +534,10 @@ def test_migrate_steps_skip_any_stamped_database_but_run_on_an_unversioned_one()
     IF NOT EXISTS` still takes ACCESS EXCLUSIVE even though nothing changes —
     and app/migrate.py runs init_db() against the live database on every
     deploy. A database Alembic has stamped, at head or behind it (every deploy
-    that brings a migration), must not pay those locks. The one exception is
-    _migrate_cookie_is_enabled, which exists because a stamp can be wrong
-    (see test_a_second_0009... above): it still runs. A database Alembic has
-    never stamped still needs them all."""
+    that brings a migration), must not pay those locks. The exceptions are the
+    steps that mirror a post-Alembic revision — a stamp can be wrong (see
+    test_a_second_0009... above) — e.g. _migrate_cookie_is_enabled: it still
+    runs. A database Alembic has never stamped still needs them all."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     import app.database as db
@@ -600,7 +600,7 @@ def test_migrate_steps_skip_any_stamped_database_but_run_on_an_unversioned_one()
         db.engine, db.async_session_maker = saved_engine, saved_maker
 
     assert seen["skipped_at_head"], "a _migrate_* step ran on a database at this image's head"
-    assert seen["guard_ran_at_head"], "_migrate_cookie_is_enabled must run on every boot"
+    assert seen["guard_ran_at_head"], "a revision safety net (_migrate_cookie_is_enabled) must run on every boot"
     assert seen["skipped_behind_head"], "a _migrate_* step ran on a stamped database behind head"
     assert seen["ran_when_unversioned"], "an unversioned database's _migrate_* steps did not run"
 

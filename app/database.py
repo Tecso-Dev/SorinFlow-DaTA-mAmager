@@ -168,9 +168,15 @@ async def init_db(strict: bool = False):
     # SELECT once waited 4.5 s behind one; the AI loops hold a transaction
     # across an LLM call). A stamped database therefore skips them whatever
     # its revision — including one behind this image, which is every deploy
-    # that brings a migration — except _migrate_cookie_is_enabled, the one
-    # step that exists because a stamp can be wrong (see its docstring). A
-    # fresh or pre-Alembic database runs them all, as before.
+    # that brings a migration — except the safety nets below: the steps that
+    # mirror a post-Alembic revision (0009, 0010, 0012, 0013, 0015), because
+    # a stamp can be wrong or a revision's failure only logged (see their
+    # docstrings). They ask the catalog first — no lock when there is nothing
+    # to add — except the cookie one, on a small table. A fresh or
+    # pre-Alembic database runs them all, as before.
+    revision_safety_nets = {_migrate_cookie_is_enabled, _migrate_users_totp_last_step,
+                            _migrate_phone_normalized, _migrate_properties_ai_pipeline,
+                            _migrate_portal_need_enrich}
     async with engine.begin() as conn:
         await _guard(conn)
         stamped = await _is_alembic_stamped(conn)
@@ -218,7 +224,7 @@ async def init_db(strict: bool = False):
                  _seed_reference_data,
                  _backfill_owner_ids):
         if stamped and step.__name__.startswith("_migrate_") \
-                and step is not _migrate_cookie_is_enabled:
+                and step not in revision_safety_nets:
             continue
         try:
             async with engine.begin() as conn:
