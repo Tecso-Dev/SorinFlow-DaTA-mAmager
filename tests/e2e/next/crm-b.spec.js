@@ -7,19 +7,6 @@
 const { test, expect } = require('@playwright/test');
 const { signIn, watchProblems, noHorizontalScroll, a11y } = require('./helpers');
 
-/**
- * The CRM tab strip's active-tab link (`bg-primary/12 text-primary`, and its
- * hover shade) is a pre-existing contrast shortfall in the shared
- * crm-frame.tsx — not owned by this stream's tabs, and outside its file
- * list. It shows up on some tabs/viewports and not others (borderline
- * ratio, glyph-dependent antialiasing) but is the same shared cause
- * everywhere, so every test here filters it out rather than special-casing
- * one tab. Flagged for the coordinator to fix in crm-frame.tsx.
- */
-function withoutKnownSharedContrast(violations) {
-  return violations.filter((v) => !(v.startsWith('color-contrast:') && v.includes('bg-primary')));
-}
-
 test('customers: list loads, filters, AI fill fails in Persian, create/edit/delete', async ({ page }) => {
   const problems = watchProblems(page);
   await signIn(page, 'owner');
@@ -75,7 +62,7 @@ test('customers: list loads, filters, AI fill fails in Persian, create/edit/dele
   await expect(page.getByRole('row', { name: new RegExp(name) })).toHaveCount(0);
 
   await noHorizontalScroll(page);
-  expect(withoutKnownSharedContrast(await a11y(page))).toEqual([]);
+  expect((await a11y(page))).toEqual([]);
   // the AI reader's 502 (LLM_API_KEY unset, asserted above) is Chromium's own
   // resource-load log for the request we deliberately sent to fail
   expect(problems.filter((p) => !p.includes('502'))).toEqual([]);
@@ -116,7 +103,7 @@ test('contacts: list, search filter, create/edit/delete, JSON export gated to su
   await expect(page.getByText('مخاطب حذف شد', { exact: true })).toBeVisible();
 
   await noHorizontalScroll(page);
-  expect(withoutKnownSharedContrast(await a11y(page))).toEqual([]);
+  expect((await a11y(page))).toEqual([]);
   expect(problems).toEqual([]);
 
   // JSON export is superadmin-only — an ordinary admin never sees the button
@@ -182,7 +169,7 @@ test('deals: list, status filter, contact picker for buyer, money grouping, edit
   await page.request.delete(`/api/crm/contacts/${buyer.id}`, { headers: csrf });
 
   await noHorizontalScroll(page);
-  expect(withoutKnownSharedContrast(await a11y(page))).toEqual([]);
+  expect((await a11y(page))).toEqual([]);
   expect(problems).toEqual([]);
 
   await signIn(page, 'agent1');
@@ -223,6 +210,6 @@ test('notes: list, create linked to a contact, edit, delete', async ({ page }) =
   await expect(page.getByText(edited)).toHaveCount(0);
 
   await noHorizontalScroll(page);
-  expect(withoutKnownSharedContrast(await a11y(page))).toEqual([]);
+  expect((await a11y(page))).toEqual([]);
   expect(problems).toEqual([]);
 });

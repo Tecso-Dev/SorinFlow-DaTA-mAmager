@@ -42,7 +42,8 @@ export function CrmFrame({ children }: { children: React.ReactNode }) {
               className={cn(
                 "flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors",
                 "outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-                active && "bg-primary/12 text-primary hover:bg-primary/15 hover:text-primary",
+                // solid, not a 12% tint: primary text on its own tint was 4.38:1
+                active && "bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground",
               )}
             >
               <t.icon className="size-4" />
