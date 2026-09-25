@@ -464,3 +464,85 @@ class TestItFitsAPhone:
         assert "javascript:" not in html and "برو" not in html
         _, html, _t = t.notification("x", "y", cta_label="برو", cta_url="https://sorinflow.com/x")
         assert 'href="https://sorinflow.com/x"' in html
+
+
+class TestBrandComesFromSiteSettings:
+    """CLAUDE.md, multi-office readiness: a template never spells out the
+    brand, office name or domain itself — everything here comes from
+    app.services.site_settings, never a module-level constant."""
+
+    SITE = {"brandName": "املاک آفتاب", "agencyName": "دفتر آفتاب",
+            "domain": "aftab.example"}
+
+    @pytest.mark.parametrize("name", [
+        "login_code", "welcome", "ticket_decision",
+        "request_received", "notification", "test",
+    ])
+    def test_a_saved_brand_replaces_the_default_everywhere(self, name):
+        from app.api.routes.email import _SAMPLES
+        _, default_html, _t = _SAMPLES[name]()
+        _, custom_html, _t2 = _SAMPLES[name](self.SITE)
+        assert "سورین‌فلو" in default_html, f"{name}: default brand missing"
+        assert "سورین‌فلو" not in custom_html, f"{name}: default brand leaked through"
+        assert "املاک آفتاب" in custom_html, f"{name}: saved brand missing"
+        assert "aftab.example" in custom_html, f"{name}: saved domain missing"
+
+    def test_no_brand_or_domain_is_hard_coded_in_the_module(self):
+        import inspect
+        from app.services import email_templates as t
+        src = inspect.getsource(t)
+        assert "سورین‌فلو" not in src
+        assert "sorinflow.com" not in src
+        assert not hasattr(t, "SITE_URL") and not hasattr(t, "BRAND")
+
+    def test_an_unset_site_falls_back_to_the_env_default_not_a_crash(self):
+        from app.services import email_templates as t
+        subj, html, text = t.login_code("123456", site=None)
+        assert "سورین‌فلو" in html and "سورین‌فلو" in subj
+
+
+class TestHeroImages:
+    """One isometric PNG per template family (scripts/render_email_heroes.py),
+    hosted at /email-assets/ with an absolute URL built from the site's own
+    domain — never embedded as a data: URI, which Gmail strips outright."""
+
+    @pytest.mark.parametrize("name,family", [
+        ("login_code", "auth"), ("welcome", "welcome"),
+        ("ticket_decision", "decision"), ("request_received", "request"),
+        ("notification", "notification"), ("test", "notification"),
+    ])
+    def test_every_template_ships_its_family_hero(self, name, family):
+        from app.api.routes.email import _SAMPLES
+        from app.services.email_templates import HERO_FILES
+        _, html, _t = _SAMPLES[name]()
+        filename, _alt = HERO_FILES[family]
+        assert f"/email-assets/{filename}" in html
+
+    def test_the_hero_url_is_absolute_and_uses_the_site_domain(self):
+        from app.api.routes.email import _SAMPLES
+        _, html, _t = _SAMPLES["welcome"]({"domain": "aftab.example"})
+        assert "https://aftab.example/email-assets/hero-welcome.png" in html
+
+    def test_never_a_data_uri(self):
+        """Gmail strips data: URIs from HTML mail outright — see the module
+        docstring's explanation for why the hero is hosted, not inlined."""
+        from app.api.routes.email import _SAMPLES
+        for name, make in _SAMPLES.items():
+            _, html, _t = make()
+            assert "data:image" not in html, name
+
+    def test_every_hero_file_referenced_is_actually_on_disk(self):
+        from pathlib import Path
+        from app.services.email_templates import HERO_FILES
+        for family, (filename, _alt) in HERO_FILES.items():
+            assert (Path("app/static/email_assets") / filename).is_file(), family
+
+    def test_the_outlook_width_is_confined_to_the_mso_branch(self):
+        """A bare width="600" on the <img> would win over max-width on
+        Gmail's Android app the same way it once did for the card itself —
+        see TestItFitsAPhone.test_the_card_is_fluid_outside_outlook."""
+        from app.api.routes.email import _SAMPLES
+        for name, make in _SAMPLES.items():
+            _, html, _t = make()
+            bare = TestItFitsAPhone._outside_mso(html)
+            assert 'width="600"' not in bare, name
