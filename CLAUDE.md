@@ -26,6 +26,7 @@
 - همهٔ migrationها افزایشی و سازگار با نسخهٔ قبل باشند (expand/contract): کد نسخهٔ قبلی باید با پایگاه دادهٔ جدید کار کند و دیپلوی بدون قطعی و بدون از دست رفتن داده باشد.
 - شناسهٔ revision در Alembic باید یکتا باشد. پیش از ساختن revision تازه، `alembic heads` را روی همهٔ برانچ‌های زنده چک کن. دو فایل با یک revision در تست دیده نمی‌شوند (تست همیشه پایگاه داده را از صفر می‌سازد) و فقط در production خراب می‌کنند.
 - `init_db()` در `app/database.py` هنگام بالا آمدن سرور: روی پایگاه دادهٔ تازه جدول‌ها را از مدل‌ها می‌سازد و فقط head را stamp می‌کند، پس `upgrade()` هیچ revisionی در تست‌های معمولی اجرا نمی‌شود (این کار `tests/test_pg_migration.py` است). روی پایگاه دادهٔ موجود `alembic upgrade head` می‌زند. خطای Alembic فقط log می‌شود و سرور سالم بالا می‌آید، پس `/health` سبز دلیل موفقیت migration نیست.
+- از فاز ۳ روی سرور این‌طور است: migration فقط در Job جدای `python -m app.migrate` اجرا می‌شود، که سخت‌گیر است و با خطای Alembic شکست می‌خورد. پادها با `DB_MIGRATE_ON_BOOT=false` فقط بررسی می‌کنند که پایگاه داده از head image عقب نباشد. پایگاه دادهٔ جلوتر (بعد از rollback) پذیرفته است، چون migrationها افزایشی‌اند. لوکال و تست‌ها مثل قبل در boot migrate می‌کنند.
 
 ## تست
 - هیچ تستی را skip یا غیرفعال نکن. تست رفتاری (HTTP یا واحد) بر تستی که فقط متن کد را چک می‌کند مقدم است.
@@ -35,11 +36,13 @@
 LC_ALL=en_US.UTF-8 /usr/local/opt/postgresql@16/bin/pg_ctl -D /usr/local/var/postgresql@16 -l /tmp/pg.log start
 redis-server --daemonize yes --save "" --appendonly no
 psql -h localhost -d postgres -tAc "DROP DATABASE IF EXISTS sorinflow_test"; psql -h localhost -d postgres -tAc "CREATE DATABASE sorinflow_test"
-DATABASE_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test REDIS_URL=redis://localhost:6379/9 SECRET_KEY=ci-only-not-a-real-secret-0123456789 LOGS_PATH=/tmp IMAGES_PATH=/tmp /Users/macbook/.venvs/sorinflow-v2/bin/python -m pytest tests/ -q
+DATABASE_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test REDIS_URL=redis://localhost:6379/9 SECRET_KEY=$(python3 -c "import secrets;print(secrets.token_hex(32))") LOGS_PATH=/tmp IMAGES_PATH=/tmp /Users/macbook/.venvs/sorinflow-v2/bin/python -m pytest tests/ -q
 PG_TEST_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test SECRET_KEY=x LOGS_PATH=/tmp IMAGES_PATH=/tmp /Users/macbook/.venvs/sorinflow-v2/bin/python -m pytest tests/test_pg_migration.py -q
 ```
 
-  (بدون `LC_ALL`، Postgres با خطای «postmaster became multithreaded» می‌میرد. پایگاه دادهٔ تست را پیش از هر اجرا از نو بساز، چون نام کاربرها یکتاست.)
+  (بدون `LC_ALL`، Postgres با خطای «postmaster became multithreaded» می‌میرد. پایگاه دادهٔ تست را پیش از هر اجرا از نو بساز، چون نام کاربرها یکتاست. کلید ثابت قبلی (`ci-only-...`) حالا در فهرست کلیدهای منتشرشده است و production با آن بالا نمی‌آید، پس هر بار کلید تصادفی بساز.)
+- پیش از کامیت، کد تازه باید از دروازهٔ lint رد شود: `python scripts/lint_new_code.py` (ruff، mypy و eslint، فقط روی خط‌های تغییرکرده). `pre-commit install` همین را خودکار می‌کند. CI همین را اجرا می‌کند و کد قدیمی را برای خطاهای قدیمی‌اش رد نمی‌کند.
+- تست end-to-end پنل با Playwright و axe در `tests/e2e/` است (`scripts/e2e_up.sh`). Chromium نسخهٔ Playwright 1.41 روی macOS این مک بالا نمی‌آید، پس این تست‌ها و ۶ تست fingerprint فقط در CI (Ubuntu) اجرا می‌شوند.
 - venv این برانچ `~/.venvs/sorinflow-v2` است و بیرون از مخزن قرار دارد. با فایل lock ساخته می‌شود:
   `uv venv --python 3.11 ~/.venvs/sorinflow-v2 && uv pip install --python ~/.venvs/sorinflow-v2/bin/python --require-hashes -r requirements-dev.lock`
   venv پوشهٔ اصلی (`venv/`) نسخه‌های production (FastAPI 0.109) را دارد و مال `main` است. به آن دست نزن.
@@ -50,6 +53,8 @@ PG_TEST_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test SECRET_KE
 - بالا آوردن و دادهٔ نمونه با یک دستور: `scripts/local_up.sh`. توقف: `docker compose -f docker-compose.local.yml down`. داده هم پاک شود: `... down -v`.
 - ورود محلی: `root`، `owner`، `manager1`، `agent1` و `agent2`، همه با رمز دورریختنی `local-pass-1234`. رمز را در مرورگر تایپ نکن: توکن را از `POST /api/users/token` بگیر و در `localStorage.sf_token` بگذار.
 - `docker-compose.yml` اصلی برای سرور است (nginx روی 80 و 443). روی لوکال بالا نیاور.
+- برنامه یک image با چهار نقش است: `SORINFLOW_ROLE=all|api|worker|scheduler`. پیش‌فرض `all` است، یعنی یک پروسه که همه‌کار می‌کند؛ لوکال و تست‌ها همین را دارند. روی سرور سه Deployment جدا هست: `backend` (api، ۲ نسخه)، `worker` (اسکرپ و Chromium، و مسیرهای ورود دیوار) و `scheduler` (حلقه‌ها). کانتینرها با uid 1000 اجرا می‌شوند.
+- هر تغییر در `k8s/`، `scripts/deploy_k8s.sh` یا بخش deploy در `deploy.yml` را پیش از پوش روی k3d امتحان کن. کلاستر: `k3d cluster create sorinflow-test --image rancher/k3s:v1.36.2-k3s1 -p "18080:80@loadbalancer" -p "18443:443@loadbalancer"`. image را با `docker build --platform linux/amd64 --provenance=false` بساز و با `docker save --platform linux/amd64` و `k3d image import` وارد کن. بعد `scripts/deploy_k8s.sh` را با `IMAGE`، `OVERLAY` و `SECRETS_HASH` اجرا کن. شبیه‌سازی کامل فاز ۳ (وضعیت قدیم، گذار اول، دیپلوی معمولی، شکست و بازگشت) هفت خرابی واقعی در دیپلوی پیدا کرد.
 
 ## قاعده‌های محصول که کد باید نگه دارد
 - هر چیزِ یک حساب دیوار (شماره، کد پیامکی، پنجرهٔ احراز هویت، اعلان) فقط برای صاحب همان شماره است. root مدیریت می‌کند ولی کد کسی را دریافت یا جواب نمی‌دهد.
