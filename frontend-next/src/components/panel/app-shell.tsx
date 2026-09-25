@@ -22,6 +22,7 @@ import { api, onApiError } from "@/lib/api";
 import { can, displayName, ROLE_LABEL, SESSION_KEY, useSession, type User } from "@/lib/session";
 import type { SiteConfig } from "@/lib/site";
 import { toast } from "@/components/toaster";
+import { LogoMark } from "@/components/brand/logo";
 import { ConfirmProvider } from "./kit";
 import { NAV, navItemFor } from "./nav";
 import { PhoneGate } from "./phone-gate";
@@ -31,12 +32,7 @@ export type ShellSite = Pick<SiteConfig, "brandName" | "brandNameLatin" | "tagli
 function BrandMark({ site, compact = false }: { site: ShellSite; compact?: boolean }) {
   return (
     <Link href="/panel" aria-label={compact ? site.brandName : undefined} className="flex items-center gap-2.5 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      <div
-        aria-hidden
-        className="grid size-9 place-items-center rounded-xl bg-linear-to-br from-indigo-500 to-violet-600 text-sm font-black text-white shadow-[0_0_24px_-4px_rgb(99_102_241/0.7)]"
-      >
-        {site.brandNameLatin.slice(0, 1)}
-      </div>
+      <LogoMark size={36} className="drop-shadow-[0_6px_14px_rgb(99_102_241/0.45)]" />
       {!compact && (
         <div className="leading-tight">
           <div className="text-[15px] font-extrabold tracking-tight">{site.brandName}</div>
