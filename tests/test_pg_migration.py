@@ -25,8 +25,12 @@ PG_URL = os.environ.get("PG_TEST_URL")
 pytestmark = pytest.mark.skipif(
     not PG_URL, reason="set PG_TEST_URL to run the Postgres migration test")
 
-# The users table exactly as production has it today, before this change.
+# The users table exactly as production had it before auth v2 — a database
+# from before Alembic too, so no alembic_version: CI runs this file on the
+# database the full suite just stamped, and init_db rightly treats a stamped
+# database as past the pre-Alembic steps these tests exercise.
 OLD_SCHEMA = """
+DROP TABLE IF EXISTS alembic_version;
 DROP TABLE IF EXISTS users CASCADE;
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
