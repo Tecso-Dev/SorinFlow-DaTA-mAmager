@@ -333,7 +333,10 @@ wait_rollout() {
   while [ "$SECONDS" -lt "$deadline" ]; do
     kubectl -n "$NS" rollout status "deployment/$dep" --timeout=5s >/dev/null 2>&1 && return 0
     rs="$(kubectl -n "$NS" get rs -l "app=$dep" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
-    hash="$([ -n "$rs" ] && kubectl -n "$NS" get rs "$rs" -o jsonpath='{.metadata.labels.pod-template-hash}' 2>/dev/null || true)"
+    hash=""
+    if [ -n "$rs" ]; then
+      hash="$(kubectl -n "$NS" get rs "$rs" -o jsonpath='{.metadata.labels.pod-template-hash}' 2>/dev/null || true)"
+    fi
     if [ -n "$hash" ]; then
       restarts="$(kubectl -n "$NS" get pods -l "app=$dep,pod-template-hash=$hash" \
         -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount}{"\n"}{end}' 2>/dev/null | sort -n | tail -1)"
