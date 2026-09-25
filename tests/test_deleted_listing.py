@@ -56,6 +56,12 @@ LIVE = """<html><body><main>
 </main></body></html>"""
 
 
+# A live ad before React has drawn it: no h1 yet, and its own description,
+# the same words as above, inside the inline state script.
+STILL_RENDERING = """<html><head><script>window.__PRELOADED_STATE__ = {"post": {"description":
+"آگهی حذف شده بود، دوباره گذاشتم. ۸۵ متر، طبقهٔ دوم."}}</script></head>
+<body><div id="app"></div></body></html>"""
+
 class FakeResponse:
     def __init__(self, status):
         self.status = status
@@ -182,6 +188,14 @@ class TestTheDetailScrapeStopsAtTheDoor:
             URL, target_category="اسکرپ تکی", wants_contact=lambda _pd: "stop before the reveal")
         assert got and got["title"] == "آپارتمان ۸۵ متری نوساز"
         assert s._last_detail_error is None
+
+    async def test_words_a_person_cannot_see_do_not_count(self, spent):
+        """A slow page with no h1 yet, whose inline state holds the ad's own
+        «آگهی حذف شده بود…»: still a listing, not a deleted one."""
+        s = scraper(FakePage(200, STILL_RENDERING), spent)
+        got = await s.scrape_property_detail(
+            URL, target_category="اسکرپ تکی", wants_contact=lambda _pd: "stop before the reveal")
+        assert got is not None and s._last_detail_error is None
 
 
 class TestTheRunFilesItUnderItsOwnName:

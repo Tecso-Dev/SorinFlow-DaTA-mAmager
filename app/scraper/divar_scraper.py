@@ -1785,10 +1785,13 @@ class DivarScraper:
             # The same page, said in words, for when the status did not say
             # 410. Asked only of a page without an h1: every listing has its
             # title there and this page has none, so an ad whose description
-            # merely mentions «آگهی حذف شده» is never taken for one.
+            # merely mentions «آگهی حذف شده» is never taken for one. Read from
+            # the text the page shows, not its HTML: the inline state script
+            # carries a live ad's description before React has drawn its h1.
             if not await self.page.query_selector("h1"):
-                html = (await self.page.content()).replace("\u200c", " ")   # «حذف‌شده»
-                if any(m in html for m in self.GONE_MARKERS):
+                shown = BeautifulSoup(await self.page.content(), "lxml").get_text(" ")
+                shown = shown.replace("\u200c", " ")   # «حذف‌شده»
+                if any(m in shown for m in self.GONE_MARKERS):
                     logger.info(f"{url}: the page says the listing is gone")
                     self._last_detail_error = self.GONE_FROM_DIVAR
                     return None
