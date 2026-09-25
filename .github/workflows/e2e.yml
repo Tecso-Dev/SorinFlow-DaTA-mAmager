@@ -76,9 +76,11 @@ jobs:
         run: npm ci --prefix tests/e2e
 
       - name: Install Playwright's Chromium
-        # Same Chromium build the Python side uses (playwright==1.41.0 in
-        # requirements.txt, @playwright/test 1.41.0 in tests/e2e/package.json)
-        # — --with-deps also installs the OS libraries Ubuntu needs for it.
+        # The panel's own browser, not the scraper's: @playwright/test is kept
+        # current, while the Python side stays on the Chromium build the
+        # scraper was tuned on (the production image ships that one
+        # preinstalled). --with-deps also installs the OS libraries Ubuntu
+        # needs for it.
         run: npx --prefix tests/e2e playwright install --with-deps chromium
 
       - name: Generate a random SECRET_KEY for this run
