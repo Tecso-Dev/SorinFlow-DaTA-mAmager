@@ -118,12 +118,16 @@ jobs:
           echo "See SECRETS.md for what each key is and how to rotate one later."
           exit 1
 
-      # A token scoped to staging-deployer (Role: full rights, but only
+      # A token scoped to staging-deployer (Role: explicit rights, only
       # inside sorinflow-staging — k8s/overlays/staging/rbac.yaml) and to 30
       # minutes, written into a throwaway kubeconfig that only this job ever
       # sees. Everything from here on runs under THIS kubeconfig, not the
-      # admin one above — so a bug in deploy_k8s.sh, or in this workflow,
-      # cannot reach any other namespace no matter what it tries.
+      # admin one above — so a BUG in deploy_k8s.sh or in this workflow (a
+      # wrong namespace, an over-broad selector) stays confined to
+      # sorinflow-staging instead of reaching anything else. It is a
+      # blast-radius limit for an accident, not a defence against a malicious
+      # workflow: this same job already holds the cluster-admin kubeconfig
+      # two steps up and could simply keep using it instead.
       - name: Mint a scoped, short-lived token for staging-deployer
         env:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml

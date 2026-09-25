@@ -11,6 +11,14 @@
 #   KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
 #     scripts/deploy_k8s.sh
 #
+# VERIFY_HOST/VERIFY_PORT (both optional, default 127.0.0.1:443): where step 5
+# reaches Traefik from to prove the allow-traefik-to-app NetworkPolicy really
+# lets it through — the real node's own address (Traefik binds its 80/443),
+# or a local k3d rehearsal's mapped port, e.g.
+#   VERIFY_PORT=18443 IMAGE=... OVERLAY=... KUBECONFIG=... scripts/deploy_k8s.sh
+# against a cluster made with
+#   k3d cluster create sorinflow-test -p "18080:80@loadbalancer" -p "18443:443@loadbalancer"
+#
 # Order, and why:
 #   1. namespace/config/PVCs/postgres/redis/services — nothing here depends
 #      on the app image, and postgres+redis must be answering before
@@ -59,7 +67,33 @@ say()  { echo; echo "── [$(date +%H:%M:%S)] $*"; }
 retry_kubectl() { "$@" || { sleep 10; "$@"; }; }
 
 TMP_PREFIX="$(mktemp -d)/sorinflow-deploy"
-trap 'rm -rf "$(dirname "$TMP_PREFIX")"' EXIT
+# Armed only between scaling backend to 0 for the very first move off the
+# root image (step 3 below) and the apply that hands its replica count back
+# to the new Deployment spec, right before the rollout waits begin. A failure
+# in that window — the ownership Job timing out, or the apply itself failing
+# — used to exit with backend at 0 and nothing to bring it back: the site
+# stayed down until someone noticed and scaled it up by hand.
+FIRST_TRANSITION_INFLIGHT=0
+cleanup_and_recover() {
+  local status=$?
+  if [ "$FIRST_TRANSITION_INFLIGHT" = 1 ]; then
+    echo "::error::exiting with backend scaled to 0 mid first-transition — restoring the single previous pod."
+    if [ -n "$(kubectl -n "$NS" get deployment backend -o jsonpath='{.spec.template.spec.securityContext.runAsUser}' 2>/dev/null || true)" ]; then
+      kubectl -n "$NS" rollout undo deployment/backend || true
+      kubectl -n "$NS" annotate deployment/backend kubectl.kubernetes.io/last-applied-configuration- >/dev/null 2>&1 || true
+    fi
+    # The old all-in-one image must never run two pods at once (migration
+    # lock deadlock, every background loop firing twice) — force Recreate
+    # before scaling it back up, same as rollback_and_diagnose below.
+    kubectl -n "$NS" patch deployment backend --type=merge \
+      -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}' || true
+    kubectl -n "$NS" scale deployment/worker deployment/scheduler --replicas=0 || true
+    kubectl -n "$NS" scale deployment/backend --replicas=1 || true
+  fi
+  rm -rf "$(dirname "$TMP_PREFIX")"
+  exit "$status"
+}
+trap cleanup_and_recover EXIT
 
 # Prints stdin, keeping only whole "---"-separated YAML documents that
 # contain a line equal to $1 once leading/trailing whitespace is stripped —
@@ -123,7 +157,17 @@ grep -qF "sorinflow.com/synced-secrets: \"${SECRETS_HASH}\"" "$RENDERED" || {
 # ── 1. namespace, config, PVCs, postgres, redis, services ──────────────────
 say "applying namespace, config, PVCs, postgres, redis, services"
 CORE="${TMP_PREFIX}.core.yaml"
-exclude_kinds "Deployment Ingress NetworkPolicy Job" < "$RENDERED" > "$CORE"
+CORE_EXCLUDE="Deployment Ingress NetworkPolicy Job"
+# The staging workflow applies the Namespace and every RBAC object
+# (ServiceAccount/Role/RoleBinding, k8s/overlays/staging/rbac.yaml) with the
+# cluster-admin kubeconfig before minting the scoped staging-deployer token
+# this script runs under from here on — that Role does not, and must not,
+# grant it permission to touch any of those again, itself included (a Role
+# that could relabel or rewrite itself would make the scoping pointless).
+if [ "$OVERLAY" = staging ]; then
+  CORE_EXCLUDE="$CORE_EXCLUDE Namespace ServiceAccount Role RoleBinding"
+fi
+exclude_kinds "$CORE_EXCLUDE" < "$RENDERED" > "$CORE"
 retry_kubectl kubectl apply -f "$CORE"
 # Traefik's Let's Encrypt resolver: kept out of the kustomization (see the
 # file's header — kustomize would move it out of kube-system, where k3s's
@@ -183,6 +227,7 @@ elif kubectl -n "$NS" get deployment backend >/dev/null 2>&1; then
   echo "The old image scrapes in-process AS ROOT, so it and a uid-1000 pod cannot safely"
   echo "share data-pvc at once. Scaling backend to 0 first — a short, accepted downtime"
   echo "(Sobhan's decision), not a bug."
+  FIRST_TRANSITION_INFLIGHT=1
   retry_kubectl kubectl -n "$NS" scale deployment/backend --replicas=0
   for _ in $(seq 1 60); do
     left="$(kubectl -n "$NS" get pods -l app=backend --no-headers 2>/dev/null | grep -vc '^$' || true)"
@@ -200,6 +245,10 @@ say "applying api, worker, scheduler and the ingress"
 APP="${TMP_PREFIX}.app.yaml"
 { select_doc "kind: Deployment" < "$RENDERED"; select_doc "kind: Ingress" < "$RENDERED"; } > "$APP"
 retry_kubectl kubectl apply -f "$APP"
+# Past this point backend's own spec.replicas governs its count again, and a
+# failure is the ordinary wait_rollout/rollback_and_diagnose pair's job below
+# — the first-transition EXIT trap's window ends here.
+FIRST_TRANSITION_INFLIGHT=0
 
 # Kept from deploy.yml: `kubectl get pods` above only ever ran when the
 # rollout succeeded, which is precisely when nobody needs it — the 65048fc
@@ -231,6 +280,11 @@ rollback_and_diagnose() {
       kubectl -n "$NS" rollout undo deployment/backend || true
       forget_last_applied backend
     fi
+    # The old all-in-one image must never run two pods at once (migration
+    # lock deadlock, every background loop firing twice) — RollingUpdate is
+    # only safe for the split-role images this rollout failed to reach.
+    kubectl -n "$NS" patch deployment backend --type=merge \
+      -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}' || true
     kubectl -n "$NS" scale deployment/backend --replicas=1 || true
   fi
   echo "::group::pods"
@@ -330,18 +384,41 @@ verify_fail() {
   kubectl -n "$NS" delete -f "$NETPOL" --ignore-not-found || true
   exit 1
 }
+# divar.ir itself is not something this deploy touched, and it is reached
+# from outside the cluster to test it — a blip there is not a reason to
+# leave the namespace wide open. Only a check of OUR OWN infrastructure
+# (Traefik, redis) calls verify_fail.
+verify_warn() { echo "::warning::$1"; }
 
-say "verifying from inside a backend pod: /ready, redis, DNS, HTTPS egress"
+# The host this overlay actually renders (sorinflow.com / staging.sorinflow.com)
+# — read out of $RENDERED instead of hard-coded, so this keeps working if
+# either ever changes.
+DOMAIN="$(grep -m1 '^  - host: ' "$RENDERED" | awk '{print $3}')"
+[ -n "$DOMAIN" ] || { echo "::error::could not read the Ingress host out of the rendered manifests." >&2; exit 1; }
+VERIFY_HOST="${VERIFY_HOST:-127.0.0.1}"
+VERIFY_PORT="${VERIFY_PORT:-443}"
+
+say "verifying $DOMAIN through Traefik, redis from inside a pod, and divar.ir reachability"
+# A curl to 127.0.0.1 inside the pod never leaves the pod's own network
+# namespace, so it never crosses the allow-traefik-to-app NetworkPolicy at
+# all — a wrong rule there (or a broken Traefik) passed this check every time
+# with the site actually unreachable behind it. Going through Traefik from
+# the HOST, the way a real visitor's request does, is the only way this
+# actually exercises that policy. --resolve pins $DOMAIN to this cluster's
+# own Traefik instead of whatever the name's real DNS answers, which is what
+# lets this run against a k3d rehearsal (see VERIFY_HOST/VERIFY_PORT above)
+# as well as the real node.
+code="$(curl -sk --max-time 10 --resolve "${DOMAIN}:${VERIFY_PORT}:${VERIFY_HOST}" \
+  -o /dev/null -w '%{http_code}' "https://${DOMAIN}:${VERIFY_PORT}/health" || true)"
+[ "$code" = 200 ] \
+  || verify_fail "https://${DOMAIN}:${VERIFY_PORT}/health returned '${code:-nothing}' through Traefik (the allow-traefik-to-app NetworkPolicy, or Traefik itself, is broken)"
+
 # A Ready pod that is not on its way out: right after a rollout the old pods
 # are still in their preStop pause, and checking from one of those failed a
 # healthy deploy and took its NetworkPolicies down with it (k3d rehearsal).
 POD="$(kubectl -n "$NS" get pods -l app=backend -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null \
   | awk -F'|' '$2 == "" && $3 == "True" { print $1; exit }' || true)"
 [ -n "$POD" ] || verify_fail "no backend pod found to verify from"
-
-kubectl -n "$NS" exec "$POD" -c backend -- \
-  sh -c 'curl -fsS --max-time 5 http://127.0.0.1:8000/ready >/dev/null' \
-  || verify_fail "/ready did not answer 200 from inside the pod (postgres/DNS reachability, or the NetworkPolicy itself, is broken)"
 
 kubectl -n "$NS" exec "$POD" -c backend -- \
   python3 -c "
@@ -356,9 +433,9 @@ asyncio.run(main())
 " || verify_fail "could not PING redis from inside the pod"
 
 kubectl -n "$NS" exec "$POD" -c backend -- sh -c 'getent hosts divar.ir >/dev/null' \
-  || verify_fail "DNS lookup for divar.ir failed from inside the pod"
+  || verify_warn "DNS lookup for divar.ir failed from inside the pod (divar.ir, not this deploy's own NetworkPolicies, may just be having a moment)"
 
 kubectl -n "$NS" exec "$POD" -c backend -- sh -c 'curl -sS -o /dev/null --max-time 10 https://divar.ir' \
-  || verify_fail "HTTPS egress to divar.ir failed from inside the pod (any HTTP status back would have counted)"
+  || verify_warn "HTTPS egress to divar.ir failed from inside the pod (any HTTP status back would have counted; divar.ir, not this deploy's own NetworkPolicies, may just be having a moment)"
 
 say "done — $OVERLAY is on ${IMAGE}"

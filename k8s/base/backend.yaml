@@ -139,8 +139,6 @@ spec:
               mountPath: /app/data
             - name: tmp
               mountPath: /tmp
-            - name: logs
-              mountPath: /app/logs
           # The 8 GB node's memory budget, measured 2026-09-15 on the live
           # box:
           #   MemTotal                 7936Mi
@@ -154,20 +152,29 @@ spec:
           # That budget used to go to one process that did everything; it is
           # now split three ways (see worker.yaml and scheduler.yaml for
           # their shares):
-          #   api (this one) × 2 replicas, 768Mi limit each  = 1536Mi
-          #   worker × 1 (holds Chromium)  ~3072Mi limit
-          #   scheduler × 1                  768Mi limit
+          #   api (this one) × 2 replicas, 1Gi limit each   = 2048Mi
+          #   worker × 1 (holds Chromium)      ~3072Mi limit
+          #   scheduler × 1                     1536Mi limit
+          #   ---------------------------------------------
+          #   sum of limits            ~6656Mi   over 6200Mi, on purpose
+          #   sum of requests            1280Mi   well inside it
+          #
           # Scheduling only cares about the sum of REQUESTS, which stays well
           # under 6200Mi; a limit is a per-pod ceiling, not a shared pool, so
-          # their sum can exceed it as long as pods are not all expected to
-          # sit at their limit at once. api itself needs little — no
-          # Chromium, no background loops, just the ASGI app.
+          # their sum can (and here does) exceed it, as long as pods are not
+          # all expected to sit at their limit at once. api is not "just the
+          # ASGI app" any more, though: the request path can run semantic
+          # search's full matrix (load_index/build_matrix over every active
+          # listing's vector, app/ai/embeddings.py) and the panel's «backup
+          # now» (POST /api/backup/run) dumps every table, embeddings
+          # included, into memory as JSON before gzipping it — on whichever
+          # of the 2 replicas gets the request. 768Mi cut that too close.
           resources:
             requests:
               cpu: "100m"
               memory: "256Mi"
             limits:
-              memory: "768Mi"
+              memory: "1Gi"
           # Startup is create_all plus a migration chain, and its duration is
           # not knowable in advance. Without a startupProbe the liveness probe
           # kills the container ~150s in and it crashloops forever with no way
@@ -204,6 +211,4 @@ spec:
           persistentVolumeClaim:
             claimName: data-pvc
         - name: tmp
-          emptyDir: {}
-        - name: logs
           emptyDir: {}

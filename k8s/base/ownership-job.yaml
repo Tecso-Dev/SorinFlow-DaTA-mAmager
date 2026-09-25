@@ -48,7 +48,14 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              add: ["CHOWN", "FOWNER", "DAC_READ_SEARCH"]
+              # DAC_OVERRIDE, not DAC_READ_SEARCH: the staging namespace
+              # enforces the Pod Security "baseline" policy, which allows
+              # CHOWN/FOWNER/DAC_OVERRIDE but not DAC_READ_SEARCH. OVERRIDE is
+              # the broader of the two (bypasses read/write/execute checks
+              # entirely, where READ_SEARCH only bypasses read and directory
+              # search) so it still lets find/chown traverse and touch every
+              # root-owned file under /app/data.
+              add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
             readOnlyRootFilesystem: true
           volumeMounts:
             - name: app-data

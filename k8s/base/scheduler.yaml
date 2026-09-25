@@ -70,15 +70,23 @@ spec:
               mountPath: /app/data
             - name: tmp
               mountPath: /tmp
-            - name: logs
-              mountPath: /app/logs
-          # See backend.yaml for the full node-budget accounting.
+          # See backend.yaml for the full node-budget accounting (this role's
+          # share is 1536Mi, not 768Mi — the request stays the same, only the
+          # ceiling moved). Two things here run well past the supervisor
+          # loops' own footprint: the embeddings loop (embed_properties →
+          # load_index, app/ai/embeddings.py) decodes every active listing's
+          # vector into a Python list of 1536 floats at once — about 49 KB
+          # per vector before numpy ever builds a matrix from them — and the
+          # nightly backup (backup_scheduler → create_backup,
+          # app/services/backup_service.py) dumps every table, embeddings
+          # included, into memory as JSON before gzipping it. 768Mi was sized
+          # for the loops alone, before either of those was this role's job.
           resources:
             requests:
               cpu: "100m"
               memory: "256Mi"
             limits:
-              memory: "768Mi"
+              memory: "1536Mi"
           # Same heartbeat-file mechanism as worker.yaml: no HTTP endpoint,
           # the supervisor loop touches HEARTBEAT_FILE and a stall in any one
           # background loop is expected to be noticed and restarted from
@@ -102,6 +110,4 @@ spec:
           persistentVolumeClaim:
             claimName: data-pvc
         - name: tmp
-          emptyDir: {}
-        - name: logs
           emptyDir: {}

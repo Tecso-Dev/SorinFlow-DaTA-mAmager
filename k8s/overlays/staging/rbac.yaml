@@ -1,10 +1,12 @@
 # .github/workflows/staging.yml applies this file (and the rest of this
 # overlay) with the cluster-admin kubeconfig, then mints a short-lived token
 # for staging-deployer and runs scripts/deploy_k8s.sh under THAT token instead
-# — so a bug in the staging workflow, or in deploy_k8s.sh itself, cannot
-# reach any namespace but this one: a Role, not a ClusterRole, grants
-# everything only inside sorinflow-staging, and there is no ClusterRoleBinding
-# anywhere in this file.
+# — so a bug in the staging workflow, or in deploy_k8s.sh itself, is confined
+# to this one namespace instead of reaching any other: a Role, not a
+# ClusterRole, and there is no ClusterRoleBinding anywhere in this file. It is
+# a blast-radius limit for an accident, not a defence against a malicious
+# workflow — the same job already holds the cluster-admin kubeconfig two
+# steps earlier and could simply keep using it instead.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -19,9 +21,58 @@ metadata:
   labels:
     app.kubernetes.io/component: rbac
 rules:
-  - apiGroups: ["*"]
-    resources: ["*"]
-    verbs: ["*"]
+  # Explicit resources scripts/deploy_k8s.sh actually touches — not "*": with
+  # every resource in every apiGroup, this Role also covered "namespaces",
+  # and RBAC treats /namespaces/sorinflow-staging as itself a namespaced
+  # object of that namespace, so staging-deployer could get/patch (and so
+  # relabel — including the pod-security labels above) its own Namespace.
+  # deploy_k8s.sh itself never applies the Namespace or this file's own
+  # objects (skipped for OVERLAY=staging — the admin kubeconfig step already
+  # applied both), so neither "namespaces" nor this apiGroup appear below.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Pods are never created or deleted directly here — Deployments and Jobs
+  # own that — only read (rollout waits, the failure diagnostics), tailed
+  # (pods/log) and exec'd into (pods/exec: the redis ping and divar.ir checks
+  # below, and the locks query in scripts/deploy_k8s.sh's failure path).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  # Read-only: `kubectl describe` reads Events, and nothing here ever needs a
+  # Secret's actual value, only whether sorinflow-secrets exists.
+  - apiGroups: [""]
+    resources: ["events", "secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Applied every deploy, then deleted (and not re-applied) if the
+  # post-deploy verification finds one broke real traffic.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["traefik.io"]
+    resources: ["middlewares"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -208,6 +208,17 @@
   value:
     name: ENVIRONMENT
     value: "production"
+# The shared data volume, not each role's own /app/logs (removed from the
+# volumes below): a log file private to one pod's ephemeral filesystem was
+# never visible to anyone but that pod, so the panel's log viewer
+# (GET /api/stats/logs) only ever showed whichever role and replica happened
+# to serve the request — api reading its own empty file, never worker's
+# scrape log. data-pvc is mounted read-write on api/worker/scheduler already.
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: LOGS_PATH
+    value: "/app/data/logs"
 # The node's own address, from Kubernetes — not a hard-coded string, which
 # once left the monitoring page reporting the old server's IP for hours after
 # a move to a new one. fieldRef is evaluated per-pod by the kubelet, so this
