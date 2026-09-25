@@ -442,6 +442,21 @@ def test_a_stolen_session_cannot_guess_the_password_at_totp_disable(client):
     assert r.status_code == 429 and int(r.headers["Retry-After"]) > 0
 
 
+def test_repeated_correct_disables_never_exhaust_the_budget(client):
+    """totp_disable used to spend its counter on one key (the bare username)
+    but clear a different one (name:username) on success — so the real
+    counter was never reset and grew a little on every legitimate use,
+    eventually locking the account out over nothing but correct passwords."""
+    totp = _totp_user("lh_totp_repeat")
+    half = _half(client, "lh_totp_repeat")
+    tok = client.post("/api/users/token/verify-totp",
+                      json={"totp_session": half, "code": totp.now()}).json()["access_token"]
+    auth = {"Authorization": f"Bearer {tok}"}
+    for _ in range(_max() + 2):
+        r = client.post("/api/users/me/totp/disable", headers=auth, json={"password": "pw123456"})
+        assert r.status_code == 200, r.text
+
+
 # ── /me/email-2fa takes a model, not a dict ───────────────────────────────────
 
 def test_email_2fa_switch_reads_a_typed_body(client):

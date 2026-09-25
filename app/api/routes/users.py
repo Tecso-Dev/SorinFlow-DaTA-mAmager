@@ -144,13 +144,16 @@ def _account_key(user: User) -> str:
     return f"uid:{user.id}"
 
 
-async def _login_attempt(request: Request, key: str) -> None:
+async def _login_attempt(request: Optional[Request], key: str) -> None:
     """Count this attempt, or 429 once this address or account has spent its.
 
     Before the password or code is looked at, so the right one is refused as
     well until the window passes — otherwise the lock would only slow a
     guesser down. A wrong answer is already counted; a right one calls
     _login_passed. Redis down: allowed, with a warning (verification.py).
+
+    request is None for a re-verify-my-password action (totp_disable): there
+    is no address to also throttle, only the account's own budget.
     """
     from app.services.verification import take_login_attempt, VerificationError
     try:
@@ -1164,12 +1167,17 @@ async def totp_disable(
 ):
     from app.services.verification import clear_login_failures
 
-    # On the budget «change password» uses (keyed on the username): a stolen
-    # session must not get unlimited guesses at the password here instead.
-    await _login_attempt(None, current_user.username)
+    # The same budget «change password» uses (keyed on the username): a
+    # stolen session must not get unlimited guesses at the password here
+    # instead. One key for both halves — spending and clearing different
+    # keys left the real counter never reset, so it grew a little on every
+    # legitimate use and eventually locked the account out over nothing but
+    # correct passwords.
+    key = f"name:{current_user.username}"
+    await _login_attempt(None, key)
     if not verify_password(data.password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="رمز عبور اشتباه است")
-    await clear_login_failures(f"name:{current_user.username}")
+    await clear_login_failures(key)
 
     current_user.totp_enabled = False
     current_user.totp_secret = None
