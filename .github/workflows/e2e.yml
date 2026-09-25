@@ -92,7 +92,10 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_e2e_local
           REDIS_URL: redis://localhost:6379/11
-        run: npx --prefix tests/e2e playwright test
+        # --config: run from the repo root, Playwright looks for its config in
+        # the working directory, not in --prefix — without it the suite ran
+        # with no baseURL and no webServer (every test «Invalid URL»).
+        run: npx --prefix tests/e2e playwright test --config tests/e2e/playwright.config.js
 
       - name: Upload the Playwright report
         if: failure()
