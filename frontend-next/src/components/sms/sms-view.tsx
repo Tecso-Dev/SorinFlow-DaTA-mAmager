@@ -276,7 +276,7 @@ function EventsCard() {
       ) : q.data.events.length === 0 ? (
         <Empty icon={MessageSquareText}>رویدادی ثبت نشده است.</Empty>
       ) : (
-        <ul tabIndex={0} role="region" aria-label="رویدادهای سرویس پیامک" className="flex max-h-80 flex-col gap-2 overflow-y-auto text-sm">
+        <ul tabIndex={0} aria-label="رویدادهای سرویس پیامک" className="flex max-h-80 flex-col gap-2 overflow-y-auto text-sm">
           {q.data.events.map((e) => (
             <li key={e.id} className="flex items-start gap-2 rounded-lg border px-3 py-2">
               <ToneBadge tone={LEVEL_TONE[e.level] ?? "neutral"}>{STAGE_LABEL[e.stage] ?? e.stage}</ToneBadge>

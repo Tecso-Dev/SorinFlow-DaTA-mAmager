@@ -219,7 +219,7 @@ export function AlertsTab() {
             {d.log.length > 0 && (
               <div>
                 <div className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground"><Clock className="size-3.5" /> تاریخچه</div>
-                <ul tabIndex={0} role="region" aria-label="تاریخچهٔ هشدارها" className="flex max-h-64 flex-col gap-1.5 overflow-y-auto text-xs">
+                <ul tabIndex={0} aria-label="تاریخچهٔ هشدارها" className="flex max-h-64 flex-col gap-1.5 overflow-y-auto text-xs">
                   {d.log.map((a, i) => (
                     <li key={i} className="rounded-lg bg-muted/30 px-3 py-1.5">
                       {a.title} — {faDate(new Date(a.since), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}

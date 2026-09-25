@@ -409,7 +409,7 @@ function ClientErrorsCard() {
       ) : q.data.items.length === 0 ? (
         <Empty icon={CircleCheck}>خطایی ثبت نشده است.</Empty>
       ) : (
-        <ul tabIndex={0} role="region" aria-label="خطاهای مرورگر کاربران" className="flex max-h-72 flex-col gap-1.5 overflow-y-auto text-xs">
+        <ul tabIndex={0} aria-label="خطاهای مرورگر کاربران" className="flex max-h-72 flex-col gap-1.5 overflow-y-auto text-xs">
           {q.data.items.map((e, i) => (
             <li key={i} className="rounded-lg bg-muted/30 px-3 py-2">
               <div className="font-medium">{String(e.message ?? "—")}</div>

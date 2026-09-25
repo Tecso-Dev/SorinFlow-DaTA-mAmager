@@ -218,7 +218,7 @@ function LogCard({ agentFilter, onAgentFilter }: { agentFilter: { agent: string;
       ) : q.data.items.length === 0 ? (
         <Empty icon={CircleAlert}>فراخوانی‌ای ثبت نشده است.</Empty>
       ) : (
-        <ul tabIndex={0} role="region" aria-label="لاگ فراخوانی‌ها" className="flex max-h-96 flex-col gap-1.5 overflow-y-auto text-sm">
+        <ul tabIndex={0} aria-label="لاگ فراخوانی‌ها" className="flex max-h-96 flex-col gap-1.5 overflow-y-auto text-sm">
           {q.data.items.map((r) => (
             <li key={r.id} className="flex items-center gap-2 rounded-lg border px-3 py-2">
               <ToneBadge tone={r.ok ? "success" : "danger"}>{r.agent}</ToneBadge>
@@ -280,7 +280,7 @@ function AssistantCard() {
       ) : log.data.items.length === 0 ? (
         <Empty icon={MessageCircle}>سؤالی ثبت نشده است.</Empty>
       ) : (
-        <ul tabIndex={0} role="region" aria-label="سؤال‌های دستیار سورین" className="flex max-h-96 flex-col gap-3 overflow-y-auto text-sm">
+        <ul tabIndex={0} aria-label="سؤال‌های دستیار سورین" className="flex max-h-96 flex-col gap-3 overflow-y-auto text-sm">
           {log.data.items.map((c) => (
             <li key={c.id} className="rounded-xl border px-3 py-2.5">
               <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
