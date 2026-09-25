@@ -158,8 +158,8 @@ async def init_db(strict: bool = False):
         fresh = not await conn.run_sync(lambda c: inspect(c).has_table("users"))
         await conn.run_sync(Base.metadata.create_all)
 
-    # Every _migrate_* step below (and _migrate_auth_v2 further down) is
-    # pre-Alembic DDL: it exists to bring a database up to the baseline
+    # Every _migrate_* step below is pre-Alembic DDL: it exists to bring a
+    # database up to the baseline
     # Alembic takes over from, and a database Alembic has stamped is past
     # that baseline for good. Its `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
     # still takes ACCESS EXCLUSIVE even though every column already exists —
@@ -236,10 +236,13 @@ async def init_db(strict: bool = False):
             # failure while committing.
             print(f"{step.__name__} skipped: {e}")
 
-    if not stamped:
-        async with engine.begin() as conn:
-            await _guard(conn)
-            await _migrate_auth_v2(conn)
+    # Every boot, stamped or not, like the revision safety nets above: every
+    # login reads these columns, _verify_auth_v2 below refuses to start
+    # without them, and the step asks the catalog first — no lock when they
+    # are already there.
+    async with engine.begin() as conn:
+        await _guard(conn)
+        await _migrate_auth_v2(conn)
 
     # From here on, schema changes are Alembic revisions (migrations/versions):
     # the steps above bring an old database to the baseline, this applies
