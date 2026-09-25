@@ -1,5 +1,5 @@
-import { ComingTab } from "@/components/crm/coming";
+import { CustomersView } from "@/components/crm/customers/customers-view";
 
 export default function Page() {
-  return <ComingTab slug="customers" />;
+  return <CustomersView />;
 }
