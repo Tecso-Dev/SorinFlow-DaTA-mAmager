@@ -1,5 +1,5 @@
-import { ComingTab } from "@/components/crm/coming";
+import { NotesView } from "@/components/crm/notes/notes-view";
 
 export default function Page() {
-  return <ComingTab slug="notes" />;
+  return <NotesView />;
 }
