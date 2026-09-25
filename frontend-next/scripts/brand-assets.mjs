@@ -3,10 +3,10 @@
 // always drawn by the same SVG logo as the pages (components/brand/logo.tsx):
 //
 //   public/og.png            1200×630 link preview (from /brand-preview/og)
-//   src/app/icon.png         512×512 favicon, transparent
-//   src/app/apple-icon.png   180×180 iOS home-screen icon, opaque
-//   public/icon-maskable.png 512×512 Android maskable icon (80% safe zone)
-//   src/app/favicon.ico      16 + 32 px, PNG-in-ICO
+//   src/components/brand/icons/icon.png        512×512 favicon, transparent
+//   src/components/brand/icons/apple-icon.png  180×180 iOS home-screen icon, opaque
+//   src/app/favicon.ico                        16 + 32 px, PNG-in-ICO
+// (the two PNGs are imported by app/layout.tsx, so they ship under /_next/static)
 //
 // Run it after switching the logo concept or renaming the brand:
 //   npm ci --prefix ../tests/e2e            (once: it brings Playwright)
@@ -70,16 +70,14 @@ function ico(pngs) {
 
 const out = {
   og: join(app, "public/og.png"),
-  icon: join(app, "src/app/icon.png"),
-  apple: join(app, "src/app/apple-icon.png"),
-  maskable: join(app, "public/icon-maskable.png"),
+  icon: join(app, "src/components/brand/icons/icon.png"),
+  apple: join(app, "src/components/brand/icons/apple-icon.png"),
   favicon: join(app, "src/app/favicon.ico"),
 };
 
 await writeFile(out.og, await shoot("/brand-preview/og", { width: 1200, height: 630 }));
 await writeFile(out.icon, await shoot("/brand-preview/icon?kind=favicon", { width: 512, height: 512, transparent: true }));
 await writeFile(out.apple, await shoot("/brand-preview/icon?kind=apple", { width: 512, height: 512, scale: 180 / 512 }));
-await writeFile(out.maskable, await shoot("/brand-preview/icon?kind=maskable", { width: 512, height: 512 }));
 const small = await Promise.all(
   [16, 32].map(async (size) => ({
     size,

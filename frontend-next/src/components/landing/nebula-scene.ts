@@ -385,6 +385,9 @@ export function startNebula(canvas: HTMLCanvasElement, opts: NebulaOptions): Neb
       geo.dispose();
       mat.dispose();
       renderer.dispose();
+      // Free the GL context now; otherwise every visit to / leaves one behind
+      // until the browser drops the oldest.
+      renderer.forceContextLoss();
     },
   };
 }

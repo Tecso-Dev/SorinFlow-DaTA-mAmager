@@ -5,6 +5,8 @@ import { Providers } from "@/components/providers";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DirectionProvider } from "@/components/ui/direction";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import appleIcon from "@/components/brand/icons/apple-icon.png";
+import icon from "@/components/brand/icons/icon.png";
 import { getSiteConfig } from "@/lib/site";
 import "./globals.css";
 
@@ -20,6 +22,9 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: { default: site.seoTitle || site.brandName, template: `%s — ${site.brandName}` },
     description: site.seoDescription || site.tagline,
+    // Imported, so they are served from /_next/static (drawn from the logo by
+    // scripts/brand-assets.mjs); /favicon.ico stays the file-convention one.
+    icons: { icon: [{ url: icon.src, type: "image/png", sizes: "512x512" }], apple: [{ url: appleIcon.src, sizes: "180x180" }] },
   };
 }
 

@@ -11,7 +11,7 @@
 // file directly but goes through `logo.tsx`, the one switch point.
 
 import { useReducedMotion } from "motion/react";
-import { useId } from "react";
+import { useId, useSyncExternalStore } from "react";
 import { cn } from "cn";
 
 /* ───────────────────────── geometry helpers ───────────────────────── */
@@ -34,10 +34,15 @@ function useGradientIds<const K extends string>(keys: readonly K[]): Record<K, s
   return Object.fromEntries(keys.map((k) => [k, `sf${base}${k}`])) as Record<K, string>;
 }
 
-/** Animation runs only when asked for and never under reduced motion. */
+const noop = () => () => {};
+
+/** Animation runs only when asked for and never under reduced motion. It
+ *  starts after hydration: the server cannot know the motion preference, so
+ *  the first client render must match its still markup. */
 function useAnimate(animated: boolean | undefined) {
   const reduce = useReducedMotion();
-  return !!animated && !reduce;
+  const hydrated = useSyncExternalStore(noop, () => true, () => false);
+  return !!animated && hydrated && !reduce;
 }
 
 export type MarkProps = {

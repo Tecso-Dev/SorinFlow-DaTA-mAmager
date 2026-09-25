@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import icon from "@/components/brand/icons/icon.png";
 import { Landing, type LandingStats } from "@/components/landing/landing";
 import { fill, LANDING } from "@/content/landing";
 import { faNum } from "@/lib/format";
@@ -55,7 +56,7 @@ function jsonLd(site: SiteConfig) {
     name: brand,
     alternateName: site.brandNameLatin || undefined,
     url,
-    logo: `${url}icon.png`,
+    logo: new URL(icon.src, url).href,
     email: site.email || undefined,
     telephone: site.phone || undefined,
   };
