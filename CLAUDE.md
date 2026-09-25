@@ -42,7 +42,9 @@ PG_TEST_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test SECRET_KE
 
   (بدون `LC_ALL`، Postgres با خطای «postmaster became multithreaded» می‌میرد. پایگاه دادهٔ تست را پیش از هر اجرا از نو بساز، چون نام کاربرها یکتاست. کلید ثابت قبلی (`ci-only-...`) حالا در فهرست کلیدهای منتشرشده است و production با آن بالا نمی‌آید، پس هر بار کلید تصادفی بساز.)
 - پیش از کامیت، کد تازه باید از دروازهٔ lint رد شود: `python scripts/lint_new_code.py` (ruff، mypy و eslint، فقط روی خط‌های تغییرکرده). `pre-commit install` همین را خودکار می‌کند. CI همین را اجرا می‌کند و کد قدیمی را برای خطاهای قدیمی‌اش رد نمی‌کند.
-- تست end-to-end پنل با Playwright و axe در `tests/e2e/` است (`scripts/e2e_up.sh`). Chromium نسخهٔ Playwright 1.41 روی macOS این مک بالا نمی‌آید، پس این تست‌ها و ۶ تست fingerprint فقط در CI (Ubuntu) اجرا می‌شوند.
+- تست end-to-end پنل با Playwright و axe در `tests/e2e/` است (`scripts/e2e_up.sh`) و روی همین مک هم اجرا می‌شود. `@playwright/test` از ۱۴۰۵/۰۷/۰۳ روی 1.63 است. اجرا:
+  `PYTHON=~/.venvs/sorinflow-v2/bin/python npx --prefix tests/e2e playwright test --config tests/e2e/playwright.config.js` (پیش از اجرا پایگاه دادهٔ `sorinflow_e2e_local` را از نو بساز).
+- ۶ تست fingerprint فقط در CI (Ubuntu) اجرا می‌شوند، چون از Chromium پایتون (Playwright 1.41، همان نسخه‌ای که اسکرپر روی آن تنظیم شده) استفاده می‌کنند و آن نسخه روی macOS این مک بالا نمی‌آید.
 - venv این برانچ `~/.venvs/sorinflow-v2` است و بیرون از مخزن قرار دارد. با فایل lock ساخته می‌شود:
   `uv venv --python 3.11 ~/.venvs/sorinflow-v2 && uv pip install --python ~/.venvs/sorinflow-v2/bin/python --require-hashes -r requirements-dev.lock`
   venv پوشهٔ اصلی (`venv/`) نسخه‌های production (FastAPI 0.109) را دارد و مال `main` است. به آن دست نزن.

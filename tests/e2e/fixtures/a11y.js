@@ -21,6 +21,15 @@ function isBaselined(pageKey, ruleId, target) {
  * @returns {Promise<string[]>} one line per new critical/serious violation; empty means clean
  */
 async function checkA11y(page, pageKey) {
+  // Measure the page at rest. The landing's CTAs fade in from opacity 0
+  // (0.6 s delay, 1 s rise): axe running inside that window read them as
+  // low-contrast — a PR run failed on it twice while push runs of the same
+  // tree passed. Only animations that end are awaited; a looping one
+  // (ringFloat, bars) would never resolve.
+  await page.evaluate(() => Promise.all(document.getAnimations()
+    .filter(a => a.effect && a.effect.getComputedTiming().endTime !== Infinity)
+    .map(a => a.finished.catch(() => null))));
+
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa'])
     .analyze();
