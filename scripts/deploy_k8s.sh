@@ -181,6 +181,34 @@ fi
 retry_kubectl kubectl -n "$NS" rollout status statefulset/postgres --timeout=300s
 retry_kubectl kubectl -n "$NS" rollout status statefulset/redis --timeout=120s
 
+# ── first transition: stop the old root pod before anything writes ─────────
+# Before the migrate Job, not after: the old all-in-one image runs every loop
+# in its own process, and the AI loops hold a transaction open across an LLM
+# call — a migration's ALTER then waits on them (up to its 5 s lock timeout,
+# failing the Job) while every query behind it waits too. The downtime this
+# step costs was accepted for this one deploy anyway; stopping first makes the
+# migration run against an idle database. From here to the apply, the EXIT
+# trap above puts the old pod back if anything fails.
+FIRST_TRANSITION=0
+EXISTING_UID=""
+if kubectl -n "$NS" get deployment backend >/dev/null 2>&1; then
+  EXISTING_UID="$(kubectl -n "$NS" get deployment backend -o jsonpath='{.spec.template.spec.securityContext.runAsUser}' 2>/dev/null || true)"
+  if [ -z "$EXISTING_UID" ]; then
+    FIRST_TRANSITION=1
+    say "FIRST TRANSITION: the live backend Deployment has no runAsUser (the old root image)."
+    echo "The old image scrapes in-process AS ROOT, so it and a uid-1000 pod cannot safely"
+    echo "share data-pvc at once. Scaling backend to 0 first — a short, accepted downtime"
+    echo "(Sobhan's decision), not a bug."
+    FIRST_TRANSITION_INFLIGHT=1
+    retry_kubectl kubectl -n "$NS" scale deployment/backend --replicas=0
+    for _ in $(seq 1 60); do
+      left="$(kubectl -n "$NS" get pods -l app=backend --no-headers 2>/dev/null | grep -vc '^$' || true)"
+      [ "${left:-0}" = "0" ] && break
+      sleep 5
+    done
+  fi
+fi
+
 # ── 2. migrate ───────────────────────────────────────────────────────────────
 say "running migrations (job/${MIGRATE_NAME})"
 MIGRATE_JOB="${TMP_PREFIX}.migrate.yaml"
@@ -214,31 +242,14 @@ run_ownership_job() {
   fi
 }
 
-EXISTING_UID=""
-if kubectl -n "$NS" get deployment backend >/dev/null 2>&1; then
-  EXISTING_UID="$(kubectl -n "$NS" get deployment backend -o jsonpath='{.spec.template.spec.securityContext.runAsUser}' 2>/dev/null || true)"
-fi
-if [ -n "$EXISTING_UID" ]; then
+if [ "$FIRST_TRANSITION" = 1 ]; then
+  say "FIRST TRANSITION: backend is at 0 (see above) — fixing data-pvc ownership for uid 1000"
+elif [ -n "$EXISTING_UID" ]; then
   say "backend already runs as uid $EXISTING_UID — running the ownership job with apps up"
-  run_ownership_job
-elif kubectl -n "$NS" get deployment backend >/dev/null 2>&1; then
-  FIRST_TRANSITION=1
-  say "FIRST TRANSITION: the live backend Deployment has no runAsUser (the old root image)."
-  echo "The old image scrapes in-process AS ROOT, so it and a uid-1000 pod cannot safely"
-  echo "share data-pvc at once. Scaling backend to 0 first — a short, accepted downtime"
-  echo "(Sobhan's decision), not a bug."
-  FIRST_TRANSITION_INFLIGHT=1
-  retry_kubectl kubectl -n "$NS" scale deployment/backend --replicas=0
-  for _ in $(seq 1 60); do
-    left="$(kubectl -n "$NS" get pods -l app=backend --no-headers 2>/dev/null | grep -vc '^$' || true)"
-    [ "${left:-0}" = "0" ] && break
-    sleep 5
-  done
-  run_ownership_job
 else
   say "backend does not exist yet (first-ever deploy to this namespace) — running the ownership job"
-  run_ownership_job
 fi
+run_ownership_job
 
 # ── 4. the rollout itself ───────────────────────────────────────────────────
 say "applying api, worker, scheduler and the ingress"
