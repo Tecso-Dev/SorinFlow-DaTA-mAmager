@@ -303,10 +303,22 @@ async def _alembic_sync(fresh: bool) -> None:
     no version yet  → an established database from before Alembic: stamp the
                       baseline the boot-time steps have brought it to, then
                       upgrade to head.
-    versioned       → upgrade to head (a no-op when nothing is newer).
+    versioned, behind → upgrade to head (a no-op when nothing is newer).
+    versioned, AHEAD  → a revision this image's own script directory has
+                      never heard of is not behind, it is ahead: a newer
+                      release's schema, reached by a rollback
+                      (`kubectl rollout undo`, or the deploy script undoing a
+                      failed rollout). Every migration is additive precisely
+                      so that keeps working — logged and left alone, never
+                      raised, the same rule assert_schema_current already
+                      applies to a running pod. Without this, `python -m
+                      app.migrate`'s strict mode (app/migrate.py) would fail
+                      the Job trying to "upgrade" a schema already ahead of
+                      it, turning a routine rollback into an outage.
     """
     from alembic import command
     from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
 
     cfg = _alembic_config()
     if cfg is None:
@@ -325,6 +337,14 @@ async def _alembic_sync(fresh: bool) -> None:
             command.upgrade(cfg, "head")
             print(f"alembic: pre-alembic database stamped baseline, upgraded to {head}")
         elif current != head:
+            try:
+                ScriptDirectory.from_config(cfg).get_revision(current)
+            except Exception:
+                from loguru import logger
+                logger.warning(f"alembic: database is at {current}, unknown to this "
+                               f"image's {head} — ahead of it (a rollback); migrations "
+                               "are additive, leaving it alone")
+                return
             command.upgrade(cfg, "head")
             print(f"alembic: upgraded {current} → {head}")
 
