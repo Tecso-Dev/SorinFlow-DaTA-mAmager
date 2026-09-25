@@ -189,7 +189,18 @@ def call_queue_for(query, user):
     """The call queue is «mine or nobody's»: the leads assigned to this
     account and the unassigned ones, whose first dial claims them. Everybody
     queues this way, root included — the queue is a person's day, not a
-    view of the office."""
+    view of the office.
+
+    A lead whose name meant nobody, or more than one person, belongs to
+    nobody (see the module docstring) — but assigned_to still holds that
+    name, so it fails "unassigned", and assigned_to_user_id is NULL, so it
+    fails "mine" for everybody too. Left as is, it would sit in no one's
+    queue at all. root and super_admin — the only ones who can actually sort
+    out who the name meant — see it; everybody else still sees only their
+    own and the genuinely unassigned, same as before.
+    """
+    if is_super(user):
+        return query.where(or_(Lead.assigned_to_user_id.is_(None), _mine(Lead.assigned_to_user_id, user)))
     return query.where(or_(Lead.assigned_to.is_(None), Lead.assigned_to == "",
                            _mine(Lead.assigned_to_user_id, user)))
 
