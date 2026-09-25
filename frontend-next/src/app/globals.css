@@ -4,13 +4,6 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Design proposals: one dashboard, three looks. Each variant scopes its own
-   tokens and can add its own utilities (va:rounded-3xl, vb:border ...).
-   Only the chosen one survives; the other two go with the /preview route. */
-@custom-variant va (&:where([data-variant="a"] *));
-@custom-variant vb (&:where([data-variant="b"] *));
-@custom-variant vc (&:where([data-variant="c"] *));
-
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -59,9 +52,10 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* ── A · «شب نیلی» — today's panel, grown up: black, indigo, soft glow ── */
-:root,
-[data-variant="a"] {
+/* «شب نیلی»: black and indigo with soft glows in the dark theme, the same
+   indigo on cool white in the light one. Every page reads these tokens and
+   nothing else; the design choice lives only in this file. */
+:root {
   --radius: 0.875rem;
   --background: #f5f6fb;
   --foreground: #0e1022;
@@ -99,12 +93,12 @@
   --sidebar-ring: #6366f1;
   --glow-1: rgb(99 102 241 / 0.10);
   --glow-2: rgb(139 92 246 / 0.08);
+  /* price-coded 3D views: cheaper → dearer */
   --viz-low: #6366f1;
   --viz-high: #ec4899;
 }
 
-.dark,
-.dark [data-variant="a"] {
+.dark {
   --background: #05050a;
   --foreground: #eef1f8;
   --card: #0c0c14;
@@ -143,175 +137,12 @@
   --glow-2: rgb(139 92 246 / 0.12);
 }
 
-/* ── B · «گرافیت» — neutral graphite, one emerald accent, dense like a pro tool ── */
-[data-variant="b"] {
-  --radius: 0.5rem;
-  --background: #fafaf9;
-  --foreground: #18181b;
-  --card: #ffffff;
-  --card-foreground: #18181b;
-  --popover: #ffffff;
-  --popover-foreground: #18181b;
-  --primary: #059669;
-  --primary-foreground: #ffffff;
-  --secondary: #f4f4f5;
-  --secondary-foreground: #27272a;
-  --muted: #f4f4f5;
-  --muted-foreground: #6b6f76;
-  --accent: #f1f1f0;
-  --accent-foreground: #18181b;
-  --destructive: #dc2626;
-  --success: #059669;
-  --warning: #d97706;
-  --info: #2563eb;
-  --border: #e7e7e4;
-  --input: #e4e4e1;
-  --ring: #10b981;
-  --chart-1: #059669;
-  --chart-2: #a1a1aa;
-  --chart-3: #52525b;
-  --chart-4: #d97706;
-  --chart-5: #2563eb;
-  --sidebar: #f7f7f6;
-  --sidebar-foreground: #3f3f46;
-  --sidebar-primary: #059669;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #ececea;
-  --sidebar-accent-foreground: #18181b;
-  --sidebar-border: #e7e7e4;
-  --sidebar-ring: #10b981;
-  --glow-1: transparent;
-  --glow-2: transparent;
-  --viz-low: #10b981;
-  --viz-high: #f59e0b;
-}
-
-.dark [data-variant="b"] {
-  --background: #0b0c0d;
-  --foreground: #e9eaec;
-  --card: #121314;
-  --card-foreground: #e9eaec;
-  --popover: #161718;
-  --popover-foreground: #e9eaec;
-  --primary: #10b981;
-  --primary-foreground: #03140e;
-  --secondary: #1a1b1d;
-  --secondary-foreground: #e9eaec;
-  --muted: #18191b;
-  --muted-foreground: #8b9097;
-  --accent: #1c1d20;
-  --accent-foreground: #e9eaec;
-  --destructive: #f05252;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --info: #60a5fa;
-  --border: #232528;
-  --input: #2a2c30;
-  --ring: #10b981;
-  --chart-1: #10b981;
-  --chart-2: #71717a;
-  --chart-3: #3f3f46;
-  --chart-4: #f59e0b;
-  --chart-5: #60a5fa;
-  --sidebar: #0e0f10;
-  --sidebar-foreground: #b4b8bf;
-  --sidebar-primary: #10b981;
-  --sidebar-primary-foreground: #03140e;
-  --sidebar-accent: #1a1b1e;
-  --sidebar-accent-foreground: #e9eaec;
-  --sidebar-border: #1f2124;
-  --sidebar-ring: #10b981;
-}
-
-/* ── C · «فیروزه» — Persian tile warmth: sand, turquoise, saffron, terracotta ── */
-[data-variant="c"] {
-  --radius: 1.125rem;
-  --background: #f6f1e9;
-  --foreground: #1d2a2c;
-  --card: #fffcf7;
-  --card-foreground: #1d2a2c;
-  --popover: #fffcf7;
-  --popover-foreground: #1d2a2c;
-  --primary: #0e8f8a;
-  --primary-foreground: #ffffff;
-  --secondary: #fdf0d5;
-  --secondary-foreground: #5c4200;
-  --muted: #efe8dc;
-  --muted-foreground: #66706f;
-  --accent: #e6f3f1;
-  --accent-foreground: #0b4f4c;
-  --destructive: #c2410c;
-  --success: #0f8a5f;
-  --warning: #c98a00;
-  --info: #2f64a3;
-  --border: #e8dfd0;
-  --input: #e3d9c8;
-  --ring: #0e9f9a;
-  --chart-1: #0e9f9a;
-  --chart-2: #e0a100;
-  --chart-3: #d9653b;
-  --chart-4: #3b6ea8;
-  --chart-5: #7c9a3d;
-  --sidebar: #fffcf7;
-  --sidebar-foreground: #1d2a2c;
-  --sidebar-primary: #0e8f8a;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e6f3f1;
-  --sidebar-accent-foreground: #0b4f4c;
-  --sidebar-border: #e8dfd0;
-  --sidebar-ring: #0e9f9a;
-  --glow-1: rgb(14 159 154 / 0.10);
-  --glow-2: rgb(224 161 0 / 0.10);
-  --viz-low: #0e9f9a;
-  --viz-high: #e0a100;
-}
-
-.dark [data-variant="c"] {
-  --background: #091313;
-  --foreground: #eaf3f1;
-  --card: #0e1c1c;
-  --card-foreground: #eaf3f1;
-  --popover: #112121;
-  --popover-foreground: #eaf3f1;
-  --primary: #2dd4bf;
-  --primary-foreground: #042f2c;
-  --secondary: #2a2210;
-  --secondary-foreground: #fbd77a;
-  --muted: #122323;
-  --muted-foreground: #8fa6a3;
-  --accent: #123030;
-  --accent-foreground: #c8f3ec;
-  --destructive: #f97350;
-  --success: #34d399;
-  --warning: #fbbf24;
-  --info: #7cb0ea;
-  --border: rgb(255 255 255 / 0.08);
-  --input: rgb(255 255 255 / 0.11);
-  --ring: #2dd4bf;
-  --chart-1: #2dd4bf;
-  --chart-2: #fbbf24;
-  --chart-3: #f97350;
-  --chart-4: #7cb0ea;
-  --chart-5: #a3c85a;
-  --sidebar: #0b1818;
-  --sidebar-foreground: #cfe2df;
-  --sidebar-primary: #2dd4bf;
-  --sidebar-primary-foreground: #042f2c;
-  --sidebar-accent: #133131;
-  --sidebar-accent-foreground: #eaf3f1;
-  --sidebar-border: rgb(255 255 255 / 0.07);
-  --sidebar-ring: #2dd4bf;
-  --glow-1: rgb(45 212 191 / 0.08);
-  --glow-2: rgb(251 191 36 / 0.06);
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   html {
     @apply font-sans;
-    font-feature-settings: "ss01";
     -webkit-text-size-adjust: 100%;
   }
   body {

@@ -117,7 +117,7 @@ export type District = { name: string; count: number; ppm: number; delta: number
 
 /** Each district is a building: height = active listings, colour = price per
  *  square metre, from --viz-low (cheaper) to --viz-high (dearer). */
-export function Skyline({ data, compact = false }: { data: District[]; compact?: boolean }) {
+export function Skyline({ data, compact = false, legend = !compact }: { data: District[]; compact?: boolean; legend?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: "0px 0px -60px 0px" });
   const p = useProgress(inView, 1.6);
@@ -158,7 +158,7 @@ export function Skyline({ data, compact = false }: { data: District[]; compact?:
     <div ref={ref} className="flex flex-col gap-4 md:flex-row md:items-center">
       <svg
         viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
-        className={cn("w-full md:w-[62%]", compact ? "max-h-[180px]" : "max-h-[300px]")}
+        className={cn("w-full", legend && "md:w-[62%]", compact ? "max-h-[180px]" : "max-h-[300px]")}
         role="img"
         aria-label="نمای سه‌بعدی آگهی‌های فعال محله‌ها"
       >
@@ -210,7 +210,7 @@ export function Skyline({ data, compact = false }: { data: District[]; compact?:
           );
         })}
       </svg>
-      {!compact && (
+      {legend && (
         <ul className="flex flex-1 flex-col gap-1.5 text-sm">
           {data.map((d, i) => (
             <li
@@ -347,7 +347,7 @@ export function CallHeatmap({ grid }: { grid: number[][] }) {
                 initial={{ opacity: 0, scale: 0.6 }}
                 animate={inView ? { opacity: 1, scale: 1 } : undefined}
                 transition={{ duration: 0.35, delay: (d * 12 + h) * 0.006, ease: EASE }}
-                className="aspect-square rounded-[5px] vb:rounded-[3px] vc:rounded-lg"
+                className="aspect-square rounded-[5px]  "
                 style={{ background: `color-mix(in oklab, var(--primary) ${Math.round((v / max) * 92) + 4}%, var(--muted))` }}
               />
             ))}

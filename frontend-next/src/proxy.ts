@@ -5,6 +5,19 @@ import { NextResponse, type NextRequest } from "next/server";
 // more. Style *attributes* stay allowed (Radix and Recharts position things
 // with style="…"); a style attribute cannot run code.
 export function proxy(request: NextRequest) {
+  // Optimistic gate only: no session cookie at all → the login page. Whether
+  // the cookie is still valid is the backend's call on every API request.
+  const { pathname, search } = request.nextUrl;
+  if (pathname.startsWith("/panel") && !pathname.startsWith("/panel/login")) {
+    const hasSession = request.cookies.has("__Host-sf_session") || request.cookies.has("sf_session");
+    if (!hasSession) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/panel/login";
+      url.search = `?next=${encodeURIComponent(pathname + search)}`;
+      return NextResponse.redirect(url);
+    }
+  }
+
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const dev = process.env.NODE_ENV === "development";
   const https = request.headers.get("x-forwarded-proto") === "https";

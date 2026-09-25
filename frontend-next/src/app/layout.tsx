@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { headers } from "next/headers";
+import { Providers } from "@/components/providers";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DirectionProvider } from "@/components/ui/direction";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -14,11 +15,11 @@ const estedad = localFont({
   display: "swap",
 });
 
-export function generateMetadata(): Metadata {
-  const site = getSiteConfig();
+export async function generateMetadata(): Promise<Metadata> {
+  const site = await getSiteConfig();
   return {
-    title: { default: site.brandName, template: `%s — ${site.brandName}` },
-    description: site.tagline,
+    title: { default: site.seoTitle || site.brandName, template: `%s — ${site.brandName}` },
+    description: site.seoDescription || site.tagline,
   };
 }
 
@@ -30,15 +31,17 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  // proxy.ts puts a fresh nonce on every request; next-themes needs it for
-  // the one inline script that sets the theme before first paint.
+  // proxy.ts puts a fresh nonce on every request. Next.js stamps it on its own
+  // scripts; the few libraries that add a <style> at runtime get it here.
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="fa" dir="rtl" className={`${estedad.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full">
         <ThemeProvider nonce={nonce}>
           <DirectionProvider dir="rtl">
-            <TooltipProvider>{children}</TooltipProvider>
+            <TooltipProvider>
+              <Providers nonce={nonce}>{children}</Providers>
+            </TooltipProvider>
           </DirectionProvider>
         </ThemeProvider>
       </body>

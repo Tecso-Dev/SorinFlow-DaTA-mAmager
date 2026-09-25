@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// ponytail: the landing page is milestone 9; until then / shows the proposals.
+// ponytail: the landing page is step 9; until then / opens the panel.
 export default function Home() {
-  redirect("/preview/a");
+  redirect("/panel");
 }
