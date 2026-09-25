@@ -15,6 +15,9 @@ async function signIn(page, username) {
 function watchProblems(page) {
   const problems = [];
   page.on('console', (m) => {
+    // E2E_DEV=1: specs pointed at `next dev`, whose own injected styles the
+    // strict CSP refuses; the production build the suite normally runs has none.
+    if (process.env.E2E_DEV && /Refused to apply inline style|Download the React DevTools|\[HMR\]|\[Fast Refresh\]/.test(m.text())) return;
     if (m.type() === 'error' || /Content Security Policy/i.test(m.text())) problems.push(m.text());
   });
   page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
