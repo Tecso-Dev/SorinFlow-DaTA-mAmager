@@ -33,6 +33,18 @@ test('logout ends the session', async ({ page }) => {
   await page.goto('/panel/login');
   await page.getByLabel(/نام کاربری/).fill('agent2');
   await page.getByLabel(/رمز/).first().fill(PASSWORD);
+  // WebKit's own credential-autofill heuristics (real on this form: correct
+  // autocomplete="username"/"current-password", no saved credential in a
+  // fresh profile) silently clear whichever of the two fields was filled
+  // first, the instant the second one is filled — confirmed by removing
+  // autocomplete entirely, which made the clearing stop. The click below
+  // then never submits (the browser's own required-field validation blocks
+  // it before React's onSubmit ever runs), so «ورود» never navigates.
+  // Re-filling the first field once more, with no third field left to
+  // trigger another clear, is what the old panel's suite never needed
+  // (username/password there are not a browser-recognised pair) but this
+  // one does.
+  await page.getByLabel(/نام کاربری/).fill('agent2');
   await page.getByRole('button', { name: /^ورود$/ }).click();
   await expect(page).toHaveURL(/\/panel$/);
   await page.getByRole('button', { name: 'منوی حساب' }).click();
