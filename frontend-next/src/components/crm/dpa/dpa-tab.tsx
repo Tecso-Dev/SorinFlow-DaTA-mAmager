@@ -435,7 +435,7 @@ export function DpaTab() {
           ) : q.isError ? (
             <ErrorNote error={q.error} />
           ) : q.data.items.length === 0 ? (
-            <Empty icon={ClipboardCheck} action={<Button size="sm" onClick={() => setDialogDpa(null)}>ارزیابی تازه</Button>}>
+            <Empty icon={ClipboardCheck} action={<Button size="sm" onClick={() => setDialogDpa(null)}>ثبت اولین ارزیابی</Button>}>
               هنوز فرمی ثبت نشده است.
             </Empty>
           ) : (
