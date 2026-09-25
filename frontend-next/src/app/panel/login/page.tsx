@@ -1,5 +1,6 @@
 import { Bot, Handshake, PhoneCall } from "lucide-react";
 import { Suspense } from "react";
+import { Logo } from "@/components/brand/logo";
 import { Skyline } from "@/components/viz";
 import { getSiteConfig } from "@/lib/site";
 import { LoginForm } from "./login-form";
@@ -31,18 +32,14 @@ export default async function LoginPage() {
           <div className="absolute -top-32 left-1/2 size-[480px] -translate-x-1/2 rounded-full bg-(--glow-1) blur-3xl" />
         </div>
         <div className="relative flex w-full flex-col items-center">
-          <div className="mb-10 flex items-center gap-2.5">
-            <div
-              aria-hidden
-              className="grid size-10 place-items-center rounded-xl bg-linear-to-br from-indigo-500 to-violet-600 text-base font-black text-white shadow-[0_0_24px_-4px_rgb(99_102_241/0.7)]"
-            >
-              {site.brandNameLatin.slice(0, 1)}
-            </div>
-            <div className="leading-tight">
-              <div className="text-lg font-extrabold">{site.brandName}</div>
-              <div className="text-xs text-muted-foreground">{site.tagline}</div>
-            </div>
-          </div>
+          <Logo
+            name={site.brandName}
+            tagline={site.tagline}
+            size={44}
+            className="mb-10"
+            nameClassName="text-lg"
+            taglineClassName="text-xs"
+          />
           <Suspense>
             <LoginForm />
           </Suspense>
