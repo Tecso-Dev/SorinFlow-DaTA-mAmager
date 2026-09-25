@@ -1,0 +1,177 @@
+# Default posture: nothing in this namespace accepts a connection unless a
+# policy below says otherwise. Without this, any pod that ever lands in this
+# namespace (a debug pod, a compromised dependency's sidecar) could reach
+# postgres or redis directly — the specific policies further down are the
+# only exceptions.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# api and worker are the only two pods Traefik ever needs to reach — nothing
+# else in the cluster calls them directly (roadmap: the old NodePort let
+# anyone skip Traefik and its X-Forwarded-For entirely; ClusterIP plus this
+# policy is what actually closes that off, the Service type change alone did
+# not). k3s's bundled Traefik chart labels its pod
+# app.kubernetes.io/name=traefik in kube-system.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traefik-to-app
+  labels:
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["api", "worker"]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# Only our own pods (api, worker, scheduler, the migrate Job) ever need
+# Postgres — not Traefik, not a pod some other namespace might one day run.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-postgres
+  labels:
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: sorinflow
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-redis
+  labels:
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: sorinflow
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# Postgres and redis never initiate a connection to anything — no egress rule
+# below means none is allowed. Without this a pod that can already read
+# every row in the database (a dependency RCE inside postgres itself, however
+# unlikely) would still be free to exfiltrate it outbound; with it, that
+# traffic has nowhere to go. Their entrypoints do all the work they need
+# (binding a socket, reading their own data directory) without calling out.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-egress-db
+  labels:
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: ["postgres", "redis"]
+  policyTypes:
+    - Egress
+  egress: []
+---
+# api, worker, scheduler and the migrate Job (labelled sorinflow.com/egress:
+# app) all need to reach: DNS, Postgres, Redis, and the open internet — Divar,
+# the LLM gateway, Kavenegar, SMTP, Telegram, ghcr.io health checks, and
+# anything a future provider integration adds. What they must NOT reach is
+# anything else on the node's own private network: the 6443 API server port
+# this phase is closing to the world stays reachable only from the pod/service
+# CIDRs (see deploy.yml), not from an app pod that got tricked into fetching
+# an attacker-chosen URL (SSRF) — same reasoning for the cloud-metadata range
+# (169.254.0.0/16) and the CGNAT range some hosting networks use
+# (100.64.0.0/10). Without this a scrape target's redirect or a malicious
+# proxy list entry could reach postgres from the "wrong side", the node's
+# other services, or a cloud metadata endpoint instead of Divar.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-egress
+  labels:
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      sorinflow.com/egress: app
+  policyTypes:
+    - Egress
+  egress:
+    # CoreDNS. Without this every outbound call above starts by failing to
+    # resolve a hostname, which looks nothing like a DNS problem from inside
+    # the app.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16

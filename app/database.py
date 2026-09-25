@@ -118,8 +118,15 @@ async def close_redis():
         redis_client = None
 
 
-async def init_db():
+async def init_db(strict: bool = False):
     """Create tables, apply migrations, seed the first accounts.
+
+    strict is `python -m app.migrate` (app/migrate.py), the step a rollout
+    runs once before any new pod starts: there an Alembic failure raises
+    instead of being printed, and the result is checked against the head, so
+    the Job fails and the rollout never begins. A boot (strict=False) keeps
+    going as it always has, because a pod that will not start is a worse
+    outage than one skipped migration.
 
     Each migration runs in **its own transaction**. Sharing one was the cause
     of the 65048fc deploy failure, and the mechanism is worth spelling out
@@ -151,8 +158,32 @@ async def init_db():
         fresh = not await conn.run_sync(lambda c: inspect(c).has_table("users"))
         await conn.run_sync(Base.metadata.create_all)
 
+    # Every _migrate_* step below is pre-Alembic DDL: it exists to bring a
+    # database up to the baseline
+    # Alembic takes over from, and a database Alembic has stamped is past
+    # that baseline for good. Its `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+    # still takes ACCESS EXCLUSIVE even though every column already exists —
+    # and app/migrate.py runs init_db() against the live database on every
+    # deploy, so each lock queues behind whatever else is running (a plain
+    # SELECT once waited 4.5 s behind one; the AI loops hold a transaction
+    # across an LLM call). A stamped database therefore skips them whatever
+    # its revision — including one behind this image, which is every deploy
+    # that brings a migration — except the safety nets below: the steps that
+    # mirror a post-Alembic revision (0009, 0010, 0012, 0013, 0015), because
+    # a stamp can be wrong or a revision's failure only logged (see their
+    # docstrings). They ask the catalog first — no lock when there is nothing
+    # to add — except the cookie one, on a small table. A fresh or
+    # pre-Alembic database runs them all, as before.
+    revision_safety_nets = {_migrate_cookie_is_enabled, _migrate_users_totp_last_step,
+                            _migrate_phone_normalized, _migrate_properties_ai_pipeline,
+                            _migrate_portal_need_enrich}
+    async with engine.begin() as conn:
+        await _guard(conn)
+        stamped = await _is_alembic_stamped(conn)
+
     # Order still matters where one migration depends on another's columns;
-    # it is preserved. What changed is the blast radius when one fails.
+    # it is preserved. What changed is the blast radius when one fails, and
+    # that a stamped database now skips every _migrate_* step outright.
     for step in (_migrate_users_totp,
                  _migrate_users_totp_last_step,
                  _migrate_users_divar_phone,
@@ -190,7 +221,11 @@ async def init_db():
                  _migrate_properties_ai_pipeline,
                  _migrate_phone_normalized,
                  _backfill_ai_pipeline_fingerprints,
-                 _seed_reference_data):
+                 _seed_reference_data,
+                 _backfill_owner_ids):
+        if stamped and step.__name__.startswith("_migrate_") \
+                and step not in revision_safety_nets:
+            continue
         try:
             async with engine.begin() as conn:
                 await _guard(conn)
@@ -201,6 +236,10 @@ async def init_db():
             # failure while committing.
             print(f"{step.__name__} skipped: {e}")
 
+    # Every boot, stamped or not, like the revision safety nets above: every
+    # login reads these columns, _verify_auth_v2 below refuses to start
+    # without them, and the step asks the catalog first — no lock when they
+    # are already there.
     async with engine.begin() as conn:
         await _guard(conn)
         await _migrate_auth_v2(conn)
@@ -213,12 +252,18 @@ async def init_db():
     try:
         await _alembic_sync(fresh)
     except Exception as e:
+        if strict:
+            raise
         print(f"alembic skipped: {e}")
 
     # A clean transaction for the check, so it reads the real schema rather
     # than inheriting the wreckage of a failed migration and mis-reporting why.
     async with engine.begin() as conn:
         await _verify_auth_v2(conn)
+    if strict:
+        # What the app pods will check before they serve: said here, the Job
+        # fails with the reason instead of every new pod refusing to start.
+        await assert_schema_current()
 
     # Seeding creates the *first* accounts. On an established database both are
     # no-ops, so a failure here — a lock timeout, a transient database blip —
@@ -231,6 +276,33 @@ async def init_db():
             print(f"{seed.__name__} skipped: {e}")
 
 
+async def _is_alembic_stamped(conn) -> bool:
+    """True once Alembic has recorded any revision for this database: it is
+    past the baseline the pre-Alembic steps in init_db() bring an old
+    database to, so they have nothing left to do (the one exception,
+    _migrate_cookie_is_enabled, is kept by the caller). With no
+    alembic_version row — fresh, or pre-Alembic — it is not stamped yet, and
+    they all run: a fresh database is only stamped by `_alembic_sync` further
+    down, after them.
+
+    Never lets a check meant to save a lock cost the boot instead: any
+    failure here reads as "not stamped", same as before this existed.
+    """
+    try:
+        cfg = _alembic_config()
+        if cfg is None:
+            return False
+
+        def _current(sync_conn):
+            from alembic.runtime.migration import MigrationContext
+            return MigrationContext.configure(sync_conn).get_current_revision()
+
+        current = await conn.run_sync(_current)
+        return current is not None
+    except Exception:
+        return False
+
+
 async def _alembic_sync(fresh: bool) -> None:
     """Stamp or upgrade, on the app's own guarded connection.
 
@@ -238,21 +310,28 @@ async def _alembic_sync(fresh: bool) -> None:
     no version yet  → an established database from before Alembic: stamp the
                       baseline the boot-time steps have brought it to, then
                       upgrade to head.
-    versioned       → upgrade to head (a no-op when nothing is newer).
+    versioned, behind → upgrade to head (a no-op when nothing is newer).
+    versioned, AHEAD  → a revision this image's own script directory has
+                      never heard of is not behind, it is ahead: a newer
+                      release's schema, reached by a rollback
+                      (`kubectl rollout undo`, or the deploy script undoing a
+                      failed rollout). Every migration is additive precisely
+                      so that keeps working — logged and left alone, never
+                      raised, the same rule assert_schema_current already
+                      applies to a running pod. Without this, `python -m
+                      app.migrate`'s strict mode (app/migrate.py) would fail
+                      the Job trying to "upgrade" a schema already ahead of
+                      it, turning a routine rollback into an outage.
     """
-    from pathlib import Path
     from alembic import command
-    from alembic.config import Config
     from alembic.runtime.migration import MigrationContext
     from alembic.script import ScriptDirectory
 
-    ini = Path(__file__).resolve().parent.parent / "alembic.ini"
-    if not ini.exists():
+    cfg = _alembic_config()
+    if cfg is None:
         print("alembic skipped: alembic.ini not found")
         return
-    cfg = Config(str(ini))
-    cfg.set_main_option("script_location", str(ini.parent / "migrations"))
-    head = ScriptDirectory.from_config(cfg).get_current_head()
+    head = _script_head(cfg)
 
     def _run(sync_conn):
         cfg.attributes["connection"] = sync_conn
@@ -265,12 +344,87 @@ async def _alembic_sync(fresh: bool) -> None:
             command.upgrade(cfg, "head")
             print(f"alembic: pre-alembic database stamped baseline, upgraded to {head}")
         elif current != head:
+            try:
+                ScriptDirectory.from_config(cfg).get_revision(current)
+            except Exception:
+                from loguru import logger
+                logger.warning(f"alembic: database is at {current}, unknown to this "
+                               f"image's {head} — ahead of it (a rollback); migrations "
+                               "are additive, leaving it alone")
+                return
             command.upgrade(cfg, "head")
             print(f"alembic: upgraded {current} → {head}")
 
     async with engine.begin() as conn:
         await _guard(conn)
         await conn.run_sync(_run)
+
+
+def _alembic_config():
+    """This image's Alembic config, or None when alembic.ini is not shipped."""
+    from pathlib import Path
+    from alembic.config import Config
+
+    ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+    if not ini.exists():
+        return None
+    cfg = Config(str(ini))
+    cfg.set_main_option("script_location", str(ini.parent / "migrations"))
+    return cfg
+
+
+def _script_head(cfg) -> str | None:
+    from alembic.script import ScriptDirectory
+    return ScriptDirectory.from_config(cfg).get_current_head()
+
+
+async def assert_schema_current(eng=None) -> None:
+    """Refuse to start while the database is BEHIND this image's Alembic head.
+
+    For a pod started with DB_MIGRATE_ON_BOOT=false, which leaves the schema
+    to `python -m app.migrate`. A database behind the image means the Job did
+    not run or failed: serving now would fail requests on a pod that reported
+    Ready, so this raises, the pod never becomes ready, and the rollout halts
+    with the previous pods still serving.
+
+    A database AHEAD of the image — at a revision this image has never heard
+    of — is allowed. That is a rollback (`kubectl rollout undo`, or the deploy
+    script undoing a failed rollout) onto a schema the newer release already
+    migrated, and every migration here is additive precisely so that older
+    code keeps working on it. Refusing it would turn a routine rollback into
+    an outage: the previous image could no longer start anywhere.
+    """
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from loguru import logger
+
+    cfg = _alembic_config()
+    if cfg is None:
+        raise RuntimeError("alembic.ini not found — cannot tell whether the schema is current")
+    script = ScriptDirectory.from_config(cfg)
+    head = script.get_current_head()
+
+    def _read(sync_conn):
+        if not inspect(sync_conn).has_table("users"):
+            return False, None
+        return True, MigrationContext.configure(sync_conn).get_current_revision()
+
+    async with (eng or engine).begin() as conn:
+        if conn.dialect.name == "postgresql":
+            await _guard(conn)      # a migration holding alembic_version must not hang the boot
+        has_users, current = await conn.run_sync(_read)
+    if has_users and current == head:
+        return
+    if has_users and current is not None:
+        try:
+            script.get_revision(current)
+        except Exception:
+            logger.warning(f"database schema is at {current}, newer than this image's {head} — "
+                           "a rollback onto a newer schema; migrations are additive, starting")
+            return
+    raise RuntimeError(
+        f"database schema is at {current or 'nothing'}{'' if has_users else ' (no users table)'}, "
+        f"this image needs {head} — run `python -m app.migrate` first. Refusing to start.")
 
 
 async def _guard(conn):
@@ -667,6 +821,25 @@ async def _backfill_cookie_owner(conn):
                   f"{rest.rowcount or 0} to the super admin")
     except Exception as e:
         print(f"cookie owner backfill skipped: {e}")
+
+
+async def _backfill_owner_ids(conn):
+    """Owned rows the previous release wrote carry a name and no account.
+
+    During a rolling deploy (and after a rollback) the old pods keep
+    assigning leads, tasks and customers by name. Alembic 0016 resolved
+    everything before it; this resolves what came after — only rows whose
+    name changed since their account was last resolved, never a row already
+    judged ownerless (see OWNERSHIP in app/auth/visibility.py). Before 0016
+    has added the columns it has nothing to do. Plain SQL, both dialects.
+    """
+    try:
+        from app.auth.visibility import backfill_owner_ids
+        touched = await conn.run_sync(backfill_owner_ids)
+        if touched:
+            print(f"owner accounts resolved for {touched} row(s) written by name")
+    except Exception as e:
+        print(f"owner account backfill skipped: {e}")
 
 
 async def _migrate_forwarder_sim2(conn):

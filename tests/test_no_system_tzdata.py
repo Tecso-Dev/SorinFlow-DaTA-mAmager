@@ -33,12 +33,17 @@ print('ok')
 
 
 def test_a_rollout_that_never_comes_up_rolls_itself_back():
-    """Recreate strategy: the old pod is gone before the new one is tried, so
-    a new pod that never becomes ready is the site being down. The deploy
-    job must put the previous image back on its own."""
-    wf = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           ".github/workflows/deploy.yml"), encoding="utf-8").read()
-    step = wf[wf.index("Roll out new image"):wf.index("Why the rollout failed")]
-    assert "if ! kubectl rollout status" in step
-    assert "kubectl rollout undo deployment/backend" in step
-    assert "exit 1" in step, "a rolled-back deploy must still be reported as failed"
+    """api and scheduler still get Recreate's old guarantee through a
+    different door now (see backend.yaml/scheduler.yaml): a pod that never
+    becomes ready must not be left half-rolled-out. scripts/deploy_k8s.sh —
+    called by deploy.yml's "Deploy" step, and by staging.yml — is what puts
+    the previous image back on its own."""
+    script = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "scripts/deploy_k8s.sh"), encoding="utf-8").read()
+    fn = script[script.index("rollback_and_diagnose() {"):script.index("\n}\n", script.index("rollback_and_diagnose() {"))]
+    assert 'wait_rollout backend || rollback_and_diagnose backend' in script
+    assert 'wait_rollout scheduler || rollback_and_diagnose scheduler' in script
+    wait = script[script.index("wait_rollout() {"):script.index("\n}\n", script.index("wait_rollout() {"))]
+    assert 'rollout status "deployment/$dep"' in wait, "the wait still asks Kubernetes, not a sleep"
+    assert 'kubectl -n "$NS" rollout undo "deployment/$dep"' in fn
+    assert "exit 1" in fn, "a rolled-back deploy must still be reported as failed"

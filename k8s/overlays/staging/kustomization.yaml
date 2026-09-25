@@ -1,0 +1,151 @@
+# staging.sorinflow.com, namespace sorinflow-staging — a second, small copy of
+# the whole stack on the same node, for trying a change before it reaches
+# sorinflow.com. Driven only by the manual .github/workflows/staging.yml
+# workflow; nothing pushes here automatically. No traefik-acme.yaml: one
+# Traefik (already configured by the production overlay) serves both hosts.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sorinflow-staging
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - ../../base
+
+patches:
+  # worker ships at 0 replicas: staging is for trying panel/API changes, not
+  # for running a second real scraper against Divar with its own login
+  # sessions. Scale it up by hand (kubectl scale) for the rare case that
+  # needs a worker.
+  - target: { kind: Deployment, name: worker }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 0
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: "100m", memory: "256Mi" }
+          limits: { memory: "512Mi" }
+
+  # backend at 1 replica: nothing here needs the zero-downtime RollingUpdate
+  # production runs 2 for.
+  - target: { kind: Deployment, name: backend }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: "50m", memory: "128Mi" }
+          limits: { memory: "256Mi" }
+
+  - target: { kind: Deployment, name: scheduler }
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: "50m", memory: "128Mi" }
+          limits: { memory: "256Mi" }
+
+  - target: { kind: StatefulSet, name: postgres }
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: "50m", memory: "128Mi" }
+          limits: { memory: "256Mi" }
+
+  - target: { kind: StatefulSet, name: redis }
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: "25m", memory: "32Mi" }
+          limits: { memory: "64Mi" }
+
+  # Its own, much smaller volumes — this is throwaway data on a shared node,
+  # not the customer database.
+  - target: { kind: PersistentVolumeClaim, name: postgres-pvc }
+    patch: |-
+      - op: replace
+        path: /spec/resources/requests/storage
+        value: 2Gi
+  - target: { kind: PersistentVolumeClaim, name: redis-pvc }
+    patch: |-
+      - op: replace
+        path: /spec/resources/requests/storage
+        value: 512Mi
+  - target: { kind: PersistentVolumeClaim, name: data-pvc }
+    patch: |-
+      - op: replace
+        path: /spec/resources/requests/storage
+        value: 2Gi
+
+  # Its own host, and the Traefik middleware reference has the namespace
+  # baked into its name ("<namespace>-<name>@kubernetescrd") — see
+  # ingress.yaml's comment.
+  - target: { kind: Ingress, name: sorinflow-ingress-http }
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: staging.sorinflow.com
+      - op: replace
+        path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.middlewares
+        value: sorinflow-staging-redirect-https@kubernetescrd
+  - target: { kind: Ingress, name: sorinflow-ingress-https }
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: staging.sorinflow.com
+
+  # Links in an email or SMS sent from staging must point back at staging —
+  # not at the production domain, which happened to be the shared default.
+  - target: { kind: Deployment, name: backend }
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: backend
+      spec:
+        template:
+          spec:
+            containers:
+              # backend.yaml's container is named "backend", not "api" — a
+              # strategic-merge patch matches containers BY NAME, so the
+              # wrong name here does not update the real container at all
+              # and instead adds a second, image-less one beside it.
+              - name: backend
+                env:
+                  - name: DOMAIN
+                    value: staging.sorinflow.com
+  - target: { kind: Deployment, name: worker }
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: worker
+      spec:
+        template:
+          spec:
+            containers:
+              - name: worker
+                env:
+                  - name: DOMAIN
+                    value: staging.sorinflow.com
+  - target: { kind: Deployment, name: scheduler }
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: scheduler
+      spec:
+        template:
+          spec:
+            containers:
+              - name: scheduler
+                env:
+                  - name: DOMAIN
+                    value: staging.sorinflow.com

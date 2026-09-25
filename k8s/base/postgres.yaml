@@ -2,7 +2,9 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: postgres-pvc
-  namespace: sorinflow
+  labels:
+    app: postgres
+    app.kubernetes.io/component: postgres
 spec:
   accessModes:
     - ReadWriteOnce
@@ -14,7 +16,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: postgres
-  namespace: sorinflow
+  labels:
+    app: postgres
+    app.kubernetes.io/component: postgres
 spec:
   serviceName: postgres
   replicas: 1
@@ -25,7 +29,19 @@ spec:
     metadata:
       labels:
         app: postgres
+        app.kubernetes.io/part-of: sorinflow
+        app.kubernetes.io/component: postgres
     spec:
+      # No token: nothing in this pod ever calls the Kubernetes API.
+      automountServiceAccountToken: false
+      securityContext:
+        # Only the seccomp floor. Not runAsNonRoot/runAsUser: the official
+        # image's own entrypoint starts as root (to fix ownership on the
+        # mounted volume, chmod the socket dir, etc.) and steps down to
+        # `postgres` itself with gosu — pinning a uid here would fight that
+        # and the container would refuse to start.
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
           image: postgres:15-alpine
@@ -84,7 +100,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres
-  namespace: sorinflow
+  labels:
+    app: postgres
+    app.kubernetes.io/component: postgres
 spec:
   selector:
     app: postgres

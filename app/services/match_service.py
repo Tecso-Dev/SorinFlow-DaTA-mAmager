@@ -829,6 +829,7 @@ async def customers_for_property(db: AsyncSession, prop: Property, limit: int = 
             "id": c.id, "full_name": c.full_name,
             "mobile1": c.mobile1, "mobile2": c.mobile2,
             "temperature": c.temperature, "consultant_name": c.consultant_name,
+            "consultant_user_id": c.consultant_user_id,
             "budget_max": c.budget_max,
             "desired_district": c.desired_district,
             "desired_specs": c.desired_specs,

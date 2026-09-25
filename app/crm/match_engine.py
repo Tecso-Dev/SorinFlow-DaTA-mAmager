@@ -23,6 +23,7 @@ from loguru import logger
 from sqlalchemy import and_, func, or_, select
 
 from app.ai import listing_reader
+from app.auth.visibility import stamp_owner
 from app.config import get_settings
 from app.database import async_session_maker
 from app.models.crm_models import Customer, CustomerMatch
@@ -117,7 +118,9 @@ async def run_once(db, *, notify: bool = True, limit: int = BATCH) -> Dict:
                 if exists:
                     continue
                 row = CustomerMatch(property_id=p.id, customer_id=c["id"], score=int(round(c["score"])),
-                                    reasons=c.get("reasons") or [], consultant=c.get("consultant_name") or None)
+                                    reasons=c.get("reasons") or [])
+                # the card is for the customer's consultant — the account, not the name
+                stamp_owner(row, c.get("consultant_name") or None, c.get("consultant_user_id"))
                 db.add(row)
                 created.append(row)
         # judged either way — no customers, or scoring failed, is still a
@@ -209,6 +212,8 @@ async def engine_loop() -> None:
         return
     await asyncio.sleep(90)          # let startup finish
     logger.info(f"[match] engine armed — every {TICK_SECONDS // 60} min, threshold {MIN_SCORE}٪")
+    from app.services.supervisor import beat
     while True:
+        beat("match_engine")
         await tick()
         await asyncio.sleep(TICK_SECONDS)

@@ -537,7 +537,9 @@ async def reader_loop() -> None:
         return
     await asyncio.sleep(START_DELAY)
     logger.info(f"[reader] armed — every {TICK_SECONDS} s, {BATCH} listings a pass, prompt v{PROMPT_VERSION}")
+    from app.services.supervisor import beat
     while True:
+        beat("listing_reader")
         r = await tick() or {}
         # a pass where every listing failed is a prompt or a model problem,
         # not a listing problem: paying for the same failures again in two

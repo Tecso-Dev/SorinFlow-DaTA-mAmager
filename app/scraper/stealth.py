@@ -35,11 +35,17 @@ What replaced it, measured the same way (see tests/test_fingerprint.py):
 
 Delay and request-limit settings are unchanged; other code reads them.
 """
+import asyncio
 import hashlib
 import os
 import random
+import secrets
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+
+from loguru import logger
+
+from app.database import get_redis
 
 
 # The engine that is actually running. The UA must claim this version and no
@@ -192,6 +198,12 @@ def get_browser_args(headless: bool = True) -> List[str]:
     dozen site-isolation and feature flags from an old gist. None made the
     browser look more real; several made it look less.
 
+    --no-sandbox is not here either, and deliberately not blanket-added the
+    way most container guides do: the container runs as a non-root user
+    (pwuser), so Chromium's own sandbox works and should stay on. Whether it
+    launches with or without it is `chromium_sandbox=` at
+    launch_persistent_context, driven by CHROMIUM_SANDBOX — see open_browser.
+
     --headless=new is the real Chrome code path. It must be paired with
     headless=False at launch: Playwright 1.41 maps headless=True to the OLD
     mode, which says HeadlessChrome in the UA and the Client Hints and has no
@@ -199,7 +211,6 @@ def get_browser_args(headless: bool = True) -> List[str]:
     """
     args = [
         "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--no-first-run",
@@ -278,7 +289,33 @@ async def apply_device(page, device: Device) -> None:
 
 # One Chromium may hold a user_data_dir at a time. Two jobs on the same
 # account would otherwise fail inside Chromium with an unreadable error.
+#
+# Redis is the lock now — worker replicas (or a worker and a scheduler) are
+# separate processes, and an in-process set only ever protected against a
+# second job in the SAME process. This set survives as the fallback for when
+# Redis itself cannot be reached: single-worker deployments (today's) stay
+# safe, and the RuntimeError text below is identical either way, since every
+# caller (divar_scraper.py, run_scraping_job) matches on "already open".
 _PROFILES_IN_USE: set = set()
+
+# safe-account -> the token THIS process's lock holds, Redis mode only. Also
+# what tells the lazily-started refresher (below) which keys are its to keep
+# alive; the fallback set above needs no such thing, since holding the
+# process alive is what holds an in-process lock.
+_profile_locks: Dict[str, str] = {}
+_profile_refresh_task: Optional[asyncio.Task] = None
+_PROFILE_LOCK_TTL = 120
+_PROFILE_REFRESH_INTERVAL = 30
+
+
+def _safe_account(account: Optional[str]) -> str:
+    """Alnum-only, so a phone number is a legible Redis key/filename and
+    nothing in it (`+`, a stray `/`) can be read as a path or key separator."""
+    return "".join(c for c in (account or "") if c.isalnum()) or "_anonymous"
+
+
+def _profile_lock_key(account: Optional[str]) -> str:
+    return f"sf:profile:{_safe_account(account)}"
 
 
 def profile_dir(account: Optional[str]) -> "Path":
@@ -292,8 +329,245 @@ def profile_dir(account: Optional[str]) -> "Path":
     """
     from pathlib import Path
     base = Path(os.environ.get("SCRAPER_PROFILE_DIR", "/app/data/profiles"))
-    safe = "".join(c for c in (account or "") if c.isalnum()) or "_anonymous"
-    return base / safe
+    return base / _safe_account(account)
+
+
+async def _refresh_profile_locks() -> None:
+    """Keep every lock this process holds alive past Redis's TTL.
+
+    One task for however many profiles this process has open at once (up to
+    SCRAPE_WORKER_CONCURRENCY), not one per lock — simpler, and 30s is a wide
+    enough margin against 120s that a shared task never risks starving one
+    lock because another call in the same tick was slow. Stops itself the
+    moment nothing is held; the next open_browser() starts it again, so an
+    idle process runs no background loop at all.
+    """
+    global _profile_refresh_task
+    try:
+        while _profile_locks:
+            await asyncio.sleep(_PROFILE_REFRESH_INTERVAL)
+            if not _profile_locks:
+                break
+            try:
+                r = await get_redis()
+                for key, token in list(_profile_locks.items()):
+                    # Only extend a lock we still believe is ours — refreshing
+                    # blindly would extend a lock this process already lost
+                    # (its own key expired and somebody else took it).
+                    if await r.get(key) == token:
+                        await r.expire(key, _PROFILE_LOCK_TTL)
+            except Exception as e:
+                logger.warning(f"[stealth] could not refresh the profile lock(s): {e}")
+    finally:
+        _profile_refresh_task = None
+
+
+def _ensure_profile_refresh_task() -> None:
+    global _profile_refresh_task
+    if _profile_refresh_task is None or _profile_refresh_task.done():
+        _profile_refresh_task = asyncio.create_task(_refresh_profile_locks())
+
+
+async def _compare_and_delete(r, key: str, token: str) -> bool:
+    """DEL `key` only if it still holds `token`. WATCH/MULTI/EXEC rather than
+    EVAL: fakeredis's test double (this repo's whole test suite) has no Lua
+    scripting without an optional dependency nobody has installed, and a
+    watched transaction is the same atomicity real Redis gives a script, at
+    the cost of one extra round trip on a path that runs once per closed
+    browser — not the hot loop."""
+    async with r.pipeline(transaction=True) as pipe:
+        await pipe.watch(key)
+        current = await pipe.get(key)
+        if current != token:
+            await pipe.reset()
+            return False
+        pipe.multi()
+        pipe.delete(key)
+        result = await pipe.execute()
+        return bool(result and result[0])
+
+
+async def _acquire_profile_lock(account: Optional[str]):
+    """Raise the same "already open" RuntimeError the in-process set always
+    has, whether Redis or the fallback set is what refused it.
+
+    Returns (redis_key, token, fallback) for close_context()/the caller's
+    failure path to release with. `fallback=True` means Redis could not be
+    reached and the in-process set is the one actually holding the guard —
+    safe for this single worker, not across replicas, which is the gap this
+    whole mechanism exists to close.
+    """
+    fs_key = str(profile_dir(account))
+    try:
+        r = await get_redis()
+        rkey = _profile_lock_key(account)
+        token = secrets.token_hex(16)
+        if not await r.set(rkey, token, nx=True, ex=_PROFILE_LOCK_TTL):
+            raise RuntimeError(
+                f"profile {fs_key} is already open in this process — two jobs cannot "
+                f"share one account's browser profile")
+        _profile_locks[rkey] = token
+        _ensure_profile_refresh_task()
+        return rkey, token, False
+    except RuntimeError:
+        raise
+    except Exception as e:
+        logger.warning(f"[stealth] profile lock via Redis unavailable — falling back to the "
+                       f"in-process guard (safe for one worker only): {e}")
+        if fs_key in _PROFILES_IN_USE:
+            # A fresh condition, not a consequence of the Redis error above —
+            # `from None` drops that unrelated traceback rather than implying
+            # the profile being busy was caused by Redis being unreachable.
+            raise RuntimeError(
+                f"profile {fs_key} is already open in this process — two jobs cannot "
+                f"share one account's browser profile") from None
+        _PROFILES_IN_USE.add(fs_key)
+        return None, None, True
+
+
+async def _release_profile_lock(fs_key: str, rkey: Optional[str], token: Optional[str],
+                                fallback: bool) -> None:
+    if fallback:
+        _PROFILES_IN_USE.discard(fs_key)
+        return
+    if rkey is None or token is None:
+        # _acquire_profile_lock only ever returns these as None together
+        # with fallback=True — reaching here with fallback=False and either
+        # missing would be a caller bug, not a Redis outage. Nothing to
+        # release either way.
+        return
+    _profile_locks.pop(rkey, None)
+    try:
+        r = await get_redis()
+        await _compare_and_delete(r, rkey, token)
+    except Exception as e:
+        # Not fatal: the lock's own TTL clears it within _PROFILE_LOCK_TTL
+        # even if nobody ever gets to release it explicitly.
+        logger.warning(f"[stealth] could not release profile lock {rkey} in Redis "
+                       f"(it expires on its own within {_PROFILE_LOCK_TTL}s): {e}")
+
+
+async def profile_in_use(account: Optional[str]) -> bool:
+    """Whether this account's profile is open right now, in ANY process.
+
+    /api/auth/refresh uses this instead of checking _PROFILES_IN_USE
+    directly — that set only ever knew about the process serving the
+    request, which is exactly the gap Redis closes.
+    """
+    try:
+        r = await get_redis()
+        return bool(await r.exists(_profile_lock_key(account)))
+    except Exception as e:
+        logger.warning(f"[stealth] profile_in_use: Redis unavailable, checking the "
+                       f"in-process guard only: {e}")
+        return str(profile_dir(account)) in _PROFILES_IN_USE
+
+
+# ── Chromium's own sandbox ───────────────────────────────────────────────
+#
+# The container runs as pwuser (uid 1000), not root, so --no-sandbox is not
+# the safe default every "Chromium in Docker" guide copies — it is giving up
+# a real defence-in-depth layer for nothing. CHROMIUM_SANDBOX (app/config.py)
+# chooses:
+#   auto (default) — sandboxed unless running as root (root cannot use the
+#                     sandbox at all; asking for it there is a guaranteed
+#                     failure with extra steps). If Chromium still refuses to
+#                     launch with a sandbox-shaped error, fall back to
+#                     unsandboxed ONCE, log it loudly, and remember the
+#                     fallback so every later auto launch in this process
+#                     goes straight there instead of failing the same way
+#                     again.
+#   on             — always sandboxed; a launch failure is not caught here.
+#   off            — never sandboxed.
+#
+# Measured on k3d with the production k3s version and the Playwright 1.41
+# image as uid 1000: a kernel/seccomp policy that forbids the namespace
+# sandbox makes Chromium abort with exactly the first string below (Playwright
+# surfaces it inside the launch error's browser log); a permissive policy
+# launches sandboxed as non-root with no error at all, which is why `auto`
+# has to genuinely attempt it rather than assuming the worse case.
+_SANDBOX_FAIL_MARKERS = (
+    "No usable sandbox",
+    "Running as root without --no-sandbox is not supported",
+    "SUID sandbox helper binary",
+    "Failed to move to new namespace",
+)
+
+# mode: the resolved CHROMIUM_SANDBOX at the last launch. active: whether that
+# launch actually ran sandboxed (None before the first launch in this
+# process). fallback_reason: the error text that triggered an auto fallback,
+# if one ever happened here.
+_sandbox_state: Dict[str, Any] = {"mode": None, "active": None, "fallback_reason": None}
+
+
+def _is_sandbox_failure(exc: BaseException) -> bool:
+    text = str(exc)
+    return any(marker in text for marker in _SANDBOX_FAIL_MARKERS)
+
+
+def _resolve_sandbox(mode: str) -> bool:
+    """Yes/no for THIS launch, before any retry. Once auto has fallen back
+    once in this process, every later auto launch skips straight to
+    unsandboxed instead of re-attempting and re-failing the same way."""
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    if _sandbox_state["fallback_reason"] is not None:
+        return False
+    return os.geteuid() != 0
+
+
+def sandbox_status() -> dict:
+    """mode, active (bool|None before the first launch), fallback_reason
+    (str|None) — read by the monitoring card."""
+    from app.config import get_settings
+    return {
+        "mode": getattr(get_settings(), "chromium_sandbox", "auto") or "auto",
+        "active": _sandbox_state["active"],
+        "fallback_reason": _sandbox_state["fallback_reason"],
+    }
+
+
+async def _launch_per_sandbox_mode(launch):
+    """`launch(use_sandbox)` under CHROMIUM_SANDBOX, with auto's one fallback,
+    recording what actually ran for sandbox_status(). Shared by open_browser
+    and probe_sandbox so the two can never decide differently."""
+    from app.config import get_settings
+    mode = (getattr(get_settings(), "chromium_sandbox", "auto") or "auto").lower()
+    sandbox = _resolve_sandbox(mode)
+    try:
+        result = await launch(sandbox)
+    except Exception as e:
+        if not (mode == "auto" and sandbox and _is_sandbox_failure(e)):
+            raise
+        logger.error(f"[stealth] Chromium's sandbox failed to launch, falling back to "
+                     f"unsandboxed for the rest of this process: {e}")
+        _sandbox_state["fallback_reason"] = str(e)
+        sandbox = False
+        result = await launch(sandbox)
+    _sandbox_state["mode"], _sandbox_state["active"] = mode, sandbox
+    return result
+
+
+async def probe_sandbox() -> None:
+    """Launch and close one throwaway Chromium at worker start, so
+    sandbox_status() — and the monitoring card — says whether this host lets
+    the sandbox run from the first minute after a deploy, not from the first
+    scrape. That is the one thing a new server or kernel can change and no
+    test here can see. Never raises: a browser that cannot start at all is the
+    first scrape's error to report, with its own log."""
+    from playwright.async_api import async_playwright
+    try:
+        async with async_playwright() as p:
+            browser = await _launch_per_sandbox_mode(
+                lambda use_sandbox: p.chromium.launch(
+                    headless=False, args=get_browser_args(headless=True),
+                    chromium_sandbox=use_sandbox))
+            await browser.close()
+        logger.info(f"[stealth] sandbox probe: {sandbox_status()}")
+    except Exception as e:
+        logger.warning(f"[stealth] sandbox probe could not launch Chromium: {e}")
 
 
 async def open_browser(playwright, *, headless: bool, proxy=None,
@@ -319,12 +593,14 @@ async def open_browser(playwright, *, headless: bool, proxy=None,
     device = Device.for_account(account)
     udd = profile_dir(account)
     udd.mkdir(parents=True, exist_ok=True)
+    fs_key = str(udd)
 
-    key = str(udd)
-    if key in _PROFILES_IN_USE:
-        raise RuntimeError(
-            f"profile {key} is already open in this process — two jobs cannot "
-            f"share one account's browser profile")
+    # Raises "already open" if Redis (or, lacking that, this process) already
+    # holds this account's profile. Held BEFORE the Singleton* cleanup below,
+    # not after: two launches racing between the old check and the old
+    # `_PROFILES_IN_USE.add()` could both pass the check and both delete each
+    # other's SingletonLock out from under a browser that was about to use it.
+    rkey, token, fallback = await _acquire_profile_lock(account)
 
     # A crash leaves Chromium's SingletonLock behind and the next launch hangs
     # on it. The lock names the pid that took it; if that process is gone the
@@ -338,9 +614,10 @@ async def open_browser(playwright, *, headless: bool, proxy=None,
                 pass
 
     opts = get_context_options(sc, proxy, device)
-    _PROFILES_IN_USE.add(key)
-    try:
-        context = await playwright.chromium.launch_persistent_context(
+    args = get_browser_args(headless=headless)
+
+    async def _launch(use_sandbox: bool):
+        return await playwright.chromium.launch_persistent_context(
             str(udd),
             # Always headless=False at the Playwright layer. When `headless` is
             # wanted the --headless=new flag provides it (real Chrome); when it
@@ -348,19 +625,26 @@ async def open_browser(playwright, *, headless: bool, proxy=None,
             # headless=True is the OLD mode and must never be used — see
             # get_browser_args.
             headless=False,
-            args=get_browser_args(headless=headless),
+            args=args,
+            # Playwright adds --no-sandbox itself when this is False, so
+            # get_browser_args never has to know which mode is active.
+            chromium_sandbox=use_sandbox,
             **opts,
         )
+
+    try:
+        context = await _launch_per_sandbox_mode(_launch)
     except Exception:
-        _PROFILES_IN_USE.discard(key)
+        await _release_profile_lock(fs_key, rkey, token, fallback)
         raise
 
     # A persistent context opens with one page already.
     page = context.pages[0] if context.pages else await context.new_page()
     await apply_device(page, device)
 
-    # So close_context() can release the guard without re-deriving the path.
-    context._sorinflow_profile_key = key
+    # So close_context() can release the guard without re-deriving any of it.
+    context._sorinflow_profile_key = fs_key
+    context._sorinflow_lock = (rkey, token, fallback)
     return context.browser, context, page, device
 
 
@@ -371,12 +655,14 @@ async def close_context(context) -> None:
     to close, and calling .close() on the None that `context.browser` returns
     is how this change would break the recycle path.
     """
-    key = getattr(context, "_sorinflow_profile_key", None)
+    fs_key = getattr(context, "_sorinflow_profile_key", None)
+    lock = getattr(context, "_sorinflow_lock", None)
     try:
         await context.close()
     finally:
-        if key:
-            _PROFILES_IN_USE.discard(key)
+        if lock and fs_key is not None:
+            rkey, token, fallback = lock
+            await _release_profile_lock(fs_key, rkey, token, fallback)
 
 
 def context_alive(context) -> bool:

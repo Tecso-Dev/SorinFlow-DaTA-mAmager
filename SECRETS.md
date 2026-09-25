@@ -20,7 +20,7 @@ hands, it does not belong in a file. It belongs in the Kubernetes Secret.
 | TLS certificates and private keys | Traefik's own ACME store on the server | **never** |
 | Divar session cookies | the `data-pvc` volume (`/app/data/cookies`) | **never** |
 | Which variables exist, and what they mean | `.env.example` — names and comments only | yes |
-| Non-secret settings (timeouts, limits, feature flags) | `k8s/04-backend.yaml` as plain `env:` | yes |
+| Non-secret settings (timeouts, limits, feature flags) | `k8s/base/backend.yaml` (per-role) or `k8s/base/shared-app-env.patch.yaml` (shared) as plain `env:` | yes |
 | Local development values | `local/local.env` — ignored by git | **never** |
 
 If you are unsure which column something belongs in, treat it as a secret. The
@@ -57,14 +57,16 @@ kubectl patch secret sorinflow-secrets -n sorinflow \
   -p "{\"stringData\":{\"KAVENEGAR_API_KEY\":\"$REAL_KEY\"}}"
 ```
 
-**Step 4 — wire it into the pod.** In `k8s/04-backend.yaml`, under `env:`:
+**Step 4 — wire it into the pod.** In `k8s/base/shared-app-env.patch.yaml`
+(one list, shared by api, worker, scheduler and the migrate Job — see that
+file's own header comment):
 
 ```yaml
-- name: KAVENEGAR_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: sorinflow-secrets
-      key: KAVENEGAR_API_KEY
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: KAVENEGAR_API_KEY
+    valueFrom: { secretKeyRef: { name: sorinflow-secrets, key: KAVENEGAR_API_KEY } }
 ```
 
 **Step 5 — apply and restart:**
@@ -75,18 +77,22 @@ kubectl patch secret sorinflow-secrets -n sorinflow \
 kubectl rollout restart deployment/backend -n sorinflow
 ```
 
-> ⚠️ **Only apply the manifest when the manifest itself changed**, and always
-> follow it with a `set image`. `k8s/04-backend.yaml` still carries
-> `image: …:latest` while CI deploys by commit SHA, so a bare apply resets the
-> tag — either reusing a stale cached blob and reporting a healthy rollout of
-> old code, or wedging in `ErrImagePull`.
+> ⚠️ **Only apply the manifest when the manifest itself changed** — a key
+> wired in above needs a rollout, not just a restart, and `kubectl rollout
+> restart` does not pick up a manifest edit at all. Do this through
+> `scripts/deploy_k8s.sh`, not a bare `kubectl apply`: the manifests carry a
+> placeholder `:latest` image tag, and `kubectl apply` on its own would reset
+> the running Deployment to it — reusing a stale cached blob and reporting a
+> healthy rollout of old code, or wedging in `ErrImagePull`.
+> `scripts/deploy_k8s.sh` always renders the real tag in first and refuses to
+> apply the placeholder, so re-running it with today's own image is the safe
+> way to pick up a manifest-only change:
 >
 > ```bash
-> kubectl get deploy backend -n sorinflow \
->   -o jsonpath='{.spec.template.spec.containers[0].image}'; echo   # note the SHA
-> kubectl apply -f k8s/04-backend.yaml -n sorinflow
-> kubectl set image deployment/backend backend=<that image> -n sorinflow
-> kubectl rollout status deployment/backend -n sorinflow --timeout=600s
+> IMAGE=$(kubectl get deploy backend -n sorinflow \
+>   -o jsonpath='{.spec.template.spec.containers[0].image}')
+> OVERLAY=production IMAGE="$IMAGE" KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
+>   bash scripts/deploy_k8s.sh
 > ```
 
 The value never appears in a commit, a pull request, or a CI log.
@@ -188,7 +194,7 @@ Rules the step keeps:
 
 To put another key under GitHub's management: add it to `LIST` and to the
 `env:` of that step in `.github/workflows/deploy.yml`, and make sure
-`k8s/04-backend.yaml` wires it into the pod (§2, step 4).
+`k8s/base/shared-app-env.patch.yaml` wires it into the pod (§2, step 4).
 
 Do not paste a key into a chat, an issue or a commit to get it there: create
 it as a repository secret yourself (`gh secret set LLM_API_KEY` from your own

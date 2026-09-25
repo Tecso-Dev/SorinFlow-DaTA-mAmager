@@ -28,7 +28,8 @@ os.environ.setdefault("LOGS_PATH", "/tmp")
 os.environ.setdefault("IMAGES_PATH", "/tmp")
 
 from app.scraper.stealth import (  # noqa: E402
-    CHROMIUM_MAJOR, Device, StealthConfig, get_browser_args, get_context_options, open_browser,
+    CHROMIUM_MAJOR, Device, StealthConfig, close_context, get_browser_args, get_context_options,
+    open_browser,
 )
 
 PROBE = """() => ({
@@ -64,15 +65,37 @@ needs_chromium = pytest.mark.skipif(not _chromium_available(),
 
 
 async def _probe(account):
+    # A page served from 127.0.0.1, not about:blank: navigator.userAgentData
+    # (the Client Hints the brand and platform checks read) exists only in a
+    # secure context, and about:blank is not one — Divar, on https, is.
+    import http.server
+    import threading
     from playwright.async_api import async_playwright
+
+    class _Blank(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<html><body></body></html>")
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Blank)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
     async with async_playwright() as p:
-        browser, context, page, device = await open_browser(
+        _browser, context, page, device = await open_browser(
             p, headless=True, account=account, stealth_config=StealthConfig())
         try:
-            await page.goto("about:blank")
+            await page.goto(f"http://127.0.0.1:{server.server_port}/")
             js = await page.evaluate(PROBE)
         finally:
-            await browser.close()
+            server.shutdown()
+            # A persistent context has no Browser object (open_browser returns
+            # None for it) — closing the context closes the browser and frees
+            # the account's profile lock.
+            await close_context(context)
     return js, device
 
 
@@ -130,7 +153,18 @@ class TestWhatDivarSees:
 
     @pytest.fixture(scope="class")
     def seen(self):
-        return asyncio.run(_probe("09146382408"))
+        # The profile lives under /app/data (the PVC) by default, and a CI
+        # runner has no /app — its own temporary directory for this probe.
+        import tempfile
+        old = os.environ.get("SCRAPER_PROFILE_DIR")
+        os.environ["SCRAPER_PROFILE_DIR"] = tempfile.mkdtemp(prefix="sf-profiles-")
+        try:
+            return asyncio.run(_probe("09146382408"))
+        finally:
+            if old is None:
+                os.environ.pop("SCRAPER_PROFILE_DIR", None)
+            else:
+                os.environ["SCRAPER_PROFILE_DIR"] = old
 
     def test_webdriver_is_false_and_inherited(self, seen):
         js, _ = seen

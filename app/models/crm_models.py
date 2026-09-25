@@ -144,6 +144,12 @@ class Task(Base):
     contact_id = Column(Integer, ForeignKey("crm_contacts.id", ondelete="SET NULL"), nullable=True, index=True)
     deal_id = Column(Integer, ForeignKey("crm_deals.id", ondelete="SET NULL"), nullable=True)
     assigned_to = Column(String(200))
+    # the account assigned_to names — whose board the task is on
+    # (app/auth/visibility.py OWNERSHIP)
+    assigned_to_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL",
+                                                     name="fk_crm_tasks_assigned_to_user"),
+                                 nullable=True, index=True)
+    owner_resolved_from = Column(String(200))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -158,6 +164,7 @@ class Task(Base):
             "contact_id": self.contact_id,
             "deal_id": self.deal_id,
             "assigned_to": self.assigned_to,
+            "assigned_to_user_id": self.assigned_to_user_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -270,6 +277,12 @@ class Customer(Base):
     source = Column(String(30), default="in_person")   # in_person|divar|referral
     temperature = Column(String(20), default="warm", index=True)  # hot|warm|cold
     consultant_name = Column(String(200))              # نام مشاور
+    # the account consultant_name names — whose customer «سورین» says it is
+    # (app/auth/visibility.py OWNERSHIP)
+    consultant_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL",
+                                                    name="fk_crm_customers_consultant_user"),
+                                nullable=True, index=True)
+    owner_resolved_from = Column(String(200))
 
     # ── آنالیز بودجه و نیاز (BANT) ──
     budget_max = Column(BigInteger)                    # سقف بودجه (تومان)
@@ -305,6 +318,7 @@ class Customer(Base):
             "source": self.source,
             "temperature": self.temperature,
             "consultant_name": self.consultant_name,
+            "consultant_user_id": self.consultant_user_id,
             "budget_max": self.budget_max,
             "payment_methods": self.payment_methods,
             "desired_specs": self.desired_specs,
@@ -636,6 +650,12 @@ class CustomerMatch(Base):
     score = Column(Integer, nullable=False, default=0)
     reasons = Column(JSON, default=list)
     consultant = Column(String(200), index=True)
+    # the customer's consultant as an account, copied with the name — whom
+    # the card is for (app/auth/visibility.py OWNERSHIP)
+    consultant_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL",
+                                                    name="fk_crm_customer_matches_consultant_user"),
+                                nullable=True, index=True)
+    owner_resolved_from = Column(String(200))
     status = Column(String(20), default="new", index=True)
     decided_by = Column(String(200))
     decided_at = Column(DateTime(timezone=True))
@@ -646,6 +666,7 @@ class CustomerMatch(Base):
         return {
             "id": self.id, "property_id": self.property_id, "customer_id": self.customer_id,
             "score": self.score, "reasons": self.reasons or [], "consultant": self.consultant,
+            "consultant_user_id": self.consultant_user_id,
             "status": self.status, "decided_by": self.decided_by,
             "decided_at": self.decided_at.isoformat() if self.decided_at else None,
             "notified_at": self.notified_at.isoformat() if self.notified_at else None,
@@ -732,6 +753,11 @@ class Cabinet(Base):
     icon = Column(String(40), default="bi-archive")
     sort_order = Column(Integer, default=0, index=True)
     owner = Column(String(200), index=True)   # None = shared across the agency
+    # the account a کمد شخصی belongs to (app/auth/visibility.py OWNERSHIP)
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL",
+                                               name="fk_crm_cabinets_owner_user"),
+                           nullable=True, index=True)
+    owner_resolved_from = Column(String(200))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     binders = relationship("Binder", back_populates="cabinet",
@@ -741,6 +767,7 @@ class Cabinet(Base):
         data = {
             "id": self.id, "name": self.name, "color": self.color,
             "icon": self.icon, "sort_order": self.sort_order, "owner": self.owner,
+            "owner_user_id": self.owner_user_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
         if with_binders:

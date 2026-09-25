@@ -1,0 +1,161 @@
+name: Deploy to staging
+
+# Manual only, on purpose — staging.sorinflow.com is for trying a change
+# before it reaches sorinflow.com, not a mirror of every push. Nothing here
+# runs the test suite either: staging is exactly the place to look at
+# something that is not green yet.
+on:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: tecso-dev/sorinflow-data-manager
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # A distinct staging-<sha> tag, never :latest and never a bare <sha> —
+      # so it can never be confused with (or accidentally overwrite) a
+      # production image tag, and two staging builds never collide.
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ steps.sha.outputs.short }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-to: type=inline
+
+      - name: Set image output
+        id: image
+        run: echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ steps.sha.outputs.short }}" >> "$GITHUB_OUTPUT"
+
+  # On the self-hosted runner, same as deploy.yml's deploy job, for the same
+  # reason: this is the one machine that can reach both ghcr.io outbound and
+  # the k3s API server. No host-level steps here (no seccomp install, no ufw)
+  # — those are one physical node's setup and deploy.yml already keeps them
+  # current on every production deploy.
+  deploy:
+    runs-on: [self-hosted, sorinflow]
+    needs: build
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Pull image into k3s containerd
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          set -euo pipefail
+          k3s ctr -n k8s.io images pull \
+            --user "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+            "${{ needs.build.outputs.image }}"
+
+      # The admin kubeconfig only ever touches these two things: the
+      # namespace itself and the RBAC that scopes everything after this step
+      # to inside it. Both are idempotent.
+      - name: Apply the staging namespace and RBAC
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          set -euo pipefail
+          kubectl apply -f k8s/overlays/staging/namespace.yaml
+          kubectl apply -n sorinflow-staging -f k8s/overlays/staging/rbac.yaml
+
+      # Unlike sorinflow-secrets in the production namespace (created once,
+      # long ago, and only ever patched since), nothing here ever creates
+      # this Secret — a workflow that could conjure the app's own signing key
+      # and database password is a bigger risk than a staging deploy that
+      # asks a person to run one command first.
+      - name: Refuse without a Secret already in place
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          if kubectl -n sorinflow-staging get secret sorinflow-secrets >/dev/null 2>&1; then
+            echo "sorinflow-secrets already exists in sorinflow-staging."
+            exit 0
+          fi
+          echo "::error::Secret sorinflow-secrets does not exist in sorinflow-staging yet."
+          echo "Create it once, e.g. from the server (the two passwords must match each other):"
+          echo '  PGPW=$(openssl rand -hex 24); RPW=$(openssl rand -hex 24)'
+          echo '  kubectl create secret generic sorinflow-secrets -n sorinflow-staging \'
+          echo '    --from-literal=POSTGRES_USER=sorinflow \'
+          echo '    --from-literal=POSTGRES_PASSWORD="$PGPW" \'
+          echo '    --from-literal=POSTGRES_DB=divar_scraper \'
+          echo '    --from-literal=REDIS_PASSWORD="$RPW" \'
+          echo '    --from-literal=SECRET_KEY="$(openssl rand -base64 48 | tr -d '"'"'\n'"'"')" \'
+          echo '    --from-literal=API_KEY="$(openssl rand -hex 32)" \'
+          echo '    --from-literal=DATABASE_URL="postgresql+asyncpg://sorinflow:$PGPW@postgres:5432/divar_scraper" \'
+          echo '    --from-literal=REDIS_URL="redis://:$RPW@redis:6379/0"'
+          echo "See SECRETS.md for what each key is and how to rotate one later."
+          exit 1
+
+      # A token scoped to staging-deployer (Role: explicit rights, only
+      # inside sorinflow-staging — k8s/overlays/staging/rbac.yaml) and to 30
+      # minutes, written into a throwaway kubeconfig that only this job ever
+      # sees. Everything from here on runs under THIS kubeconfig, not the
+      # admin one above — so a BUG in deploy_k8s.sh or in this workflow (a
+      # wrong namespace, an over-broad selector) stays confined to
+      # sorinflow-staging instead of reaching anything else. It is a
+      # blast-radius limit for an accident, not a defence against a malicious
+      # workflow: this same job already holds the cluster-admin kubeconfig
+      # two steps up and could simply keep using it instead.
+      - name: Mint a scoped, short-lived token for staging-deployer
+        env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          set -euo pipefail
+          TOKEN="$(kubectl -n sorinflow-staging create token staging-deployer --duration=30m)"
+          echo "::add-mask::$TOKEN"
+          SERVER="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+          STAGING_KUBECONFIG="$(mktemp)"
+          kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
+            | base64 -d > "${STAGING_KUBECONFIG}.ca"
+          kubectl --kubeconfig "$STAGING_KUBECONFIG" config set-cluster k3s \
+            --server="$SERVER" --embed-certs=true --certificate-authority="${STAGING_KUBECONFIG}.ca" >/dev/null
+          kubectl --kubeconfig "$STAGING_KUBECONFIG" config set-credentials staging-deployer --token="$TOKEN" >/dev/null
+          kubectl --kubeconfig "$STAGING_KUBECONFIG" config set-context staging \
+            --cluster=k3s --user=staging-deployer --namespace=sorinflow-staging >/dev/null
+          kubectl --kubeconfig "$STAGING_KUBECONFIG" config use-context staging >/dev/null
+          rm -f "${STAGING_KUBECONFIG}.ca"
+          chmod 600 "$STAGING_KUBECONFIG"
+          echo "STAGING_KUBECONFIG=$STAGING_KUBECONFIG" >> "$GITHUB_ENV"
+
+      - name: Deploy staging
+        env:
+          KUBECONFIG: ${{ env.STAGING_KUBECONFIG }}
+          OVERLAY: staging
+        run: |
+          IMAGE="${{ needs.build.outputs.image }}" bash scripts/deploy_k8s.sh
+
+      - name: Remove the temporary kubeconfig
+        if: always()
+        run: rm -f "${{ env.STAGING_KUBECONFIG }}"

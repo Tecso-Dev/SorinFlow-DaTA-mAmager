@@ -47,6 +47,10 @@ router.include_router(scraper.router, prefix="/scraper", tags=["Scraper"], depen
 # Machine-authenticated (HMAC in the route), so no permission dependency:
 # the SMS forwarder is a phone, not a user. See scraper.machine_router.
 router.include_router(scraper.machine_router, prefix="/scraper", tags=["Scraper"])
+# Cities/categories reference data — any staff member, not just "scraper"
+# (the properties/CRM/jobs filters read it too). See scraper.lookup_router.
+router.include_router(scraper.lookup_router, prefix="/scraper", tags=["Scraper"],
+                      dependencies=[Depends(get_staff_user)])
 router.include_router(auth.router, prefix="/auth", tags=["Authentication"], dependencies=_perm("divar_auth"))
 router.include_router(stats.router, prefix="/stats", tags=["Statistics"], dependencies=_perm("stats"))
 router.include_router(proxies.router, prefix="/proxies", tags=["Proxies"], dependencies=_perm("proxies"))

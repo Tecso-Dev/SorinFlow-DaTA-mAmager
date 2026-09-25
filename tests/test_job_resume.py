@@ -31,7 +31,6 @@ from app.schemas import ScrapingJobResponse  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_JS = open(os.path.join(ROOT, "frontend/js/app.js"), encoding="utf-8").read()
 DB = open(os.path.join(ROOT, "app/database.py"), encoding="utf-8").read()
-MAIN = open(os.path.join(ROOT, "app/main.py"), encoding="utf-8").read()
 
 
 class TestTheRunRemembersHowItStarted:
@@ -59,14 +58,14 @@ class TestStartAndResumeShareOneLauncher:
     """A resume that skipped a check the start makes would be the side door."""
 
     def test_start_delegates(self):
-        assert "_launch_job(job_config, background_tasks, db, current_user)" in \
+        assert "_launch_job(job_config, db, current_user)" in \
             inspect.getsource(sr.start_scraping_job)
 
     def test_resume_delegates(self):
         src = inspect.getsource(sr.resume_scraping_job)
         # as the run's owner — root pressing «ادامه» on a colleague's run
         # must not relaunch it on root's numbers
-        assert "_launch_job(config, background_tasks, db, run_as" in src
+        assert "_launch_job(config, db, run_as" in src
         assert "run_as = current_user" in src
 
     def test_the_launcher_still_makes_the_ownership_check(self):
@@ -147,10 +146,10 @@ class TestThePanel:
 
 class TestTheRestartMessagePointsAtTheButton:
     def test_it_no_longer_says_run_it_again(self):
-        i = MAIN.index("async def _release_orphaned_jobs")
-        block = MAIN[i:i + 2000]
-        assert "دوباره اجرا کنید" not in block
-        assert "«ادامه»" in block
+        # the worker's sweep writes it now (app/services/scrape_queue.py)
+        from app.services import scrape_queue
+        assert "دوباره اجرا کنید" not in scrape_queue.ORPHAN_REASON
+        assert "«ادامه»" in scrape_queue.ORPHAN_REASON
 
 
 class TestACompletedRunIsNotOfferedResume:

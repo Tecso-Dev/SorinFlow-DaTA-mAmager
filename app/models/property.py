@@ -180,7 +180,13 @@ class Property(Base):
     is_archived = Column(Boolean, default=False, index=True)   # بایگانی
     is_private = Column(Boolean, default=False, index=True)    # فایل شخصی
     is_draft = Column(Boolean, default=False, index=True)      # پیش‌نویس
-    created_by = Column(String(200), index=True)               # who filed it
+    created_by = Column(String(200), index=True)               # who filed it, as shown
+    # …and the account that is: what «شخصی» is checked against. The name
+    # an account was resolved from — see OWNERSHIP in app/auth/visibility.py.
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL",
+                                                    name="fk_properties_created_by_user"),
+                                nullable=True, index=True)
+    owner_resolved_from = Column(String(200))
     tags = Column(String(500))                                 # برچسب، comma-separated
 
     # ── AI pipeline staleness (app/ai/listing_reader.py, embeddings.py,

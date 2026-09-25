@@ -42,11 +42,13 @@ info "RAM ${MEM_MB}MB · ${CPUS} vCPU · $(. /etc/os-release && echo "$PRETTY_NA
 # larger one it is leaving capacity unused. Either way, say so rather than
 # letting the numbers silently stop matching the machine.
 if [ "$MEM_MB" -lt 7000 ]; then
-  info "WARNING: k8s/04-backend.yaml assumes ~8GB. Lower the backend limit"
-  info "         (currently 4096Mi) before applying the manifests here."
+  info "WARNING: k8s/base/{backend,worker,scheduler}.yaml assume ~8GB (see the"
+  info "         budget comment in backend.yaml). Lower worker's limit"
+  info "         (currently 3072Mi, the biggest single share) before applying"
+  info "         the manifests here."
 elif [ "$MEM_MB" -gt 12000 ]; then
-  info "NOTE: this node is larger than the manifests assume — the backend"
-  info "      limit (4096Mi) can be raised. Measure first:"
+  info "NOTE: this node is larger than the manifests assume — worker's limit"
+  info "      (3072Mi) can be raised first; it holds Chromium. Measure first:"
   info "      free -m; kubectl top pod -n sorinflow"
 fi
 
@@ -128,15 +130,16 @@ say "Next"
 cat <<'EOF'
    This script prepares the host only. To bring the application up:
 
-     kubectl apply -f k8s/00-namespace.yaml
+     kubectl apply -f k8s/overlays/production/namespace.yaml
      kubectl create secret generic sorinflow-secrets -n sorinflow \
        --from-env-file=.env.production      # see SECRETS.md
-     kubectl apply -f k8s/02-postgres.yaml -f k8s/02b-postgres-init-configmap.yaml
-     kubectl apply -f k8s/03-redis.yaml
-     kubectl apply -f k8s/04-backend.yaml -f k8s/05-ingress.yaml
-     kubectl apply -f k8s/06-traefik-acme.yaml
+     kubectl apply -f k8s/overlays/production/traefik-acme.yaml
+     IMAGE=ghcr.io/tecso-dev/sorinflow-data-manager:<sha> \
+       OVERLAY=production KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
+       bash scripts/deploy_k8s.sh
 
-   CI applies 02, 03, 04 and 05 on every push to main. It does NOT apply the
-   namespace, the postgres init ConfigMap or the ACME config — those are
-   one-time, and on a new server they are yours to run.
+   deploy.yml runs scripts/deploy_k8s.sh on every push to main. It does NOT
+   create the namespace, the Secret or the Traefik ACME config — those are
+   one-time, and on a new server they are yours to run (see also
+   scripts/new_server.sh, which does all of this from a backup bundle).
 EOF

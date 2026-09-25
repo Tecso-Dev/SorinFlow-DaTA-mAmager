@@ -118,7 +118,9 @@ async def exporter_loop() -> None:
         f"[gcp] exporter started — project={settings.gcp_project_id} "
         f"every {settings.gcp_export_interval}s")
     consecutive_failures = 0
+    from app.services.supervisor import beat
     while True:
+        beat("gcp_exporter")
         try:
             await asyncio.sleep(settings.gcp_export_interval)
             before = _stats["failures"]

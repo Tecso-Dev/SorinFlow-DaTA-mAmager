@@ -1,0 +1,24 @@
+repos:
+  # Only looks at staged lines (git diff --cached), so it never asks anyone
+  # to clean up code they did not touch — see scripts/lint_new_code.py.
+  - repo: local
+    hooks:
+      - id: lint-new-code
+        name: lint changed lines (ruff, mypy, eslint)
+        # python3, not python: language: system runs whatever is on PATH,
+        # and this Mac (like a bare CI image) has no `python` at all —
+        # activate the venv (~/.venvs/sorinflow-v2, see CLAUDE.md) first so
+        # this resolves to the interpreter ruff/mypy are installed into.
+        entry: python3 scripts/lint_new_code.py --staged
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+        args: [--allow-multiple-documents]  # k8s/ and compose files are single-doc today, but harmless to allow
+      - id: detect-private-key
+      - id: check-added-large-files

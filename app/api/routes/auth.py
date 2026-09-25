@@ -1,6 +1,8 @@
 """
 SorinFlow Divar Scraper - Authentication API Routes
 """
+import json
+import time
 from datetime import datetime
 from fastapi import Request, APIRouter, Depends, HTTPException
 from loguru import logger
@@ -9,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Any, List, Optional
 
-from app.database import get_db
+from app.database import get_db, get_redis
 from app.auth.dependencies import get_current_user
 from app.models.cookie import Cookie
 from app.models.user import User
@@ -36,24 +38,79 @@ settings = get_settings()
 # the life of the pod, and starting a second attempt for the same number
 # overwrote the dict entry, dropping the only handle to the previous one. On a
 # single-replica box a handful of those is most of the CPU.
+#
+# This stays a plain in-process dict even after the rest of this module's
+# state moved to Redis: a Chromium handle cannot be handed to another
+# process, so it can only ever mean "a browser THIS process launched" — which
+# is also exactly why the Ingress pins /api/auth/login|verify|refresh to one
+# worker (see the k8s section of the shared Phase 3 contract). `_auth_by` and
+# `_auth_started` moved to `sf:divar-login:{digits}` in Redis (JSON
+# {user_id, started_at}) precisely because THOSE checks — "someone else is
+# mid-login with this number", "only the starter may verify" — must survive
+# a restart even though the browser itself cannot.
 auth_instances = {}
-_auth_started = {}          # phone -> monotonic time the browser was launched
-# phone -> the user who started that login. The OTP step is only theirs to
-# finish: it used to be keyed by the number alone, so anybody who knew a
-# login was in flight could complete it and walk off with the session.
-_auth_by = {}
 
 # A login nobody finished. Generous: the OTP itself has a 30s wait and people
 # go and find their phone.
 AUTH_INSTANCE_TTL = 600
 
 
+def _login_registry_key(phone_number: str) -> str:
+    return f"sf:divar-login:{_digits10(phone_number)}"
+
+
+async def _note_login_started(phone_number: str, user_id: Optional[int]) -> None:
+    """Record who started this number's login and when. Wall-clock time
+    (time.time()), not monotonic — this value is read back by whichever
+    process/replica handles the OTP step, possibly after a restart, and a
+    monotonic clock means nothing outside the process that read it."""
+    try:
+        r = await get_redis()
+        await r.set(_login_registry_key(phone_number),
+                    json.dumps({"user_id": user_id, "started_at": time.time()}),
+                    ex=AUTH_INSTANCE_TTL)
+    except Exception as e:
+        logger.warning(f"[auth] could not record login start for {phone_number}: {e}")
+
+
+async def _raw_login_entry(phone_number: str) -> Optional[dict]:
+    """{"user_id": …, "started_at": …} for an in-flight login, or None if
+    there genuinely is none. Raises on a Redis failure instead of hiding
+    it — a caller that must tell "nobody started this" apart from "the
+    registry could not be asked" (verify_otp, the sweep) uses this
+    directly; _login_started_by below is the swallow-and-log wrapper most
+    callers want instead."""
+    r = await get_redis()
+    raw = await r.get(_login_registry_key(phone_number))
+    return json.loads(raw) if raw else None
+
+
+async def _login_started_by(phone_number: str) -> Optional[dict]:
+    """{"user_id": …, "started_at": …} for an in-flight login, or None if
+    nothing is recorded — including once AUTH_INSTANCE_TTL has passed, since
+    Redis drops the key on its own, and if the registry could not be read at
+    all (logged; see _raw_login_entry for a caller that must not conflate
+    the two)."""
+    try:
+        return await _raw_login_entry(phone_number)
+    except Exception as e:
+        logger.warning(f"[auth] could not read the login registry for {phone_number}: {e}")
+        return None
+
+
+async def _clear_login_started(phone_number: str) -> None:
+    try:
+        r = await get_redis()
+        await r.delete(_login_registry_key(phone_number))
+    except Exception as e:
+        logger.warning(f"[auth] could not clear the login registry for {phone_number}: {e}")
+
+
 async def _discard_auth_instance(phone_number: str, why: str):
     """Close and forget one login browser. Never raises — a browser that is
     already gone must not turn into a 500 on somebody else's request."""
     auth = auth_instances.pop(phone_number, None)
-    _auth_started.pop(phone_number, None)
-    _auth_by.pop(phone_number, None)
+    await _clear_login_started(phone_number)
     if auth is None:
         return
     try:
@@ -65,10 +122,26 @@ async def _discard_auth_instance(phone_number: str, why: str):
 
 
 async def _sweep_auth_instances():
-    """Close logins nobody came back to finish."""
-    import time as _time
-    now = _time.monotonic()
-    stale = [p for p, t in _auth_started.items() if now - t > AUTH_INSTANCE_TTL]
+    """Close logins nobody came back to finish.
+
+    auth_instances can only ever hold what THIS process launched, so sweeping
+    just walks it. "Abandoned" is now Redis's own TTL on the registry key
+    (AUTH_INSTANCE_TTL) rather than a monotonic clock this function compared
+    by hand — a browser whose registry entry has expired is, by definition,
+    one nobody came back to finish within the same window that used to be
+    checked here.
+
+    A Redis failure must not read as "every phone's entry is gone" —
+    _login_started_by's own swallow-to-None would make every one of them
+    look abandoned on a single hiccup, closing every in-flight login at once
+    instead of only the ones actually left behind. _raw_login_entry is used
+    directly here so that failure skips this pass instead.
+    """
+    try:
+        stale = [p for p in list(auth_instances) if await _raw_login_entry(p) is None]
+    except Exception as e:
+        logger.warning(f"[auth] could not read the login registry — skipping the sweep: {e}")
+        return
     for phone in stale:
         await _discard_auth_instance(phone, f"abandoned for {AUTH_INSTANCE_TTL}s")
 
@@ -149,8 +222,9 @@ async def initiate_login(
     # Somebody else's login in flight for this number is not ours to end.
     # Superseding it used to be free for anyone, which is a way to cancel a
     # colleague's login on every attempt.
-    other = _auth_by.get(phone_number)
-    if other is not None and other != current_user.id and phone_number in auth_instances:
+    other = await _login_started_by(phone_number)
+    other_uid = other.get("user_id") if other else None
+    if other_uid is not None and other_uid != current_user.id and phone_number in auth_instances:
         await _sweep_auth_instances()
         if phone_number in auth_instances:
             raise HTTPException(
@@ -162,12 +236,10 @@ async def initiate_login(
     await _discard_auth_instance(phone_number, "superseded by a new login")
     await _sweep_auth_instances()
 
-    import time as _time
     auth = DivarAuth(db)
     auth_instances[phone_number] = auth
-    _auth_started[phone_number] = _time.monotonic()
-    _auth_by[phone_number] = current_user.id
-    
+    await _note_login_started(phone_number, int(current_user.id))
+
     try:
         result = await auth.login_with_phone(phone_number)
         
@@ -189,8 +261,32 @@ async def verify_otp(
     current_user: User = Depends(get_current_user_optional),
 ):
     """Verify OTP code and complete login"""
-    
+
+    # Who started this login decides who may finish it (below) — on an
+    # unowned number that is the only thing standing between "my own
+    # in-flight login" and "somebody else's". _login_started_by's
+    # swallow-to-None on a Redis failure would answer "nobody started this",
+    # which reads as permission, not as "unknown" — any divar_auth user could
+    # then finish another user's in-flight login on an unowned number during
+    # an outage. Fail closed instead: the registry could not be asked, so
+    # this refuses rather than guesses.
+    try:
+        login = await _raw_login_entry(phone_number)
+    except Exception as e:
+        logger.warning(f"[auth] could not read the login registry for {phone_number} — "
+                       f"refusing to verify: {e}")
+        raise HTTPException(status_code=503,
+                            detail="سرویس موقتاً در دسترس نیست — چند لحظه بعد دوباره امتحان کنید") from None
     if phone_number not in auth_instances:
+        if login is not None:
+            # Redis remembers a login in flight; this process has no browser
+            # for it — the one thing that cannot follow a restart across
+            # processes. Asking for the code again is honest; waiting on it
+            # would hang forever.
+            await _clear_login_started(phone_number)
+            raise HTTPException(
+                status_code=409,
+                detail="ورود قبلی با ری‌استارت سرور از بین رفت — دوباره «ارسال کد» را بزنید")
         raise HTTPException(
             status_code=400,
             detail="No login session found. Please initiate login first."
@@ -199,7 +295,8 @@ async def verify_otp(
     # number that is not somebody else's. Checked BEFORE the code goes in:
     # submit_otp_code saves the jar to the row itself, so a refusal after it
     # would already have overwritten the owner's session.
-    if not current_user or _auth_by.get(phone_number) not in (None, current_user.id):
+    started_by = login.get("user_id") if login else None
+    if not current_user or started_by not in (None, current_user.id):
         raise HTTPException(status_code=403, detail="این ورود را کاربر دیگری شروع کرده است")
     await _refuse_somebody_elses(db, current_user, phone_number)
     
@@ -369,8 +466,8 @@ async def refresh_session(
     # («already open»), which this route used to report as «expired — log in
     # again»; and restoring the same session in a second browser would rotate
     # the refresh token under the running one.
-    from app.scraper.stealth import profile_dir, _PROFILES_IN_USE
-    if str(profile_dir(phone)) in _PROFILES_IN_USE:
+    from app.scraper.stealth import profile_in_use
+    if await profile_in_use(phone):
         return {"success": True, "in_use": True,
                 "message": "این شماره همین حالا در یک اسکرپ در حال استفاده است و نشستش فعال است"}
     
@@ -681,8 +778,8 @@ async def set_cookie_enabled(
             ScrapingJob.status.in_(("running", "paused", "pending"))))).scalars().all() if want else []
         for j in live:
             if _digits10(j.divar_phone) == want:
-                otp_store.request_switch(str(j.job_id), None, by=user.id, reason="disabled",
-                                         from_phone=cookie.phone_number)
+                await otp_store.request_switch(str(j.job_id), None, by=user.id, reason="disabled",
+                                               from_phone=cookie.phone_number)
                 moved.append(str(j.job_id))
                 await job_log.record(
                     str(j.job_id), job_log.SESSION,
@@ -804,8 +901,8 @@ async def set_number_owner(
         for j in live:
             if (j.config or {}).get("owner_user_id") == old \
                     and _digits10(j.divar_phone) == _digits10(cookie.phone_number):
-                otp_store.request_switch(str(j.job_id), None, by=user.id, reason="reassigned",
-                                         from_phone=cookie.phone_number)
+                await otp_store.request_switch(str(j.job_id), None, by=user.id, reason="reassigned",
+                                               from_phone=cookie.phone_number)
                 moved.append(str(j.job_id))
     await db.commit()
     _ip = request.client.host if request.client else "?"
@@ -840,7 +937,7 @@ async def identity_cleared(
     cookie.identity_required_at = None
     await db.commit()
     from app.scraper import otp_store
-    otp_store.clear_identity_required(cookie.phone_number)
+    await otp_store.clear_identity_required(cookie.phone_number)
     return {"success": True, "phone_number": cookie.phone_number}
 
 

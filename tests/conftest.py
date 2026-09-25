@@ -48,6 +48,36 @@ async def _dispose_db_pool_after_test():
     await db.engine.dispose(close=False)
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _restore_redis_after_module():
+    """About eighteen test modules stub Redis for the app by assigning
+    app.database.get_redis (and, separately, app.services.verification's own
+    name for it — imported once with `from app.database import get_redis`, so
+    reassigning the first name never touches the second) directly to a
+    fakeredis closure, module-scoped, and never put the original back. That
+    is not pytest's monkeypatch fixture, which undoes itself automatically —
+    it is a plain attribute assignment, so the fake keeps serving every test
+    module that runs afterward in the same process, including ones exercising
+    a real REDIS_URL, until something else happens to overwrite it again.
+
+    Snapshotting both names here once, before anything in the module runs,
+    and restoring them after — instead of teaching each of those modules to
+    clean up after itself — closes that leak regardless of which module
+    happens to run last with a stub in place. redis_client is included
+    because app.database.get_redis() lazily opens a real connection into it
+    on first call and caches it there; restoring the reference here (not
+    closing it — some other still-running fixture may hold the same object)
+    keeps a connection opened on one test module's event loop from being
+    reused by the next module's, which asyncpg's own pool hit the same way
+    (see _dispose_db_pool_after_test above).
+    """
+    import app.database as db
+    import app.services.verification as v
+    saved = (db.get_redis, db.redis_client, v.get_redis)
+    yield
+    db.get_redis, db.redis_client, v.get_redis = saved
+
+
 @pytest.fixture
 def sample_html_property():
     """Minimal Divar property page HTML for parser tests."""

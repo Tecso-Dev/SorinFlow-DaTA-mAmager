@@ -103,6 +103,22 @@ rm -f "$GPG_LOG" "$GPG_STATUS"
 tar -xf "$OUTDIR/.plain.tar" -C "$OUTDIR"
 rm -f "$OUTDIR/.plain.tar"
 
+# ── the Secret's env file, rebuilt from the Secret itself ───────────────────
+# new_server.sh loads the env file with `kubectl create secret --from-env-file`,
+# which reads one KEY=value per line: a value holding a newline (a PEM key, a
+# service-account JSON) would keep only its first line, and every other line
+# would become a key of its own. A bundle that carries the Secret as JSON
+# (dr_backup.sh writes both) gets its env file rebuilt from it with the
+# one-line values only; the JSON, every value exactly, is applied afterwards.
+SECRET_JSON="$OUTDIR/k8s/sorinflow-secrets.json"
+MULTILINE=""
+if [ -f "$SECRET_JSON" ]; then
+  jq -r '.data | to_entries[] | select(.value | @base64d | test("\n") | not)
+         | "\(.key)=\(.value | @base64d)"' "$SECRET_JSON" > "$OUTDIR/k8s/sorinflow-secrets.env"
+  MULTILINE="$(jq -r '[.data | to_entries[] | select(.value | @base64d | test("\n")) | .key]
+                      | join(", ")' "$SECRET_JSON")"
+fi
+
 # ── 4. sanity — what new_server.sh itself insists on ────────────────────────
 for need in db/divar_scraper.dump db/globals.sql k8s/sorinflow-secrets.env data-pvc.tar; do
   [ -e "$OUTDIR/$need" ] || { echo "restored bundle is missing $need" >&2; exit 1; }
@@ -114,3 +130,9 @@ echo "restored into: $OUTDIR"
 echo
 echo "next, on the new box:"
 echo "  bash scripts/new_server.sh $OUTDIR [github-runner-registration-token]"
+if [ -n "$MULTILINE" ]; then
+  echo
+  echo "these Secret keys hold more than one line, so the env file leaves them out: $MULTILINE"
+  echo "once new_server.sh has created the Secret, put every key back exactly:"
+  echo "  kubectl apply -f $SECRET_JSON"
+fi

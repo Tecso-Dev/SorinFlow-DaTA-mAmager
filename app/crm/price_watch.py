@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 from loguru import logger
 from sqlalchemy import select
 
+from app.auth.visibility import stamp_owner
 from app.config import get_settings
 from app.database import async_session_maker
 from app.models.crm_models import CustomerMatch, PriceAlert
@@ -115,9 +116,10 @@ async def run_once(db, *, notify: bool = True, limit: int = BATCH) -> Dict:
                 CustomerMatch.property_id == p.id, CustomerMatch.customer_id == c["id"]))).scalar_one_or_none()
             if exists:
                 continue
-            db.add(CustomerMatch(property_id=p.id, customer_id=c["id"], score=int(round(c["score"])),
-                                 reasons=["قیمت کم شد", *(c.get("reasons") or [])],
-                                 consultant=c.get("consultant_name") or None))
+            row = CustomerMatch(property_id=p.id, customer_id=c["id"], score=int(round(c["score"])),
+                                reasons=["قیمت کم شد", *(c.get("reasons") or [])])
+            stamp_owner(row, c.get("consultant_name") or None, c.get("consultant_user_id"))
+            db.add(row)
             alert.matches_created = (alert.matches_created or 0) + 1
             matches += 1
         created.append(alert)
@@ -199,6 +201,8 @@ async def watch_loop() -> None:
         return
     await asyncio.sleep(120)
     logger.info(f"[price] watch armed — every {TICK_SECONDS // 60} min, cuts of {MIN_DROP_PCT}٪ and more")
+    from app.services.supervisor import beat
     while True:
+        beat("price_watch")
         await tick()
         await asyncio.sleep(TICK_SECONDS)

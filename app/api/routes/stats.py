@@ -3,6 +3,7 @@ SorinFlow Divar Scraper - Statistics API Routes
 """
 import json
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
@@ -403,9 +404,15 @@ async def get_recent_logs(
     lines: int = Query(200, ge=1, le=1000),
     grep: str = Query("", max_length=200),
     level: str = Query("", max_length=10),
+    log: Literal["scraper.log", "api.log", "scheduler.log"] = "scraper.log",
     _: User = _require_admin,
 ):
     """Recent log lines, newest last. Admin only — logs name jobs and accounts.
+
+    `log` picks which role's file to read (see app/main.py's logger setup —
+    each role now writes its own file). Defaults to scraper.log, which is
+    what this always read before roles split apart, and is what api/worker
+    and the scrape loops still write.
 
     Runs in a worker thread: it is file I/O, and doing it on the event loop
     blocks every other request for the duration of the read.
@@ -413,7 +420,7 @@ async def get_recent_logs(
     from starlette.concurrency import run_in_threadpool
     from app.config import get_settings
 
-    path = str(Path(get_settings().logs_path) / "scraper.log")
+    path = str(Path(get_settings().logs_path) / log)
     try:
         return await run_in_threadpool(_tail_log, path, lines, grep, level)
     except Exception as e:

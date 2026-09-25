@@ -187,7 +187,9 @@ async def seed_properties_and_leads(db, count=20):
             property_url=prop.url,
             property_title=prop.title,
             status=lead_statuses[i % len(lead_statuses)],
-            assigned_to=STAFF[i % len(STAFF)][0],
+            # the display name, as the panel assigns — the account is
+            # resolved from it at the end of main()
+            assigned_to=STAFF[i % len(STAFF)][1],
             notes="لید نمونه — محیط توسعهٔ محلی.",
         ))
         leads_made += 1
@@ -273,7 +275,12 @@ async def main():
         await seed_customers(db)
         await seed_jobs(db, users)
         await db.commit()
-
+    # leads and customers above name their consultant; the boot step would
+    # resolve the accounts on the next restart, this does it now
+    from app.auth.visibility import backfill_owner_ids
+    async with engine.begin() as conn:
+        print(f"owner accounts: {await conn.run_sync(backfill_owner_ids)} row(s) resolved")
+    async with async_session_maker() as db:
         super_admins = (await db.execute(
             select(User).where(User.role.in_([ROLE_ROOT, ROLE_SUPER_ADMIN])))).scalars().all()
 

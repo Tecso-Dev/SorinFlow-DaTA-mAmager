@@ -48,6 +48,27 @@ PG_TEST_URL=postgresql+asyncpg://sf@127.0.0.1:55432/sorinflow_test \
 CI runs both against real PostgreSQL and Redis services, and **nothing reaches
 the registry unless they pass**.
 
+## Linting
+
+```bash
+pre-commit install                       # once per clone — see .pre-commit-config.yaml
+python scripts/lint_new_code.py          # the same gate by hand, against origin/main
+npx eslint frontend/js frontend/*.js     # the panel's JS on its own, whole tree
+```
+
+ruff, mypy and eslint each have a long list of pre-existing findings on this
+codebase — turning any of them into a gate on the *whole* tree would either
+block the next unrelated commit until someone works through that backlog, or
+get disabled within a week. `scripts/lint_new_code.py` is the actual gate
+(pre-commit hook and CI both call it): it runs all three but only reports a
+finding on a line the change itself added or touched, so nothing already
+there has to be fixed to get a commit in. `--staged` lints what is about to
+be committed; with no flags it diffs against `origin/main`, same as CI.
+
+CI also runs `pytest --cov=app --cov-report=xml --cov-report=term:skip-covered`
+and uploads the report as a build artifact. There is no enforced minimum —
+watch the trend, do not chase a number.
+
 ## What good work looks like here
 
 - **Fix the cause, not the symptom.** If a guard is missing in one caller, check

@@ -2569,13 +2569,13 @@ async function loadProperties() {
                     }
                 </td>
                 <td data-l="" class="pt-actions">
-                    <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${property.id})">
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewProperty(${property.id})" title="مشاهده">
                         <i class="bi bi-eye"></i>
                     </button>
-                    <a href="${safeUrl(property.url)}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                    <a href="${safeUrl(property.url)}" target="_blank" class="btn btn-sm btn-outline-secondary" title="مشاهده در دیوار">
                         <i class="bi bi-box-arrow-up-left"></i>
                     </a>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteProperty(${property.id})">
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteProperty(${property.id})" title="حذف">
                         <i class="bi bi-trash"></i>
                     </button>
                 </td>
@@ -3457,11 +3457,16 @@ function _buildRangeSlider(el) {
     if (!loInput || !hiInput) return;
     const ceiling = Number(el.dataset.ceiling) || 100000000000;
     const onChange = el.dataset.onChange;
+    // data-label names the field for the two thumbs' own accessible name —
+    // this builder is shared by price/deposit/rent/area/ppm sliders, so it
+    // cannot hardcode one. Falls back to something honest rather than
+    // nothing when a caller doesn't set it.
+    const label = esc(el.dataset.label || 'مقدار');
 
     el.innerHTML = `
         <div class="range-slider__rail"><div class="range-slider__fill"></div></div>
-        <input type="range" class="range-slider__thumb lo" min="0" max="${RANGE_STEPS}" value="0">
-        <input type="range" class="range-slider__thumb hi" min="0" max="${RANGE_STEPS}" value="${RANGE_STEPS}">
+        <input type="range" class="range-slider__thumb lo" min="0" max="${RANGE_STEPS}" value="0" aria-label="حداقل ${label}">
+        <input type="range" class="range-slider__thumb hi" min="0" max="${RANGE_STEPS}" value="${RANGE_STEPS}" aria-label="حداکثر ${label}">
         <div class="range-slider__readout"><span class="lo"></span><span class="hi"></span></div>`;
 
     const loThumb = el.querySelector('.range-slider__thumb.lo');
@@ -7764,7 +7769,7 @@ async function loadLeads() {
             row.innerHTML = `
                 <td><input type="checkbox" class="form-check-input lead-check" data-id="${lead.id}"
                            ${_selectedLeads.has(lead.id) ? 'checked' : ''}
-                           onchange="toggleLeadSelection(${lead.id}, this.checked)"></td>
+                           onchange="toggleLeadSelection(${lead.id}, this.checked)" aria-label="انتخاب این لید"></td>
                 <td>${lead.serial_no != null
                         ? `<span class="serial-badge" title="کد ملک — همان کدی که در لیست املاک است">${formatSerial(lead.serial_no)}</span>`
                         : '<span class="text-muted" title="ملک این لید حذف شده است">—</span>'}</td>
@@ -7784,7 +7789,7 @@ async function loadLeads() {
                 </td>
                 <td>
                     <select class="form-select form-select-sm status-quick ${st.cls}"
-                            onchange="quickLeadStatus(${lead.id}, this.value, this)">
+                            onchange="quickLeadStatus(${lead.id}, this.value, this)" aria-label="تغییر وضعیت لید">
                         ${Object.entries(CRM_STATUS_LABELS).map(([val, info]) =>
                             `<option value="${val}" ${lead.status === val ? 'selected' : ''}>${info.label}</option>`
                         ).join('')}
@@ -12206,7 +12211,7 @@ async function loadMonitoring() {
                    <span class="text-muted small">${esc(dv.error || dv.status || '')}</span>`;
         }
 
-        await Promise.all([loadGcpStatus(), loadMonitoringLogs()]);
+        await Promise.all([loadGcpStatus(), loadMonitoringLogs(), loadRuntime()]);
         startLive();
     } catch (e) {
         showToast('خطا', 'خواندن وضعیت سامانه ناموفق بود', 'danger');
@@ -12256,6 +12261,88 @@ async function testGcp() {
         showToast(r.ok ? 'موفق' : 'ناموفق', r.detail || '', r.ok ? 'success' : 'warning');
         loadGcpStatus();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// ── پردازه‌ها و کارهای پس‌زمینه ─────────────────────────────────────────────
+// /api/monitoring/runtime, root and super_admin only. The api, the scrape
+// worker and the scheduler are separate processes; each writes its own
+// heartbeat and each supervised loop its own state to Redis, so this card is
+// the one place they show up together. Every value goes through html``/esc.
+const RT_ROLE_FA = { all: 'همه‌کاره', api: 'API', worker: 'اسکرپر', scheduler: 'زمان‌بند' };
+const RT_LOOP_FA = {
+    reminders: 'یادآورها و پیامک قرارها', backup: 'بکاپ شبانه', lease_expiry: 'پایان اجاره‌ها',
+    audit_retention: 'نگهداری رویدادها', divar_session: 'بررسی نشست‌های دیوار',
+    proxy_pool: 'تست پراکسی‌ها', forwarder_watch: 'پایش فورواردرها', apk_mirror: 'آینهٔ APK فورواردر',
+    scrape_scheduler: 'اسکرپ‌های زمان‌بندی‌شده', match_engine: 'موتور تطبیق', price_watch: 'پایش قیمت',
+    digest: 'گزارش روزانه', listing_reader: 'خوانندهٔ آگهی', embeddings: 'بردار متن آگهی‌ها',
+    photo_tagger: 'برچسب‌زن عکس', assistant: 'دستیار سورین', gcp_exporter: 'ارسال به Google Cloud',
+    scrape_consumer: 'صف اسکرپ', scrape_sweep: 'بازبینی صف اسکرپ',
+};
+
+function _rtAgo(sec) {
+    if (sec === null || sec === undefined) return '—';
+    if (sec < 90) return `${faNum(Math.max(0, Math.round(sec)))} ثانیه پیش`;
+    if (sec < 5400) return `${faNum(Math.round(sec / 60))} دقیقه پیش`;
+    return `${faNum(Math.round(sec / 3600))} ساعت پیش`;
+}
+
+function _rtProc(p) {
+    // The sandbox's shape is the scraper's to decide; shown as it comes.
+    const sb = p.sandbox === undefined || p.sandbox === null ? ''
+        : typeof p.sandbox === 'object'
+            ? Object.entries(p.sandbox).map(([k, v]) => `${k}: ${v}`).join(' · ')
+            : String(p.sandbox);
+    const n = (p.running || []).length;
+    return html`<div class="rt-proc${p.draining ? ' is-draining' : ''}">
+        <div><b>${RT_ROLE_FA[p.role] || p.role}</b> <span class="rt-dim" dir="ltr">${p.host}</span></div>
+        <div class="rt-dim">آخرین تپش: ${_rtAgo(p.age_seconds)}</div>
+        ${raw(p.draining ? '<span class="rt-tag is-warn">در حال تخلیه — کار تازه نمی‌گیرد</span>' : '')}
+        ${raw(n ? html`<span class="rt-tag">${faNum(n)} اسکرپ در حال اجرا</span>` : '')}
+        ${raw(sb ? html`<div class="rt-dim">سندباکس کروم: <span dir="ltr">${sb}</span></div>` : '')}
+    </div>`;
+}
+
+function _rtLoop(l) {
+    const [label, cls] = l.off ? ['خاموش', 'is-off']
+        : l.stale ? ['گیرکرده', 'is-bad']
+        : l.restarts ? [`${faNum(l.restarts)} بار ری‌استارت`, 'is-warn']
+        : ['سالم', 'is-ok'];
+    const beat = l.off ? '' : `تپش: ${l.last_beat ? _rtAgo(Date.now() / 1000 - l.last_beat) : 'هنوز نه'}`;
+    const err = l.last_error_at
+        ? html`<div class="rt-dim">خطای آخر: ${new Date(l.last_error_at * 1000).toLocaleString('fa-IR')}</div>`
+        : '';
+    // the internal name, the role and the error's type and line stay in the
+    // tooltip: the cell is for reading the state at a glance
+    return html`<div class="rt-loop" title="${l.name} · ${l.role || ''}${l.last_error ? ' · ' + l.last_error : ''}">
+        <div class="rt-loop-head"><span>${RT_LOOP_FA[l.name] || l.name}</span><span class="rt-tag ${cls}">${label}</span></div>
+        ${raw(beat ? html`<div class="rt-dim">${beat}</div>` : '')}
+        ${raw(err)}
+    </div>`;
+}
+
+async function loadRuntime() {
+    const card = document.getElementById('mon-runtime-card');
+    if (!card) return;
+    const allowed = ['root', 'super_admin'].includes(_currentUser?.role);
+    card.classList.toggle('d-none', !allowed);
+    if (!allowed) return;
+    const procs = document.getElementById('mon-rt-procs');
+    let d;
+    try {
+        d = await apiCall('/monitoring/runtime');
+    } catch (e) {
+        procs.innerHTML = html`<span class="text-danger small">${e.message || 'خواندن وضعیت پردازه‌ها ناموفق بود'}</span>`;
+        return;
+    }
+    procs.innerHTML = (d.processes || []).map(_rtProc).join('')
+        || '<span class="text-muted small">هیچ پردازه‌ای در یک دقیقهٔ گذشته گزارش نداده است</span>';
+    const running = d.running || [];
+    _setTile('mon-rt-queue', `در صف: ${faNum(d.queue_length || 0)} · در حال اجرا: ${faNum(running.length)}`);
+    document.getElementById('mon-rt-running').innerHTML = running.map(r =>
+        html`<span class="rt-tag" dir="ltr" title="${r.worker}">${String(r.job_id).slice(0, 8)}</span>`).join(' ');
+    const loops = d.loops || [];
+    document.getElementById('mon-rt-loops').innerHTML = loops.map(_rtLoop).join('')
+        || '<span class="text-muted small">هنوز هیچ کار پس‌زمینه‌ای گزارش نداده است</span>';
 }
 
 async function loadMonitoringLogs() {

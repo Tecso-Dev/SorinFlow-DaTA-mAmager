@@ -187,40 +187,44 @@ class TestAskingDivarForAnotherCode:
     """The only way to get a second code was to let the prompt fail and wait
     for the scraper to reach the next listing."""
 
-    def setup_method(self):
+    @pytest.fixture(autouse=True)
+    def _redis(self, monkeypatch):
         from app.scraper import otp_store
-        otp_store._store.clear()
+        from _fake_redis import patch_redis
+        patch_redis(monkeypatch, otp_store)
 
-    def test_a_resend_is_flagged_then_consumed_once(self):
+    async def test_a_resend_is_flagged_then_consumed_once(self):
         from app.scraper import otp_store
-        otp_store.request("j:1", "0912")
-        assert otp_store.ask_resend("j:1")["ok"] is True
-        assert otp_store.take_resend("j:1") is True
-        assert otp_store.take_resend("j:1") is False, "one press, one resend"
+        await otp_store.request("j:1", "0912")
+        assert (await otp_store.ask_resend("j:1"))["ok"] is True
+        assert await otp_store.take_resend("j:1") is True
+        assert await otp_store.take_resend("j:1") is False, "one press, one resend"
 
-    def test_it_is_capped(self):
+    async def test_it_is_capped(self):
         from app.scraper import otp_store
-        otp_store.request("j:1", "0912")
+        await otp_store.request("j:1", "0912")
         for _ in range(otp_store.MAX_RESENDS):
-            assert otp_store.ask_resend("j:1")["ok"] is True
-            otp_store.take_resend("j:1")
-        out = otp_store.ask_resend("j:1")
+            assert (await otp_store.ask_resend("j:1"))["ok"] is True
+            await otp_store.take_resend("j:1")
+        out = await otp_store.ask_resend("j:1")
         assert out["ok"] is False and out["reason"] == "limit"
 
-    def test_a_closed_request_cannot_be_resent(self):
+    async def test_a_closed_request_cannot_be_resent(self):
         from app.scraper import otp_store
-        otp_store.request("j:1", "0912")
-        otp_store.submit("j:1", "123456")
-        assert otp_store.ask_resend("j:1")["ok"] is False
-        assert otp_store.ask_resend("nope:1")["ok"] is False
+        await otp_store.request("j:1", "0912")
+        await otp_store.submit("j:1", "123456")
+        assert (await otp_store.ask_resend("j:1"))["ok"] is False
+        assert (await otp_store.ask_resend("nope:1"))["ok"] is False
 
-    def test_the_clock_restarts_so_the_countdown_matches_the_new_code(self):
+    async def test_the_clock_restarts_so_the_countdown_matches_the_new_code(self):
         import time
         from app.scraper import otp_store
-        otp_store.request("j:1", "0912")
-        otp_store._store["j:1"]["ts"] = time.time() - 120
-        otp_store.restart_clock("j:1")
-        assert time.time() - otp_store._store["j:1"]["ts"] < 2
+        await otp_store.request("j:1", "0912")
+        r = await otp_store.get_redis()
+        await r.hset(otp_store._prompt_key("j:1"), "ts", time.time() - 120)
+        await otp_store.restart_clock("j:1")
+        ts = float(await r.hget(otp_store._prompt_key("j:1"), "ts"))
+        assert time.time() - ts < 2
 
     def test_only_the_parked_browser_can_press_it(self):
         """Divar's resend control is on the page the browser is sitting on."""

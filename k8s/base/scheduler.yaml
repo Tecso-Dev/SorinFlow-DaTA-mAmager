@@ -1,0 +1,113 @@
+# The scheduler role: every periodic background loop (digest, embedding
+# backfill, SMS-cap warnings, telegram relay checks, ...), each under a
+# supervisor that restarts it with backoff and watches its heartbeat. No
+# Service: nothing routes HTTP to this role, api and worker cover that
+# between them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduler
+  labels:
+    app: scheduler
+    app.kubernetes.io/component: scheduler
+    sorinflow.com/inject-app-env: "true"
+spec:
+  replicas: 1
+  # Recreate: a second scheduler running for even a few seconds means every
+  # periodic loop firing twice — two digests, two rounds of the same
+  # embedding backfill batch, one SMS-cap warning sent twice. There is no
+  # queue or lock protecting most of these the way the scrape queue protects
+  # worker, so the simplest correct answer is the same one the whole app used
+  # before it was split: never run two at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: scheduler
+  template:
+    metadata:
+      labels:
+        app: scheduler
+        app.kubernetes.io/part-of: sorinflow
+        app.kubernetes.io/component: scheduler
+        sorinflow.com/egress: app
+      annotations:
+        sorinflow.com/synced-secrets: "unsynced"
+    spec:
+      terminationGracePeriodSeconds: 60
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        # data-pvc is a `local` PV, so the kubelet re-applies fsGroup to every
+        # file on it at EVERY mount by default — a recursive walk over all the
+        # downloaded images on each pod start and rolling update. Once the root
+        # is right (the data-ownership Job, then the first mount) there is
+        # nothing to fix, so only a mismatched root triggers the walk.
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: scheduler
+          image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          env:
+            - name: SORINFLOW_ROLE
+              value: "scheduler"
+            - name: DB_MIGRATE_ON_BOOT
+              value: "false"
+            # See backend.yaml's comment and shared-app-env.patch.yaml — the
+            # rest of the env (DATABASE_URL, SECRET_KEY, ...) is shared.
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
+          # See backend.yaml for the full node-budget accounting (this role's
+          # share is 1536Mi, not 768Mi — the request stays the same, only the
+          # ceiling moved). Two things here run well past the supervisor
+          # loops' own footprint: the embeddings loop (embed_properties →
+          # load_index, app/ai/embeddings.py) decodes every active listing's
+          # vector into a Python list of 1536 floats at once — about 49 KB
+          # per vector before numpy ever builds a matrix from them — and the
+          # nightly backup (backup_scheduler → create_backup,
+          # app/services/backup_service.py) dumps every table, embeddings
+          # included, into memory as JSON before gzipping it. 768Mi was sized
+          # for the loops alone, before either of those was this role's job.
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              memory: "1536Mi"
+          # Same heartbeat-file mechanism as worker.yaml: no HTTP endpoint,
+          # the supervisor loop touches HEARTBEAT_FILE and a stall in any one
+          # background loop is expected to be noticed and restarted from
+          # inside the process — this is the outer safety net for when the
+          # whole process wedges.
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "test -f /tmp/sorinflow-heartbeat"]
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test $(( $(date +%s) - $(stat -c %Y /tmp/sorinflow-heartbeat) )) -lt 90
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: app-data
+          persistentVolumeClaim:
+            claimName: data-pvc
+        - name: tmp
+          emptyDir: {}

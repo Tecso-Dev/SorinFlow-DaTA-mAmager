@@ -4,12 +4,11 @@ SorinFlow Divar Scraper - Scraper API Routes
 import re
 import json
 import time
-from fastapi import Request, APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import Request, APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, false, delete
 from typing import Optional, List
 from datetime import datetime
-import asyncio
 import sys
 import os
 import uuid
@@ -35,10 +34,15 @@ router = APIRouter()
 # each route. Found live: signed and unsigned alike answered «Not
 # authenticated» from the permission dependency before the handler ran.
 machine_router = APIRouter()
-settings = get_settings()
 
-# Store active scraping job IDs for tracking
-active_tasks = {}
+# Cities/categories: static reference data (app/config.py), not scraper
+# state, but the properties, CRM and jobs filters all populate their pickers
+# from these same two routes (frontend/js/app.js's loadCities/loadCategories)
+# — so gating them behind the "scraper" permission like the rest of `router`
+# 403'd every account that could see properties or CRM but not the scraper
+# itself. Any signed-in staff member may read them.
+lookup_router = APIRouter()
+settings = get_settings()
 
 
 async def run_scraping_job(
@@ -252,33 +256,26 @@ async def run_scraping_job(
         # A switch nobody got to belongs to a run that has ended.
         try:
             from app.scraper import otp_store as _os
-            _os.take_switch(job_id)
+            await _os.take_switch(job_id)
         except Exception:
             pass
 
-        # Cleanup tracking
-        if job_id in active_tasks:
-            del active_tasks[job_id]
-            logger.info(f"[{job_id}] Removed from active tasks")
-        
         logger.info(f"[{job_id}] Background task completed")
 
 
 @router.post("/start", response_model=ScrapingJobResponse, dependencies=[Depends(require_verified_phone)])
 async def start_scraping_job(
     job_config: ScrapingJobCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Start a new scraping job"""
-    return await _launch_job(job_config, background_tasks, db, current_user)
+    return await _launch_job(job_config, db, current_user)
 
 
 @router.post("/jobs/{job_id}/resume", response_model=ScrapingJobResponse, dependencies=[Depends(require_verified_phone)])
 async def resume_scraping_job(
     job_id: str,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -331,7 +328,7 @@ async def resume_scraping_job(
 
     config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
                                   if k in ScrapingJobCreate.model_fields})
-    resp = await _launch_job(config, background_tasks, db, run_as,
+    resp = await _launch_job(config, db, run_as,
                              resumed_from=job.job_id, interactive=False)
     await job_log.record(
         resp.job_id, job_log.START,
@@ -342,7 +339,6 @@ async def resume_scraping_job(
 
 async def _launch_job(
     job_config: ScrapingJobCreate,
-    background_tasks: Optional[BackgroundTasks],
     db: AsyncSession,
     current_user: Optional[User],
     resumed_from=None,
@@ -442,57 +438,27 @@ async def _launch_job(
     # this job so starting one scrape does not lift a dismissal the user just
     # made on another one that is still running.
     from app.scraper import otp_store
-    otp_store.reset_cancel(job_id)
+    await otp_store.reset_cancel(job_id)
     if fell_back_from:
         from app.services import job_log as _jl
         await _jl.record(job_id, _jl.SESSION,
                          f"شمارهٔ ذخیره‌شدهٔ {fell_back_from} خاموش است — اجرا با «خودکار» انجام می‌شود",
                          level="warning", phone=fell_back_from)
 
-    # Store a placeholder to track active jobs
-    active_tasks[job_id] = {"status": "starting", "city": job_config.city, "category": job_config.category}
+    # Queued, not run here: a worker process takes it from Redis and runs
+    # run_scraping_job with the row's config (app/services/scrape_queue.py),
+    # so a request, a schedule and a resume all start a run the same way, and
+    # an api process restarting no longer takes a scrape down with it. With
+    # Redis down the row just waits as pending — the worker's sweep queues it
+    # once Redis is back — so the answer here is the same either way.
+    from app.services import scrape_queue
+    try:
+        await scrape_queue.enqueue(job_id)
+        logger.info(f"Queued scraping job {job_id}")
+    except Exception as e:
+        logger.warning(f"[queue] could not queue {job_id} ({type(e).__name__}: {e}) — "
+                       "it stays pending and the worker's sweep queues it when Redis is back")
 
-    # From a request, the job runs after the response goes out; from the
-    # scheduler there is no request, and the loop is the same one, so a task
-    # on it is the same thing.
-    _spawn = background_tasks.add_task if background_tasks is not None else \
-        (lambda fn, *a: asyncio.create_task(fn(*a)))
-    _spawn(
-        run_scraping_job,
-        job_id,
-        job_config.city,
-        job_config.category,
-        job_config.max_items,
-        job_config.download_images,
-        settings.database_url,
-        job_config.divar_phone or None,
-        job_config.min_price,
-        job_config.max_price,
-        job_config.min_deposit,
-        job_config.max_deposit,
-        job_config.min_rent,
-        job_config.max_rent,
-        job_config.min_price_per_meter,
-        job_config.max_price_per_meter,
-        job_config.min_area,
-        job_config.max_area,
-        job_config.min_rooms,
-        job_config.max_rooms,
-        job_config.has_images,
-        job_config.has_elevator,
-        job_config.has_parking,
-        job_config.has_storage,
-        job_config.has_balcony,
-        job_config.advertiser_type,
-        job_config.max_age_hours,
-        job_config.posted_date,
-        job_config.rotate_every,
-        current_user.id if current_user else None,
-        job_config.urls,
-    )
-    
-    logger.info(f"Started background task for job {job_id}")
-    
     return ScrapingJobResponse(
         id=job.id,
         job_id=job_id,
@@ -908,12 +874,9 @@ async def cancel_scraping_job(
     # out of its wait on the cancelled status, and the prompt in the dashboard
     # would otherwise sit there collecting a code nobody is listening for.
     from app.scraper import otp_store
-    freed = otp_store.clear_job(job_id)
+    freed = await otp_store.clear_job(job_id)
 
-    # Remove from active tasks tracking
-    # The scraper will check job status in the database and stop
-    if job_id in active_tasks:
-        del active_tasks[job_id]
+    # The run itself sees the status in the database and stops.
     logger.info(f"Job {job_id} marked for cancellation (was {was}, otp cleared={freed})")
 
     return {"message": "Job cancelled successfully", "was": was, "otp_cleared": freed}
@@ -989,8 +952,8 @@ async def switch_job_account(
             status_code=409,
             detail="شمارهٔ روشن و معتبر دیگری ندارید — اول یک شمارهٔ دیوار دیگر اضافه یا روشن کنید")
 
-    otp_store.request_switch(str(job.job_id), target.phone_number if target else None,
-                             by=user.id)
+    await otp_store.request_switch(str(job.job_id), target.phone_number if target else None,
+                                   by=user.id)
     to = target.phone_number if target else "شمارهٔ بعدی شما"
     await job_log.record(
         str(job.job_id), job_log.SESSION,
@@ -1090,7 +1053,7 @@ async def estimate_matching_posts(
             "applied_after_scrape": ignored}
 
 
-@router.get("/cities")
+@lookup_router.get("/cities")
 async def get_available_cities():
     """Get list of available cities for scraping"""
     return [
@@ -1099,7 +1062,7 @@ async def get_available_cities():
     ]
 
 
-@router.get("/categories")
+@lookup_router.get("/categories")
 async def get_available_categories():
     """Get list of available categories for scraping"""
     return [
@@ -1173,7 +1136,7 @@ async def _my_prompts(db, user, pending, identity):
 async def _my_prompt_or_404(db, user, key: str):
     """The pending prompt behind this key, if it is this person's to answer."""
     from app.scraper import otp_store
-    mine, _ = await _my_prompts(db, user, otp_store.get_pending(), [])
+    mine, _ = await _my_prompts(db, user, await otp_store.get_pending(), [])
     got = next((p for p in mine if p.get("key") == key), None)
     if not got:
         # Deliberately the same answer as a key that does not exist: whether
@@ -1195,10 +1158,10 @@ async def get_otp_pending(
     """
     from app.scraper import otp_store
     pending, identity = await _my_prompts(
-        db, current_user, otp_store.get_pending(),
+        db, current_user, await otp_store.get_pending(),
         # Accounts Divar wants identified — national ID, birth date. No
         # code answers it; the panel opens a dialog naming the number.
-        otp_store.identity_required())
+        await otp_store.identity_required())
     return {"forwarders": await _my_forwarders(db, current_user), "pending": pending,
             "timeout": otp_store.wait_window(),
             "identity_required": identity}
@@ -1241,7 +1204,7 @@ async def submit_otp_code(
     """
     from app.scraper import otp_store
     await _my_prompt_or_404(db, current_user, key)
-    ok = otp_store.submit(key, body.code.strip())
+    ok = await otp_store.submit(key, body.code.strip())
     if not ok:
         raise HTTPException(status_code=404, detail="No pending OTP request for this key")
     return {"success": True}
@@ -1397,14 +1360,14 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     elif not code:
         reason = "no_code_in_text"
     elif kind == "login":
-        otp_store.put_login_code(body.account, code)
+        await otp_store.put_login_code(body.account, code)
         reason = "parked_for_login"
     elif kind == "contact":
-        hit = otp_store.find_pending_for_account(body.account)
+        hit = await otp_store.find_pending_for_account(body.account)
         if not hit:
             # Not a miss — an arrival ahead of the request. Park it; the
             # scraper claims it the moment it opens one for this account.
-            if otp_store.park_early_code(body.account, code, body.sentStamp):
+            if await otp_store.park_early_code(body.account, code, body.sentStamp):
                 reason = "parked_early"
             else:
                 reason = "no_pending_for_account"
@@ -1437,7 +1400,7 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
                     sent_ms = None
             if sent_ms is not None and (sent_ms / 1000.0) < (entry["ts"] - 10):
                 reason = "stale_code"
-            elif otp_store.submit(key, code, sent_stamp_ms=body.sentStamp, source="forwarder"):
+            elif await otp_store.submit(key, code, sent_stamp_ms=body.sentStamp, source="forwarder"):
                 matched, matched_key, reason = True, key, "matched"
             else:
                 reason = "already_answered"
@@ -1587,7 +1550,7 @@ async def take_login_code(
     owner = await number_owner(db, account)
     if owner is not None and owner != current_user.id:
         return {"code": None}
-    return {"code": otp_store.take_login_code(account)}
+    return {"code": await otp_store.take_login_code(account)}
 
 
 @router.post("/otp/{key}/resend")
@@ -1607,7 +1570,7 @@ async def resend_otp_code(
     """
     from app.scraper import otp_store
     await _my_prompt_or_404(db, current_user, key)
-    result = otp_store.ask_resend(key)
+    result = await otp_store.ask_resend(key)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("message"))
     return result
@@ -1630,7 +1593,7 @@ async def cancel_otp(
     from app.scraper import otp_store
     if key:
         await _my_prompt_or_404(db, current_user, key)
-        otp_store.clear(key)
+        await otp_store.clear(key)
         return {"success": True, "cleared": 1}
 
     # The key carries the job («{job_id}:{divar_id}»), so a dismissal aimed at
@@ -1644,12 +1607,12 @@ async def cancel_otp(
         owner = (await _owner_of_job(db, [job_id])).get(str(job_id))
         if not _is_mine(current_user, owner):
             raise HTTPException(status_code=404, detail="تسک یافت نشد")
-        cleared = otp_store.cancel_all(job_id)
+        cleared = await otp_store.cancel_all(job_id)
         return {"success": True, "cleared": cleared, "suppressed": True, "scope": job_id}
 
-    mine, _ = await _my_prompts(db, current_user, otp_store.get_pending(), [])
+    mine, _ = await _my_prompts(db, current_user, await otp_store.get_pending(), [])
     jobs = {otp_store.job_of(p["key"]) for p in mine}
-    cleared = sum(otp_store.cancel_all(j) for j in jobs)
+    cleared = sum([await otp_store.cancel_all(j) for j in jobs])
     return {"success": True, "cleared": cleared,
             "suppressed": True, "scope": ", ".join(sorted(jobs)) or "none"}
 
@@ -1660,7 +1623,6 @@ class SingleScrapeRequest(BaseModel):
 @router.post("/scrape-single", dependencies=[Depends(require_verified_phone)])
 async def scrape_single_property(
     request: SingleScrapeRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1682,7 +1644,7 @@ async def scrape_single_property(
         raise HTTPException(status_code=400, detail="Invalid Divar property URL")
     cfg = ScrapingJobCreate(city="—", category="اسکرپ تکی", urls=[url], max_items=1,
                             download_images=True)
-    return await _launch_job(cfg, background_tasks, db, current_user)
+    return await _launch_job(cfg, db, current_user)
 
 
 class RescrapeRequest(BaseModel):
@@ -1693,7 +1655,6 @@ class RescrapeRequest(BaseModel):
 @router.post("/rescrape", dependencies=[Depends(require_verified_phone)])
 async def rescrape_listings(
     body: RescrapeRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1708,13 +1669,16 @@ async def rescrape_listings(
         raise HTTPException(status_code=400, detail="هیچ لینک آگهی معتبری داده نشد")
     cfg = ScrapingJobCreate(city="—", category=body.label or "بازاسکرپ",
                             urls=urls, max_items=len(urls), download_images=True)
-    return await _launch_job(cfg, background_tasks, db, current_user)
+    return await _launch_job(cfg, db, current_user)
 
 
 @router.get("/active-tasks")
 async def get_active_tasks():
-    """Get list of currently active scraping tasks"""
+    """The runs some worker holds right now — its claims in Redis, since
+    the run is no longer in the process answering this."""
+    from app.services import scrape_queue
+    ids = sorted(await scrape_queue.claims())
     return {
-        "active_count": len(active_tasks),
-        "task_ids": list(active_tasks.keys())
+        "active_count": len(ids),
+        "task_ids": ids
     }

@@ -225,6 +225,16 @@ def _needs_postgres():
     return not str(db.engine.url).startswith("postgresql")
 
 
+@pytest.fixture
+def unpublished_key(monkeypatch):
+    """The app refuses to boot in production on a SECRET_KEY printed in this
+    repository (app/main.py) — the suite's own default and CI's among them —
+    so it boots here on a key of its own."""
+    import secrets
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "secret_key", secrets.token_hex(32))
+
+
 class TestErrorPages:
     """404 and 500 as pages, not raw JSON.
 
@@ -234,7 +244,7 @@ class TestErrorPages:
 
     @pytest.mark.skipif(_needs_postgres(),
                         reason="needs Postgres — set DATABASE_URL=postgresql+asyncpg://…")
-    def test_a_browser_gets_html_for_404(self):
+    def test_a_browser_gets_html_for_404(self, unpublished_key):
         from fastapi.testclient import TestClient
         import app.main as m
         with TestClient(m.app, raise_server_exceptions=False) as c:
@@ -245,7 +255,7 @@ class TestErrorPages:
 
     @pytest.mark.skipif(_needs_postgres(),
                         reason="needs Postgres — set DATABASE_URL=postgresql+asyncpg://…")
-    def test_an_api_caller_still_gets_json_for_404(self):
+    def test_an_api_caller_still_gets_json_for_404(self, unpublished_key):
         """The dashboard and every script call /api — HTML there would break
         them, whatever the Accept header says."""
         from fastapi.testclient import TestClient

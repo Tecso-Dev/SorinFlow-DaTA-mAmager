@@ -49,10 +49,10 @@ class TestAUuidJobIdDoesNotCrashTheStore:
         u = uuid.UUID("118a7ddc-415b-4ef5-b86a-6cc9e0f751e1")
         assert otp_store.job_of(u) == otp_store.job_of(f"{u}:some-divar-id")
 
-    def test_is_cancelled_accepts_a_uuid(self):
+    async def test_is_cancelled_accepts_a_uuid(self):
         import uuid
         from app.scraper import otp_store
-        assert otp_store.is_cancelled(uuid.uuid4()) is False
+        assert await otp_store.is_cancelled(uuid.uuid4()) is False
 
     def test_none_and_empty_are_still_safe(self):
         from app.scraper import otp_store

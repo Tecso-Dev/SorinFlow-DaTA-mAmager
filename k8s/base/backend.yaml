@@ -1,0 +1,214 @@
+# The api role: HTTP only. No background loops, no scrape consumer, never
+# launches Chromium (see worker.yaml and scheduler.yaml for those). Splitting
+# them out of the one process this used to be is what makes 2 replicas and a
+# RollingUpdate safe here — see the strategy comment below.
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  labels:
+    app: backend
+    app.kubernetes.io/component: api
+spec:
+  # ClusterIP: reachable only inside the cluster, i.e. through Traefik. As a
+  # NodePort anyone could reach the app directly, skip Traefik and write
+  # their own X-Forwarded-For.
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app: backend
+    app.kubernetes.io/component: api
+    # Picked up by the shared-app-env patch (kustomization.yaml) — see
+    # shared-app-env.patch.yaml for the actual list and why each one is there.
+    sorinflow.com/inject-app-env: "true"
+spec:
+  replicas: 2
+  # Historically Recreate, not RollingUpdate. With one replica doing
+  # everything — HTTP, the scrape worker, startup migrations, live Divar
+  # session files on data-pvc — a RollingUpdate's brief overlap of old and new
+  # pods meant two processes writing /app/data at once, and the new pod's
+  # migration waiting on a lock the old pod still held so it could never
+  # become Ready, so the old pod was never terminated. Deploys 65048fc and
+  # b491c0c both deadlocked exactly that way.
+  #
+  # Neither risk applies to this role any more: api never migrates on boot
+  # (DB_MIGRATE_ON_BOOT is false — a separate Job does it before the rollout,
+  # see migrate-job.yaml) and mounts data-pvc read-only, never writes it. A
+  # RollingUpdate overlap here is just two stateless HTTP servers running
+  # briefly together, which is the point of 2 replicas to begin with.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        app.kubernetes.io/part-of: sorinflow
+        app.kubernetes.io/component: api
+        # Selected by the allow-app-egress NetworkPolicy (networkpolicy.yaml):
+        # DNS, postgres, redis and the open internet minus private ranges.
+        sorinflow.com/egress: app
+      annotations:
+        # A fingerprint of the GitHub-managed secret values, rendered by
+        # scripts/deploy_k8s.sh (SECRETS_HASH). A pod reads the Secret once,
+        # at start; a re-run that only changed a key used to leave the
+        # running pod on the old value. Changing this line changes the pod
+        # template, so the pod is recreated and reads the new one.
+        sorinflow.com/synced-secrets: "unsynced"
+    spec:
+      terminationGracePeriodSeconds: 30
+      # No token: the api role never calls the Kubernetes API itself.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000    # pwuser in the Playwright base image
+        runAsGroup: 1000
+        fsGroup: 1000
+        # data-pvc is a `local` PV, so the kubelet re-applies fsGroup to every
+        # file on it at EVERY mount by default — a recursive walk over all the
+        # downloaded images on each pod start and rolling update. Once the root
+        # is right (the data-ownership Job, then the first mount) there is
+        # nothing to fix, so only a mismatched root triggers the walk.
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      # Image is imported directly into the node's containerd by the deploy
+      # workflow over the self-hosted runner, so the kubelet must not try to
+      # pull it from the registry.
+      containers:
+        # «backend», the name the pre-kustomize manifest gave this container,
+        # not «api»: apply merges containers BY NAME, and after a
+        # `kubectl rollout undo` its record of the last applied config no
+        # longer matches the live template — the next apply then kept the old
+        # container and added the new one beside it, two processes on port
+        # 8000 in every pod (seen on the k3d rehearsal of a failed first move
+        # followed by a retry). The same name updates the one container in place.
+        - name: backend
+          image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
+          imagePullPolicy: IfNotPresent
+          # SIGTERM stops uvicorn accepting at once, but Traefik keeps routing to
+          # the pod until it sees the endpoint go — about a second — and each
+          # request in that gap was a 502 (seen on the k3d rehearsal: one burst
+          # per replaced pod). The pause lets Traefik catch up first.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          ports:
+            - containerPort: 8000
+          env:
+            - name: SORINFLOW_ROLE
+              value: "api"
+            # Startup only checks the schema is at Alembic head and refuses
+            # to start otherwise — migrate-job.yaml runs the real migration
+            # before this Deployment is applied.
+            - name: DB_MIGRATE_ON_BOOT
+              value: "false"
+            # Everything else (DATABASE_URL, SECRET_KEY, the optional
+            # provider keys, PUBLIC_AUTH_ENABLED, DOMAIN, ...) comes from the
+            # shared-app-env patch below — one definition for api, worker,
+            # scheduler and the migrate Job instead of four copies to keep in
+            # sync.
+          # Read-write, not read-only: api serves the downloaded images off
+          # data-pvc (StaticFiles in app/main.py) but also writes there itself
+          # — avatars (routes/users.py), manual listing photos (routes/crm.py),
+          # imported Divar cookie files, and the panel's «backup now» request
+          # the host's DR watcher picks up. Read-only turned every one of those
+          # into a 500.
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
+          # The 8 GB node's memory budget, measured 2026-09-15 on the live
+          # box:
+          #   MemTotal                 7936Mi
+          #   k3s-server + containerd   ~850Mi
+          #   Runner.Listener            129Mi   the self-hosted CI runner
+          #   traefik + coredns + metrics-server   ~110Mi
+          #   postgres + redis          ~60Mi idle, up to 1.3Gi by their limits
+          #   ---------------------------------------------
+          #   genuinely available     ~6200Mi
+          #
+          # That budget used to go to one process that did everything; it is
+          # now split three ways (see worker.yaml and scheduler.yaml for
+          # their shares):
+          #   api (this one) × 2 replicas, 1Gi limit each   = 2048Mi
+          #   worker × 1 (holds Chromium)      ~3072Mi limit
+          #   scheduler × 1                     1536Mi limit
+          #   ---------------------------------------------
+          #   sum of limits            ~6656Mi   over 6200Mi, on purpose
+          #   sum of requests            1280Mi   well inside it
+          #
+          # Scheduling only cares about the sum of REQUESTS, which stays well
+          # under 6200Mi; a limit is a per-pod ceiling, not a shared pool, so
+          # their sum can (and here does) exceed it, as long as pods are not
+          # all expected to sit at their limit at once. api is not "just the
+          # ASGI app" any more, though: the request path can run semantic
+          # search's full matrix (load_index/build_matrix over every active
+          # listing's vector, app/ai/embeddings.py) and the panel's «backup
+          # now» (POST /api/backup/run) dumps every table, embeddings
+          # included, into memory as JSON before gzipping it — on whichever
+          # of the 2 replicas gets the request. 768Mi cut that too close.
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              memory: "1Gi"
+          # Startup is create_all plus a migration chain, and its duration is
+          # not knowable in advance. Without a startupProbe the liveness probe
+          # kills the container ~150s in and it crashloops forever with no way
+          # out. This gives boot up to 5 minutes while keeping the liveness
+          # probe tight once the app is actually serving.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              # /ready answers 503 while Postgres or Redis is unreachable;
+              # /health only says the process is up (roadmap #13)
+              path: /ready
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 6
+            # Unset defaults to 1s. One worker serves /health and every route
+            # on the same event loop, so a GC pause or an image decode was
+            # enough to fail a probe.
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5
+      volumes:
+        - name: app-data
+          persistentVolumeClaim:
+            claimName: data-pvc
+        - name: tmp
+          emptyDir: {}

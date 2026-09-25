@@ -44,29 +44,43 @@ NOBODYS = "09146382412"       # a session no user has claimed
 
 @pytest.fixture(scope="module")
 def client():
-    import fakeredis.aioredis
     import app.database as db
     from app.config import get_settings
     if not str(db.engine.url).startswith("postgresql"):
         pytest.skip("needs Postgres — see test_auth_roles.py", allow_module_level=True)
     cfg = get_settings()
-    saved = (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler, cfg.match_engine)
+    saved = (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler, cfg.match_engine,
+             cfg.scrape_worker_enabled)
     cfg.environment, cfg.api_key = "test", ""
     cfg.cookies_path = "/tmp/sorinflow-test-cookies"
     cfg.scrape_scheduler = False
     cfg.match_engine = False
-    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    # These tests make running and pending rows of their own to look at; a
+    # scrape worker in the app would take them for real work.
+    cfg.scrape_worker_enabled = False
 
-    async def _get_redis():
-        return fake
-    db.get_redis = _get_redis
+    # One fakeredis server for the whole module: HTTP calls run inside
+    # TestClient's own portal loop, but plenty of tests below also poke
+    # otp_store/the login registry directly from a bare asyncio.run() —
+    # a different loop every time. _fake_redis.redis_factory hands out a
+    # fresh client per get_redis() call bound to whichever loop asked, all
+    # sharing this one server, so both styles see the same data.
+    from _fake_redis import redis_factory
+    get_redis = redis_factory()
     import app.services.verification as v
-    v.get_redis = _get_redis
+    from app.scraper import otp_store
+    from app.scraper import stealth
+    from app.api.routes import auth as auth_routes
+    db.get_redis = v.get_redis = otp_store.get_redis = stealth.get_redis = \
+        auth_routes.get_redis = get_redis
     from fastapi.testclient import TestClient
     import app.main as m
     with TestClient(m.app) as c:
         yield c
-    (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler, cfg.match_engine) = saved
+    # Left pending, a later module's app — worker on — would take them for work.
+    _finish_all_runs()
+    (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler, cfg.match_engine,
+     cfg.scrape_worker_enabled) = saved
 
 
 def _engine():
@@ -304,8 +318,11 @@ class _Auth:
 def _switch(owner, request, *, every=None, active=JAN_1, ok=True):
     from app.scraper import otp_store
     job = f"switch-test-{request}-{every}-{ok}"
-    otp_store.cancel_all(job)          # the old number's prompts were dismissed
-    otp_store.request_switch(job, request)
+
+    async def _setup():
+        await otp_store.cancel_all(job)          # the old number's prompts were dismissed
+        await otp_store.request_switch(job, request)
+    asyncio.run(_setup())
 
     async def fn(sc):
         sc.auth = _Auth(ok)
@@ -318,7 +335,11 @@ def _switch(owner, request, *, every=None, active=JAN_1, ok=True):
         return changed, sc.active_phone, sc.auth.restored
     changed, now, restored = _with_scraper(
         owner, fn, active_phone=active, _job_id_str=job, _rotate_every_override=every)
-    return changed, now, restored, otp_store.is_cancelled(job), otp_store.has_switch(job)
+
+    async def _read():
+        return await otp_store.is_cancelled(job), await otp_store.has_switch(job)
+    suppressed, pending = asyncio.run(_read())
+    return changed, now, restored, suppressed, pending
 
 
 class TestSwitchingMidRun:
@@ -412,18 +433,76 @@ class TestTheDivarLoginIsNotAWayIn:
         from app.api.routes import auth as auth_routes
         phone = "09129990001"
         auth_routes.auth_instances[phone] = object()
-        auth_routes._auth_by[phone] = people["root"]
+        asyncio.run(auth_routes._note_login_started(phone, people["root"]))
         try:
             r = client.post(f"/api/auth/verify?phone_number={phone}", json={"code": "123456"},
                             headers=_tok(client, "np_jan"))
             assert r.status_code == 403, r.text
         finally:
             auth_routes.auth_instances.pop(phone, None)
-            auth_routes._auth_by.pop(phone, None)
+            asyncio.run(auth_routes._clear_login_started(phone))
+
+    def test_verify_fails_closed_when_the_registry_cannot_be_read(self, client, people, monkeypatch):
+        """Without this, a Redis outage makes _login_started_by's
+        swallow-to-None answer "nobody started this" — which reads as
+        permission, not "unknown" — and any divar_auth user could finish
+        another's in-flight login on an unowned number."""
+        from app.api.routes import auth as auth_routes
+
+        class _BrokenRedis:
+            async def get(self, *a, **kw):
+                raise ConnectionError("redis is down")
+
+        async def _broken():
+            return _BrokenRedis()
+
+        phone = "09129990004"
+        auth_routes.auth_instances[phone] = object()
+        monkeypatch.setattr(auth_routes, "get_redis", _broken)
+        try:
+            r = client.post(f"/api/auth/verify?phone_number={phone}", json={"code": "123456"},
+                            headers=_tok(client, "np_jan"))
+            assert r.status_code == 503, r.text
+        finally:
+            auth_routes.auth_instances.pop(phone, None)
+
+    def test_the_sweep_does_not_close_every_login_when_redis_errors(self, client, monkeypatch):
+        """One Redis hiccup used to make every phone's registry entry look
+        gone at once (the same swallow-to-None as above), so the sweep
+        closed every in-flight login browser on the node, not only the ones
+        actually abandoned."""
+        from app.api.routes import auth as auth_routes
+
+        class _BrokenRedis:
+            async def get(self, *a, **kw):
+                raise ConnectionError("redis is down")
+
+        async def _broken():
+            return _BrokenRedis()
+
+        class _FakeAuth:
+            def __init__(self):
+                self.closed = False
+
+            async def close_browser(self):
+                self.closed = True
+
+        p1, p2 = "09129990005", "09129990006"
+        a1, a2 = _FakeAuth(), _FakeAuth()
+        auth_routes.auth_instances[p1] = a1
+        auth_routes.auth_instances[p2] = a2
+        monkeypatch.setattr(auth_routes, "get_redis", _broken)
+        try:
+            asyncio.run(auth_routes._sweep_auth_instances())
+            assert p1 in auth_routes.auth_instances and p2 in auth_routes.auth_instances
+            assert not a1.closed and not a2.closed, "a Redis outage must not close every in-flight login"
+        finally:
+            auth_routes.auth_instances.pop(p1, None)
+            auth_routes.auth_instances.pop(p2, None)
 
     def test_a_forwarded_login_code_is_only_the_owners(self, client, people):
         from app.scraper import otp_store
-        otp_store.put_login_code(ROOT_NUM, "654321")
+        asyncio.run(otp_store.put_login_code(ROOT_NUM, "654321"))
         r = client.get(f"/api/scraper/login-code/{ROOT_NUM}", headers=_tok(client, "np_jan"))
         assert r.status_code == 200 and r.json()["code"] is None
         r = client.get(f"/api/scraper/login-code/{ROOT_NUM}", headers=_tok(client, "np_root"))
@@ -461,7 +540,7 @@ class TestTheOnOffSwitch:
                          headers=_tok(client, "np_jan"))
         assert r.status_code == 200 and r.json()["is_enabled"] is False
         assert job in r.json()["moved_jobs"]
-        req = otp_store.take_switch(job)
+        req = asyncio.run(otp_store.take_switch(job))
         assert req and req["phone"] is None and req["reason"] == "disabled"
         r = client.patch(f"/api/auth/cookies/{cid}", json={"enabled": True},
                          headers=_tok(client, "np_jan"))
@@ -484,7 +563,7 @@ class TestTheSwitchEndpoint:
         r = client.post(f"/api/scraper/jobs/{job}/switch-account", json={"phone": JAN_2},
                         headers=_tok(client, "np_jan"))
         assert r.status_code == 200, r.text
-        assert otp_store.take_switch(job)["phone"] == JAN_2
+        assert asyncio.run(otp_store.take_switch(job))["phone"] == JAN_2
 
     def test_or_simply_the_next_one(self, client, people):
         from app.scraper import otp_store
@@ -492,7 +571,7 @@ class TestTheSwitchEndpoint:
         r = client.post(f"/api/scraper/jobs/{job}/switch-account", json={},
                         headers=_tok(client, "np_jan"))
         assert r.status_code == 200, r.text
-        assert otp_store.take_switch(job)["phone"] is None
+        assert asyncio.run(otp_store.take_switch(job))["phone"] is None
 
     def test_not_onto_somebody_elses_number(self, client, people):
         job = _job(people["jan"])
@@ -733,9 +812,16 @@ class TestStaleRequestsAndPools:
         assert tried == [], "rotated onto a number the database no longer offers"
         assert s._rotation_pool == []
 
-    def test_move_off_a_number_the_run_already_left_is_dropped(self):
+    def test_move_off_a_number_the_run_already_left_is_dropped(self, monkeypatch):
         from app.scraper import otp_store
         from app.scraper.divar_scraper import DivarScraper
+        from _fake_redis import patch_redis
+        # This test needs no Postgres and takes no `client`/`people` fixture,
+        # so it must not depend on the module's `client` fixture having run
+        # first to patch otp_store's Redis — under sqlite `client` skips
+        # itself before it gets there, leaving the real (unreachable here)
+        # get_redis singleton bound to whatever event loop last touched it.
+        patch_redis(monkeypatch, otp_store)
         s = DivarScraper.__new__(DivarScraper)
         s.active_phone = "09121110002"
         s._job_id_str = "stale-switch"
@@ -753,7 +839,8 @@ class TestStaleRequestsAndPools:
         async def _pool():
             return ["09121110002", "09121110003"]
         s._load_rotation_pool = _pool
-        otp_store.request_switch("stale-switch", None, reason="disabled", from_phone="09121110001")
+        asyncio.run(otp_store.request_switch("stale-switch", None, reason="disabled",
+                                             from_phone="09121110001"))
         assert asyncio.run(s.maybe_rotate_account()) is False
         assert tried == [] and s.active_phone == "09121110002"
 
@@ -780,7 +867,7 @@ class TestTheReviewThroughTheApp:
         r = client.post("/api/auth/login", json={"phone_number": fresh},
                         headers=_tok(client, "np_third"))
         assert r.status_code == 403, r.text
-        otp_store.put_login_code(fresh, "112233")
+        asyncio.run(otp_store.put_login_code(fresh, "112233"))
         r = client.get(f"/api/scraper/login-code/{fresh}", headers=_tok(client, "np_third"))
         assert r.json()["code"] is None
         r = client.get(f"/api/scraper/login-code/{fresh}", headers=_tok(client, "np_jan"))
@@ -793,27 +880,24 @@ class TestTheReviewThroughTheApp:
         from app.api.routes.scraper import _launch_job
         from app.schemas import ScrapingJobCreate
         from app.models.user import User
+        from app.models.scraping_job import ScrapingJob
+        from app.services import scrape_queue
         from sqlalchemy import select
-
-        class _BG:
-            def __init__(self):
-                self.calls = []
-
-            def add_task(self, fn, *a):
-                self.calls.append(a)
 
         async def _go(interactive):
             eng, maker = _engine()
             try:
                 async with maker() as s:
                     jan = (await s.execute(select(User).where(User.id == people["jan"]))).scalar_one()
-                    bg = _BG()
                     cfg = ScrapingJobCreate(city="urmia", category="rent-apartment", divar_phone=JAN_OFF)
                     try:
-                        resp = await _launch_job(cfg, bg, s, jan, interactive=interactive)
+                        resp = await _launch_job(cfg, s, jan, interactive=interactive)
                     except HTTPException as e:
                         return e.status_code, None, None
-                    return 200, resp.divar_phone, bg.calls[0][6]
+                    # what the worker will run it with: the row's saved config
+                    row = (await s.execute(select(ScrapingJob).where(
+                        ScrapingJob.job_id == resp.job_id))).scalar_one()
+                    return 200, resp.divar_phone, scrape_queue.job_kwargs(row)["divar_phone"]
             finally:
                 await eng.dispose()
         _finish_all_runs()
@@ -829,14 +913,17 @@ class TestTheReviewThroughTheApp:
         assert "interactive=False" in inspect.getsource(scrape_scheduler.fire)
 
     def test_refresh_leaves_a_number_a_run_is_on_alone(self, client, people):
-        from app.scraper.stealth import profile_dir, _PROFILES_IN_USE
-        key = str(profile_dir(JAN_1))
-        _PROFILES_IN_USE.add(key)
+        from app.scraper import stealth
+
+        async def _hold():
+            return await stealth._acquire_profile_lock(JAN_1)
+        rkey, token, fallback = asyncio.run(_hold())
         try:
             r = client.post(f"/api/auth/refresh?phone_number={JAN_1}", headers=_tok(client, "np_jan"))
             assert r.status_code == 200 and r.json()["in_use"] is True, r.text
         finally:
-            _PROFILES_IN_USE.discard(key)
+            fs_key = str(stealth.profile_dir(JAN_1))
+            asyncio.run(stealth._release_profile_lock(fs_key, rkey, token, fallback))
 
     def test_no_switch_onto_a_number_another_run_is_on(self, client, people):
         _finish_all_runs()
@@ -911,7 +998,7 @@ class TestRootsRegistry:
                          headers=_tok(client, "np_root"))
         assert r.status_code == 200 and r.json()["changed"] is True, r.text
         assert job in r.json()["moved_jobs"]
-        req = otp_store.take_switch(job)
+        req = asyncio.run(otp_store.take_switch(job))
         assert req and req["from_phone"] == self.MISFILED
         mine = client.get("/api/auth/cookies?mine=1", headers=_tok(client, "np_jan")).json()["cookies"]
         assert self.MISFILED in {c["phone_number"] for c in mine}, "the colleague still cannot see their number"

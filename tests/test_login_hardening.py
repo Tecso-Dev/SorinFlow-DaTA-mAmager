@@ -442,6 +442,21 @@ def test_a_stolen_session_cannot_guess_the_password_at_totp_disable(client):
     assert r.status_code == 429 and int(r.headers["Retry-After"]) > 0
 
 
+def test_repeated_correct_disables_never_exhaust_the_budget(client):
+    """totp_disable used to spend its counter on one key (the bare username)
+    but clear a different one (name:username) on success — so the real
+    counter was never reset and grew a little on every legitimate use,
+    eventually locking the account out over nothing but correct passwords."""
+    totp = _totp_user("lh_totp_repeat")
+    half = _half(client, "lh_totp_repeat")
+    tok = client.post("/api/users/token/verify-totp",
+                      json={"totp_session": half, "code": totp.now()}).json()["access_token"]
+    auth = {"Authorization": f"Bearer {tok}"}
+    for _ in range(_max() + 2):
+        r = client.post("/api/users/me/totp/disable", headers=auth, json={"password": "pw123456"})
+        assert r.status_code == 200, r.text
+
+
 # ── /me/email-2fa takes a model, not a dict ───────────────────────────────────
 
 def test_email_2fa_switch_reads_a_typed_body(client):
@@ -483,6 +498,10 @@ def test_production_with_the_default_secret_key_exits_nonzero():
 @pytest.mark.parametrize("key", [
     "your-super-secret-key-change-in-production-with-random-string",
     "replace-with-a-long-random-value",
+    "ci-only-not-a-real-secret-0123456789",
+    "0123456789abcdef0123456789abcdef",
+    "test-secret-key-0123456789abcdef",
+    "ai-eval-harness-fake-secret-0123456789",
     "a-31-character-key-is-too-shor",
     "",
 ])
@@ -495,10 +514,39 @@ def test_production_refuses_a_published_or_short_secret_key(monkeypatch, key):
         asyncio.run(m._refuse_default_secrets())
 
 
+def test_every_secret_key_printed_in_the_repository_is_refused():
+    """Workflows, docs, scripts and tests all print a SECRET_KEY somewhere.
+    Any of them long enough to pass the length check must be on the refused
+    list, or a copy-pasted command line boots production on a public key."""
+    import re
+    import app.main as m
+    # KEY=value, KEY: value, "KEY": "value", ("KEY", "value"), environ["KEY"] = "value", ${KEY:-value}
+    printed = re.compile(r"""SECRET_KEY["']?\]?\s*(?::-|[:=,])\s*["']?([^\s"'$)}]{32,})""")
+    skip_dirs = {".git", "node_modules", "vendor", "venv", ".venv", "__pycache__", "graphify-out"}
+    found = {}
+    for base, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
+        for name in files:
+            if not name.endswith((".py", ".md", ".yml", ".yaml", ".sh", ".example", ".toml", ".ini",
+                                  ".txt", ".cfg", ".json")) and not name.startswith((".env", "Dockerfile")):
+                continue
+            path = os.path.join(base, name)
+            try:
+                text = open(path, encoding="utf-8").read()
+            except (UnicodeDecodeError, OSError):
+                continue
+            for key in printed.findall(text):
+                found.setdefault(key, os.path.relpath(path, ROOT))
+    assert found, "the scan found nothing — the pattern is broken"
+    missing = {k: where for k, where in found.items() if k not in m._PUBLISHED_SECRET_KEYS}
+    assert not missing, f"published SECRET_KEY values production would still accept: {missing}"
+
+
 def test_the_live_pods_config_starts(client, monkeypatch):
-    """What production has (k8s/04-backend.yaml and the Secret): ENVIRONMENT
-    production, a 64-character SECRET_KEY, no SUPER_ADMIN_PASSWORD at all —
-    so the placeholder — and a users table with rows. It must boot."""
+    """What production has (k8s/base/shared-app-env.patch.yaml and the
+    Secret): ENVIRONMENT production, a 64-character SECRET_KEY, no
+    SUPER_ADMIN_PASSWORD at all — so the placeholder — and a users table with
+    rows. It must boot."""
     import secrets
     import app.main as m
     monkeypatch.setattr(m.settings, "environment", "production")

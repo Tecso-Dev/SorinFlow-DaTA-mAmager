@@ -2,7 +2,9 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: redis-pvc
-  namespace: sorinflow
+  labels:
+    app: redis
+    app.kubernetes.io/component: redis
 spec:
   accessModes:
     - ReadWriteOnce
@@ -14,7 +16,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: redis
-  namespace: sorinflow
+  labels:
+    app: redis
+    app.kubernetes.io/component: redis
 spec:
   serviceName: redis
   replicas: 1
@@ -25,7 +29,16 @@ spec:
     metadata:
       labels:
         app: redis
+        app.kubernetes.io/part-of: sorinflow
+        app.kubernetes.io/component: redis
     spec:
+      # No token: nothing in this pod ever calls the Kubernetes API.
+      automountServiceAccountToken: false
+      securityContext:
+        # Only the seccomp floor, not a fixed runAsUser — same reasoning as
+        # postgres.yaml: redis:7-alpine's own entrypoint drops root itself.
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: redis
           image: redis:7-alpine
@@ -84,7 +97,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: redis
-  namespace: sorinflow
+  labels:
+    app: redis
+    app.kubernetes.io/component: redis
 spec:
   selector:
     app: redis

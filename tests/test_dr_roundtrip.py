@@ -29,7 +29,8 @@ import sys
 import tarfile
 import threading
 import time
-from base64 import b64encode
+import re
+from base64 import b64decode, b64encode
 from email import policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -224,6 +225,8 @@ def pipeline(tmp_path_factory):
         "DR_BACKUP_PASSPHRASE": passphrase,
         "TELEGRAM_BOT_TOKEN": "123456:FAKE-BOT-TOKEN-FOR-TESTS",
         "TELEGRAM_CHAT_ID": "999999",
+        # more than one line, as a PEM key or a service account's JSON is
+        "GCP_SERVICE_ACCOUNT_JSON": '{\n  "type": "service_account",\n  "client_email": "x@y.iam"\n}\n',
     }
     secret_json = base / "secret.json"
     secret_json.write_text(json.dumps({
@@ -234,6 +237,15 @@ def pipeline(tmp_path_factory):
     kubectl_path = fakebin / "kubectl"
     kubectl_path.write_text(FAKE_KUBECTL)
     kubectl_path.chmod(kubectl_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    # ── fake chown: this test does not run as root, so it cannot actually
+    # hand the bundle to uid 1000 the way the real host does. It records what
+    # it was asked to do instead, which the assertions below read back — the
+    # only way to prove the handoff without a real uid 1000 to chown to.
+    chown_log = base / "chown.log"
+    chown_path = fakebin / "chown"
+    chown_path.write_text(f'#!/usr/bin/env bash\necho "$*" >> "{chown_log}"\n')
+    chown_path.chmod(chown_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
     # ── fake Telegram ────────────────────────────────────────────────────────
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _TelegramHandler)
@@ -287,6 +299,7 @@ def pipeline(tmp_path_factory):
             "outdir": storage / f"restored-{stamp}",
             "plain_secret": plain_secret, "passphrase": passphrase,
             "records": httpd.records, "expected_counts": expected_counts, "env": env,
+            "chown_log": chown_log,
         }
     finally:
         httpd.shutdown()
@@ -341,6 +354,18 @@ class TestBackupShipsSuccessfully:
         # the row counts travel in the same message
         assert any("users 3" in t or "properties 2" in t for t in texts), texts
 
+    def test_the_finished_bundle_is_handed_to_the_pods_uid(self, pipeline):
+        """The api/worker pods run as uid/gid 1000 with no capabilities and
+        cannot read a root-owned 0700 bundle, so without this chown the
+        off-site copy would silently never ship and a delivered bundle could
+        never be deleted. It must run only after the bundle is complete
+        (encrypted, split, manifest written) and cover the whole outbox, not
+        just the newest stamp, so a bundle a previous run left behind is
+        still readable too."""
+        calls = pipeline["chown_log"].read_text().splitlines()
+        outbox = pipeline["pvc"] / "dr-outbox"
+        assert f"-R 1000:1000 {outbox}" in calls, calls
+
 
 class TestRestore:
     """These all read what the fixture's single dr_restore.sh run produced —
@@ -351,6 +376,9 @@ class TestRestore:
         assert r.returncode == 0, f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"
         assert "sha256 OK" in r.stdout
         assert "scripts/new_server.sh" in r.stdout
+        # and names what the env file cannot carry, and how it comes back
+        assert "GCP_SERVICE_ACCOUNT_JSON" in r.stdout
+        assert f"kubectl apply -f {pipeline['outdir'] / 'k8s' / 'sorinflow-secrets.json'}" in r.stdout
 
     def test_restored_bundle_has_what_new_server_sh_requires(self, pipeline):
         outdir = pipeline["outdir"]
@@ -367,12 +395,23 @@ class TestRestore:
             assert counts.get(table) == str(n), counts
 
     def test_secrets_env_round_trips_exactly(self, pipeline):
+        """Every one-line value, exactly, and every line one KEY=value — what
+        `kubectl create secret --from-env-file` (new_server.sh) reads. A value
+        with a newline in it would keep its first line there and turn the
+        others into keys, so it is left to the JSON below."""
         outdir = pipeline["outdir"]
-        restored = dict(
-            line.split("=", 1) for line in (outdir / "k8s" / "sorinflow-secrets.env").read_text().splitlines()
-            if "=" in line
-        )
-        assert restored == pipeline["plain_secret"]
+        lines = (outdir / "k8s" / "sorinflow-secrets.env").read_text().splitlines()
+        assert all(re.fullmatch(r"[-._a-zA-Z0-9]+=.*", line) for line in lines), lines
+        restored = dict(line.split("=", 1) for line in lines)
+        one_line = {k: v for k, v in pipeline["plain_secret"].items() if "\n" not in v}
+        assert restored == one_line and "GCP_SERVICE_ACCOUNT_JSON" not in restored
+
+    def test_the_secret_json_carries_every_value_exactly(self, pipeline):
+        manifest = json.loads((pipeline["outdir"] / "k8s" / "sorinflow-secrets.json").read_text())
+        assert (manifest["kind"], manifest["metadata"]) == (
+            "Secret", {"name": "sorinflow-secrets", "namespace": "sorinflow"})
+        decoded = {k: b64decode(v).decode() for k, v in manifest["data"].items()}
+        assert decoded == pipeline["plain_secret"]
 
     def test_traefik_acme_json_round_trips(self, pipeline):
         original = (pipeline["base"] / "traefik" / "acme.json").read_text()
@@ -496,10 +535,36 @@ class TestTamperIsRefused:
         assert not (copy_dir / f"restored-{manifest['stamp']}").exists()
 
 
+class TestTheDataVolume:
+
+    def test_two_data_volumes_stop_the_run_loudly(self, tmp_path):
+        """An old volume left beside the new one: the run refuses to guess
+        which is the office's, alerts through the pod, and touches neither."""
+        storage, fakebin, log = tmp_path / "storage", tmp_path / "bin", tmp_path / "kubectl.log"
+        for pvc in ("pvc-aaa_sorinflow_data-pvc", "pvc-bbb_sorinflow_data-pvc"):
+            (storage / pvc).mkdir(parents=True)
+            (storage / pvc / "dr-request").write_text("")
+        fakebin.mkdir()
+        (fakebin / "kubectl").write_text(f'#!/usr/bin/env bash\necho "$*" >> "{log}"\n')
+        (fakebin / "kubectl").chmod(0o755)
+        (tmp_path / "work").mkdir()
+        env = {k: v for k, v in os.environ.items() if k != "DR_DATA_DIR"}
+        env.update(PATH=f"{fakebin}{os.pathsep}{os.environ['PATH']}", DR_STORAGE_DIR=str(storage),
+                   DR_WORK_DIR=str(tmp_path / "work"), KUBECONFIG="/dev/null")
+        r = subprocess.run(["bash", str(REPO / "scripts" / "dr_backup.sh")],
+                           env=env, capture_output=True, text=True, timeout=60)
+        assert r.returncode != 0
+        assert "pvc-aaa_sorinflow_data-pvc" in r.stderr and "pvc-bbb_sorinflow_data-pvc" in r.stderr
+        assert "dr_backup alert" in log.read_text(), "the office hears about it"
+        for pvc in storage.iterdir():
+            assert sorted(x.name for x in pvc.iterdir()) == ["dr-request"], "neither volume was touched"
+        assert list((tmp_path / "work").iterdir()) == [], "and the work directory is cleaned up"
+
+
 class TestInstall:
     """install_dr_backup.sh on a fake host: systemd is a logging stub."""
 
-    def _run(self, tmp_path):
+    def _run(self, tmp_path, data_dir=True):
         fakebin = tmp_path / "bin"
         fakebin.mkdir(exist_ok=True)
         log = tmp_path / "systemctl.log"
@@ -510,6 +575,8 @@ class TestInstall:
                    DR_SYSTEMD_UNIT_DIR=str(tmp_path / "units"),
                    DR_BIN_DIR=str(tmp_path / "opt"),
                    DR_DATA_DIR=str(tmp_path / "pvc"))
+        if not data_dir:        # a fresh box: the volume does not exist yet
+            env.pop("DR_DATA_DIR")
         r = subprocess.run(["bash", str(REPO / "scripts" / "install_dr_backup.sh")],
                            env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
@@ -528,3 +595,28 @@ class TestInstall:
         assert f"PathExists={tmp_path / 'pvc'}/dr-request" in \
             (tmp_path / "units" / "dr-backup.path").read_text()
         assert "daemon-reload" not in self._run(tmp_path)
+
+    def test_the_unit_can_write_only_where_the_script_writes(self, tmp_path):
+        """Root, but on a read-only filesystem except the work directory
+        under /root and the data volume itself — so what the pod leaves on
+        the volume cannot steer a write anywhere else."""
+        self._run(tmp_path)
+        directives = [line.strip() for line in (tmp_path / "units" / "dr-backup.service").read_text().splitlines()
+                      if line.strip() and not line.startswith("#")]
+        for need in ("NoNewPrivileges=yes", "PrivateTmp=yes", "ProtectSystem=strict",
+                     "ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectKernelLogs=yes",
+                     "ProtectControlGroups=yes", "ProtectClock=yes", "RestrictSUIDSGID=yes",
+                     "RestrictRealtime=yes", "LockPersonality=yes"):
+            assert need in directives, need
+        assert [d for d in directives if d.startswith("ReadWritePaths=")] == [
+            "ReadWritePaths=/root", f"ReadWritePaths=-{tmp_path / 'pvc'}"]
+        # the script writes its work directory under /root, as the unit allows
+        script = (REPO / "scripts" / "dr_backup.sh").read_text()
+        assert '"${DR_WORK_DIR:-/root}/.sorinflow-dr-work.XXXXXX"' in script
+        assert "ExecStopPost=/bin/sh -c 'rm -rf /root/.sorinflow-dr-work.*'" in directives
+
+    def test_before_the_volume_exists_the_storage_directory_stands_in(self, tmp_path):
+        self._run(tmp_path, data_dir=False)
+        service = (tmp_path / "units" / "dr-backup.service").read_text()
+        assert "ReadWritePaths=-/var/lib/rancher/k3s/storage\n" in service
+        assert not (tmp_path / "units" / "dr-backup.path").exists(), "no watcher without the volume"

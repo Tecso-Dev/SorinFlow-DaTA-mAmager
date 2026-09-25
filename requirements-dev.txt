@@ -20,3 +20,14 @@ aiosqlite==0.19.0
 # Verification codes and login throttling live in Redis. fakeredis lets the auth
 # tests run without a server, so they stay hermetic wherever the suite is run.
 fakeredis==2.21.0
+
+# Quality gate (scripts/lint_new_code.py, .pre-commit-config.yaml, ci.yml).
+# ruff and mypy only ever run against added/changed lines, never the whole
+# tree, so a version bump here cannot fail an unrelated commit over
+# pre-existing code neither of them has looked at before.
+ruff==0.16.9
+mypy==2.3.1
+pre-commit==4.6.2
+
+# pytest --cov=app in ci.yml.
+pytest-cov==7.1.0

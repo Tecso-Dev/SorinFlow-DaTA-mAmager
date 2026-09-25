@@ -1,0 +1,42 @@
+# SorinFlow — kustomize base. One set of workload/policy definitions shared
+# by every environment; overlays/production and overlays/staging change only
+# what genuinely differs between them (namespace, host, replica counts,
+# resource sizing, RBAC). See docs/PROGRESS.md and CLAUDE.md for the product
+# and process rules this is built against.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - postgres.yaml
+  - postgres-init-configmap.yaml
+  - redis.yaml
+  - data-pvc.yaml
+  - backend.yaml
+  - worker.yaml
+  - scheduler.yaml
+  - migrate-job.yaml
+  - ownership-job.yaml
+  - ingress.yaml
+  - networkpolicy.yaml
+
+# Stamped onto every object's own metadata for discovery (`kubectl get all -l
+# app.kubernetes.io/part-of=sorinflow`). includeSelectors: false is load
+# bearing: a Deployment/StatefulSet/Service's selector is immutable once
+# created, and every one of these objects already exists live — letting this
+# touch spec.selector or the pod template labels would make `kubectl apply`
+# fail on the running cluster instead of updating it in place. Pod-template
+# labels are instead set explicitly per resource, which is also what the
+# NetworkPolicies in networkpolicy.yaml actually select on.
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: sorinflow
+    includeSelectors: false
+
+# The env list every role that runs the app image needs (DATABASE_URL,
+# SECRET_KEY, the optional provider keys, ...), defined once and fanned out
+# by label instead of copy-pasted into backend.yaml, worker.yaml,
+# scheduler.yaml and migrate-job.yaml. See shared-app-env.patch.yaml.
+patches:
+  - path: shared-app-env.patch.yaml
+    target:
+      labelSelector: "sorinflow.com/inject-app-env=true"

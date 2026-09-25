@@ -1,0 +1,14 @@
+{
+  "name": "sorinflow-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Playwright end-to-end and axe accessibility tests for the SorinFlow panel. Own Node project — not part of a root package.json.",
+  "scripts": {
+    "test": "playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.41.0"
+  }
+}

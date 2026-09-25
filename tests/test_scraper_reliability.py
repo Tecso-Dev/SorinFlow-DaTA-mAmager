@@ -597,47 +597,53 @@ class TestTheNodeBudgetIsSane:
         return "\n".join(l for l in lines if not l.strip().startswith("#"))
 
     def test_postgres_is_not_besteffort(self):
-        y = self._yaml("k8s/02-postgres.yaml")
+        y = self._yaml("k8s/base/postgres.yaml")
         assert "resources:" in y and "requests:" in y, \
             "the database is first in the eviction queue again"
         assert 'memory: "1Gi"' in y
 
     def test_redis_is_not_besteffort(self):
-        y = self._yaml("k8s/03-redis.yaml")
+        y = self._yaml("k8s/base/redis.yaml")
         assert "resources:" in y and "requests:" in y
         assert 'memory: "256Mi"' in y
 
     def test_redis_will_not_silently_drop_a_login_code(self):
         """allkeys-lru would evict verification codes under pressure and it
         would look exactly like an SMS that never arrived."""
-        y = self._yaml("k8s/03-redis.yaml")
+        y = self._yaml("k8s/base/redis.yaml")
         assert "--maxmemory" in y
         assert "noeviction" in y
         assert "allkeys-lru" not in y
 
     def test_the_backend_limit_and_the_neighbours_fit_the_node(self):
-        """Requests are the reservation that must fit; limits may oversubscribe."""
+        """Requests are the reservation that must fit; limits may oversubscribe.
+        The one process this used to be is now api (x2 replicas) + worker +
+        scheduler (see k8s/base/backend.yaml's node-budget comment) — the sum
+        of every role's request must still leave the ~6200Mi the 8GB node
+        actually has free once k3s, containerd, the CI runner, Traefik and
+        coredns are accounted for."""
         import re
-        def req_mem(path):
-            """The CONTAINER's memory request.
+        def req_mem(path, replicas=1):
+            """The CONTAINER's memory request, times its replica count.
 
             Anchored on the requests: block that actually has a memory key —
-            04-backend.yaml opens with a PersistentVolumeClaim whose own
-            requests: block asks for storage, and reading that one finds no
-            memory at all.
+            data-pvc.yaml, for instance, has its own requests: block asking
+            for storage, and reading that one finds no memory at all.
             """
             y = self._yaml(path)
             for m in re.finditer(r"requests:", y):
                 mm = re.search(r'memory:\s*"(\d+)(Mi|Gi)"', y[m.end():m.end() + 200])
                 if mm:
                     n, unit = int(mm.group(1)), mm.group(2)
-                    return n * (1024 if unit == "Gi" else 1)
+                    return n * (1024 if unit == "Gi" else 1) * replicas
             raise AssertionError(f"{path} declares no memory request")
 
-        total = (req_mem("k8s/04-backend.yaml")
-                 + req_mem("k8s/02-postgres.yaml")
-                 + req_mem("k8s/03-redis.yaml"))
-        assert total < 3072, f"requests total {total}Mi — too close to a 4Gi node"
+        total = (req_mem("k8s/base/backend.yaml", replicas=2)
+                 + req_mem("k8s/base/worker.yaml")
+                 + req_mem("k8s/base/scheduler.yaml")
+                 + req_mem("k8s/base/postgres.yaml")
+                 + req_mem("k8s/base/redis.yaml"))
+        assert total < 3000, f"requests total {total}Mi — too close to the ~6200Mi an 8GB node actually has free"
 
 
 class TestCiAppliesWhatTheBudgetAssumes:
@@ -655,20 +661,43 @@ class TestCiAppliesWhatTheBudgetAssumes:
         from pathlib import Path
         return Path(".github/workflows/deploy.yml").read_text(encoding="utf-8")
 
+    def test_the_deploy_job_runs_the_script_that_applies_everything(self):
+        assert "bash scripts/deploy_k8s.sh" in self._workflow()
+
     @pytest.mark.parametrize("manifest", [
-        "k8s/02-postgres.yaml",
-        "k8s/03-redis.yaml",
-        "k8s/04-backend.yaml",
-        "k8s/05-ingress.yaml",
+        "postgres.yaml",
+        "redis.yaml",
+        "backend.yaml",
+        "worker.yaml",
+        "scheduler.yaml",
+        "ingress.yaml",
     ])
     def test_every_manifest_the_budget_depends_on_is_applied(self, manifest):
-        assert manifest in self._workflow(), \
-            f"{manifest} is in git but CI never applies it — it will drift silently"
+        # scripts/deploy_k8s.sh applies whatever `kubectl kustomize k8s/base`
+        # renders, so "is it applied" is really "is it in the kustomization" —
+        # a file sitting in k8s/base/ but missing from resources: is in git
+        # and never reaches the cluster, same failure mode this test always
+        # guarded against.
+        from pathlib import Path
+        base = Path("k8s/base/kustomization.yaml").read_text(encoding="utf-8")
+        assert manifest in base, \
+            f"{manifest} is in k8s/base but not in kustomization.yaml — it will drift silently"
+
+    def test_every_manifest_outside_the_kustomization_is_applied_by_the_script(self):
+        # The one file kustomize must not render (it would move it out of
+        # kube-system, where k3s's helm-controller reads it): the deploy has to
+        # apply it itself, or a rebuilt server serves no certificate.
+        from pathlib import Path
+        script = Path("scripts/deploy_k8s.sh").read_text(encoding="utf-8")
+        assert "kubectl apply -f k8s/overlays/production/traefik-acme.yaml" in script
 
     def test_the_workflow_still_parses(self):
         import yaml
         d = yaml.safe_load(self._workflow())
-        assert set(d["jobs"]) >= {"test", "build", "deploy"}
+        # test moved to ci.yml (called from here as the "ci" job) so a plain
+        # push and a pull request run the exact same gate; build now also
+        # waits on the browser (e2e) and manifest (k8s) gates.
+        assert set(d["jobs"]) >= {"ci", "e2e", "k8s", "build", "deploy"}
 
 
 class TestTheHostSetupIsInTheRepository:
@@ -709,18 +738,22 @@ class TestTheHostSetupIsInTheRepository:
         assert setting.lower() in self._script().lower()
 
     def test_it_checks_the_node_is_the_size_the_manifests_assume(self):
-        """The memory budget in k8s/04-backend.yaml is sized for ~8GB. On a
-        different machine those numbers stop meaning anything, silently."""
+        """The memory budget across k8s/base/{backend,worker,scheduler}.yaml
+        is sized for ~8GB (see the accounting comment in backend.yaml). On a
+        different machine those numbers stop meaning anything, silently.
+        worker's 3072Mi is the biggest single share and the one most worth
+        naming here — it is the one that holds Chromium."""
         s = self._script()
         assert "MemTotal" in s
-        assert "4096Mi" in s, "the script does not name the limit it is validating"
+        assert "3072Mi" in s, "the script does not name the limit it is validating"
 
     def test_the_backend_limit_matches_what_the_script_expects(self):
-        """Two places state the budget; they must not drift apart."""
+        """Two places state worker's share of the budget; they must not drift
+        apart."""
         from pathlib import Path
-        manifest = Path("k8s/04-backend.yaml").read_text(encoding="utf-8")
-        assert 'memory: "4096Mi"' in manifest
-        assert "4096Mi" in self._script()
+        manifest = Path("k8s/base/worker.yaml").read_text(encoding="utf-8")
+        assert 'memory: "3072Mi"' in manifest
+        assert "3072Mi" in self._script()
 
 
 class TestNoTransactionSurvivesTheSlowWork:
@@ -823,11 +856,11 @@ class TestOneChallengedAccountDoesNotKillThePool:
         src = inspect.getsource(DivarScraper._usable_account_count)
         assert "except Exception" in src and "return 1" in src
 
-    def test_otp_store_exposes_the_counter(self):
+    async def test_otp_store_exposes_the_counter(self):
         from app.scraper import otp_store
         assert hasattr(otp_store, "note_timeout")
         assert hasattr(otp_store, "clear_timeouts")
-        assert otp_store.note_timeout(None) == 0     # no job, no crash
+        assert await otp_store.note_timeout(None) == 0     # no job, no crash
 
 
 class TestTheStoredJarStaysFresh:
@@ -977,20 +1010,22 @@ class TestWeDoNotLearnTheSameFactFiveTimes:
         src = _code_only(inspect.getsource(ContactExtractor._handle_sms_otp_if_present))
         assert "min(timeout, 30)" in src
 
-    def test_a_successful_reveal_restores_the_full_window(self):
+    async def test_a_successful_reveal_restores_the_full_window(self, monkeypatch):
         """clear_timeouts resets the strike count, so a job that starts working
         again treats the next prompt as a first one."""
         from app.scraper import otp_store
-        otp_store.clear_timeouts("j")
-        assert otp_store.strikes("j") == 0
-        otp_store.note_timeout("j")
-        assert otp_store.strikes("j") == 1
-        otp_store.clear_timeouts("j")
-        assert otp_store.strikes("j") == 0
+        from _fake_redis import patch_redis
+        patch_redis(monkeypatch, otp_store)
+        await otp_store.clear_timeouts("j")
+        assert await otp_store.strikes("j") == 0
+        await otp_store.note_timeout("j")
+        assert await otp_store.strikes("j") == 1
+        await otp_store.clear_timeouts("j")
+        assert await otp_store.strikes("j") == 0
 
-    def test_strikes_is_safe_without_a_job(self):
+    async def test_strikes_is_safe_without_a_job(self):
         from app.scraper import otp_store
-        assert otp_store.strikes(None) == 0
+        assert await otp_store.strikes(None) == 0
 
 
 class TestANewRoundStartsOnlyWhenNothingIsLeft:
@@ -1108,28 +1143,32 @@ class TestARunKilledByADeploySaysSo:
     last ordinary event, which reads as though the scraper gave up on its own.
     """
 
+    # The worker's sweep closes these out now (app/services/scrape_queue.py);
+    # the rows themselves are tested on Postgres in test_scrape_queue.py.
+
     def test_orphaned_jobs_get_a_reason(self):
         import inspect
-        from app import main
-        src = inspect.getsource(main._release_orphaned_jobs)
-        assert "سرور در میانهٔ اجرا ری‌استارت شد" in src
-        assert "finish_reason" in src
+        from app.services import scrape_queue as sq
+        assert "سرور در میانهٔ اجرا ری‌استارت شد" in sq.ORPHAN_REASON
+        assert "finish_reason=ORPHAN_REASON" in inspect.getsource(sq.release_orphans)
 
     def test_the_reason_also_reaches_the_run_log(self):
         import inspect
-        from app import main
-        src = inspect.getsource(main._release_orphaned_jobs)
-        assert "job_log.record" in src
-        assert "job_log.ERROR" in src
+        from app.services import scrape_queue as sq
+        src = inspect.getsource(sq.release_orphans)
+        assert "job_log.record" in src and "job_log.ERROR" in src
+        assert "ری‌استارت" in sq.ORPHAN_LOG
 
-    def test_logging_the_reason_cannot_stop_the_pod_booting(self):
-        """A stale row is cosmetic; a pod that will not start is not — the
-        function's own docstring says so."""
-        import inspect
-        from app import main
-        src = inspect.getsource(main._release_orphaned_jobs)
-        i = src.index("job_log.record")
-        assert "except Exception" in src[i:i + 500]
+    async def test_logging_the_reason_cannot_stop_the_sweep(self, monkeypatch):
+        """A stale row is cosmetic; a worker that stops sweeping is not. The
+        run log swallows its own failures."""
+        import uuid
+        from app.services import job_log
+
+        def _broken():
+            raise RuntimeError("database is down")
+        monkeypatch.setattr(job_log, "async_session_maker", _broken)
+        assert await job_log.record(uuid.uuid4(), job_log.ERROR, "x", level="error") is False
 
 
 class TestWeDoNotForgeHeadersChromiumComputesCorrectly:

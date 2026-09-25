@@ -21,6 +21,9 @@ env/
 .env_/
 ENV/
 
+# Node (eslint + its config packages — see package.json/eslint.config.js)
+node_modules/
+
 # Environment variables
 .env
 .env.local
@@ -108,3 +111,9 @@ docker-compose.override.yml
 
 # sqlite files the test suites create in the repo root
 _*.db
+
+# tests/e2e is its own Node project (package-lock.json IS committed)
+tests/e2e/node_modules/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+tests/e2e/blob-report/

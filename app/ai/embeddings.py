@@ -472,6 +472,8 @@ async def embed_loop() -> None:
         return
     await asyncio.sleep(200)          # let startup finish; after the match engine's first pass
     logger.info(f"[embed] armed — every {TICK_SECONDS // 60} min, {LIMIT} listings a pass, version {EMBED_VERSION}")
+    from app.services.supervisor import beat
     while True:
+        beat("embeddings")
         await tick()
         await asyncio.sleep(TICK_SECONDS)

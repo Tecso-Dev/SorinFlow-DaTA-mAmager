@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 from sqlalchemy.pool import NullPool  # noqa: E402
 
 from app.ai import assistant, embeddings  # noqa: E402
+from app.auth.visibility import backfill_owner_ids  # noqa: E402
 from app.database import Base  # noqa: E402
 from app.models.ai_chat import AiChat  # noqa: E402
 from app.models.app_setting import AppSetting  # noqa: E402
@@ -130,7 +131,12 @@ def world(tmp_path, monkeypatch):
         async with eng.begin() as c:
             await c.run_sync(lambda sc: Base.metadata.create_all(sc, tables=TABLES))
         async with maker() as s:
-            return await _seed(s)
+            seeded = await _seed(s)
+        # the rows name their owners, as the release before accounts wrote
+        # them; the boot step gives them their accounts
+        async with eng.begin() as c:
+            await c.run_sync(backfill_owner_ids)
+        return seeded
     users, ids = asyncio.run(build())
 
     # one fake Redis server; a client per call, so no client outlives its event loop

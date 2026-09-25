@@ -3,7 +3,7 @@ SorinFlow Divar Scraper - Application Configuration
 """
 from pydantic_settings import BaseSettings
 from pydantic import Field, AliasChoices
-from typing import Optional, List
+from typing import List, Literal
 from functools import lru_cache
 
 class Settings(BaseSettings):
@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     
     # Scraper Settings
     scraper_headless: bool = Field(default=True, validation_alias=AliasChoices("SCRAPER_HEADLESS", "scraper_headless"))
+    # Chromium's own sandbox (namespaces + seccomp), separate from anything
+    # this app does. The container runs as pwuser, not root, so it can use
+    # it: `auto` sandboxes unless running as root (root cannot anyway) and
+    # falls back once, loudly, if the runtime refuses it — see
+    # app/scraper/stealth.py's sandbox_status(). `on`/`off` skip that
+    # decision entirely. Literal, not a plain str, so a typo in the env is a
+    # boot-time error instead of a silently-ignored "auto".
+    chromium_sandbox: Literal["auto", "on", "off"] = Field(
+        default="auto", validation_alias=AliasChoices("CHROMIUM_SANDBOX", "chromium_sandbox"))
     scraper_delay_min: float = Field(default=2.0, validation_alias=AliasChoices("SCRAPER_DELAY_MIN", "scraper_delay_min"))
     scraper_delay_max: float = Field(default=5.0, validation_alias=AliasChoices("SCRAPER_DELAY_MAX", "scraper_delay_max"))
     # Max seconds to wait for a Divar SMS-OTP code before giving up on a phone.
@@ -294,6 +303,29 @@ class Settings(BaseSettings):
     # that is still a real option and not just a default to move past.
     db_pool_size: int = Field(default=10, validation_alias=AliasChoices("DB_POOL_SIZE", "db_pool_size"))
     db_max_overflow: int = Field(default=20, validation_alias=AliasChoices("DB_MAX_OVERFLOW", "db_max_overflow"))
+
+    # ── Process roles ─────────────────────────────────────────────────────
+    # One image, one command; which parts of the app this process runs is
+    # chosen here (app/main.py, _start_background). all: everything in one
+    # process, as it always was — local dev, the test suite, docker compose.
+    # api: HTTP only, never a background loop, never a browser. worker: the
+    # scrape queue and its Chromium. scheduler: every periodic loop. A typo is
+    # refused at startup rather than read as «run nothing».
+    sorinflow_role: Literal["all", "api", "worker", "scheduler"] = Field(default="all", validation_alias=AliasChoices("SORINFLOW_ROLE", "sorinflow_role"))
+    # true: boot runs init_db() — the boot steps, Alembic, the seeds — as it
+    # always has. false: the pod only checks the database is at the Alembic
+    # head this image carries and refuses to start otherwise; the schema is
+    # `python -m app.migrate`'s job, run once before a rollout.
+    db_migrate_on_boot: bool = Field(default=True, validation_alias=AliasChoices("DB_MIGRATE_ON_BOOT", "db_migrate_on_boot"))
+    # The scrape queue's consumer (app/services/scrape_queue.py) in roles all
+    # and worker. Off only for a process that must never run a scrape, such
+    # as a test that boots the app around job rows it made itself.
+    scrape_worker_enabled: bool = Field(default=True, validation_alias=AliasChoices("SCRAPE_WORKER_ENABLED", "scrape_worker_enabled"))
+    # Scrapes one worker runs at once — each is a Chromium.
+    scrape_worker_concurrency: int = Field(default=3, ge=1, validation_alias=AliasChoices("SCRAPE_WORKER_CONCURRENCY", "scrape_worker_concurrency"))
+    # Touched every 15 s by the process heartbeat; the worker's and the
+    # scheduler's liveness probe reads its age (they have no HTTP to ask).
+    heartbeat_file: str = Field(default="/tmp/sorinflow-heartbeat", validation_alias=AliasChoices("HEARTBEAT_FILE", "heartbeat_file"))
 
     class Config:
         env_file = ".env"

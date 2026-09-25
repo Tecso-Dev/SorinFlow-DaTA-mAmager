@@ -56,10 +56,11 @@ _super_admin = Depends(_role_dep(ROLE_ROOT, "super_admin"))
 async def _guard_name_is_free(db: AsyncSession, name, exclude_id=None) -> None:
     """A display name another account already goes by is refused.
 
-    Ownership in this panel is by name (app/auth/visibility.py: a private
-    file's filer, a match's consultant, a lead's assignee, and «سورین»'s
-    customer scope all compare against full_name, else username), so taking
-    a colleague's name would hand over their files, matches and customers.
+    Ownership is by account (app/auth/visibility.py), but a colleague is
+    still named in a form — a task's assignee, a customer's consultant — and
+    a typed name is resolved to the one account that goes by it. Two
+    accounts with one name would leave every such row nobody's, and two
+    people the panel shows the same would be told apart by nothing.
     """
     name = (name or "").strip()
     if not name:
@@ -143,13 +144,16 @@ def _account_key(user: User) -> str:
     return f"uid:{user.id}"
 
 
-async def _login_attempt(request: Request, key: str) -> None:
+async def _login_attempt(request: Optional[Request], key: str) -> None:
     """Count this attempt, or 429 once this address or account has spent its.
 
     Before the password or code is looked at, so the right one is refused as
     well until the window passes — otherwise the lock would only slow a
     guesser down. A wrong answer is already counted; a right one calls
     _login_passed. Redis down: allowed, with a warning (verification.py).
+
+    request is None for a re-verify-my-password action (totp_disable): there
+    is no address to also throttle, only the account's own budget.
     """
     from app.services.verification import take_login_attempt, VerificationError
     try:
@@ -786,26 +790,28 @@ async def change_my_password(data: PasswordChangeRequest,
     moves, and a token minted before it is refused from then on. This
     device gets a fresh token in the response so it stays in."""
     from app.services.verification import (
-        check_login_rate, record_login_failure, clear_login_failures, VerificationError)
+        take_login_attempt, login_attempt_passed, clear_login_failures, VerificationError)
 
-    # The same throttle as the login form. Somebody holding a stolen session
-    # must not get unlimited guesses at the one thing that would let them
-    # keep it.
-    try:
-        await check_login_rate(f"name:{current_user.username}")
-    except VerificationError as e:
-        raise HTTPException(status_code=429, detail=e.message)
-    if not verify_password(data.current_password, current_user.hashed_password):
-        await record_login_failure(f"name:{current_user.username}")
-        raise HTTPException(400, "رمز فعلی درست نیست")
     if data.new_password == data.current_password:
         raise HTTPException(400, "رمز تازه نباید با رمز فعلی یکی باشد")
+    # The same throttle as the login form. Somebody holding a stolen session
+    # must not get unlimited guesses at the one thing that would let them
+    # keep it — counted before the password is compared, in one Redis
+    # transaction, so guesses sent together meet the cap one by one.
+    key = f"name:{current_user.username}"
+    try:
+        await take_login_attempt(request, key)
+    except VerificationError as e:
+        raise HTTPException(status_code=429, detail=e.message) from None
+    if not verify_password(data.current_password, current_user.hashed_password):
+        raise HTTPException(400, "رمز فعلی درست نیست")
+    await login_attempt_passed(request)
 
     current_user.hashed_password = get_password_hash(data.new_password)
     current_user.token_version = (current_user.token_version or 0) + 1
     await db.commit()
     await db.refresh(current_user)
-    await clear_login_failures(f"name:{current_user.username}")
+    await clear_login_failures(key)
     logger.warning(f"[profile] {current_user.username} changed their password; "
                    f"other sessions signed out")
     await audit.record("password_change", actor=current_user, target_type="user",
@@ -1161,12 +1167,17 @@ async def totp_disable(
 ):
     from app.services.verification import clear_login_failures
 
-    # On the budget «change password» uses (keyed on the username): a stolen
-    # session must not get unlimited guesses at the password here instead.
-    await _login_attempt(None, current_user.username)
+    # The same budget «change password» uses (keyed on the username): a
+    # stolen session must not get unlimited guesses at the password here
+    # instead. One key for both halves — spending and clearing different
+    # keys left the real counter never reset, so it grew a little on every
+    # legitimate use and eventually locked the account out over nothing but
+    # correct passwords.
+    key = f"name:{current_user.username}"
+    await _login_attempt(None, key)
     if not verify_password(data.password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="رمز عبور اشتباه است")
-    await clear_login_failures(f"name:{current_user.username}")
+    await clear_login_failures(key)
 
     current_user.totp_enabled = False
     current_user.totp_secret = None
@@ -1274,7 +1285,7 @@ async def update_user(
         await _guard_name_is_free(db, data.full_name, exclude_id=user.id)
         user.full_name = data.full_name
     elif data.role in STAFF_ROLES and user.role not in STAFF_ROLES:
-        # a visitor made staff joins the name-based ownership rules with the
+        # a visitor made staff joins the colleagues a form names, with the
         # name they picked at sign-up — the same check as the portal ticket
         await _guard_name_is_free(db, user.full_name or user.username, exclude_id=user.id)
     if data.role is not None:
