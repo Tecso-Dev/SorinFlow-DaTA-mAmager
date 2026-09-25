@@ -4309,6 +4309,9 @@ class DivarScraper:
             # saves nothing is otherwise indistinguishable from a broken one.
             skip_tally: Dict[str, int] = {}
             fail_tally: Dict[str, int] = {}
+            # Listings Divar had deleted: neither a failure nor a filter's
+            # doing, and every sentence built from skip_tally says «با فیلترها».
+            gone = 0
             category_drops: List[str] = []   # a handful, for the log
             # Handed to each detail scrape so it can tell, before asking Divar
             # for contact info, whether this ad is going to be discarded anyway.
@@ -4696,7 +4699,7 @@ class DivarScraper:
                         # Deleted on Divar. Nothing went wrong here and a retry
                         # will find it just as gone, so it is not «ناموفق»: a
                         # bucket of its own, with Divar's own words beside it.
-                        skip_tally["deleted"] = skip_tally.get("deleted", 0) + 1
+                        gone += 1
                         await skipped_listings.record(
                             job.job_id, divar_id=listing['divar_id'],
                             url=listing.get('url'), title=listing.get('title'),
@@ -4833,6 +4836,9 @@ class DivarScraper:
                     f"{self._FILTER_LABELS_FA.get(k, k)}: {v}" for k, v in top)
                 dropped = f"{sum(skip_tally.values())} آگهی با فیلترها حذف شد ({named})"
                 finish_reason = f"{finish_reason}؛ {dropped}" if finish_reason else dropped
+            if gone:
+                _gone = f"{gone} آگهی در دیوار حذف شده بود"
+                finish_reason = f"{finish_reason}؛ {_gone}" if finish_reason else _gone
 
             # A run whose OTP prompts went unanswered finishes fast and looks
             # normal, but half its listings have no phone number. Say so.
@@ -4901,7 +4907,7 @@ class DivarScraper:
             # difference pass unremarked.
             _dropped = sum(skip_tally.values())
             _accounted = (job.new_items + job.updated_items
-                          + job.failed_items + _dropped)
+                          + job.failed_items + _dropped + gone)
             _parts = [f"{job.new_items} تازه", f"{job.updated_items} تکراری"]
             if job.failed_items:
                 _named = "، ".join(f"{k}: {v}" for k, v in
@@ -4910,6 +4916,8 @@ class DivarScraper:
                               + (f" ({_named})" if _named else ""))
             _parts += [f"{v} {self._FILTER_LABELS_FA.get(k, k)}"
                        for k, v in sorted(skip_tally.items(), key=lambda kv: -kv[1])]
+            if gone:
+                _parts.append(f"{gone} {self.GONE_FROM_DIVAR}")
             _unreached = len(all_listings) - examined
             if _unreached > 0:
                 _parts.append(f"{_unreached} بررسی‌نشده")

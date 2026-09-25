@@ -247,6 +247,14 @@ class TestTheRunFilesItUnderItsOwnName:
         assert "1 در دیوار حذف شده" in tally
         assert "ناموفق" not in tally and "بی‌حساب" not in tally
 
+    async def test_the_finish_line_does_not_blame_filters_the_run_did_not_have(self, run):
+        """«۱ آگهی با فیلترها حذف شد» and «همهٔ نامزدها با فیلترها حذف شدند» on a
+        single scrape with no filters would send the reader after the wrong thing."""
+        job, _, lines = await run(FakePage(410, SAYS_NOTHING))
+        assert "1 آگهی در دیوار حذف شده بود" in job.finish_reason
+        assert "با فیلترها" not in job.finish_reason
+        assert not any("با فیلترها" in m for m in lines)
+
     async def test_a_page_that_would_not_open_is_still_a_failure(self, run, spent):
         """The new branch takes only what Divar called gone."""
         job, rows, _ = await run(FakePage(200, "<html></html>", lands_on="https://divar.ir/"))
