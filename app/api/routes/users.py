@@ -15,7 +15,7 @@ POST /{id}/password      — reset password (super_admin)
 POST /{id}/totp/disable  — force-disable 2FA (super_admin)
 """
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, or_, func
@@ -34,6 +34,7 @@ from app.auth.jwt import (
     TOKEN_SMS_PENDING,
 )
 from app.auth.dependencies import get_current_user, _role_dep
+from app.auth.session_cookie import reissue
 from app.auth.permissions import (
     PERMISSIONS, ALL_PERMISSIONS, ROLE_ROOT, ASSIGNABLE_BY_SUPER_ADMIN,
     DEFAULT_ADMIN_PERMISSIONS, STAFF_ROLES, normalize_permissions, user_permissions,
@@ -738,6 +739,7 @@ def _me_response(user: User) -> UserResponse:
 
 @router.patch("/me")
 async def update_me(data: ProfileUpdate,
+                    request: Request, response: Response,
                     current_user: User = Depends(get_current_user),
                     db: AsyncSession = Depends(get_db)):
     """Edit my own profile. A changed username comes back with a fresh token,
@@ -777,12 +779,14 @@ async def update_me(data: ProfileUpdate,
         current_user.links = _clean_links(data.links)
     await db.commit()
     await db.refresh(current_user)
+    token = create_access_token(access_claims(current_user)) if renamed else None
     return {"user": _me_response(current_user),
-            "access_token": create_access_token(access_claims(current_user)) if renamed else None}
+            "access_token": reissue(request, response, token) if token else None}
 
 
 @router.post("/me/password")
 async def change_my_password(data: PasswordChangeRequest,
+                             response: Response,
                              current_user: User = Depends(get_current_user),
                              db: AsyncSession = Depends(get_db),
                              request: Request = None):
@@ -820,7 +824,7 @@ async def change_my_password(data: PasswordChangeRequest,
                        request=request)
     return {"success": True,
             "message": "رمز عوض شد و دستگاه‌های دیگر از حساب خارج شدند",
-            "access_token": create_access_token(access_claims(current_user))}
+            "access_token": reissue(request, response, create_access_token(access_claims(current_user)))}
 
 
 def _pending_email_key(user: User) -> str:

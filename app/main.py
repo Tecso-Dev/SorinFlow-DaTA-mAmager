@@ -464,13 +464,16 @@ async def _maintenance_allows(request: Request) -> bool:
         if bypass and request.cookies.get(mt.BYPASS_COOKIE) == bypass:
             return True
 
-        token = request.headers.get("Authorization", "")
-        if token.startswith("Bearer "):
+        # The old panel's bearer header, or the new panel's session cookie.
+        from app.auth.session_cookie import session_token
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:] if auth.startswith("Bearer ") else session_token(request)
+        if token:
             try:
                 from app.auth.jwt import decode_token, is_access_token
                 from app.models.user import User
                 from sqlalchemy import select
-                payload = decode_token(token[7:])
+                payload = decode_token(token)
                 # A token issued before the TOTP step is not a login yet, so it
                 # must not open a site that has been deliberately closed.
                 username = payload.get("sub") if is_access_token(payload) else None

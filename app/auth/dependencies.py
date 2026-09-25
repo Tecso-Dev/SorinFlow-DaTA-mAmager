@@ -17,7 +17,6 @@ from app.auth.permissions import (
     has_permission,
 )
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/users/token")
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/users/token", auto_error=False)
 
 # Higher number wins. Kept for callers that compare tiers rather than name them.
@@ -47,11 +46,33 @@ async def _user_from_token(token: str, db: AsyncSession) -> Optional[User]:
     return user
 
 
+async def _token_of(request: Request, bearer: Optional[str]) -> Optional[str]:
+    """The access token a request carries: the Authorization header (the old
+    panel, scripts) or the httpOnly session cookie (the new panel).
+
+    A cookie rides along on any request the browser makes, including one a
+    hostile page triggers, so a state-changing request authenticated by it
+    must also carry the CSRF header — which only a page of our own origin can
+    read out of its cookie. A bearer token is never sent automatically, so it
+    needs no such proof.
+    """
+    if bearer:
+        return bearer
+    from app.auth.session_cookie import session_token, csrf_ok
+    token = session_token(request)
+    if token and request.method not in ("GET", "HEAD", "OPTIONS") and not csrf_ok(request, token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail={"code": "csrf", "message": "نشست این صفحه تأیید نشد؛ صفحه را دوباره باز کنید"})
+    return token
+
+
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme_optional),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    user = await _user_from_token(token, db)
+    token = await _token_of(request, token)
+    user = await _user_from_token(token, db) if token else None
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -62,10 +83,12 @@ async def get_current_user(
 
 
 async def get_current_user_optional(
+    request: Request,
     token: Optional[str] = Depends(oauth2_scheme_optional),
     db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
     """Same as get_current_user but returns None instead of raising 401."""
+    token = await _token_of(request, token)
     if not token:
         return None
     return await _user_from_token(token, db)
