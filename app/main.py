@@ -56,9 +56,19 @@ logger.add(
 # /app/logs, so importing the app anywhere else — a test run, a shell, a
 # read-only root filesystem — died at import time before a single line of the
 # application ran. Stdout logging above is the one that must always work.
+#
+# The filename depends on the role: with each role now its own pod and each
+# pod writing into its own emptyDir, every role sharing "scraper.log" meant
+# the panel's log viewer — which tails whichever api replica answers — could
+# never show a scrape or a scheduler loop, only that api pod's own lines.
+# roles all and worker keep the original name (a local/test run, or the
+# worker, is exactly what "scraper" always meant); api and scheduler get
+# their own file, which the k8s side then points at the shared data volume
+# so the viewer can read them from any replica.
+_ROLE_LOG_NAMES = {"api": "api.log", "scheduler": "scheduler.log"}
 try:
     logger.add(
-        str(Path(get_settings().logs_path) / "scraper.log"),
+        str(Path(get_settings().logs_path) / _ROLE_LOG_NAMES.get(get_settings().sorinflow_role, "scraper.log")),
         rotation="10 MB",
         retention="7 days",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {extra[request_id]} | {name}:{function}:{line} - {message}",
@@ -67,7 +77,7 @@ try:
         backtrace=False,
         diagnose=False,
         compression="gz",      # a 10MB text log compresses to well under 1MB
-        enqueue=True,          # the scraper and the API both write to this file
+        enqueue=True,          # more than one task in this process can write to it at once
     )
 except Exception as _log_err:  # pragma: no cover - environment dependent
     logger.warning(f"file logging disabled ({_log_err})")
