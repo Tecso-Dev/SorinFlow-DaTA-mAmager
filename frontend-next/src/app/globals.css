@@ -1,0 +1,328 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Design proposals: one dashboard, three looks. Each variant scopes its own
+   tokens and can add its own utilities (va:rounded-3xl, vb:border ...).
+   Only the chosen one survives; the other two go with the /preview route. */
+@custom-variant va (&:where([data-variant="a"] *));
+@custom-variant vb (&:where([data-variant="b"] *));
+@custom-variant vc (&:where([data-variant="c"] *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-estedad), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-estedad), ui-sans-serif, system-ui, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-viz-low: var(--viz-low);
+  --color-viz-high: var(--viz-high);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* ── A · «شب نیلی» — today's panel, grown up: black, indigo, soft glow ── */
+:root,
+[data-variant="a"] {
+  --radius: 0.875rem;
+  --background: #f5f6fb;
+  --foreground: #0e1022;
+  --card: #ffffff;
+  --card-foreground: #0e1022;
+  --popover: #ffffff;
+  --popover-foreground: #0e1022;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --secondary: #eef0f8;
+  --secondary-foreground: #1d2140;
+  --muted: #eef0f7;
+  --muted-foreground: #5a6378;
+  --accent: #eceefb;
+  --accent-foreground: #1d2140;
+  --destructive: #dc2626;
+  --success: #16a34a;
+  --warning: #d97706;
+  --info: #0284c7;
+  --border: #e3e6f0;
+  --input: #dfe3ee;
+  --ring: #6366f1;
+  --chart-1: #6366f1;
+  --chart-2: #8b5cf6;
+  --chart-3: #06b6d4;
+  --chart-4: #ec4899;
+  --chart-5: #10b981;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1d2140;
+  --sidebar-primary: #4f46e5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef0fb;
+  --sidebar-accent-foreground: #1d2140;
+  --sidebar-border: #e6e8f2;
+  --sidebar-ring: #6366f1;
+  --glow-1: rgb(99 102 241 / 0.10);
+  --glow-2: rgb(139 92 246 / 0.08);
+  --viz-low: #6366f1;
+  --viz-high: #ec4899;
+}
+
+.dark,
+.dark [data-variant="a"] {
+  --background: #05050a;
+  --foreground: #eef1f8;
+  --card: #0c0c14;
+  --card-foreground: #eef1f8;
+  --popover: #10101a;
+  --popover-foreground: #eef1f8;
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --secondary: #161622;
+  --secondary-foreground: #e4e7f2;
+  --muted: #13131d;
+  --muted-foreground: #8f9ab0;
+  --accent: #181828;
+  --accent-foreground: #eef1f8;
+  --destructive: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --info: #38bdf8;
+  --border: rgb(255 255 255 / 0.07);
+  --input: rgb(255 255 255 / 0.10);
+  --ring: #6366f1;
+  --chart-1: #818cf8;
+  --chart-2: #a78bfa;
+  --chart-3: #22d3ee;
+  --chart-4: #f472b6;
+  --chart-5: #34d399;
+  --sidebar: #08080e;
+  --sidebar-foreground: #c9d0de;
+  --sidebar-primary: #6366f1;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgb(99 102 241 / 0.12);
+  --sidebar-accent-foreground: #eef1f8;
+  --sidebar-border: rgb(255 255 255 / 0.06);
+  --sidebar-ring: #6366f1;
+  --glow-1: rgb(99 102 241 / 0.16);
+  --glow-2: rgb(139 92 246 / 0.12);
+}
+
+/* ── B · «گرافیت» — neutral graphite, one emerald accent, dense like a pro tool ── */
+[data-variant="b"] {
+  --radius: 0.5rem;
+  --background: #fafaf9;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #059669;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #27272a;
+  --muted: #f4f4f5;
+  --muted-foreground: #6b6f76;
+  --accent: #f1f1f0;
+  --accent-foreground: #18181b;
+  --destructive: #dc2626;
+  --success: #059669;
+  --warning: #d97706;
+  --info: #2563eb;
+  --border: #e7e7e4;
+  --input: #e4e4e1;
+  --ring: #10b981;
+  --chart-1: #059669;
+  --chart-2: #a1a1aa;
+  --chart-3: #52525b;
+  --chart-4: #d97706;
+  --chart-5: #2563eb;
+  --sidebar: #f7f7f6;
+  --sidebar-foreground: #3f3f46;
+  --sidebar-primary: #059669;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ececea;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: #e7e7e4;
+  --sidebar-ring: #10b981;
+  --glow-1: transparent;
+  --glow-2: transparent;
+  --viz-low: #10b981;
+  --viz-high: #f59e0b;
+}
+
+.dark [data-variant="b"] {
+  --background: #0b0c0d;
+  --foreground: #e9eaec;
+  --card: #121314;
+  --card-foreground: #e9eaec;
+  --popover: #161718;
+  --popover-foreground: #e9eaec;
+  --primary: #10b981;
+  --primary-foreground: #03140e;
+  --secondary: #1a1b1d;
+  --secondary-foreground: #e9eaec;
+  --muted: #18191b;
+  --muted-foreground: #8b9097;
+  --accent: #1c1d20;
+  --accent-foreground: #e9eaec;
+  --destructive: #f05252;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --info: #60a5fa;
+  --border: #232528;
+  --input: #2a2c30;
+  --ring: #10b981;
+  --chart-1: #10b981;
+  --chart-2: #71717a;
+  --chart-3: #3f3f46;
+  --chart-4: #f59e0b;
+  --chart-5: #60a5fa;
+  --sidebar: #0e0f10;
+  --sidebar-foreground: #b4b8bf;
+  --sidebar-primary: #10b981;
+  --sidebar-primary-foreground: #03140e;
+  --sidebar-accent: #1a1b1e;
+  --sidebar-accent-foreground: #e9eaec;
+  --sidebar-border: #1f2124;
+  --sidebar-ring: #10b981;
+}
+
+/* ── C · «فیروزه» — Persian tile warmth: sand, turquoise, saffron, terracotta ── */
+[data-variant="c"] {
+  --radius: 1.125rem;
+  --background: #f6f1e9;
+  --foreground: #1d2a2c;
+  --card: #fffcf7;
+  --card-foreground: #1d2a2c;
+  --popover: #fffcf7;
+  --popover-foreground: #1d2a2c;
+  --primary: #0e8f8a;
+  --primary-foreground: #ffffff;
+  --secondary: #fdf0d5;
+  --secondary-foreground: #5c4200;
+  --muted: #efe8dc;
+  --muted-foreground: #66706f;
+  --accent: #e6f3f1;
+  --accent-foreground: #0b4f4c;
+  --destructive: #c2410c;
+  --success: #0f8a5f;
+  --warning: #c98a00;
+  --info: #2f64a3;
+  --border: #e8dfd0;
+  --input: #e3d9c8;
+  --ring: #0e9f9a;
+  --chart-1: #0e9f9a;
+  --chart-2: #e0a100;
+  --chart-3: #d9653b;
+  --chart-4: #3b6ea8;
+  --chart-5: #7c9a3d;
+  --sidebar: #fffcf7;
+  --sidebar-foreground: #1d2a2c;
+  --sidebar-primary: #0e8f8a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e6f3f1;
+  --sidebar-accent-foreground: #0b4f4c;
+  --sidebar-border: #e8dfd0;
+  --sidebar-ring: #0e9f9a;
+  --glow-1: rgb(14 159 154 / 0.10);
+  --glow-2: rgb(224 161 0 / 0.10);
+  --viz-low: #0e9f9a;
+  --viz-high: #e0a100;
+}
+
+.dark [data-variant="c"] {
+  --background: #091313;
+  --foreground: #eaf3f1;
+  --card: #0e1c1c;
+  --card-foreground: #eaf3f1;
+  --popover: #112121;
+  --popover-foreground: #eaf3f1;
+  --primary: #2dd4bf;
+  --primary-foreground: #042f2c;
+  --secondary: #2a2210;
+  --secondary-foreground: #fbd77a;
+  --muted: #122323;
+  --muted-foreground: #8fa6a3;
+  --accent: #123030;
+  --accent-foreground: #c8f3ec;
+  --destructive: #f97350;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --info: #7cb0ea;
+  --border: rgb(255 255 255 / 0.08);
+  --input: rgb(255 255 255 / 0.11);
+  --ring: #2dd4bf;
+  --chart-1: #2dd4bf;
+  --chart-2: #fbbf24;
+  --chart-3: #f97350;
+  --chart-4: #7cb0ea;
+  --chart-5: #a3c85a;
+  --sidebar: #0b1818;
+  --sidebar-foreground: #cfe2df;
+  --sidebar-primary: #2dd4bf;
+  --sidebar-primary-foreground: #042f2c;
+  --sidebar-accent: #133131;
+  --sidebar-accent-foreground: #eaf3f1;
+  --sidebar-border: rgb(255 255 255 / 0.07);
+  --sidebar-ring: #2dd4bf;
+  --glow-1: rgb(45 212 191 / 0.08);
+  --glow-2: rgb(251 191 36 / 0.06);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    font-feature-settings: "ss01";
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  /* Persian digits keep one width in tables and counters. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
