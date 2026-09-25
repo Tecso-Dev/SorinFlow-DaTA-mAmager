@@ -17,10 +17,13 @@ import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
 
+// last_run/history come from app/services/dr_backup.py's ship(): the outcome
+// sits under `sent`, not at the top level.
+type DrRun = { stamp?: string; sent?: { ok?: boolean; at?: string; error?: string }; parts?: number };
 type DrStatus = {
-  last_run: { at: string; ok: boolean } | null;
-  history: { at: string; ok: boolean }[];
-  last_alert: string | null;
+  last_run: DrRun | null;
+  history: DrRun[];
+  last_alert: { text: string; at: string } | null;
   requested: boolean;
   undelivered: string[];
   schedule_fa: string;
@@ -87,10 +90,13 @@ export function DrCard() {
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-muted-foreground">آخرین اجرا:</span>
-              {q.data?.last_run ? (
+              {q.data?.last_run?.sent?.at ? (
                 <>
-                  <span className="font-semibold">{faDate(new Date(q.data.last_run.at), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                  <ToneBadge tone={q.data.last_run.ok ? "success" : "danger"}>{q.data.last_run.ok ? "موفق" : "ناموفق"}</ToneBadge>
+                  <span className="font-semibold">{faDate(new Date(q.data.last_run.sent.at), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                  <ToneBadge tone={q.data.last_run.sent.ok ? "success" : "danger"}>{q.data.last_run.sent.ok ? "موفق" : "ناموفق"}</ToneBadge>
+                  {!q.data.last_run.sent.ok && q.data.last_run.sent.error && (
+                    <span className="text-xs text-muted-foreground">{q.data.last_run.sent.error}</span>
+                  )}
                 </>
               ) : <span>—</span>}
             </div>

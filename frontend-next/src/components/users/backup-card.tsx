@@ -22,15 +22,17 @@ type Status = {
   configured: boolean; chat_ids: string[]; source: string; token_masked: string;
   proxy_mode: string; route_label: string; route_configured: boolean; proxy_masked: string;
   proxy_pool: string; relay: string; relay_key_set: boolean; proxy_source: string | null;
-  schedule_fa: string; snapshots: { file: string; at: string; size: number }[]; snapshot_count: number;
-  last_offsite: { at: string; ok: boolean } | null; digest_hour: number; digest_last_sent: string | null;
+  schedule_fa: string; snapshots: { file: string; at: string; size_kb: number }[]; snapshot_count: number;
+  // {} (no `at`) before the first shipment ever runs — bk.last_offsite() returns {}, not null
+  last_offsite: { at?: string; ok?: boolean } | null; digest_hour: number; digest_last_sent: string | null;
 };
 
 const QKEY = ["users", "backup-status"] as const;
 
-function fmtSize(bytes: number) {
-  if (bytes >= 1e9) return `${faNum(bytes / 1e9, { maximumFractionDigits: 1 })} گیگابایت`;
-  return `${faNum(bytes / 1e6, { maximumFractionDigits: 1 })} مگابایت`;
+function fmtSize(kb: number) {
+  if (kb >= 1024 * 1024) return `${faNum(kb / (1024 * 1024), { maximumFractionDigits: 1 })} گیگابایت`;
+  if (kb >= 1024) return `${faNum(kb / 1024, { maximumFractionDigits: 1 })} مگابایت`;
+  return `${faNum(kb, { maximumFractionDigits: 0 })} کیلوبایت`;
 }
 
 export function BackupCard() {
@@ -276,14 +278,14 @@ export function BackupCard() {
               <div>
                 <div className="text-xs text-muted-foreground">آخرین ارسال خارجی</div>
                 <div className="font-semibold">
-                  {q.data?.last_offsite ? faDate(new Date(q.data.last_offsite.at), { month: "short", day: "numeric" }) : "—"}
+                  {q.data?.last_offsite?.at ? faDate(new Date(q.data.last_offsite.at), { month: "short", day: "numeric" }) : "—"}
                 </div>
               </div>
               {q.data?.snapshots[0] && (
                 <div className="col-span-2 sm:col-span-2">
                   <div className="text-xs text-muted-foreground">آخرین فایل</div>
                   <div className="truncate text-xs font-semibold tabular" dir="ltr">
-                    {q.data.snapshots[0].file} ({fmtSize(q.data.snapshots[0].size)})
+                    {q.data.snapshots[0].file} ({fmtSize(q.data.snapshots[0].size_kb)})
                   </div>
                 </div>
               )}
