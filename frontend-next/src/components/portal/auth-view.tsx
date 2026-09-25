@@ -14,7 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, ApiError } from "@/lib/api";
 import { parseDigits } from "@/lib/format";
 import { SESSION_KEY, type Session } from "@/lib/session";
@@ -337,22 +337,21 @@ export function AuthView() {
           setFormError(null);
           setStep({ kind: "auth", tab: v as "login" | "register" });
         }}
-        className="items-center"
+        className="w-full items-center"
       >
         <TabsList className="mb-5 w-full">
           <TabsTrigger value="login">ورود</TabsTrigger>
           <TabsTrigger value="register">ثبت‌نام</TabsTrigger>
         </TabsList>
-      </Tabs>
 
-      {formError && (
-        <div role="alert" className="mb-4 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-          <span>{formError}</span>
-        </div>
-      )}
+        {formError && (
+          <div role="alert" className="mb-4 flex w-full items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            <span>{formError}</span>
+          </div>
+        )}
 
-      {step.tab === "login" && (
+        <TabsContent value="login" className="w-full">
         <form onSubmit={submitLogin} className="flex flex-col gap-4">
           <AuthField id="li-id" label="شماره موبایل یا ایمیل">
             <Input
@@ -383,9 +382,9 @@ export function AuthView() {
             ورود
           </Button>
         </form>
-      )}
+        </TabsContent>
 
-      {step.tab === "register" && (
+        <TabsContent value="register" className="w-full">
         <form onSubmit={submitRegister} className="flex flex-col gap-4">
           <AuthField id="rg-name" label="نام و نام خانوادگی" error={rgErrors.name}>
             <Input
@@ -464,7 +463,8 @@ export function AuthView() {
             ثبت‌نام و دریافت کد
           </Button>
         </form>
-      )}
+        </TabsContent>
+      </Tabs>
 
       <p className="mt-5 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
         <Mail className="size-3.5" />

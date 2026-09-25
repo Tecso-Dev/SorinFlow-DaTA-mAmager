@@ -1,3 +1,5 @@
+"use client";
+
 import { CircleHelp } from "lucide-react";
 import { ConfirmProvider } from "@/components/panel/kit";
 
