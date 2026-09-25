@@ -16,7 +16,7 @@ import { toast } from "@/components/toaster";
 import { useNonce } from "@/components/nonce";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
-import { SESSION_KEY, type User } from "@/lib/session";
+import { can, SESSION_KEY, type User } from "@/lib/session";
 
 type DivarCookie = {
   id: number; phone_number: string; is_valid: boolean; reveals: number;
@@ -127,9 +127,14 @@ function ChangeChannel({
 
 export function ContactCard({ me }: { me: User }) {
   const qc = useQueryClient();
+  // The /auth router is gated on the divar_auth permission for the whole
+  // router — asking without it just earns a 403, so the old panel skipped
+  // the call outright and said why instead.
+  const hasDivarAuth = can(me, { perm: "divar_auth" });
   const divar = useQuery({
     queryKey: ["profile", "divar-cookies"],
     queryFn: () => api<{ cookies: DivarCookie[] }>("/auth/cookies?mine=1"),
+    enabled: hasDivarAuth,
   });
 
   async function refresh() {
@@ -162,7 +167,11 @@ export function ContactCard({ me }: { me: User }) {
               <Smartphone className="size-4 text-muted-foreground" />
               شماره‌های دیوار من
             </div>
-            {divar.isPending ? (
+            {!hasDivarAuth ? (
+              <Empty icon={KeyRound}>
+                برای دیدن شماره‌های دیوار به دسترسی «حساب‌های دیوار» نیاز دارید — از مدیر بخواهید.
+              </Empty>
+            ) : divar.isPending ? (
               <ListSkeleton rows={2} />
             ) : divar.isError ? (
               <Empty>بارگیری ناموفق بود</Empty>
@@ -184,9 +193,11 @@ export function ContactCard({ me }: { me: User }) {
                 ))}
               </ul>
             )}
-            <Link href="/panel/divar" className="mt-2 inline-block text-xs font-semibold text-primary hover:underline">
-              افزودن شماره در «احراز هویت دیوار» ←
-            </Link>
+            {hasDivarAuth && (
+              <Link href="/panel/divar" className="mt-2 inline-block text-xs font-semibold text-primary hover:underline">
+                افزودن شماره در «احراز هویت دیوار» ←
+              </Link>
+            )}
           </div>
         </div>
       </Section>
