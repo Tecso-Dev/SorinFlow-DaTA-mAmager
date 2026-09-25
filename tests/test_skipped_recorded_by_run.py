@@ -70,7 +70,9 @@ class TestAllThreeRoutesAreCovered:
         # Eight since 2026-09-14: the eighth is «Divar wants identity
         # verification», split out of no_phone because it is ours and
         # temporary — the listing is retried once the account is verified.
-        assert SCRAPER.count("skipped_listings.record(") == 8
+        # Nine since 2026-09-25: the ninth is «deleted on Divar», split out
+        # of «failed» because nothing failed and a retry finds it just as gone.
+        assert SCRAPER.count("skipped_listings.record(") == 9
 
     def test_a_duplicate_is_not_recorded_as_unsaved(self):
         """It was saved — on an earlier run."""

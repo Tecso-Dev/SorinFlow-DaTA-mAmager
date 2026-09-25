@@ -3635,6 +3635,7 @@ class DivarScraper:
         "has_storage": "انباری",
         "has_balcony": "بالکن",
         "category": "خارج از دسته‌بندی",
+        "deleted": GONE_FROM_DIVAR,
     }
 
     # Divar's own words for what kind of ad this is, mapped to the two the
@@ -4688,6 +4689,16 @@ class DivarScraper:
                                 job.job_id, divar_id=listing['divar_id'],
                                 url=listing.get('url'), title=listing.get('title'),
                                 reason="failed", detail=_save_why)
+                    elif detail is None and getattr(self, "_last_detail_error", None) == self.GONE_FROM_DIVAR:
+                        # Deleted on Divar. Nothing went wrong here and a retry
+                        # will find it just as gone, so it is not «ناموفق»: a
+                        # bucket of its own, with Divar's own words beside it.
+                        skip_tally["deleted"] = skip_tally.get("deleted", 0) + 1
+                        await skipped_listings.record(
+                            job.job_id, divar_id=listing['divar_id'],
+                            url=listing.get('url'), title=listing.get('title'),
+                            reason="deleted",
+                            detail="دیوار می‌گوید این آگهی حذف شده یا دیگر وجود ندارد")
                     elif detail is None:
                         # None = real scrape error (network failure, parse error, etc.)
                         job.failed_items += 1
