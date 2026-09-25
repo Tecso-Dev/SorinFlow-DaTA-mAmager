@@ -23,8 +23,9 @@ where verification actually proves ownership of the number being claimed.
 See portal_register.
 """
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from loguru import logger
 from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +38,7 @@ from app.auth.jwt import (
     access_claims,
 )
 from app.auth.permissions import ROLE_VISITOR, STAFF_ROLES
+from app.auth.session_cookie import set_session
 from app.services.verification import (
     VerificationError, issue_code, verify_code,
     take_login_attempt, login_attempt_passed, clear_login_failures,
@@ -44,11 +46,13 @@ from app.services.verification import (
 )
 from app.schemas import (
     PortalRegisterRequest, PortalVerifyRequest, PortalResendRequest,
-    PortalLoginRequest, PortalPendingResponse, TokenResponse,
+    PortalLoginRequest, PortalPendingResponse, TokenResponse, UserResponse,
 )
 
 router = APIRouter()
 settings = get_settings()
+
+Db = Annotated[AsyncSession, Depends(get_db)]
 
 PURPOSE_SIGNUP = "signup"
 
@@ -297,13 +301,14 @@ async def portal_verify(data: PortalVerifyRequest, db: AsyncSession = Depends(ge
     return _token_for(user)
 
 
-@router.post("/login", dependencies=[_enabled])
-async def portal_login(data: PortalLoginRequest, request: Request,
-                       db: AsyncSession = Depends(get_db)):
-    """Visitor login by phone or email.
+async def _authenticate_visitor(data: PortalLoginRequest, request: Request,
+                                db: AsyncSession) -> "User | PortalPendingResponse":
+    """The whole password check for a visitor: lookup, rate limit, constant-time
+    compare, the staff/inactive/verification gates. Shared by the bearer-token
+    endpoint below and the panel-style cookie one, so the two never drift apart.
 
-    Staff are turned away on purpose: this path has no TOTP step, so letting an
-    admin through here would be a way around their second factor.
+    Returns the signed-in User on success, or a PortalPendingResponse when a
+    fresh code is owed first — neither caller can turn that into a session.
     """
     identifier = data.identifier.strip()
     # Matched on phone or email only. Matching on username too would let a
@@ -360,7 +365,40 @@ async def portal_login(data: PortalLoginRequest, request: Request,
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
-    return _token_for(user)
+    return user
+
+
+@router.post("/login", dependencies=[_enabled])
+async def portal_login(data: PortalLoginRequest, request: Request, db: Db):
+    """Visitor login by phone or email, a bearer token in the body — used by
+    nothing in the portal itself any more, kept for any external caller.
+
+    Staff are turned away on purpose: this path has no TOTP step, so letting an
+    admin through here would be a way around their second factor.
+    """
+    result = await _authenticate_visitor(data, request, db)
+    if isinstance(result, PortalPendingResponse):
+        return result
+    return _token_for(result)
+
+
+@router.post("/session/login", dependencies=[_enabled])
+async def portal_session_login(data: PortalLoginRequest, request: Request,
+                               response: Response, db: Db):
+    """The portal's own login: same check as /login, but on success the token
+    goes into an httpOnly cookie (app/auth/session_cookie.set_session) instead
+    of the response body — the mirror of app/api/routes/session.py for staff,
+    which refuses this same role. A pending code (unverified account) is
+    returned in the body either way; it cannot authenticate anything, and the
+    verify screen needs it for its next step.
+    """
+    result = await _authenticate_visitor(data, request, db)
+    if isinstance(result, PortalPendingResponse):
+        return result
+    token = create_access_token(access_claims(result), token_type=TOKEN_ACCESS)
+    csrf = set_session(request, response, token, False)
+    body = UserResponse.model_validate(result, from_attributes=True).model_dump(mode="json")
+    return {"user": body, "csrf_token": csrf}
 
 
 @router.get("/status")
