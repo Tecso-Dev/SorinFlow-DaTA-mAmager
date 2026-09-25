@@ -14,8 +14,10 @@ const path = require('path');
 const { defineConfig, devices } = require('@playwright/test');
 
 const root = path.resolve(__dirname, '..', '..');
-const api = process.env.E2E_API_URL || 'http://127.0.0.1:8111';
-const baseURL = process.env.E2E_NEXT_URL || 'http://127.0.0.1:3111';
+// The same ports the two start scripts use, so a second checkout on this Mac
+// can run the suite beside the first (E2E_PORT=8121 E2E_NEXT_PORT=3121 ...).
+const api = process.env.E2E_API_URL || `http://127.0.0.1:${process.env.E2E_PORT || '8111'}`;
+const baseURL = process.env.E2E_NEXT_URL || `http://127.0.0.1:${process.env.E2E_NEXT_PORT || '3111'}`;
 const launchOptions = process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {};
 const iphone = devices['iPhone 13'];
 
