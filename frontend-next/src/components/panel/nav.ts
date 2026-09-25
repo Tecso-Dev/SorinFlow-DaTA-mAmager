@@ -1,6 +1,6 @@
 import {
-  Activity, Bot, Building2, Inbox, KeyRound, LayoutDashboard, Mail, MessageSquareText, ScanEye, ScrollText,
-  ShieldCheck, Smartphone, Sparkles, UserCog, Users, type LucideIcon,
+  Activity, Bot, Building2, Inbox, KeyRound, LayoutDashboard, Mail, MessageSquareText, Palette, ScanEye,
+  ScrollText, ShieldCheck, Smartphone, Sparkles, UserCog, Users, type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@/lib/session";
 
@@ -55,6 +55,7 @@ export const NAV: { label: string; items: NavItem[] }[] = [
       { key: "monitoring", label: "پایش سامانه", href: "/panel/monitoring", icon: Activity, perm: "monitoring", step: 7, legacy: "monitoring" },
       { key: "users", label: "کاربران و بکاپ", href: "/panel/users", icon: UserCog, roles: BOSS, step: 7, legacy: "users" },
       { key: "audit", label: "رویدادها", href: "/panel/audit", icon: ScrollText, roles: BOSS, step: 7, legacy: "audit" },
+      { key: "settings", label: "برند و سایت", href: "/panel/settings", icon: Palette, roles: ["root"], step: 7, legacy: "users" },
     ],
   },
 ];
