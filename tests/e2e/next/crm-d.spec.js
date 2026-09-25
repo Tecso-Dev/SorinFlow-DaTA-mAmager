@@ -78,7 +78,7 @@ test.describe('reminders', () => {
     await expect(page.getByRole('heading', { name: 'یادآورها' })).toBeVisible();
 
     const title = `e2e-d-reminder-${stamp}`;
-    await page.getByRole('button', { name: 'یادآور تازه' }).click();
+    await page.getByRole('button', { name: 'یادآور تازه' }).first().click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('عنوان').fill(title);
     await dialog.getByLabel('زمان یادآوری').fill('1405/08/01 10:00');
