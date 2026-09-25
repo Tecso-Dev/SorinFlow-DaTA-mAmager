@@ -574,7 +574,18 @@ async def api_key_middleware(request: Request, call_next):
                     # login endpoints: locally API_KEY is empty so these worked,
                     # while in production a search engine asking for the crawl
                     # rules got 401 JSON and therefore no rules at all.
-                    "/robots.txt", "/sitemap.xml", "/llms.txt", "/og.png"}
+                    "/robots.txt", "/sitemap.xml", "/llms.txt", "/og.png",
+                    # The new panel's cookie login (app/api/routes/session.py):
+                    # unauthenticated by nature, like the /api/users/token group.
+                    # GET /api/session is not here — a real call to it carries
+                    # the session cookie, which the check below accepts.
+                    "/api/session/login", "/api/session/verify-totp",
+                    "/api/session/verify-email", "/api/session/logout",
+                    # The brand and contact details the login screen, the
+                    # landing page and the Next.js server read before anyone
+                    # has signed in. Left out, production silently fell back to
+                    # the defaults and never showed what root had saved.
+                    "/api/public/site"}
     is_dashboard = (request.url.path.startswith("/dashboard")
                     or request.url.path.startswith("/images")
                     # the APK is fetched by a phone that has nothing to
@@ -585,7 +596,14 @@ async def api_key_middleware(request: Request, call_next):
 
     is_preflight = request.method == "OPTIONS"
     has_bearer = request.headers.get("Authorization", "").startswith("Bearer ")
-    if not is_public and not is_preflight and not has_bearer and settings.api_key:
+    # The new panel's session cookie stands where the old panel's Bearer does:
+    # the browser sends no API key either way, and the real check (token,
+    # token_version, CSRF on writes) happens in get_current_user. Without this
+    # every cookie request was a 401 in production, where API_KEY is set, and
+    # never locally, where it is empty.
+    from app.auth.session_cookie import session_token
+    has_session = session_token(request) is not None
+    if not is_public and not is_preflight and not has_bearer and not has_session and settings.api_key:
         provided = (
             request.headers.get("X-API-Key")
             or request.query_params.get("api_key")

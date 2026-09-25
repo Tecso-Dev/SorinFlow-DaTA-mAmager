@@ -70,6 +70,36 @@ class TestCspReportEndpoint:
         )
         assert r.status_code == 204
 
+    def test_the_new_panels_cookie_and_login_pass_the_api_key_gate(self, monkeypatch):
+        """The new panel sends a session cookie and never the API key. With the
+        key set (production), the gate answered every one of its requests —
+        the login itself included — with 401 before any route saw it, while
+        locally, with no key, everything worked."""
+        from app.config import get_settings
+        monkeypatch.setattr(get_settings(), "api_key", "a-key-the-browser-never-sends")
+        gate = "Invalid or missing API key"
+        c = _client()
+        for path in ("/api/session/login", "/api/session/verify-totp",
+                     "/api/session/verify-email", "/api/session/logout"):
+            r = c.post(path, json={})
+            assert r.json().get("detail") != gate, f"{path} stopped at the API-key gate"
+        # a request carrying the session cookie reaches the real check
+        # (get_current_user), which refuses this bogus token on its own terms
+        # (/api/stats/overview, not /api/users/me: that one is public anyway)
+        r = _client().get("/api/stats/overview", cookies={"sf_session": "not-a-real-token"})
+        assert r.status_code == 401 and r.json().get("detail") != gate
+        # the brand the login page and the landing page read before sign-in
+        # (this file's sqlite has no app_settings table, so past the gate the
+        # route fails — the point here is only that it got past the gate)
+        from starlette.testclient import TestClient
+        import app.main as m
+        site = TestClient(m.app, raise_server_exceptions=False).get("/api/public/site")
+        assert gate not in site.text
+        # and a request with neither a Bearer, nor a cookie, nor the key is
+        # still refused at the gate
+        bare = _client().get("/api/stats/overview")
+        assert bare.status_code == 401 and bare.json().get("detail") == gate
+
     def test_a_report_is_accepted_when_the_api_key_gate_is_on(self, monkeypatch):
         """Production sets API_KEY, and the middleware then refuses every /api
         path it does not list as public — the browser sends no key with a CSP
