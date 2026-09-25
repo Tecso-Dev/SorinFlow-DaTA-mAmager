@@ -1,0 +1,122 @@
+# The new panel (frontend-next, Phase 4): the Next.js server for /panel and
+# its /_next assets. Same image as the backend (the Dockerfile's `web` stage
+# puts the standalone server at /app/web), so it rolls out with the same tag.
+# Everything else on the host still goes to the backend (ingress.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  labels:
+    app: web
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    app: web
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+    app.kubernetes.io/component: web
+spec:
+  # One small stateless pod; the RollingUpdate brings the new one up before
+  # the old one goes, so a deploy has no gap.
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+        app.kubernetes.io/part-of: sorinflow
+        app.kubernetes.io/component: web
+    spec:
+      terminationGracePeriodSeconds: 20
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
+          imagePullPolicy: IfNotPresent
+          command: ["node", "/app/web/server.js"]
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: NODE_ENV
+              value: "production"
+            - name: NEXT_TELEMETRY_DISABLED
+              value: "1"
+            # server-side reads (the brand settings) go straight to the api
+            # Service; the browser's /api calls go through Traefik
+            - name: BACKEND_INTERNAL_URL
+              value: "http://backend:8000"
+          # Next writes its fetch and image caches under .next/cache.
+          volumeMounts:
+            - name: next-cache
+              mountPath: /app/web/.next/cache
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "96Mi"
+            limits:
+              memory: "384Mi"
+          startupProbe:
+            httpGet:
+              path: /panel/login
+              port: 3000
+            periodSeconds: 3
+            failureThreshold: 40
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /panel/login
+              port: 3000
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /panel/login
+              port: 3000
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 5
+      volumes:
+        - name: next-cache
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
