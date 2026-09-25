@@ -95,7 +95,8 @@ export function Toolbar({ children, className }: { children: React.ReactNode; cl
 const TONE: Record<Tone, string> = {
   neutral: "bg-muted text-muted-foreground",
   info: "bg-info/12 text-info",
-  warning: "bg-warning/15 text-warning",
+  // light: the warning token alone is 4.1:1 on its own tint; a shade darker passes AA
+  warning: "bg-warning/15 text-[color-mix(in_oklch,var(--warning),black_22%)] dark:text-warning",
   success: "bg-success/12 text-success",
   danger: "bg-destructive/12 text-destructive",
   primary: "bg-primary/12 text-primary",
