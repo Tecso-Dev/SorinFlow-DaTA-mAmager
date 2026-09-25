@@ -22,6 +22,7 @@ import { api, onApiError } from "@/lib/api";
 import { can, displayName, ROLE_LABEL, SESSION_KEY, useSession, type User } from "@/lib/session";
 import type { SiteConfig } from "@/lib/site";
 import { toast } from "@/components/toaster";
+import { DivarOtpPopup } from "./divar-otp-popup";
 import { ConfirmProvider } from "./kit";
 import { NAV, navItemFor } from "./nav";
 import { PhoneGate } from "./phone-gate";
@@ -346,6 +347,7 @@ export function AppShell({ site, children }: { site: ShellSite; children: React.
       </div>
       <CommandPalette user={user} open={palette} onOpenChange={setPalette} />
       <PhoneGate />
+      <DivarOtpPopup />
     </div>
   );
 }
