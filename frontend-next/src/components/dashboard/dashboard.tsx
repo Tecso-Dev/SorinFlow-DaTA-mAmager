@@ -19,7 +19,6 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
 import {
@@ -310,13 +309,23 @@ function TrendPanel({ ov, days, onDays }: { ov: Overview; days: number; onDays: 
       title="روند آگهی و لید"
       hint={`${faNum(totals.l)} آگهی و ${faNum(totals.d)} قرارداد در ${faNum(ov.days)} روز گذشته`}
       action={
-        <Tabs value={String(days)} onValueChange={(v) => onDays(Number(v))}>
-          <TabsList className="h-8">
-            {[7, 30, 90].map((d) => (
-              <TabsTrigger key={d} value={String(d)} className="px-2.5 text-xs">{faNum(d)} روز</TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        // a switch of the same chart, not tabs of different panels
+        <div role="group" aria-label="بازهٔ زمانی" className="inline-flex h-8 items-center rounded-lg bg-muted p-[3px]">
+          {[7, 30, 90].map((d) => (
+            <button
+              key={d}
+              type="button"
+              aria-pressed={days === d}
+              onClick={() => onDays(d)}
+              className={cn(
+                "h-full rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                days === d && "bg-background text-foreground shadow-sm dark:bg-input/30",
+              )}
+            >
+              {faNum(d)} روز
+            </button>
+          ))}
+        </div>
       }
     >
       <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
@@ -784,8 +793,7 @@ function TeamPanel({ ov }: { ov: Overview }) {
       hint={`${faNum(ov.days)} روز گذشته`}
       bodyClassName="px-0 pb-2"
     >
-      <div className="overflow-x-auto">
-        <Table>
+      <Table aria-label="عملکرد مشاوران">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="ps-5">مشاور</TableHead>
@@ -823,8 +831,7 @@ function TeamPanel({ ov }: { ov: Overview }) {
               </TableRow>
             ))}
           </TableBody>
-        </Table>
-      </div>
+      </Table>
     </Panel>
   );
 }

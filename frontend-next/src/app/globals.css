@@ -71,10 +71,11 @@
   --muted-foreground: #5a6378;
   --accent: #eceefb;
   --accent-foreground: #1d2140;
-  --destructive: #dc2626;
-  --success: #16a34a;
-  --warning: #d97706;
-  --info: #0284c7;
+  /* dark enough for 11px text on their own 12% tint (WCAG AA 4.5:1) */
+  --destructive: #b91c1c;
+  --success: #166534;
+  --warning: #b45309;
+  --info: #0369a1;
   --border: #e3e6f0;
   --input: #dfe3ee;
   --ring: #6366f1;
@@ -105,7 +106,7 @@
   --card-foreground: #eef1f8;
   --popover: #10101a;
   --popover-foreground: #eef1f8;
-  --primary: #6366f1;
+  --primary: #5d60ef; /* white on it: 4.8:1 (indigo-500 was 4.47) */
   --primary-foreground: #ffffff;
   --secondary: #161622;
   --secondary-foreground: #e4e7f2;

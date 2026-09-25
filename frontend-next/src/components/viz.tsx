@@ -333,7 +333,7 @@ export function CallHeatmap({ grid }: { grid: number[][] }) {
   const inView = useInView(ref, { once: true });
   const max = Math.max(1, ...grid.flat());
   return (
-    <div ref={ref} className="overflow-x-auto">
+    <div ref={ref} className="overflow-x-auto" tabIndex={0} role="region" aria-label="نمودار تماس‌ها به تفکیک روز و ساعت">
       <div className="grid min-w-[520px] grid-cols-[4.5rem_repeat(12,minmax(0,1fr))] gap-1 text-[10px]">
         <span />
         {HOURS.map((h) => (
