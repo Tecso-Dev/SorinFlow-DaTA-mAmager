@@ -4,7 +4,7 @@
 
 **Divar property collection, data management, and real-estate CRM in one Persian RTL workspace.**
 
-[![FastAPI 0.109](https://img.shields.io/badge/FastAPI-0.109-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![FastAPI 0.141](https://img.shields.io/badge/FastAPI-0.141-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Playwright 1.41](https://img.shields.io/badge/Playwright-1.41-2EAD33?logo=playwright&logoColor=white)](https://playwright.dev/python/)
 [![PostgreSQL 15](https://img.shields.io/badge/PostgreSQL-15-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -38,7 +38,7 @@ SorinFlow is a FastAPI application for collecting real-estate listings from Diva
 
 Read this before changing anything. Where this section and the rest of the README disagree, this section is the one that was checked against the code.
 
-**What it is.** One FastAPI codebase that scrapes Divar listings with Playwright, stores them as a property inventory, and works them through a CRM — plus a public customer portal bolted on the side. Persian/RTL throughout. It runs live at `sorinflow.com` on a single-node k3s cluster on an Iranian VPS behind Traefik, as three role-differentiated Deployments of the same image (`SORINFLOW_ROLE=api|worker|scheduler` — see below). `main` is the only branch and pushing to it deploys straight to production; a manually-triggered `staging.yml` can put the same image in front of a separate `sorinflow-staging` namespace first, and CI — lint, the pytest suite against real Postgres/Redis, the Playwright+axe E2E suite, and a kustomize/kubeconform manifest check — gates every push and pull request either way.
+**What it is.** One FastAPI codebase that scrapes Divar listings with Playwright, stores them as a property inventory, and works them through a CRM — plus a public customer portal bolted on the side. Persian/RTL throughout. It runs live at `sorinflow.com` on a single-node k3s cluster on an Iranian VPS behind Traefik, as three role-differentiated Deployments of the same image (`SORINFLOW_ROLE=api|worker|scheduler` — see below). Work lands on `sorinflow-v2`; pushing `main` deploys straight to production; a manually-triggered `staging.yml` can put the same image in front of a separate `sorinflow-staging` namespace first, and CI — lint, the pytest suite against real Postgres/Redis, the Playwright+axe E2E suite, and a kustomize/kubeconform manifest check — gates every push and pull request either way.
 
 **Moving parts.**
 
@@ -86,7 +86,7 @@ State that used to live only in the process, and die with the pod, mostly moved 
 - **CI applies only two manifests** — `04-backend.yaml` and `05-ingress.yaml`. Namespace, Postgres, Redis and the Traefik ACME config drift silently.
 - **A Secret key with no matching `env` entry in `04-backend.yaml` never reaches the pod**, so `kubectl patch secret` for it is a silent no-op. `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL` and `SUPER_ADMIN_PASSWORD` are wired now; the `GCP_*` block is still in that state. The LLM trio is managed as GitHub Actions secrets — the deploy copies them into the cluster (`SECRETS.md` §2d).
 - **The nightly backup is every table** — password hashes, TOTP secrets, live Divar session JSON included — so the copy that leaves the server is sealed under a key derived from `SECRET_KEY` before it goes to Telegram (`app/services/backup_service.py`, `seal()`); the local copy stays plain on the volume that already holds the data. `scripts/restore_backup.py` imports every model module and opens the sealed `.enc` copy under the same key. Telegram credentials are entered on the admin panel (token encrypted) or via `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, environment first.
-- **Tests skip quietly on SQLite.** A default local run (no `DATABASE_URL`, so SQLite) is 3,407 passed / 238 skipped — most of the auth, Divar-number-ownership and migration suites need real Postgres. Point `DATABASE_URL` and `PG_TEST_URL` at Postgres and Redis at a real Redis, and the only skips left on this codebase's own development Mac are 6 `test_fingerprint.py` cases, because Playwright 1.41's Chromium build does not launch on this macOS version — they, and the Playwright+axe E2E suite, run in CI (Ubuntu) instead. CI runs everything against real Postgres and Redis on every push and pull request, plus lint, coverage, and the E2E and kustomize/kubeconform gates. House rule, stated by the owner: leave a test that fails without the fix, and revert it once to watch it go red.
+- **Tests skip quietly on SQLite.** A default local run (no `DATABASE_URL`, so SQLite) is 3,407 passed / 238 skipped — most of the auth, Divar-number-ownership and migration suites need real Postgres. Point `DATABASE_URL` and `PG_TEST_URL` at Postgres and Redis at a real Redis, and the only skips left on this codebase's own development Mac are 6 `test_fingerprint.py` cases, because the scraper's Chromium (Playwright 1.41) does not launch on this macOS version — they run in CI (Ubuntu) instead. The Playwright+axe E2E suite uses its own, current Playwright and runs on the Mac too. CI runs everything against real Postgres and Redis on every push and pull request, plus lint, coverage, and the E2E and kustomize/kubeconform gates. House rule, stated by the owner: leave a test that fails without the fix, and revert it once to watch it go red.
 - **Untested surface is the request layer.** No test imports any route module; `app/api/routes/crm.py` alone is 2,177 lines. 28 handlers take a raw `dict` body with no schema.
 - The panel loads nine assets from jsDelivr and code.jquery.com with no fallback, while byte-real local copies of four of them sit unreferenced in `frontend/`. On an Iranian network that is the panel's most exposed dependency.
 - **The scraper's depth comes from one replayed request.** `_collect_from_browser_dom` scrolls to a cap of 200; everything past that is `_fetch_listings_direct_api` replaying the browser's own `/postlist/w/search` POST with an advanced cursor. That replay was gated on a cursor it could only obtain by first succeeding, so it produced nothing in any run until 2026-09-02 and every scrape was silently capped at whatever the scroll reached. The legacy `/v8/web-search` GET it fell through to is dead — it answers HTTP 200 with a `BLOCKING_VIEW` «نیاز به بروزرسانی» and zero listings — and is deleted. If depth breaks again, look at the cursor first: `self._dom_cursor`, captured in the response listener, seeds the API phase.
@@ -245,7 +245,7 @@ flowchart TD
     P --> MATCH["services/match_service.py<br/>customer criteria matching"]
     P --> FILE["Filing: binder_id (binder or folder), tags,<br/>is_private on the property row<br/>routes/filing.py"]
 
-    JOB --> SWEEP["scrape_queue.sweep(), every 60s:<br/>orphaned running/paused rows failed;<br/>lost pending rows requeued<br/>(or failed past 24h stale)"]
+    JOB --> SWEEP["scrape_queue.sweep(), every 60s:<br/>orphaned running/paused rows failed,<br/>lost pending rows requeued<br/>(or failed past 24h stale)"]
 ```
 
 Historically the scrape lived inside the same web process that answered HTTP requests, which is why `strategy: Recreate` plus a boot-time-only orphan sweep existed together: a deploy killed the task, and without the sweep the row said «در حال اجرا» forever. Phase 3 gives the scrape its own `worker` role (`k8s/base/worker.yaml`, `RollingUpdate` with a 2-hour drain — a rollout lets `worker` finish what it is running instead of killing it) and replaces the boot-time sweep with a continuous one: `scrape_queue.sweep()` runs at start and every 60 s, closes out a `running`/`paused` row only once nobody holds its Redis claim (safe the whole time other workers live, not just at boot), and re-pushes a queue entry that Redis itself lost — failing it instead, past 24 h, if nothing has ever claimed it. `auth_instances` (the live Divar-login browser) still lives in whichever process is running it — now always `worker`, since the Ingress pins those three routes there.
@@ -376,7 +376,7 @@ Rules:
 | Operations | Docker Compose (local), k3s/Kubernetes with kustomize (`k8s/base` + overlays) in production, Traefik ingress, GitHub Actions |
 | Dependencies | `requirements.txt` in, hash-locked `requirements.lock` / `requirements-dev.lock` out (uv, universal); Docker and CI install with `--require-hashes`, CI runs `pip-audit` |
 | Lint / code quality | ruff, mypy (non-strict), eslint — all three gated only on changed lines (`scripts/lint_new_code.py`); pre-commit runs the same gate plus yaml/merge-conflict/private-key checks |
-| Tests | pytest, pytest-asyncio and pytest-cov; `node --test` for the Telegram relay Worker and the panel's escaping helpers; Playwright 1.41 + `@axe-core/playwright` for the panel E2E suite (`tests/e2e/`, its own Node project); kubeconform + shellcheck for the Kubernetes manifests and deploy scripts |
+| Tests | pytest, pytest-asyncio and pytest-cov; `node --test` for the Telegram relay Worker and the panel's escaping helpers; Playwright 1.63 + `@axe-core/playwright` for the panel E2E suite (`tests/e2e/`, its own Node project, separate from the scraper's Playwright 1.41); kubeconform + shellcheck for the Kubernetes manifests and deploy scripts |
 
 The Docker image (the Playwright base) runs Python 3.10, which is why the locks are compiled for 3.10; development uses 3.11 from the same lock. Regenerate a lock after editing `requirements.txt`:
 
@@ -829,7 +829,7 @@ closed.
 | `app/services/` | Backups (sealed, Telegram), SMS/email providers, verification codes, the forwarder and its watch, the scrape scheduler, the APK mirror, browser-error intake, DPA support, `scrape_queue.py` (the Redis scrape queue), `supervisor.py` (loop supervision and heartbeats), `net_guard.py` (public-address-only outbound guard) |
 | `frontend/` | Persian landing page and the static single-page dashboard; `vendor/` holds every third-party asset (no CDN), `sw.js` + `manifest.webmanifest` + `icons/` make it a PWA |
 | `tests/` | 182 `test_*.py` files: parsers, validators, auth/role behaviour, migrations, the scrape queue, supervisor, Chromium sandbox, Kubernetes manifests and the lint gate itself |
-| `tests/e2e/` | Its own Node project (Playwright 1.41 + `@axe-core/playwright`) driving the real panel in a real browser: smoke and accessibility specs, an axe baseline, and `scripts/e2e_up.sh` as the app-under-test's boot script |
+| `tests/e2e/` | Its own Node project (Playwright 1.63 + `@axe-core/playwright`) driving the real panel in a real browser: smoke and accessibility specs, an axe baseline, and `scripts/e2e_up.sh` as the app-under-test's boot script |
 | `scripts/` | `new_server.sh` (rebuild a server from a backup bundle), `provision-host.sh` (host-level setup), `restore_backup.py`, `deploy_k8s.sh` (renders a kustomize overlay and rolls it out — the same script CI, staging and a person locally all call), `lint_new_code.py` (the changed-lines lint gate), `local_up.sh`/`e2e_up.sh` (dev and E2E app boot), deployment and survey helpers |
 | `k8s/` | kustomize: `base/` (Postgres, Redis, the `api`/`worker`/`scheduler` Deployments, the migrate and data-ownership Jobs, NetworkPolicies, ingress) and `overlays/production`, `overlays/staging` |
 | `deploy/seccomp/` | `sorinflow-chromium.json`, the seccomp profile the worker's Chromium sandbox runs under (installed onto the node by `deploy.yml`) |
@@ -918,7 +918,7 @@ tests create usernames that must be unique.
 
 CI runs the full suite against real Postgres and Redis services — plus
 `pip-audit` and the Telegram relay Worker's own `node --test` — on every push
-**and every pull request**, and nothing reaches the registry unless it passes.
+**and every pull request**, and nothing reaches the registry unless they pass.
 
 ### Linting
 
@@ -950,9 +950,10 @@ out to Divar, Telegram, an LLM or Google switched off) and waits for `/health`
 before the suite runs; set `E2E_BASE_URL` to point at an already-running
 instance instead, e.g. while iterating on one spec. The axe gate fails only on
 a *new* critical or serious accessibility violation, compared against
-`tests/e2e/a11y-baseline.json`. **This suite, and 6 of the Python
-`test_fingerprint.py` cases, need a Chromium build that does not launch under
-Playwright 1.41 on this codebase's development macOS** — both run in CI
+`tests/e2e/a11y-baseline.json`. The suite runs on its own, current Playwright
+(1.63), so it runs on the development Mac as well as in CI. **6 of the Python
+`test_fingerprint.py` cases need the scraper's own Chromium (Playwright 1.41),
+which does not launch on this codebase's development macOS** — they run in CI
 (`ubuntu-22.04`, which the production image is also built on) instead.
 
 ### Kubernetes manifest checks
