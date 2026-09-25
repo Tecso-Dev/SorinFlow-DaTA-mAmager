@@ -1,5 +1,5 @@
-import { ComingTab } from "@/components/crm/coming";
+import { RemindersTab } from "@/components/crm/reminders/reminders-tab";
 
 export default function Page() {
-  return <ComingTab slug="reminders" />;
+  return <RemindersTab />;
 }
