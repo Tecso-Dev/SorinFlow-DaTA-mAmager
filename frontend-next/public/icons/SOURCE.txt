@@ -1,0 +1,1 @@
+Rendered from frontend/favicon.svg — rerun scripts/render-icons.mjs <path-to-final-logo.svg> once there is one.
