@@ -219,6 +219,15 @@ jq -n --arg stamp "$STAMP" \
       '{stamp: $stamp, created_at: $created_at, row_counts: $row_counts, parts: $parts}' \
       > "$OUTDIR/manifest.json"
 
+# The bundle is finished and already GPG-encrypted end to end, so handing it
+# over costs no secrecy. The api/worker pods run as uid/gid 1000 with no
+# capabilities and cannot read a root-owned 0700 tree — without this the
+# off-site copy silently never ships, and ship() can never delete a
+# delivered bundle either. A non-root dev/test run of this script (its own
+# test suite) cannot chown to a uid it does not have; that failure is
+# swallowed rather than failing a backup that is otherwise complete.
+chown -R 1000:1000 "$OUTBOX" || true
+
 # ── 7. ship — the pod reaches Telegram, the host cannot ────────────────────
 STAGE="ارسال به تلگرام"
 kubectl -n "$NAMESPACE" exec "$BACKEND" -- python -m app.services.dr_backup ship \

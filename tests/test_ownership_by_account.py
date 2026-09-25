@@ -445,16 +445,18 @@ class TestWhoSeesWhat:
     def test_a_former_colleagues_name_inherits_nothing(self, office):
         """reza leaves and his account is deleted; nima later goes by the
         same name, and the pods restart. What was reza's is nobody's: the
-        manager and root see it, nima does not."""
+        manager and root see it — his queue entry included, since a lead
+        nobody can claim would otherwise sit unresolved forever — nima does
+        not."""
         api, p = office["api"], office["people"]
         reza = _holdings(office, "reza")
         assert api("DELETE", f"/users/{p['reza'].id}", "boss").status_code == 200
         assert api("PATCH", "/users/me", "nima", json={"full_name": "رضا کریمی"}).status_code == 200
         office["boot"]()
         assert _shown(_seen(office, "nima"), reza) == set()
-        assert _shown(_seen(office, "boss"), reza) == ALL - {"queue"}
-        # his lead is not «nobody's yet» either: it stays out of every queue
-        # until a manager hands it on
+        assert _shown(_seen(office, "boss"), reza) == ALL
+        # his lead is not «nobody's yet» either: dialling it (below) does not
+        # silently claim it the way a never-named lead's first dial would
         lead = _get(office, Lead, reza["queue"])
         assert (lead.assigned_to, lead.assigned_to_user_id) == ("رضا کریمی", None)
         assert api("POST", f"/crm/leads/{lead.id}/call", "nima", json={"outcome": "answered"}).status_code == 403
@@ -483,8 +485,10 @@ class TestWhoSeesWhat:
         office["boot"]()
         assert _shown(_seen(office, "twin1"), held) == set()
         assert _shown(_seen(office, "twin2"), held) == set()
-        assert _shown(_seen(office, "boss"), held) == ALL - {"queue"}
-        assert _shown(_seen(office, "root"), held) == ALL - {"queue"}
+        # including the queue entry: two people going by "دوقلو" is exactly
+        # the kind of stuck row only root/super_admin can sort out
+        assert _shown(_seen(office, "boss"), held) == ALL
+        assert _shown(_seen(office, "root"), held) == ALL
 
     def test_what_the_previous_release_wrote_is_its_owners_after_the_boot(self, office):
         async def by_name(s):

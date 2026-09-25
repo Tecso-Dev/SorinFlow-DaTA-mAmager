@@ -238,6 +238,15 @@ def pipeline(tmp_path_factory):
     kubectl_path.write_text(FAKE_KUBECTL)
     kubectl_path.chmod(kubectl_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
+    # ── fake chown: this test does not run as root, so it cannot actually
+    # hand the bundle to uid 1000 the way the real host does. It records what
+    # it was asked to do instead, which the assertions below read back — the
+    # only way to prove the handoff without a real uid 1000 to chown to.
+    chown_log = base / "chown.log"
+    chown_path = fakebin / "chown"
+    chown_path.write_text(f'#!/usr/bin/env bash\necho "$*" >> "{chown_log}"\n')
+    chown_path.chmod(chown_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
     # ── fake Telegram ────────────────────────────────────────────────────────
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _TelegramHandler)
     httpd.lock = threading.Lock()
@@ -290,6 +299,7 @@ def pipeline(tmp_path_factory):
             "outdir": storage / f"restored-{stamp}",
             "plain_secret": plain_secret, "passphrase": passphrase,
             "records": httpd.records, "expected_counts": expected_counts, "env": env,
+            "chown_log": chown_log,
         }
     finally:
         httpd.shutdown()
@@ -343,6 +353,18 @@ class TestBackupShipsSuccessfully:
         assert any(created_at in t for t in texts), texts
         # the row counts travel in the same message
         assert any("users 3" in t or "properties 2" in t for t in texts), texts
+
+    def test_the_finished_bundle_is_handed_to_the_pods_uid(self, pipeline):
+        """The api/worker pods run as uid/gid 1000 with no capabilities and
+        cannot read a root-owned 0700 bundle, so without this chown the
+        off-site copy would silently never ship and a delivered bundle could
+        never be deleted. It must run only after the bundle is complete
+        (encrypted, split, manifest written) and cover the whole outbox, not
+        just the newest stamp, so a bundle a previous run left behind is
+        still readable too."""
+        calls = pipeline["chown_log"].read_text().splitlines()
+        outbox = pipeline["pvc"] / "dr-outbox"
+        assert f"-R 1000:1000 {outbox}" in calls, calls
 
 
 class TestRestore:

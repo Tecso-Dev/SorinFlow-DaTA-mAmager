@@ -265,6 +265,27 @@ class TestTheConcurrencyCap:
         assert [r["job_id"] for r in runs] == ids, "first in, first out"
         consumer.cancel()
 
+    async def test_a_foreign_workers_claims_count_toward_the_cap(self, queue, monkeypatch):
+        """During a worker rollout the draining pod keeps its own runs going
+        while the new pod's local _running starts at zero — the cap must see
+        every worker's claims, not just this process's, or a rollout runs
+        double the configured Chromiums on one node."""
+        monkeypatch.setattr(sq.settings, "scrape_worker_concurrency", 2)
+        runs = _stand_in(monkeypatch)
+        # two claims already held by a worker this process knows nothing
+        # about — not in sq._running, only in Redis
+        await queue.redis.set(sq.CLAIM.format(str(uuid.uuid4())), "another-worker", ex=90)
+        await queue.redis.set(sq.CLAIM.format(str(uuid.uuid4())), "another-worker", ex=90)
+        jid = await _job(queue)
+        await sq.enqueue(jid)
+        consumer = asyncio.create_task(sq.consume())
+        await asyncio.sleep(0.3)
+        consumer.cancel()
+        await asyncio.gather(consumer, return_exceptions=True)
+        assert runs == [] and sq.running_ids() == []
+        assert await queue.redis.lrange(sq.QUEUE, 0, -1) == [jid], \
+            "left in the queue: the node is already at its cap"
+
 
 class TestTheSweep:
 
@@ -319,6 +340,26 @@ class TestTheSweep:
         young = await _job(queue, age=timedelta(seconds=30))
         await sq.sweep()
         assert await queue.redis.lpos(sq.QUEUE, young) is None
+
+    async def test_a_pending_row_stuck_over_24h_is_failed_not_requeued_forever(self, queue):
+        """Something keeps a row like this from ever running (bad config,
+        nobody consuming the queue) — requeuing it every minute for days
+        only hides that."""
+        stale = await _job(queue, status="pending", age=timedelta(hours=25))
+        fresh = await _job(queue, status="pending", age=timedelta(minutes=10))
+
+        res = await sq.sweep()
+
+        assert res["failed_stale"] == 1
+        row = await _row(stale)
+        assert row.status == "failed" and row.completed_at is not None
+        assert row.finish_reason == sq.STALE_PENDING_REASON and "«ادامه»" in row.finish_reason
+        assert await queue.redis.lpos(sq.QUEUE, stale) is None, "not pushed back into the queue"
+        assert (await _row(fresh)).status == "pending", "a merely-old pending row is unaffected"
+        async with database.async_session_maker() as db:
+            lines = (await db.execute(select(ScrapingLog).where(
+                ScrapingLog.job_id == uuid.UUID(stale)))).scalars().all()
+        assert [(line.level, line.message) for line in lines] == [("error", sq.STALE_PENDING_LOG)]
 
 
 class TestTheDrain:

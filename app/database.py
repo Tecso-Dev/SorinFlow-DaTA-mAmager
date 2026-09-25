@@ -158,8 +158,25 @@ async def init_db(strict: bool = False):
         fresh = not await conn.run_sync(lambda c: inspect(c).has_table("users"))
         await conn.run_sync(Base.metadata.create_all)
 
+    # Every _migrate_* step below (and _migrate_auth_v2 further down) is
+    # pre-Alembic DDL: it exists to bring a database up to the baseline
+    # Alembic takes over from. Once one is already at this image's head, its
+    # `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` still takes ACCESS EXCLUSIVE
+    # even though every column already exists — and app/migrate.py runs
+    # init_db() against the live database on every deploy, so that lock
+    # queues behind whatever else is running (a plain SELECT once waited
+    # 4.5s behind one). A database not yet at head — fresh, pre-Alembic, or
+    # simply behind — still runs every step: a fresh one is not stamped yet
+    # (that happens below, in _alembic_sync), and an old stamp can be wrong
+    # in a way Alembic itself never sees (_migrate_cookie_is_enabled exists
+    # because of exactly that, see its docstring).
+    async with engine.begin() as conn:
+        await _guard(conn)
+        stamped = await _is_alembic_stamped(conn)
+
     # Order still matters where one migration depends on another's columns;
-    # it is preserved. What changed is the blast radius when one fails.
+    # it is preserved. What changed is the blast radius when one fails, and
+    # that a stamped database now skips every _migrate_* step outright.
     for step in (_migrate_users_totp,
                  _migrate_users_totp_last_step,
                  _migrate_users_divar_phone,
@@ -199,6 +216,8 @@ async def init_db(strict: bool = False):
                  _backfill_ai_pipeline_fingerprints,
                  _seed_reference_data,
                  _backfill_owner_ids):
+        if stamped and step.__name__.startswith("_migrate_"):
+            continue
         try:
             async with engine.begin() as conn:
                 await _guard(conn)
@@ -209,9 +228,10 @@ async def init_db(strict: bool = False):
             # failure while committing.
             print(f"{step.__name__} skipped: {e}")
 
-    async with engine.begin() as conn:
-        await _guard(conn)
-        await _migrate_auth_v2(conn)
+    if not stamped:
+        async with engine.begin() as conn:
+            await _guard(conn)
+            await _migrate_auth_v2(conn)
 
     # From here on, schema changes are Alembic revisions (migrations/versions):
     # the steps above bring an old database to the baseline, this applies
@@ -245,6 +265,37 @@ async def init_db(strict: bool = False):
             print(f"{seed.__name__} skipped: {e}")
 
 
+async def _is_alembic_stamped(conn) -> bool:
+    """True once this database's current Alembic revision already matches
+    this image's head — the steady state after an ordinary deploy, where the
+    pre-Alembic steps in init_db() have nothing left to do.
+
+    A database at an older revision, or with no alembic_version row at all,
+    is NOT considered stamped, and still runs them: a fresh database is only
+    stamped by `_alembic_sync` further down, after those run, and an old
+    stamp can be wrong in a way Alembic itself never sees — see
+    `_migrate_cookie_is_enabled`'s docstring for the '0009' collision that is
+    exactly this.
+
+    Never lets a check meant to save a lock cost the boot instead: any
+    failure here reads as "not stamped", same as before this existed.
+    """
+    try:
+        cfg = _alembic_config()
+        if cfg is None:
+            return False
+        head = _script_head(cfg)
+
+        def _current(sync_conn):
+            from alembic.runtime.migration import MigrationContext
+            return MigrationContext.configure(sync_conn).get_current_revision()
+
+        current = await conn.run_sync(_current)
+        return current is not None and current == head
+    except Exception:
+        return False
+
+
 async def _alembic_sync(fresh: bool) -> None:
     """Stamp or upgrade, on the app's own guarded connection.
 
@@ -252,10 +303,22 @@ async def _alembic_sync(fresh: bool) -> None:
     no version yet  → an established database from before Alembic: stamp the
                       baseline the boot-time steps have brought it to, then
                       upgrade to head.
-    versioned       → upgrade to head (a no-op when nothing is newer).
+    versioned, behind → upgrade to head (a no-op when nothing is newer).
+    versioned, AHEAD  → a revision this image's own script directory has
+                      never heard of is not behind, it is ahead: a newer
+                      release's schema, reached by a rollback
+                      (`kubectl rollout undo`, or the deploy script undoing a
+                      failed rollout). Every migration is additive precisely
+                      so that keeps working — logged and left alone, never
+                      raised, the same rule assert_schema_current already
+                      applies to a running pod. Without this, `python -m
+                      app.migrate`'s strict mode (app/migrate.py) would fail
+                      the Job trying to "upgrade" a schema already ahead of
+                      it, turning a routine rollback into an outage.
     """
     from alembic import command
     from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
 
     cfg = _alembic_config()
     if cfg is None:
@@ -274,6 +337,14 @@ async def _alembic_sync(fresh: bool) -> None:
             command.upgrade(cfg, "head")
             print(f"alembic: pre-alembic database stamped baseline, upgraded to {head}")
         elif current != head:
+            try:
+                ScriptDirectory.from_config(cfg).get_revision(current)
+            except Exception:
+                from loguru import logger
+                logger.warning(f"alembic: database is at {current}, unknown to this "
+                               f"image's {head} — ahead of it (a rollback); migrations "
+                               "are additive, leaving it alone")
+                return
             command.upgrade(cfg, "head")
             print(f"alembic: upgraded {current} → {head}")
 

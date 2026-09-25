@@ -50,6 +50,11 @@ DRAIN_LOG_EVERY = 60
 # rollout to this code, be running inside an api pod of the previous release,
 # which never claims. Putting that one back would run it twice.
 REQUEUE_AFTER = timedelta(minutes=5)
+# A pending row this old has been rebuilt and pushed back by the sweep for a
+# full day without any worker ever taking it — requeuing it forever only
+# hides that something is actually wrong (bad config, nobody consuming the
+# queue). Marked failed instead of requeued past this age.
+STALE_PENDING_AFTER = timedelta(hours=24)
 
 # The words a run killed with its process has always ended with, so the panel
 # and the «ادامه» button read it exactly as before.
@@ -58,6 +63,12 @@ ORPHAN_REASON = ("سرور در میانهٔ اجرا ری‌استارت شد �
                  "«ادامه» از همان‌جا دنبال می‌شود")
 ORPHAN_LOG = ("سرور در میانهٔ این اسکرپ ری‌استارت شد (استقرار نسخهٔ "
               "جدید یا ری‌استارت سرویس) — تسک ادامه پیدا نکرد")
+
+STALE_PENDING_REASON = ("این تسک بیش از ۲۴ ساعت در صف ماند و هیچ ورکری آن را "
+                        "اجرا نکرد — ناموفق ثبت شد. با دکمهٔ «ادامه» دوباره "
+                        "اجرا کنید")
+STALE_PENDING_LOG = ("این تسک بیش از ۲۴ ساعت در صف بود و هیچ ورکری آن را "
+                     "برنداشت — ناموفق ثبت شد")
 
 # Unique per process even where the pid is not: a restarted container is
 # PID 1 again, under the same hostname, and must not mistake the dead
@@ -183,8 +194,12 @@ async def _take(r, job_id: str) -> None:
 
 
 async def consume() -> None:
-    """Pop, claim, run — at most SCRAPE_WORKER_CONCURRENCY at once. Beats
-    every few seconds, idle or full."""
+    """Pop, claim, run — at most SCRAPE_WORKER_CONCURRENCY at once, and that
+    cap is GLOBAL, not per process: during a worker rollout (maxSurge 1) the
+    draining pod keeps its own runs going while the new pod's local
+    `_running` starts at zero, so checking only that let a rollout briefly
+    run double the configured Chromiums on one node. Beats every few
+    seconds, idle or full."""
     warned = False
     while True:
         beat("scrape_consumer")
@@ -193,6 +208,14 @@ async def consume() -> None:
                                return_when=asyncio.FIRST_COMPLETED)
             continue
         try:
+            # ponytail: a count-then-act check, not atomic, so two workers
+            # racing this at once can briefly go one job over the cap — far
+            # better than today's whole extra process worth, and a Lua-scripted
+            # reserve is precision the test suite's fakeredis cannot exercise
+            # anyway (see _cas above).
+            if len(await claims()) >= settings.scrape_worker_concurrency:
+                await asyncio.sleep(POP_TIMEOUT)
+                continue
             r: Any = await database.get_redis()
             # ponytail: an id popped just as the process is cancelled is lost
             # from the list; the sweep re-queues the pending row, so no
@@ -247,14 +270,40 @@ async def release_orphans(job_ids) -> int:
     return len(released)
 
 
+async def _fail_stale_pending(job_ids) -> int:
+    """Pending rows the sweep has been rebuilding and re-queueing for a full
+    day without any worker ever taking them. Requeuing them again would only
+    hide whatever actually keeps them from running (bad config, nobody
+    consuming the queue); failed says so instead, the same way any other
+    stop does. Same shape as release_orphans, for pending rows instead of
+    running/paused ones."""
+    async with database.async_session_maker() as db:
+        failed = (await db.execute(
+            update(ScrapingJob)
+            .where(ScrapingJob.job_id.in_(list(job_ids)),
+                   ScrapingJob.status == "pending")
+            .values(status="failed", completed_at=datetime.now(), finish_reason=STALE_PENDING_REASON)
+            .returning(ScrapingJob.job_id)
+            .execution_options(synchronize_session=False))).scalars().all()
+        await db.commit()
+    if failed:
+        logger.warning(f"{len(failed)} scraping job(s) sat pending over 24h with no worker "
+                       "taking them and have been marked failed")
+    for job_id in failed:
+        await job_log.record(job_id, job_log.ERROR, STALE_PENDING_LOG, level="error")
+    return len(failed)
+
+
 async def sweep() -> dict:
     """What Redis lost, put right from Postgres.
 
     A running or paused row that nobody claims belongs to a worker that is
     gone: closed out as a restart always did. A pending row neither queued
-    nor claimed lost its entry: pushed back, oldest first. Runs this process
-    holds are never touched, even in the moment after a Redis restart before
-    their claims are re-asserted.
+    nor claimed lost its entry: pushed back, oldest first — unless it has
+    been going in circles for a full day, in which case it is marked failed
+    instead of pushed back yet again. Runs this process holds are never
+    touched, even in the moment after a Redis restart before their claims
+    are re-asserted.
     """
     r: Any = await database.get_redis()
     async with database.async_session_maker() as db:
@@ -262,18 +311,21 @@ async def sweep() -> dict:
             select(ScrapingJob.job_id, ScrapingJob.status, ScrapingJob.created_at)
             .where(ScrapingJob.status.in_(("pending", "running", "paused")))
             .order_by(ScrapingJob.id))).all()
-    orphans, requeued = [], 0
+    orphans, stale_pending, requeued = [], [], 0
     for job_id, status, created_at in rows:
         jid = str(job_id)
         if jid in _running or await r.exists(CLAIM.format(jid)):
             continue
         if status != "pending":
             orphans.append(job_id)
+        elif _older_than(created_at, STALE_PENDING_AFTER):
+            stale_pending.append(job_id)
         elif _older_than(created_at, REQUEUE_AFTER) and await r.lpos(QUEUE, jid) is None:
             await r.lpush(QUEUE, jid)
             requeued += 1
     released = await release_orphans(orphans) if orphans else 0
-    return {"released": released, "requeued": requeued}
+    failed_stale = await _fail_stale_pending(stale_pending) if stale_pending else 0
+    return {"released": released, "requeued": requeued, "failed_stale": failed_stale}
 
 
 async def sweep_loop() -> None:
@@ -284,7 +336,7 @@ async def sweep_loop() -> None:
         beat("scrape_sweep")
         try:
             res = await sweep()
-            if res["released"] or res["requeued"]:
+            if res["released"] or res["requeued"] or res["failed_stale"]:
                 logger.info(f"[queue] sweep: {res}")
         except Exception as e:
             logger.warning(f"[queue] sweep failed: {type(e).__name__}: {e}")

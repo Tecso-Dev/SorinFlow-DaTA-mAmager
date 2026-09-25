@@ -166,6 +166,26 @@ def _seed(username, full_name, leads):
     return asyncio.run(_go())
 
 
+def _seed_root(username, full_name):
+    """A root account, no leads of its own — for tests that need to see the
+    queue the way root does rather than dial as a consultant."""
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from app.models.user import User
+    from app.auth.jwt import get_password_hash
+
+    async def _go():
+        eng = create_async_engine(os.environ["DATABASE_URL"])
+        maker = async_sessionmaker(eng, expire_on_commit=False)
+        try:
+            async with maker() as s:
+                s.add(User(username=username, full_name=full_name, role="root", permissions=[],
+                           hashed_password=get_password_hash("pw123456"), is_active=True))
+                await s.commit()
+        finally:
+            await eng.dispose()
+    asyncio.run(_go())
+
+
 def _tok(client, username):
     r = client.post("/api/users/token", data={"username": username, "password": "pw123456"})
     assert r.status_code == 200, r.text
@@ -226,3 +246,25 @@ class TestThroughTheApp:
         ids = _seed("cq_bad", "بد", [{"phone": "09140000010"}])
         r = client.post(f"/api/crm/leads/{ids[0]}/call", headers=_tok(client, "cq_bad"), json={"outcome": "hung_up"})
         assert r.status_code == 400
+
+    def test_a_lead_whose_name_meant_nobody_appears_only_in_roots_queue(self, client):
+        """assigned_to holds a name (so it is not "unassigned"),
+        assigned_to_user_id never resolved to an account (so it is not
+        "mine" for anyone) — left out of call_queue_for's root exception,
+        this sits in no one's queue at all forever."""
+        ids = _seed("cq_named_nobody", "دارندهٔ لید", [
+            {"phone": "09140000012", "assigned_to": "نامی که به کسی نرسید"},
+        ])
+        _seed_root("cq_root_queue", "ریشه")
+
+        # an ordinary admin — even the one who filed it — does not see it
+        owner = client.get("/api/crm/calls/today", headers=_tok(client, "cq_named_nobody")).json()
+        assert ids[0] not in [x["id"] for x in owner["items"]]
+
+        # root does, and can act on it — the existing claim-on-first-dial
+        # rule (log_call's is_super exception) already allows this
+        root = _tok(client, "cq_root_queue")
+        d = client.get("/api/crm/calls/today", headers=root).json()
+        assert ids[0] in [x["id"] for x in d["items"]]
+        r = client.post(f"/api/crm/leads/{ids[0]}/call", headers=root, json={"outcome": "answered"})
+        assert r.status_code == 200, r.text

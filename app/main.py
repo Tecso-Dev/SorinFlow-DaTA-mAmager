@@ -56,9 +56,19 @@ logger.add(
 # /app/logs, so importing the app anywhere else — a test run, a shell, a
 # read-only root filesystem — died at import time before a single line of the
 # application ran. Stdout logging above is the one that must always work.
+#
+# The filename depends on the role: with each role now its own pod and each
+# pod writing into its own emptyDir, every role sharing "scraper.log" meant
+# the panel's log viewer — which tails whichever api replica answers — could
+# never show a scrape or a scheduler loop, only that api pod's own lines.
+# roles all and worker keep the original name (a local/test run, or the
+# worker, is exactly what "scraper" always meant); api and scheduler get
+# their own file, which the k8s side then points at the shared data volume
+# so the viewer can read them from any replica.
+_ROLE_LOG_NAMES = {"api": "api.log", "scheduler": "scheduler.log"}
 try:
     logger.add(
-        str(Path(get_settings().logs_path) / "scraper.log"),
+        str(Path(get_settings().logs_path) / _ROLE_LOG_NAMES.get(get_settings().sorinflow_role, "scraper.log")),
         rotation="10 MB",
         retention="7 days",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {extra[request_id]} | {name}:{function}:{line} - {message}",
@@ -67,7 +77,7 @@ try:
         backtrace=False,
         diagnose=False,
         compression="gz",      # a 10MB text log compresses to well under 1MB
-        enqueue=True,          # the scraper and the API both write to this file
+        enqueue=True,          # more than one task in this process can write to it at once
     )
 except Exception as _log_err:  # pragma: no cover - environment dependent
     logger.warning(f"file logging disabled ({_log_err})")
@@ -131,6 +141,33 @@ async def _refuse_default_secrets() -> None:
         for reason in why:
             logger.critical(f"Refusing to start in production: {reason}")
         raise RuntimeError("Refusing to start in production: " + "; ".join(why))
+
+
+async def _backfill_owner_ids_once() -> None:
+    """Give rows written by name, since the last time this ran, their account.
+
+    App pods run with DB_MIGRATE_ON_BOOT=false, so init_db()'s own step of
+    the same name (app/database.py, right after Alembic 0016's one-time
+    sweep of the whole table) never runs in them — only the separate migrate
+    Job does, before the rollout starts. A row the PREVIOUS release writes by
+    name between that Job finishing and its own pods stopping would then
+    stay ownerless until the next deploy. Roles scheduler and all run this
+    once at startup instead, on the app's own guarded connection, same as
+    the boot step; api and worker never read or write ownership, so they
+    skip it. Never stops a pod that is otherwise ready to serve — a lock
+    timeout or a transient database blip here is logged, not raised, the
+    same rule the boot step itself follows.
+    """
+    from app.database import engine, _guard
+    from app.auth.visibility import backfill_owner_ids
+    try:
+        async with engine.begin() as conn:
+            await _guard(conn)
+            touched = await conn.run_sync(backfill_owner_ids)
+        if touched:
+            logger.info(f"owner accounts resolved for {touched} row(s) written by name")
+    except Exception as e:
+        logger.warning(f"owner account backfill skipped: {e}")
 
 
 # ─── what each process runs ─────────────────────────────────────────────────
@@ -292,6 +329,9 @@ async def lifespan(app: FastAPI):
         # what halts the rollout with the previous pods still serving.
         await assert_schema_current()
         logger.info("Database schema is at this image's Alembic head")
+
+    if role in ("scheduler", "all"):
+        await _backfill_owner_ids_once()
 
     # Google Cloud export: the sink buffers this process's log records and
     # the exporter loop (every role — see _loops) ships them.

@@ -73,9 +73,12 @@ class TestPythonMAppMigrate:
 
     @pytest.mark.skipif(not ON_POSTGRES, reason="needs Postgres — the boot steps and Alembic are Postgres DDL")
     def test_strict_where_a_boot_is_forgiving(self):
-        """Exit 0 at head; exit 1 when Alembic cannot upgrade — where the same
-        database still boots through the forgiving path DB_MIGRATE_ON_BOOT=true
-        takes."""
+        """Exit 0 at head; exit 0, warned but not upgraded, when the database
+        is AHEAD of this image (a rollback onto a newer, additive schema) —
+        the Job agrees with the forgiving path DB_MIGRATE_ON_BOOT=true takes,
+        and with assert_schema_current, which already let a running pod start
+        on one. Exit 1 only for a real failure: a revision this image knows
+        about whose upgrade raises."""
         from sqlalchemy import text
         from sqlalchemy.engine import make_url
         from sqlalchemy.ext.asyncio import create_async_engine
@@ -95,6 +98,12 @@ class TestPythonMAppMigrate:
             finally:
                 await eng.dispose()
 
+        head = database._script_head(database._alembic_config())
+        # A revision chained onto the real head whose upgrade() always
+        # raises — a genuine failure that must still fail the Job, without
+        # touching any revision this repo actually ships. Removed in finally.
+        broken_rev = ROOT / "migrations" / "versions" / "test_only_broken_revision.py"
+
         admin = url.set(database="postgres")
         asyncio.run(_sql(admin, f'DROP DATABASE IF EXISTS "{scratch.database}" WITH (FORCE)',
                          f'CREATE DATABASE "{scratch.database}"', autocommit=True))
@@ -111,20 +120,46 @@ class TestPythonMAppMigrate:
                     await eng.dispose()
             asyncio.run(_check())
 
+            # Ahead of the image: '9999' is a revision this image's own
+            # script directory has never heard of — the shape a rollback onto
+            # a newer release's schema leaves behind. Migrations are
+            # additive, so the Job must not fail trying to "upgrade" a schema
+            # that is already ahead of it; that would turn a routine rollback
+            # into an outage.
             asyncio.run(_sql(scratch, "UPDATE alembic_version SET version_num = '9999'"))
             r = _python("-m", "app.migrate", env=scratch_env)
-            assert r.returncode == 1, (r.stdout + r.stderr)[-3000:]
-            assert "migration failed" in r.stdout + r.stderr
+            assert r.returncode == 0, (r.stdout + r.stderr)[-3000:]
+            assert "migration complete" in r.stdout + r.stderr
+            assert "ahead of it" in r.stdout + r.stderr
 
-            # the same database, booted the ordinary way: printed, not raised
+            # the same database, booted the ordinary way: agrees, unraised
             r = _python("-c", "import asyncio; from app.database import init_db; asyncio.run(init_db())",
                         env=scratch_env)
             assert r.returncode == 0, (r.stdout + r.stderr)[-3000:]
-            assert "alembic skipped" in r.stdout
-            # and a pod on this image still starts on it: 9999 is a revision
-            # this image has never heard of — ahead of it, as after a rollback.
-            # Only the Job, which would have to migrate it, refuses.
+            assert "ahead of it" in r.stdout + r.stderr
+            # neither call touched a schema/version already ahead of them
             asyncio.run(_check())
+
+            # A real failure must still fail the Job: put the database back
+            # at its real, known head, then give it one more revision whose
+            # upgrade() always raises.
+            asyncio.run(_sql(scratch, f"UPDATE alembic_version SET version_num = '{head}'"))
+            broken_rev.write_text(
+                '"""a revision that always fails — test_strict_where_a_boot_is_forgiving only.\n\n'
+                f'Revision ID: test_only\nRevises: {head}\n"""\n'
+                'revision = "test_only"\n'
+                f'down_revision = "{head}"\n'
+                'branch_labels = None\n'
+                'depends_on = None\n\n\n'
+                'def upgrade() -> None:\n'
+                '    raise RuntimeError("intentional failure — test_strict_where_a_boot_is_forgiving")\n\n\n'
+                'def downgrade() -> None:\n'
+                '    pass\n'
+            )
+            r = _python("-m", "app.migrate", env=scratch_env)
+            assert r.returncode == 1, (r.stdout + r.stderr)[-3000:]
+            assert "migration failed" in r.stdout + r.stderr
         finally:
+            broken_rev.unlink(missing_ok=True)
             asyncio.run(_sql(admin, f'DROP DATABASE IF EXISTS "{scratch.database}" WITH (FORCE)',
                              autocommit=True))
