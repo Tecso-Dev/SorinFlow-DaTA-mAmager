@@ -164,9 +164,14 @@ def scraper(page, calls):
     return s
 
 
+# A 410 whose page gives the words check nothing to go on (an h1, no marker):
+# only the status can tell, so this case proves the status check by itself.
+SAYS_NOTHING = "<html><body><h1>آگهی‌های مشابه</h1></body></html>"
+
 GONE = [
+    pytest.param(410, SAYS_NOTHING, id="410-alone"),
+    pytest.param(200, RENDERED, id="words-alone"),
     pytest.param(410, AS_SERVED, id="410-as-served"),
-    pytest.param(200, RENDERED, id="words-after-render"),
     pytest.param(None, AS_SERVED, id="no-response-to-read"),
     pytest.param(200, RENDERED.replace("حذف شده", "حذف\u200cشده"), id="half-space"),
 ]
