@@ -62,6 +62,10 @@ async def _finish(request: Request, response: Response, reply: TokenResponse,
     user = await _user_from_token(reply.access_token, db)
     if user is None:
         raise HTTPException(status_code=401, detail="حساب کاربری در دسترس نیست")
+    if user.role == "visitor":
+        # A customer's portal account. Every staff API would refuse it anyway,
+        # but it gets no panel cookie to begin with.
+        raise HTTPException(status_code=403, detail="این حساب برای پورتال مشتریان است؛ از صفحهٔ پورتال وارد شوید.")
     csrf = set_session(request, response, reply.access_token, remember)
     return {"user": _user_body(user), "csrf_token": csrf}
 
