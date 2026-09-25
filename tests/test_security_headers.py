@@ -100,6 +100,16 @@ class TestCspReportEndpoint:
         bare = _client().get("/api/stats/overview")
         assert bare.status_code == 401 and bare.json().get("detail") == gate
 
+    def test_email_assets_pass_the_api_key_gate(self, monkeypatch):
+        """A mail client fetching a hero image (app/services/email_templates.py)
+        carries neither a bearer, nor a cookie, nor the API key — the same
+        situation /images and /downloads are already exempt for."""
+        from app.config import get_settings
+        monkeypatch.setattr(get_settings(), "api_key", "a-key-the-browser-never-sends")
+        r = _client().get("/email-assets/hero-auth.png")
+        assert r.status_code != 401
+        assert r.status_code != 404, "app/static/email_assets/hero-auth.png is missing"
+
     def test_a_report_is_accepted_when_the_api_key_gate_is_on(self, monkeypatch):
         """Production sets API_KEY, and the middleware then refuses every /api
         path it does not list as public — the browser sends no key with a CSP
