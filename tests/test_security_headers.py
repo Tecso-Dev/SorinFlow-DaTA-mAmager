@@ -70,6 +70,20 @@ class TestCspReportEndpoint:
         )
         assert r.status_code == 204
 
+    def test_a_report_is_accepted_when_the_api_key_gate_is_on(self, monkeypatch):
+        """Production sets API_KEY, and the middleware then refuses every /api
+        path it does not list as public — the browser sends no key with a CSP
+        report, so it was a 401 on the live site and every report was lost."""
+        from app.config import get_settings
+        monkeypatch.setattr(get_settings(), "api_key", "a-key-the-browser-never-sends")
+        r = _client().post(
+            "/api/public/csp-report",
+            content=b'{"csp-report": {"document-uri": "https://sorinflow.com/", '
+                     b'"violated-directive": "img-src", "blocked-uri": "https://cdn.example/x.png"}}',
+            headers={"Content-Type": "application/csp-report"},
+        )
+        assert r.status_code == 204, r.text
+
     def test_a_reporting_api_report_is_accepted(self):
         r = _client().post(
             "/api/public/csp-report",

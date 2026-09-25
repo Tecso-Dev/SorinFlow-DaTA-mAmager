@@ -527,6 +527,9 @@ async def maintenance_middleware(request: Request, call_next):
 async def api_key_middleware(request: Request, call_next):
     public_paths = {"/health", "/ready", "/", "/favicon.svg", "/favicon.ico", "/api/public/stats",
                     "/api/public/client-error", "/api/docs", "/api/redoc", "/api/openapi.json", "/api/info",
+                    # The browser posts CSP violation reports on its own, with no
+                    # key — gated, every report from the live site was a 401.
+                    "/api/public/csp-report",
                     "/api/users/token", "/api/users/token/verify-totp", "/api/users/me",
                     # The rest of the login and recovery flow. Unauthenticated
                     # by nature — there is no token to send yet, which is the
