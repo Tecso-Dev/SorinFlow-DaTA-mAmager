@@ -1,5 +1,5 @@
-import { ComingTab } from "@/components/crm/coming";
+import { FilingPage } from "@/components/crm/filing/filing-page";
 
 export default function Page() {
-  return <ComingTab slug="filing" />;
+  return <FilingPage />;
 }

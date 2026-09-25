@@ -1,5 +1,5 @@
-import { ComingTab } from "@/components/crm/coming";
+import { CalendarPage } from "@/components/crm/calendar/calendar-page";
 
 export default function Page() {
-  return <ComingTab slug="calendar" />;
+  return <CalendarPage />;
 }
