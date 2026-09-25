@@ -113,7 +113,11 @@ patches:
         template:
           spec:
             containers:
-              - name: api
+              # backend.yaml's container is named "backend", not "api" — a
+              # strategic-merge patch matches containers BY NAME, so the
+              # wrong name here does not update the real container at all
+              # and instead adds a second, image-less one beside it.
+              - name: backend
                 env:
                   - name: DOMAIN
                     value: staging.sorinflow.com
