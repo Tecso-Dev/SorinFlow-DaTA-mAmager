@@ -740,7 +740,7 @@ def _me_response(user: User) -> UserResponse:
 @router.patch("/me")
 async def update_me(data: ProfileUpdate,
                     current_user: User = Depends(get_current_user),
-                    db: AsyncSession = Depends(get_db),
+                    db: AsyncSession = Depends(get_db),  # noqa: B008
                     # None only when called directly (tests); FastAPI needs the bare type to inject
                     request: Request = None, response: Response = None):  # type: ignore[assignment]
     """Edit my own profile. A changed username comes back with a fresh token,
