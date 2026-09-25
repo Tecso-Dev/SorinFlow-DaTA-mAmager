@@ -529,16 +529,15 @@ def test_a_second_0009_that_added_cookies_enabled_does_not_strand_is_enabled():
     assert "is_enabled" in cols
 
 
-def test_migrate_steps_skip_a_database_already_at_head_but_run_on_an_unversioned_one():
+def test_migrate_steps_skip_any_stamped_database_but_run_on_an_unversioned_one():
     """Every _migrate_* step is pre-Alembic DDL — `ALTER TABLE ... ADD COLUMN
     IF NOT EXISTS` still takes ACCESS EXCLUSIVE even though nothing changes —
     and app/migrate.py runs init_db() against the live database on every
-    deploy. Once a database is already at this image's head there is nothing
-    left for them to do, so a deploy that touches no schema must not pay that
-    lock. A database Alembic has never stamped still needs them, same as
-    always — the boot path that gives a pre-Alembic database its baseline
-    (see test_a_second_0009... above for why that must survive even a wrong
-    alembic_version row, which this does not touch)."""
+    deploy. A database Alembic has stamped, at head or behind it (every deploy
+    that brings a migration), must not pay those locks. The one exception is
+    _migrate_cookie_is_enabled, which exists because a stamp can be wrong
+    (see test_a_second_0009... above): it still runs. A database Alembic has
+    never stamped still needs them all."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     import app.database as db
@@ -550,11 +549,15 @@ def test_migrate_steps_skip_a_database_already_at_head_but_run_on_an_unversioned
     db.async_session_maker = async_sessionmaker(
         db.engine, expire_on_commit=False, autocommit=False, autoflush=False)
 
-    async def _is_enabled_exists():
+    async def _column_exists(column):
         async with db.engine.begin() as c:
             return bool((await c.execute(text(
                 "SELECT 1 FROM information_schema.columns WHERE table_name='cookies' "
-                "AND column_name='is_enabled' AND table_schema=current_schema()"))).first())
+                "AND column_name=:c AND table_schema=current_schema()"), {"c": column})).first())
+
+    async def _drop(column):
+        async with db.engine.begin() as c:
+            await c.execute(text(f"ALTER TABLE cookies DROP COLUMN {column}"))
 
     async def _go():
         eng = create_async_engine(PG_URL)
@@ -564,23 +567,28 @@ def test_migrate_steps_skip_a_database_already_at_head_but_run_on_an_unversioned
         await eng.dispose()
 
         await db.init_db()                                    # fresh -> stamped at head
-        assert await _is_enabled_exists(), "create_all did not build the column"
+        assert await _column_exists("challenged_at"), "create_all did not build the column"
+        seen = {}
 
-        async with db.engine.begin() as c:
-            await c.execute(text("ALTER TABLE cookies DROP COLUMN is_enabled"))
-        assert not await _is_enabled_exists()
+        await _drop("challenged_at")                          # _migrate_cookie_challenged_at's
+        await _drop("is_enabled")                             # _migrate_cookie_is_enabled's
+        await db.init_db()                                    # at head
+        seen["skipped_at_head"] = not await _column_exists("challenged_at")
+        seen["guard_ran_at_head"] = await _column_exists("is_enabled")
 
-        await db.init_db()                                    # already at head
-        skipped_at_head = not await _is_enabled_exists()
+        async with db.engine.begin() as c:                    # behind head: a deploy with a migration
+            await c.execute(text("UPDATE alembic_version SET version_num = '0015'"))
+        await db.init_db()
+        seen["skipped_behind_head"] = not await _column_exists("challenged_at")
 
         async with db.engine.begin() as c:
             await c.execute(text("DROP TABLE alembic_version"))   # unversioned again
-        await db.init_db()                                    # behind head: must catch up
-        ran_when_unversioned = await _is_enabled_exists()
-        return skipped_at_head, ran_when_unversioned
+        await db.init_db()
+        seen["ran_when_unversioned"] = await _column_exists("challenged_at")
+        return seen
 
     try:
-        skipped_at_head, ran_when_unversioned = _run(_go())
+        seen = _run(_go())
     finally:
         async def _drop_schema():
             eng = create_async_engine(PG_URL)
@@ -591,8 +599,10 @@ def test_migrate_steps_skip_a_database_already_at_head_but_run_on_an_unversioned
         _run(_drop_schema())
         db.engine, db.async_session_maker = saved_engine, saved_maker
 
-    assert skipped_at_head, "a _migrate_* step ran on a database already at this image's head"
-    assert ran_when_unversioned, "an unversioned database's _migrate_* steps did not run"
+    assert seen["skipped_at_head"], "a _migrate_* step ran on a database at this image's head"
+    assert seen["guard_ran_at_head"], "_migrate_cookie_is_enabled must run on every boot"
+    assert seen["skipped_behind_head"], "a _migrate_* step ran on a stamped database behind head"
+    assert seen["ran_when_unversioned"], "an unversioned database's _migrate_* steps did not run"
 
 
 def test_the_boot_refuses_a_users_table_without_totp_last_step():

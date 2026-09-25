@@ -160,16 +160,17 @@ async def init_db(strict: bool = False):
 
     # Every _migrate_* step below (and _migrate_auth_v2 further down) is
     # pre-Alembic DDL: it exists to bring a database up to the baseline
-    # Alembic takes over from. Once one is already at this image's head, its
-    # `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` still takes ACCESS EXCLUSIVE
-    # even though every column already exists — and app/migrate.py runs
-    # init_db() against the live database on every deploy, so that lock
-    # queues behind whatever else is running (a plain SELECT once waited
-    # 4.5s behind one). A database not yet at head — fresh, pre-Alembic, or
-    # simply behind — still runs every step: a fresh one is not stamped yet
-    # (that happens below, in _alembic_sync), and an old stamp can be wrong
-    # in a way Alembic itself never sees (_migrate_cookie_is_enabled exists
-    # because of exactly that, see its docstring).
+    # Alembic takes over from, and a database Alembic has stamped is past
+    # that baseline for good. Its `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+    # still takes ACCESS EXCLUSIVE even though every column already exists —
+    # and app/migrate.py runs init_db() against the live database on every
+    # deploy, so each lock queues behind whatever else is running (a plain
+    # SELECT once waited 4.5 s behind one; the AI loops hold a transaction
+    # across an LLM call). A stamped database therefore skips them whatever
+    # its revision — including one behind this image, which is every deploy
+    # that brings a migration — except _migrate_cookie_is_enabled, the one
+    # step that exists because a stamp can be wrong (see its docstring). A
+    # fresh or pre-Alembic database runs them all, as before.
     async with engine.begin() as conn:
         await _guard(conn)
         stamped = await _is_alembic_stamped(conn)
@@ -216,7 +217,8 @@ async def init_db(strict: bool = False):
                  _backfill_ai_pipeline_fingerprints,
                  _seed_reference_data,
                  _backfill_owner_ids):
-        if stamped and step.__name__.startswith("_migrate_"):
+        if stamped and step.__name__.startswith("_migrate_") \
+                and step is not _migrate_cookie_is_enabled:
             continue
         try:
             async with engine.begin() as conn:
@@ -266,16 +268,13 @@ async def init_db(strict: bool = False):
 
 
 async def _is_alembic_stamped(conn) -> bool:
-    """True once this database's current Alembic revision already matches
-    this image's head — the steady state after an ordinary deploy, where the
-    pre-Alembic steps in init_db() have nothing left to do.
-
-    A database at an older revision, or with no alembic_version row at all,
-    is NOT considered stamped, and still runs them: a fresh database is only
-    stamped by `_alembic_sync` further down, after those run, and an old
-    stamp can be wrong in a way Alembic itself never sees — see
-    `_migrate_cookie_is_enabled`'s docstring for the '0009' collision that is
-    exactly this.
+    """True once Alembic has recorded any revision for this database: it is
+    past the baseline the pre-Alembic steps in init_db() bring an old
+    database to, so they have nothing left to do (the one exception,
+    _migrate_cookie_is_enabled, is kept by the caller). With no
+    alembic_version row — fresh, or pre-Alembic — it is not stamped yet, and
+    they all run: a fresh database is only stamped by `_alembic_sync` further
+    down, after them.
 
     Never lets a check meant to save a lock cost the boot instead: any
     failure here reads as "not stamped", same as before this existed.
@@ -284,14 +283,13 @@ async def _is_alembic_stamped(conn) -> bool:
         cfg = _alembic_config()
         if cfg is None:
             return False
-        head = _script_head(cfg)
 
         def _current(sync_conn):
             from alembic.runtime.migration import MigrationContext
             return MigrationContext.configure(sync_conn).get_current_revision()
 
         current = await conn.run_sync(_current)
-        return current is not None and current == head
+        return current is not None
     except Exception:
         return False
 
