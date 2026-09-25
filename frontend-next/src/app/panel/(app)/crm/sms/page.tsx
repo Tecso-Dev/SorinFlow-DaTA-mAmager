@@ -1,5 +1,5 @@
-import { ComingTab } from "@/components/crm/coming";
+import { SmsTab } from "@/components/crm/sms/sms-tab";
 
 export default function Page() {
-  return <ComingTab slug="sms" />;
+  return <SmsTab />;
 }
