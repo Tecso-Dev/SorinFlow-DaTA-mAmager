@@ -678,9 +678,11 @@ class ContactExtractor:
                 )
                 # notification() returns (subject, html, text) — the same shape
                 # every template in that module uses.
+                from app.services.site_settings import read_site
+                site_cfg = await read_site(db)
                 subj, html, text = email_templates.notification(
-                    subject, body,
-                    cta_label="ورود به پنل", cta_url="https://sorinflow.com/dashboard/")
+                    subject, body, cta_label="ورود به پنل",
+                    cta_url=f"https://{site_cfg['domain']}/dashboard/", site=site_cfg)
                 targets = recipients if recipients else [to]
                 sent = []
                 for addr in targets:

@@ -287,9 +287,11 @@ async def _deliver(code: str, *, phone: str, email: str | None,
         try:
             # A code that proves an address must not arrive under the
             # heading «کد ورود» — the person did not try to log in.
+            from app.services.site_settings import read_site
+            site_cfg = await read_site(db) if db is not None else None
             maker = (email_templates.verify_email_code
                      if purpose == "email_verify" else email_templates.login_code)
-            subject, html, plain = maker(code, minutes=max(1, ttl // 60))
+            subject, html, plain = maker(code, minutes=max(1, ttl // 60), site=site_cfg)
             res = await email_service.send(email, subject, html, plain, db=db)
         except Exception as e:
             logger.warning(f"[verification] email leg raised: {type(e).__name__}: {e}")

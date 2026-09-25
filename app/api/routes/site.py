@@ -3,20 +3,19 @@ The office's public identity: brand, office name, domain and contact details.
 
 Pages never spell these themselves (CLAUDE.md, multi-office readiness): the
 new panel, the portal and the landing page read GET /api/public/site, and
-root or super_admin edit them in the panel. Kept in app_settings as one JSON
-row, so there is no table to migrate; until someone saves them the
-environment's SITE_* values (or the defaults below) stand in.
+root or super_admin edit them in the panel. The storage and read side
+(app_settings as one JSON row, env/default fallback) live in
+app/services/site_settings.py so other services — email_templates.py in
+particular — can read the same config without importing a route module.
 
 When offices arrive (phase 6) this becomes one row per agency, chosen by the
 request's host; the shape stays the same.
 """
 import json
-import os
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
@@ -24,28 +23,10 @@ from app.database import get_db
 from app.models.app_setting import AppSetting
 from app.models.user import User
 from app.services import audit
+from app.services.site_settings import SITE_KEY, defaults, read_site
 
 public_router = APIRouter()
 router = APIRouter()
-
-SITE_KEY = "site.config"
-
-# camelCase on the wire: the panel's SiteConfig type (frontend-next/src/lib/site.ts)
-FIELDS = ("brandName", "brandNameLatin", "tagline", "agencyName", "domain", "phone", "email",
-          "telegram", "instagram", "address", "seoTitle", "seoDescription")
-
-
-def defaults() -> dict:
-    env = os.environ.get
-    return {
-        "brandName": env("SITE_BRAND_NAME", "سورین‌فلو"),
-        "brandNameLatin": env("SITE_BRAND_NAME_LATIN", "SorinFlow"),
-        "tagline": env("SITE_TAGLINE", "CRM املاک و اسکرپر دیوار"),
-        "agencyName": env("SITE_AGENCY_NAME", ""),
-        "domain": env("SITE_DOMAIN", env("DOMAIN", "sorinflow.com")),
-        "phone": "", "email": "", "telegram": "", "instagram": "", "address": "",
-        "seoTitle": "", "seoDescription": "",
-    }
 
 
 class SiteIn(BaseModel):
@@ -61,20 +42,6 @@ class SiteIn(BaseModel):
     address: Optional[str] = Field(None, max_length=300)
     seoTitle: Optional[str] = Field(None, max_length=120)
     seoDescription: Optional[str] = Field(None, max_length=300)
-
-
-async def read_site(db: AsyncSession) -> dict:
-    raw = (await db.execute(select(AppSetting.value).where(AppSetting.key == SITE_KEY))).scalar()
-    out = defaults()
-    try:
-        saved = json.loads(raw or "{}")
-    except ValueError:
-        saved = {}
-    if isinstance(saved, dict):
-        # an emptied brand falls back to the default rather than going blank
-        out.update({k: str(v) for k, v in saved.items() if k in FIELDS and v is not None
-                    and (str(v).strip() or k not in ("brandName", "brandNameLatin"))})
-    return out
 
 
 @public_router.get("/site")
