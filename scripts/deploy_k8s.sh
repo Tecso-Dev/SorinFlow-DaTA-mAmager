@@ -157,7 +157,17 @@ grep -qF "sorinflow.com/synced-secrets: \"${SECRETS_HASH}\"" "$RENDERED" || {
 # ── 1. namespace, config, PVCs, postgres, redis, services ──────────────────
 say "applying namespace, config, PVCs, postgres, redis, services"
 CORE="${TMP_PREFIX}.core.yaml"
-exclude_kinds "Deployment Ingress NetworkPolicy Job" < "$RENDERED" > "$CORE"
+CORE_EXCLUDE="Deployment Ingress NetworkPolicy Job"
+# The staging workflow applies the Namespace and every RBAC object
+# (ServiceAccount/Role/RoleBinding, k8s/overlays/staging/rbac.yaml) with the
+# cluster-admin kubeconfig before minting the scoped staging-deployer token
+# this script runs under from here on — that Role does not, and must not,
+# grant it permission to touch any of those again, itself included (a Role
+# that could relabel or rewrite itself would make the scoping pointless).
+if [ "$OVERLAY" = staging ]; then
+  CORE_EXCLUDE="$CORE_EXCLUDE Namespace ServiceAccount Role RoleBinding"
+fi
+exclude_kinds "$CORE_EXCLUDE" < "$RENDERED" > "$CORE"
 retry_kubectl kubectl apply -f "$CORE"
 # Traefik's Let's Encrypt resolver: kept out of the kustomization (see the
 # file's header — kustomize would move it out of kube-system, where k3s's
