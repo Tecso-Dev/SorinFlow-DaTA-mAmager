@@ -115,6 +115,16 @@ class TestASuccessfulVisitorLoginSetsTheCookie:
         assert mine.status_code == 200 and mine.json()["phone"] == phone
         client.cookies.clear()
 
+    def test_remember_keeps_the_cookie_for_the_token_lifetime(self, client):
+        phone = "09121110005"
+        _mk_user(phone)
+        r = client.post("/api/public/auth/session/login",
+                        json={"identifier": phone, "password": PW, "remember": True})
+        assert r.status_code == 200, r.text
+        session = next(h for h in r.headers.get_list("set-cookie") if h.startswith("sf_session="))
+        assert "Max-Age=" in session
+        client.cookies.clear()
+
     def test_email_identifier_works_too(self, client):
         phone = "09121110002"
         _mk_user(phone, email="visitor2@example.com")

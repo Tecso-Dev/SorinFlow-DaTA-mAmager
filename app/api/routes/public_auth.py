@@ -382,8 +382,12 @@ async def portal_login(data: PortalLoginRequest, request: Request, db: Db):
     return _token_for(result)
 
 
+class PortalSessionLogin(PortalLoginRequest):
+    remember: bool = False
+
+
 @router.post("/session/login", dependencies=[_enabled])
-async def portal_session_login(data: PortalLoginRequest, request: Request,
+async def portal_session_login(data: PortalSessionLogin, request: Request,
                                response: Response, db: Db):
     """The portal's own login: same check as /login, but on success the token
     goes into an httpOnly cookie (app/auth/session_cookie.set_session) instead
@@ -396,7 +400,7 @@ async def portal_session_login(data: PortalLoginRequest, request: Request,
     if isinstance(result, PortalPendingResponse):
         return result
     token = create_access_token(access_claims(result), token_type=TOKEN_ACCESS)
-    csrf = set_session(request, response, token, False)
+    csrf = set_session(request, response, token, data.remember)
     body = UserResponse.model_validate(result, from_attributes=True).model_dump(mode="json")
     return {"user": body, "csrf_token": csrf}
 
