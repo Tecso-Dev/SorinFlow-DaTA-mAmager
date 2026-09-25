@@ -201,7 +201,7 @@ async def consume() -> None:
     run double the configured Chromiums on one node. Beats every few
     seconds, idle or full."""
     warned = False
-    while True:
+    while not draining:
         beat("scrape_consumer")
         if len(_running) >= settings.scrape_worker_concurrency:
             await asyncio.wait(list(_running.values()), timeout=POP_TIMEOUT,
@@ -217,9 +217,6 @@ async def consume() -> None:
                 await asyncio.sleep(POP_TIMEOUT)
                 continue
             r: Any = await database.get_redis()
-            # ponytail: an id popped just as the process is cancelled is lost
-            # from the list; the sweep re-queues the pending row, so no
-            # BLMOVE processing list until that delay matters.
             got = await r.brpop(QUEUE, timeout=POP_TIMEOUT)
         except (RedisError, OSError) as e:
             if not warned:
@@ -231,7 +228,11 @@ async def consume() -> None:
         if warned:
             warned = False
             logger.info("[queue] Redis is back — taking scrapes again")
-        if got:
+        if got and draining:
+            # SIGTERM came while this pop was waiting: the id goes back to the
+            # end it was popped from, first in line for the next worker.
+            await r.rpush(QUEUE, got[1])
+        elif got:
             await _take(r, got[1])
 
 
@@ -365,7 +366,12 @@ async def drain(tasks: List[asyncio.Task]) -> None:
     """
     global draining
     draining = True
-    for t in tasks:
+    # The consumer stops by itself within one POP_TIMEOUT. Cancelled mid-BRPOP
+    # it left the pop waiting on the Redis server, which then handed the next
+    # enqueued id to nobody — off the list until the sweep's five-minute
+    # re-queue (seen on CI). Only what is still going after that is cancelled.
+    _done, still_running = await asyncio.wait(tasks, timeout=POP_TIMEOUT + 3)
+    for t in still_running:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
     while _running:
