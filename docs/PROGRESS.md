@@ -265,6 +265,19 @@
 
 - `tests/test_pg_migration.py` جدا با `PG_TEST_URL` (همان alembic check): **10 passed** در فاز ۰، **12 passed** در آخر فاز ۱، **13 passed** در آخر فاز ۲ و **15 passed** در آخر فاز ۳.
 - آخر فاز ۳ روی sqlite: **3407 passed، 238 skipped، 0 failed**. تنها skipهای اجرای Postgres روی این مک ۶ تست fingerprint هستند: Chromium نسخهٔ Playwright 1.41 روی macOS این مک بالا نمی‌آید. در CI (Ubuntu) اجرا می‌شوند.
+- **CI روی `sorinflow-v2` (`9523de3`) سبز شد:**
+  - `ci.yml`: دروازهٔ lint؛ **3628 passed، 17 skipped** (skipها بیشتر تست‌های migration هستند که در قدم جداگانهٔ خودشان اجرا شدند: **15 passed**)؛ پوشش کل کد **۵۸٪**.
+  - `e2e.yml`: Playwright و axe سبز.
+  - `k8s.yml`: kubeconform و shellcheck سبز.
+  - تست‌های fingerprint اولین بار با Chromium واقعی اجرا شدند.
+- **خرابی‌هایی که فقط CI نشان داد و رفع شدند:**
+  - Chromium نسخهٔ Playwright 1.41 روی Ubuntu 24.04 نصب نمی‌شد؛ کارهای test و e2e حالا روی 22.04 (jammy) اجرا می‌شوند.
+  - SQLite قدیمی‌تر از 3.39 عبارت `HAVING` بدون `GROUP BY` را نمی‌پذیرد.
+  - Playwright فایل پیکربندی خودش را پیدا نمی‌کرد.
+  - تست‌های fingerprint که تا حالا اجرا نشده بودند دو ایراد در خودشان داشتند.
+  - یک رقابت در drain صف.
+  - قدم auth v2 روی پایگاه دادهٔ stamp‌شده.
+
 - آخر فاز ۲ روی sqlite (پیش‌فرض، بدون Postgres): **3216 passed، 218 skipped، 0 failed**. skipها تست‌های مخصوص Postgres هستند. تست‌های Worker با `node --test`: **11 passed**. تست escape پنل: **15 check**.
 - دلیل skipها در اجرای معمولی:
   - ۱۰ تست migration که `PG_TEST_URL` می‌خواهند؛
