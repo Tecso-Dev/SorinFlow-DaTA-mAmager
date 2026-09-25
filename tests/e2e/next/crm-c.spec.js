@@ -4,40 +4,46 @@
 // opens the tree through its "کمدها" Sheet trigger when the sidebar itself
 // is hidden below the lg breakpoint, rather than assuming a desktop layout.
 const { test, expect } = require('@playwright/test');
-const { AxeBuilder } = require('@axe-core/playwright');
-const { signIn, watchProblems, noHorizontalScroll, scrollThrough } = require('./helpers');
+const { signIn, watchProblems, noHorizontalScroll, scrollThrough, a11y } = require('./helpers');
+
+// The cabinet/binder tree (tree.tsx, aria-label «کمد و زونکن‌ها») is mounted
+// twice at once on a phone once the Sheet is open: the desktop copy stays in
+// the DOM (display:none, so role/label queries already skip it), plus the
+// Sheet's own copy. A plain text query is not filtered by that — scoping to
+// this landmark keeps every cabinet/binder lookup pointed at the one visible
+// copy instead of also matching the same name inside the hidden one.
+const tree = (page) => page.getByRole('navigation', { name: 'کمد و زونکن‌ها' });
 
 async function openTreeIfSheeted(page) {
   // a plain string is a substring match, unlike an anchored regex — the
   // button's accessible name is "کمدها" plus whatever the Menu icon
   // contributes, so an exact ^$ match silently never found it on a phone
   const trigger = page.getByRole('button', { name: 'کمدها' });
-  if (!(await trigger.isVisible().catch(() => false))) return;
+  // isVisible() is a one-shot, non-retrying read of *right now* — called
+  // straight after goto()/onScope(), before this client component has
+  // hydrated, it reported false (never visible) on a phone just as often
+  // as it correctly reports false on desktop (where the button never
+  // exists), silently skipping the open. waitFor() actually gives a
+  // just-navigated page a moment to hydrate; desktop still resolves
+  // quickly, just via the timeout instead of an instant read.
+  const trulyDesktop = await trigger.waitFor({ state: 'visible', timeout: 2000 }).then(() => false).catch(() => true);
+  if (trulyDesktop) return;
   const opened = page.getByRole('button', { name: 'کمد جدید' });
-  // a click right after goto() can land before hydration attaches the
-  // handler and is silently swallowed — retry rather than trust one click
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // this scope's own unfiled list is ~300 real seeded properties (60 a
+  // page), each card its own Tilt/motion component — a real click always
+  // opens the Sheet, but mounting and animating it in can take a WebKit
+  // main thread that busy well past a short wait. A blind fixed-attempt
+  // retry loop here previously re-clicked the trigger on that same slow
+  // mount, toggling the still-opening Sheet closed again — fixed: only
+  // click when it is confirmed *not* open, and give each attempt long
+  // enough that "still not open" means the click truly did not land (e.g.
+  // one right after goto(), before hydration attaches the handler), not
+  // that WebKit is merely still animating it in.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (await opened.isVisible().catch(() => false)) return;
     await trigger.click();
-    const ok = await opened.waitFor({ state: 'visible', timeout: 4000 }).then(() => true).catch(() => false);
-    if (ok) return;
+    if (await opened.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false)) return;
   }
-}
-
-/**
- * Same wcag2a/wcag2aa scan as helpers.a11y, minus the CRM tab strip
- * (crm-frame.tsx, shared by every CRM tab, not this stream's file): its
- * active link is 4.38:1 against the required 4.5:1 on a phone's 14px
- * rendering — confirmed with app/api routes untouched, reported to the
- * coordinator rather than edited here (see the final report).
- */
-async function a11yOwnPages(page) {
-  const r = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa'])
-    .exclude('nav[aria-label="بخش‌های CRM"]')
-    .analyze();
-  return r.violations
-    .filter((v) => v.impact === 'serious' || v.impact === 'critical')
-    .map((v) => `${v.id}: ${v.help} @ ${v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join(' | ')}`);
 }
 
 test.describe('تقویم', () => {
@@ -125,11 +131,7 @@ test.describe('تقویم', () => {
     await signIn(page, 'owner');
     await page.goto('/panel/crm/calendar');
     await scrollThrough(page);
-    // a reveal-on-view section that entered on the last scroll step can
-    // still be mid fade-in — axe sampling that instant reads a transient,
-    // not the settled, colour
-    await page.waitForTimeout(500);
-    expect(await a11yOwnPages(page)).toEqual([]);
+    expect(await a11y(page)).toEqual([]);
   });
 });
 
@@ -175,7 +177,7 @@ test.describe('کمد و زونکن', () => {
     await dialog.getByRole('button', { name: 'ساخت کمد' }).click();
     await expect(page.getByText('کمد ساخته شد').first()).toBeVisible();
 
-    const cabRow = page.getByText(cabName, { exact: true }).locator('..');
+    const cabRow = tree(page).getByText(cabName, { exact: true }).locator('..');
     await cabRow.getByRole('button', { name: 'عملیات کمد' }).click();
     await page.getByRole('menuitem', { name: 'زونکن جدید' }).click();
     const binName = `e2e-bin-${Date.now()}`;
@@ -185,13 +187,13 @@ test.describe('کمد و زونکن', () => {
     await expect(page.getByText('زونکن ساخته شد').first()).toBeVisible();
 
     // an empty binder shows the empty state
-    await page.getByRole('button', { name: new RegExp(binName) }).first().click();
+    await tree(page).getByRole('button', { name: new RegExp(binName) }).click();
     await expect(page.getByText('فایلی اینجا نیست')).toBeVisible();
 
     // back to «بدون زونکن» — selecting a binder above closed the tree Sheet
     // on a phone (its own scope change), so it may need reopening
     await openTreeIfSheeted(page);
-    await page.getByRole('button', { name: 'فایل‌های بدون زونکن' }).click();
+    await tree(page).getByRole('button', { name: 'فایل‌های بدون زونکن' }).click();
     await page.waitForTimeout(600);
     const checkboxes = page.locator('button[role="checkbox"]');
     await checkboxes.nth(0).click();
@@ -225,13 +227,13 @@ test.describe('کمد و زونکن', () => {
 
     // cleanup: delete the test binder, then the test cabinet
     await openTreeIfSheeted(page);
-    const binRow = page.getByText(binName, { exact: true }).locator('../..');
+    const binRow = tree(page).getByText(binName, { exact: true }).locator('../..');
     await binRow.getByRole('button', { name: 'عملیات زونکن' }).click();
     await page.getByRole('menuitem', { name: 'حذف', exact: true }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'حذف', exact: true }).click();
     await expect(page.getByText('حذف شد').first()).toBeVisible();
 
-    const cabRow2 = page.getByText(cabName, { exact: true }).locator('..');
+    const cabRow2 = tree(page).getByText(cabName, { exact: true }).locator('..');
     await cabRow2.getByRole('button', { name: 'عملیات کمد' }).click();
     await page.getByRole('menuitem', { name: 'حذف کمد' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'حذف', exact: true }).click();
@@ -245,7 +247,6 @@ test.describe('کمد و زونکن', () => {
     await signIn(page, 'owner');
     await page.goto('/panel/crm/filing');
     await scrollThrough(page);
-    await page.waitForTimeout(500);
-    expect(await a11yOwnPages(page)).toEqual([]);
+    expect(await a11y(page)).toEqual([]);
   });
 });
