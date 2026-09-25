@@ -2375,6 +2375,30 @@ async def create_reminder(data: ReminderIn, db: AsyncSession = Depends(get_db)):
     return reminder.to_dict()
 
 
+@router.patch("/reminders/{reminder_id}")
+async def update_reminder(reminder_id: int, payload: ReminderIn, db: AsyncSession = Depends(get_db)):  # noqa: B008
+    """Partial update — the old panel had no edit, only delete-and-recreate.
+    Same validation as create: remind_at, if sent, must parse."""
+    data = payload.model_dump(exclude_unset=True)
+    result = await db.execute(select(Reminder).where(Reminder.id == reminder_id))
+    reminder = result.scalar_one_or_none()
+    if not reminder:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    if "remind_at" in data:
+        if not data["remind_at"]:
+            raise HTTPException(status_code=400, detail="remind_at is required")
+        try:
+            reminder.remind_at = _parse_datetime(data["remind_at"])  # type: ignore[assignment]
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Invalid remind_at format") from exc
+    for field in ("title", "repeat", "channel", "sms_to", "contact_id", "deal_id", "task_id"):
+        if field in data:
+            setattr(reminder, field, data[field])
+    await db.commit()
+    await db.refresh(reminder)
+    return reminder.to_dict()
+
+
 @router.delete("/reminders/{reminder_id}")
 async def delete_reminder(reminder_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Reminder).where(Reminder.id == reminder_id))
