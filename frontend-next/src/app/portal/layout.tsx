@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { CircleHelp } from "lucide-react";
-import { ConfirmProvider } from "@/components/panel/kit";
+import { PortalConfirmShell } from "@/components/portal/confirm-shell";
 import { PwaRegister } from "@/components/pwa/register";
 import { getSiteConfig } from "@/lib/site";
 
@@ -10,6 +9,9 @@ import { getSiteConfig } from "@/lib/site";
 // once in its own shell — plus the PWA scaffolding (manifest, icons, the
 // /portal/ scope worker) that mirrors panel/layout.tsx. Scaffolding only:
 // the portal itself is still frontend/portal.html until Phase 4 step 8.
+// generateMetadata makes this a server component, so the confirm dialog
+// (a client component needing the icon prop) is a separate client wrapper
+// — see the comment in confirm-shell.tsx.
 export async function generateMetadata(): Promise<Metadata> {
   const site = await getSiteConfig();
   return {
@@ -30,7 +32,7 @@ export default function PortalLayout({ children }: LayoutProps<"/portal">) {
   return (
     <div className="min-h-dvh bg-background text-foreground">
       <PwaRegister scope="/portal/" />
-      <ConfirmProvider fallbackIcon={CircleHelp}>{children}</ConfirmProvider>
+      <PortalConfirmShell>{children}</PortalConfirmShell>
     </div>
   );
 }
