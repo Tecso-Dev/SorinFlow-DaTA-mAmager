@@ -130,7 +130,18 @@ class TestWhatDivarSees:
 
     @pytest.fixture(scope="class")
     def seen(self):
-        return asyncio.run(_probe("09146382408"))
+        # The profile lives under /app/data (the PVC) by default, and a CI
+        # runner has no /app — its own temporary directory for this probe.
+        import tempfile
+        old = os.environ.get("SCRAPER_PROFILE_DIR")
+        os.environ["SCRAPER_PROFILE_DIR"] = tempfile.mkdtemp(prefix="sf-profiles-")
+        try:
+            return asyncio.run(_probe("09146382408"))
+        finally:
+            if old is None:
+                os.environ.pop("SCRAPER_PROFILE_DIR", None)
+            else:
+                os.environ["SCRAPER_PROFILE_DIR"] = old
 
     def test_webdriver_is_false_and_inherited(self, seen):
         js, _ = seen
