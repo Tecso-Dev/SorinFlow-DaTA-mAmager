@@ -82,7 +82,7 @@ def remembered(token: str) -> bool:
         return False
 
 
-def reissue(request: Request, response: Response, token: str) -> Optional[str]:
+def reissue(request: Optional[Request], response: Optional[Response], token: str) -> Optional[str]:
     """A route minted a fresh access token (a rename, a password change).
 
     For a request that came on the session cookie the fresh token replaces the
@@ -90,6 +90,8 @@ def reissue(request: Request, response: Response, token: str) -> Optional[str]:
     the page a token it was built never to see. A bearer caller gets its token
     back to store, as before.
     """
+    if request is None or response is None:  # called directly, not over HTTP
+        return token
     old = session_token(request)
     if request.headers.get("Authorization", "").startswith("Bearer ") or not old:
         return token
