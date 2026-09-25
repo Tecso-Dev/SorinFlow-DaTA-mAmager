@@ -11,6 +11,8 @@ does the same for CORSMiddleware.
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./_test_error_handling.db")
 os.environ.setdefault("SECRET_KEY", "0123456789abcdef0123456789abcdef")
@@ -125,7 +127,12 @@ class TestInternalErrorHandler:
         assert r.status_code == 500
         assert "text/html" in r.headers["content-type"]
 
-    def test_exactly_one_traceback_is_logged_with_the_ref(self, tmp_path):
+    # 44998621901f: the random id CI drew on 2026-09-25. Its first eleven
+    # characters happen to be digits, which is exactly the Iranian-mobile
+    # shape log_redaction masks, so the message came out «[4499*****01f]»
+    # and a search of the message text found nothing — one run in about 250.
+    @pytest.mark.parametrize("sent_id", [None, "44998621901f"])
+    def test_exactly_one_traceback_is_logged_with_the_ref(self, tmp_path, sent_id):
         # app.main's own module-level logger.remove()/logger.add() calls run
         # once, on this process's first import of it — which would otherwise
         # wipe the sink this test adds below if that first import happened to
@@ -137,11 +144,18 @@ class TestInternalErrorHandler:
         seen = []
         sink_id = logger.add(lambda m: seen.append(m), level="ERROR")
         try:
-            r = _client(tmp_path).get("/api/boom")
+            headers = {"X-Request-ID": sent_id} if sent_id else {}
+            r = _client(tmp_path).get("/api/boom", headers=headers)
         finally:
             logger.remove(sink_id)
         ref = r.json()["ref"]
-        matches = [m for m in seen if ref in m and "kaboom" in m]
+        if sent_id:
+            assert ref == sent_id
+        # By the record's request id, the field every line's id column is
+        # printed from, not by the message text: the redaction filter may
+        # rewrite a digit run inside the ref there, never the column.
+        matches = [m for m in seen
+                   if m.record["extra"].get("request_id") == ref and "kaboom" in m]
         assert len(matches) == 1, f"expected exactly one traceback line, got {len(matches)}"
         assert "ValueError" in matches[0]
         assert "Traceback" in matches[0] or "kaboom" in matches[0]

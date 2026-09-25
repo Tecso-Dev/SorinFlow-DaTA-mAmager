@@ -46,8 +46,10 @@ class TestTheDetailScrapeSaysWhyItGaveUp:
 
     def test_every_none_return_now_has_a_reason(self):
         """A return with no reason set would be reported as «نامعلوم» forever."""
+        # Six since 2026-09-25: a listing Divar has deleted is named twice,
+        # once from the 410 and once from the page's own words.
         reasons = DETAIL.count("self._last_detail_error =")
-        assert reasons == 4, "one clear + three reasons; a path was added or lost"
+        assert reasons == 6, "one clear + five reasons; a path was added or lost"
 
 
 class TestTheRunTalliesThem:
