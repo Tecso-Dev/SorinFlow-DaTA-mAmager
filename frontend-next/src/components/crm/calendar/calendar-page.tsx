@@ -10,8 +10,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { PageHeader, Section, Toolbar } from "@/components/panel/kit";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "cn";
 import { Reveal } from "@/components/viz";
 import { toast } from "@/components/toaster";
 import { api } from "@/lib/api";
@@ -173,13 +173,23 @@ export function CalendarPage() {
                   <option key={k} value={k}>{v.label}</option>
                 ))}
               </select>
-              <Tabs value={view} onValueChange={(v) => setView(v as View)}>
-                <TabsList>
-                  <TabsTrigger value="month">ماه</TabsTrigger>
-                  <TabsTrigger value="week">هفته</TabsTrigger>
-                  <TabsTrigger value="day">روز</TabsTrigger>
-                </TabsList>
-              </Tabs>
+              {/* a switch of the same grid, not tabs of separate panels */}
+              <div role="group" aria-label="نمای تقویم" className="inline-flex h-8 items-center rounded-lg bg-muted p-[3px]">
+                {([["month", "ماه"], ["week", "هفته"], ["day", "روز"]] as const).map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={view === v}
+                    onClick={() => setView(v)}
+                    className={cn(
+                      "h-full rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      view === v && "bg-background text-foreground shadow-sm dark:bg-input/30",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </Toolbar>
 

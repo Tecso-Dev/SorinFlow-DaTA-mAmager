@@ -31,11 +31,17 @@ export function EventChip({
       style={{ "--c": row.color } as React.CSSProperties}
       className={cn(
         "flex w-full items-center gap-1 truncate rounded-md border-s-2 px-1.5 py-0.5 text-start text-[11px] leading-4 outline-none transition-colors",
-        "border-s-[var(--c)] bg-[color-mix(in_oklab,var(--c)_16%,transparent)] hover:bg-[color-mix(in_oklab,var(--c)_26%,transparent)]",
+        // the event's own colour lives on the accent bar and the icon only —
+        // a neutral, already-vetted token background keeps the text itself
+        // at a guaranteed contrast no matter what colour the backend sends
+        "border-s-[var(--c)] bg-muted/60 text-foreground hover:bg-accent",
         "focus-visible:ring-2 focus-visible:ring-ring",
-        overlay && "border-dashed opacity-80",
-        done && "line-through opacity-60",
-        canceled && "opacity-45 line-through",
+        // status/kind is shown by shape (dashed border, strikethrough) and
+        // an explicit muted colour, not element opacity — opacity fades the
+        // text toward the day cell's own background and can fall under the
+        // WCAG contrast ratio depending on the event's own colour and theme
+        overlay && "border-dashed",
+        (done || canceled) && "line-through text-muted-foreground",
         dense && "px-1 py-px text-[10px]",
       )}
     >

@@ -65,30 +65,38 @@ export function MonthView({
           return (
             <motion.div
               key={i}
-              role="button"
-              tabIndex={0}
+              // a plain, non-interactive cell: its own click is a mouse-only
+              // convenience, so the day button and the chip buttons inside it
+              // are never a control nested inside another one for a11y tools
               onClick={() => cellClick(d)}
-              onKeyDown={(e) => e.key === "Enter" && cellClick(d)}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.25, delay: Math.min(i * 0.006, 0.2) }}
               className={cn(
-                "group relative flex min-h-[64px] cursor-pointer flex-col gap-0.5 border-b border-e p-1 text-start outline-none transition-colors sm:min-h-[104px] sm:p-1.5",
-                "[&:nth-child(7n)]:border-e-0 hover:bg-accent/40 focus-visible:bg-accent/40",
-                !inMonth && "bg-muted/20 text-muted-foreground/60",
+                "group relative flex min-h-[64px] cursor-pointer flex-col gap-0.5 border-b border-e p-1 text-start transition-colors sm:min-h-[104px] sm:p-1.5",
+                "[&:nth-child(7n)]:border-e-0 hover:bg-accent/40",
+                // the tint alone says "not this month" — an extra text
+                // opacity on top of it can drop below the contrast floor
+                !inMonth && "bg-muted/20 text-muted-foreground",
                 isSelected && "bg-primary/[0.06] sm:bg-transparent",
               )}
             >
               <div className="flex items-center justify-between">
-                <span
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cellClick(d);
+                  }}
+                  aria-label={`روز ${faNum(jParts(d).d)}`}
                   className={cn(
-                    "grid size-6 place-items-center rounded-full text-xs font-semibold tabular",
+                    "grid size-6 place-items-center rounded-full text-xs font-semibold tabular outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     isToday && "bg-primary text-primary-foreground",
                   )}
                 >
                   {faNum(jParts(d).d)}
-                </span>
-                <Plus className="hidden size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 sm:block" />
+                </button>
+                <Plus aria-hidden className="hidden size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 sm:block" />
               </div>
 
               {/* desktop: up to three chips, «+N» beyond that */}

@@ -108,7 +108,9 @@ export function FileCard({
           </div>
         )}
 
-        <div className="mt-auto flex items-center gap-1 border-t pt-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+        {/* a touch screen has no hover, so the row stays visible below sm;
+            above it, it only shows on hover/focus to keep the card calm */}
+        <div className="mt-auto flex items-center gap-1 border-t pt-2 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
           <button type="button" onClick={onEdit} className="rounded-md p-1.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" title="ویرایش فایل" aria-label="ویرایش فایل">
             <Pencil className="size-4" />
           </button>
