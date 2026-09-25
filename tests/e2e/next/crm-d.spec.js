@@ -4,18 +4,6 @@ const { signIn, watchProblems, noHorizontalScroll, scrollThrough, a11y } = requi
 
 const stamp = Date.now();
 
-// Pre-existing in shared code, not this stream's tabs: the active CRM nav
-// tab (CrmFrame's `bg-primary/12` … `hover:bg-primary/15`) and kit.tsx
-// ToneBadge's "warning" tone (`bg-warning/… text-warning`, used everywhere —
-// task priority, lead status, this tab's own "زیر هدف" score) are both under
-// the AA contrast ratio, in every tab and both themes. Filtered out of the
-// strict a11y checks below rather than papered over once per stream; a fix
-// belongs in kit.tsx's TONE map and CrmFrame's active-tab classes.
-const KNOWN_SHARED_A11Y_ISSUES = [
-  /^color-contrast: .*\bbg-primary\\\/\d+/,
-  /^color-contrast: .*\bbg-warning\\\/\d+/,
-];
-const withoutKnownIssues = (violations) => violations.filter((v) => !KNOWN_SHARED_A11Y_ISSUES.some((re) => re.test(v)));
 
 test.describe('tasks', () => {
   test('loads with data, creates, edits, completes and deletes a task', async ({ page }) => {
@@ -65,7 +53,7 @@ test.describe('tasks', () => {
     await expect(page.getByRole('row', { name: new RegExp(title) })).toHaveCount(0);
 
     await noHorizontalScroll(page);
-    expect(withoutKnownIssues(await a11y(page))).toEqual([]);
+    expect((await a11y(page))).toEqual([]);
     expect(problems).toEqual([]);
   });
 
@@ -123,7 +111,7 @@ test.describe('reminders', () => {
     await expect(page.getByText('یادآور حذف شد').first()).toBeVisible();
 
     await noHorizontalScroll(page);
-    expect(withoutKnownIssues(await a11y(page))).toEqual([]);
+    expect((await a11y(page))).toEqual([]);
     expect(problems).toEqual([]);
   });
 });
@@ -146,7 +134,7 @@ test.describe('sms', () => {
     await expect(page.getByRole('heading', { name: 'تاریخچهٔ ارسال' })).toBeVisible();
 
     await noHorizontalScroll(page);
-    expect(withoutKnownIssues(await a11y(page))).toEqual([]);
+    expect((await a11y(page))).toEqual([]);
     expect(problems).toEqual([]);
   });
 });
@@ -198,7 +186,7 @@ test.describe('dpa', () => {
     await expect(page.getByText('رکورد حذف شد').first()).toBeVisible();
 
     await noHorizontalScroll(page);
-    expect(withoutKnownIssues(await a11y(page))).toEqual([]);
+    expect((await a11y(page))).toEqual([]);
     expect(problems).toEqual([]);
   });
 });
@@ -219,7 +207,7 @@ test.describe('report', () => {
     await expect(page.getByText('مخاطبان به تفکیک نوع')).toBeVisible();
 
     await noHorizontalScroll(page);
-    expect(withoutKnownIssues(await a11y(page))).toEqual([]);
+    expect((await a11y(page))).toEqual([]);
     expect(problems).toEqual([]);
   });
 
@@ -229,8 +217,6 @@ test.describe('report', () => {
     await page.goto('/panel/crm/report');
     await expect(page.locator('html')).toHaveClass(/dark/);
     await scrollThrough(page);
-    // The active CRM tab (shared CrmFrame) has the same pre-existing contrast
-    // gap in dark mode — see KNOWN_SHARED_A11Y_ISSUES above.
-    expect(withoutKnownIssues(await a11y(page))).toEqual([]);
+    expect((await a11y(page))).toEqual([]);
   });
 });
