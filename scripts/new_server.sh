@@ -98,8 +98,9 @@ kubectl apply -f "$SRC/k8s/overlays/production/traefik-acme.yaml" >/dev/null
 # the Let's Encrypt account + certificate from the old box in place so HTTPS
 # works the moment DNS points here — no waiting on a fresh issuance.
 if [ -f "$BUNDLE/k8s/traefik-acme.json" ]; then
-  for i in $(seq 1 60); do
-    TDIR=$(ls -d /var/lib/rancher/k3s/storage/*_kube-system_traefik 2>/dev/null | head -1 || true)
+  for _ in $(seq 1 60); do
+    TDIR=""
+    for d in /var/lib/rancher/k3s/storage/*_kube-system_traefik; do [ -d "$d" ] && TDIR="$d" && break; done
     [ -n "$TDIR" ] && break; sleep 5
   done
   if [ -n "${TDIR:-}" ]; then
@@ -150,8 +151,9 @@ kubectl apply -n sorinflow -f "$SRC/k8s/base/data-pvc.yaml" >/dev/null
 # real app before the restore below, it cannot serve a request or touch
 # Divar with the wrong data.
 kubectl apply -n sorinflow -f "$SRC/k8s/base/ownership-job.yaml" >/dev/null
-for i in $(seq 1 60); do
-  DDIR=$(ls -d /var/lib/rancher/k3s/storage/*_sorinflow_data-pvc 2>/dev/null | head -1 || true)
+for _ in $(seq 1 60); do
+  DDIR=""
+  for d in /var/lib/rancher/k3s/storage/*_sorinflow_data-pvc; do [ -d "$d" ] && DDIR="$d" && break; done
   [ -n "$DDIR" ] && break; sleep 5
 done
 [ -n "${DDIR:-}" ] || { echo "data volume never appeared"; exit 1; }
