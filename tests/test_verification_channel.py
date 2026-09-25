@@ -161,15 +161,21 @@ class TestTheRouteCreditsOnlyWhatWasProven:
         src = inspect.getsource(public_auth.portal_verify)
         assert "user.email_verified = True" in src
 
-    @pytest.mark.parametrize("fn_name", ["portal_login"])
-    def test_either_proof_opens_the_account(self, fn_name):
+    def test_either_proof_opens_the_account(self):
         """Gating on the phone alone would loop every account created while
-        email is the only channel: verify by email, still fail the gate."""
+        email is the only channel: verify by email, still fail the gate.
+
+        _authenticate_visitor, not portal_login itself: the bearer /login and
+        the cookie /session/login share this one check (see
+        app/api/routes/public_auth.py), so it lives in the helper both call."""
         import inspect
         from app.api.routes import public_auth
 
-        src = inspect.getsource(getattr(public_auth, fn_name))
+        src = inspect.getsource(public_auth._authenticate_visitor)
         assert "user.phone_verified or user.email_verified" in src
+        # both callers reach the same gate — nothing forked it per-route
+        assert "user.phone_verified or user.email_verified" not in inspect.getsource(public_auth.portal_login)
+        assert "user.phone_verified or user.email_verified" not in inspect.getsource(public_auth.portal_session_login)
 
     def test_the_portal_gate_accepts_either_proof(self):
         import inspect

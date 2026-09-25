@@ -80,7 +80,11 @@ class TestCspReportEndpoint:
         gate = "Invalid or missing API key"
         c = _client()
         for path in ("/api/session/login", "/api/session/verify-totp",
-                     "/api/session/verify-email", "/api/session/logout"):
+                     "/api/session/verify-email", "/api/session/logout",
+                     # the portal's own cookie login (app/api/routes/public_auth.py);
+                     # PUBLIC_AUTH_ENABLED is off in this file's settings, so it 404s
+                     # past the gate rather than 200ing, same as the point below
+                     "/api/public/auth/session/login"):
             r = c.post(path, json={})
             assert r.json().get("detail") != gate, f"{path} stopped at the API-key gate"
         # a request carrying the session cookie reaches the real check

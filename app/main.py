@@ -551,6 +551,12 @@ async def api_key_middleware(request: Request, call_next):
                     "/api/public/auth/register", "/api/public/auth/verify",
                     "/api/public/auth/resend", "/api/public/auth/login",
                     "/api/public/auth/status",
+                    # The portal's own cookie login (app/api/routes/public_auth.py):
+                    # unauthenticated by nature, like the bearer login above it.
+                    # No matching logout entry needed — the portal reuses the
+                    # panel's own POST /api/session/logout, already public and
+                    # role-agnostic (it just clears whatever cookie is there).
+                    "/api/public/auth/session/login",
                     # حالت تعمیر: this middleware runs outside the maintenance
                     # one, so anything it rejects never reaches that logic at
                     # all — including the link meant to get back in. The POST
