@@ -143,6 +143,33 @@ async def _refuse_default_secrets() -> None:
         raise RuntimeError("Refusing to start in production: " + "; ".join(why))
 
 
+async def _backfill_owner_ids_once() -> None:
+    """Give rows written by name, since the last time this ran, their account.
+
+    App pods run with DB_MIGRATE_ON_BOOT=false, so init_db()'s own step of
+    the same name (app/database.py, right after Alembic 0016's one-time
+    sweep of the whole table) never runs in them — only the separate migrate
+    Job does, before the rollout starts. A row the PREVIOUS release writes by
+    name between that Job finishing and its own pods stopping would then
+    stay ownerless until the next deploy. Roles scheduler and all run this
+    once at startup instead, on the app's own guarded connection, same as
+    the boot step; api and worker never read or write ownership, so they
+    skip it. Never stops a pod that is otherwise ready to serve — a lock
+    timeout or a transient database blip here is logged, not raised, the
+    same rule the boot step itself follows.
+    """
+    from app.database import engine, _guard
+    from app.auth.visibility import backfill_owner_ids
+    try:
+        async with engine.begin() as conn:
+            await _guard(conn)
+            touched = await conn.run_sync(backfill_owner_ids)
+        if touched:
+            logger.info(f"owner accounts resolved for {touched} row(s) written by name")
+    except Exception as e:
+        logger.warning(f"owner account backfill skipped: {e}")
+
+
 # ─── what each process runs ─────────────────────────────────────────────────
 _EVERY_ROLE = ("all", "api", "worker", "scheduler")
 _PERIODIC = ("all", "scheduler")
@@ -302,6 +329,9 @@ async def lifespan(app: FastAPI):
         # what halts the rollout with the previous pods still serving.
         await assert_schema_current()
         logger.info("Database schema is at this image's Alembic head")
+
+    if role in ("scheduler", "all"):
+        await _backfill_owner_ids_once()
 
     # Google Cloud export: the sink buffers this process's log records and
     # the exporter loop (every role — see _loops) ships them.

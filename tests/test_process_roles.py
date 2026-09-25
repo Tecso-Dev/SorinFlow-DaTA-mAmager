@@ -139,6 +139,9 @@ def boot(monkeypatch):
     async def _assert_schema():
         calls.append("assert_schema_current")
 
+    async def _backfill():
+        calls.append("backfill_owner_ids")
+
     async def _noop():
         pass
 
@@ -148,6 +151,7 @@ def boot(monkeypatch):
     monkeypatch.setattr(main, "_refuse_default_secrets", _refuse)
     monkeypatch.setattr(main, "init_db", _init_db)
     monkeypatch.setattr(main, "assert_schema_current", _assert_schema)
+    monkeypatch.setattr(main, "_backfill_owner_ids_once", _backfill)
     monkeypatch.setattr(main, "_start_background", _start_background)
     monkeypatch.setattr(main, "close_db", _noop)
     monkeypatch.setattr(main, "close_redis", _noop)
@@ -161,14 +165,51 @@ class TestTheBoot:
         monkeypatch.setattr(main.settings, "sorinflow_role", "all")
         async with main.lifespan(main.app):
             pass
-        assert boot == ["refuse", "init_db", "start:all"]
+        assert boot == ["refuse", "init_db", "backfill_owner_ids", "start:all"]
 
     async def test_a_pod_that_does_not_migrate_only_checks(self, boot, monkeypatch):
         monkeypatch.setattr(main.settings, "db_migrate_on_boot", False)
         monkeypatch.setattr(main.settings, "sorinflow_role", "api")
         async with main.lifespan(main.app):
             pass
-        assert boot == ["refuse", "assert_schema_current", "start:api"]
+        assert boot == ["refuse", "assert_schema_current", "start:api"], \
+            "api never touches ownership — only scheduler and all backfill it"
+
+    async def test_a_non_migrating_scheduler_still_backfills_ownership(self, boot, monkeypatch):
+        """The one role this actually matters for: DB_MIGRATE_ON_BOOT=false
+        in k8s means init_db()'s own backfill step never runs in this pod —
+        only the separate migrate Job does, before the rollout."""
+        monkeypatch.setattr(main.settings, "db_migrate_on_boot", False)
+        monkeypatch.setattr(main.settings, "sorinflow_role", "scheduler")
+        async with main.lifespan(main.app):
+            pass
+        assert boot == ["refuse", "assert_schema_current", "backfill_owner_ids", "start:scheduler"]
+
+    async def test_a_worker_does_not_backfill_ownership(self, boot, monkeypatch):
+        monkeypatch.setattr(main.settings, "db_migrate_on_boot", False)
+        monkeypatch.setattr(main.settings, "sorinflow_role", "worker")
+        async with main.lifespan(main.app):
+            pass
+        assert boot == ["refuse", "assert_schema_current", "start:worker"]
+
+    async def test_a_failed_backfill_does_not_raise(self, monkeypatch):
+        """Same rule as every other boot step: a lock timeout or a transient
+        database blip must not stop a pod that is otherwise ready to serve.
+        Exercises the real _backfill_owner_ids_once, not the boot fixture's
+        recording stub — _guard is Postgres-only SQL this suite's sqlite
+        would fail on for an unrelated reason, so it is a no-op here and the
+        actual backfill call is what is made to fail."""
+        import app.database as db
+        from app.auth import visibility
+
+        async def _noop_guard(conn):
+            pass
+
+        def _broken(conn):
+            raise RuntimeError("database is down")
+        monkeypatch.setattr(db, "_guard", _noop_guard)
+        monkeypatch.setattr(visibility, "backfill_owner_ids", _broken)
+        await main._backfill_owner_ids_once()   # must not raise
 
     async def test_a_schema_behind_the_image_stops_the_boot(self, boot, monkeypatch):
         async def _behind():
