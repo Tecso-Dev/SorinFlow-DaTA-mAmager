@@ -39,6 +39,23 @@ class PropertyBase(BaseModel):
     property_type: Optional[str] = None
     listing_type: Optional[str] = None
     corner_type: Optional[str] = None  # نبش
+    # These columns have existed on the model since the start, but were never
+    # added here, so FastAPI's response_model silently stripped them off the
+    # wire — the property-detail view's land/built area, direction, frontage,
+    # unit status, document/usage type, building age, extra manual attrs,
+    # address and coordinates all rendered blank no matter what was stored.
+    building_direction: Optional[str] = None   # جهت
+    land_area: Optional[int] = None
+    built_area: Optional[int] = None
+    frontage: Optional[int] = None             # بر
+    unit_status: Optional[str] = None
+    document_type: Optional[str] = None
+    usage_type: Optional[str] = None
+    building_age: Optional[str] = None
+    address: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    extra_attrs: Optional[dict] = None
 
 
 class PropertyCreate(PropertyBase):
@@ -92,7 +109,8 @@ class PropertyResponse(PropertyBase):
     ai_duplicate_of: Optional[int] = None
     scraped_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
-    
+    updated_at: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
