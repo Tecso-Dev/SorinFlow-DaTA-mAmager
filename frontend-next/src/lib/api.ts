@@ -45,10 +45,32 @@ function messageOf(status: number, body: unknown): { message: string; code?: str
   return { message: "درخواست انجام نشد.", code };
 }
 
-export async function api<T = unknown>(
-  path: string,
-  init: Omit<RequestInit, "body"> & { json?: unknown; body?: BodyInit } = {},
-): Promise<T> {
+/** What a route answers when the caller's own phone must be verified first
+ *  (app/auth/dependencies.require_verified_phone). */
+export type PhoneGateDetail = { code: "phone_unverified"; message: string; phone: string | null };
+type PhoneGate = (d: PhoneGateDetail) => Promise<boolean>;
+let phoneGate: PhoneGate | null = null;
+/** The shell's verification dialog: resolves true once the number is
+ *  verified, and the refused call is then made again. */
+export function setPhoneGate(g: PhoneGate | null) {
+  phoneGate = g;
+}
+
+type ApiInit = Omit<RequestInit, "body"> & { json?: unknown; body?: BodyInit };
+
+export async function api<T = unknown>(path: string, init: ApiInit = {}): Promise<T> {
+  try {
+    return await request<T>(path, init);
+  } catch (e) {
+    const d = e instanceof ApiError && e.status === 403 ? (e.detail as { detail?: PhoneGateDetail } | null)?.detail : null;
+    if (d && typeof d === "object" && d.code === "phone_unverified" && phoneGate && (await phoneGate(d))) {
+      return request<T>(path, init);
+    }
+    throw e;
+  }
+}
+
+async function request<T>(path: string, init: ApiInit): Promise<T> {
   const method = (init.method ?? (init.json !== undefined ? "POST" : "GET")).toUpperCase();
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
