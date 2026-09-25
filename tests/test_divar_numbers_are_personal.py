@@ -442,6 +442,64 @@ class TestTheDivarLoginIsNotAWayIn:
             auth_routes.auth_instances.pop(phone, None)
             asyncio.run(auth_routes._clear_login_started(phone))
 
+    def test_verify_fails_closed_when_the_registry_cannot_be_read(self, client, people, monkeypatch):
+        """Without this, a Redis outage makes _login_started_by's
+        swallow-to-None answer "nobody started this" — which reads as
+        permission, not "unknown" — and any divar_auth user could finish
+        another's in-flight login on an unowned number."""
+        from app.api.routes import auth as auth_routes
+
+        class _BrokenRedis:
+            async def get(self, *a, **kw):
+                raise ConnectionError("redis is down")
+
+        async def _broken():
+            return _BrokenRedis()
+
+        phone = "09129990004"
+        auth_routes.auth_instances[phone] = object()
+        monkeypatch.setattr(auth_routes, "get_redis", _broken)
+        try:
+            r = client.post(f"/api/auth/verify?phone_number={phone}", json={"code": "123456"},
+                            headers=_tok(client, "np_jan"))
+            assert r.status_code == 503, r.text
+        finally:
+            auth_routes.auth_instances.pop(phone, None)
+
+    def test_the_sweep_does_not_close_every_login_when_redis_errors(self, client, monkeypatch):
+        """One Redis hiccup used to make every phone's registry entry look
+        gone at once (the same swallow-to-None as above), so the sweep
+        closed every in-flight login browser on the node, not only the ones
+        actually abandoned."""
+        from app.api.routes import auth as auth_routes
+
+        class _BrokenRedis:
+            async def get(self, *a, **kw):
+                raise ConnectionError("redis is down")
+
+        async def _broken():
+            return _BrokenRedis()
+
+        class _FakeAuth:
+            def __init__(self):
+                self.closed = False
+
+            async def close_browser(self):
+                self.closed = True
+
+        p1, p2 = "09129990005", "09129990006"
+        a1, a2 = _FakeAuth(), _FakeAuth()
+        auth_routes.auth_instances[p1] = a1
+        auth_routes.auth_instances[p2] = a2
+        monkeypatch.setattr(auth_routes, "get_redis", _broken)
+        try:
+            asyncio.run(auth_routes._sweep_auth_instances())
+            assert p1 in auth_routes.auth_instances and p2 in auth_routes.auth_instances
+            assert not a1.closed and not a2.closed, "a Redis outage must not close every in-flight login"
+        finally:
+            auth_routes.auth_instances.pop(p1, None)
+            auth_routes.auth_instances.pop(p2, None)
+
     def test_a_forwarded_login_code_is_only_the_owners(self, client, people):
         from app.scraper import otp_store
         asyncio.run(otp_store.put_login_code(ROOT_NUM, "654321"))

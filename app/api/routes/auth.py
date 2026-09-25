@@ -73,14 +73,26 @@ async def _note_login_started(phone_number: str, user_id: Optional[int]) -> None
         logger.warning(f"[auth] could not record login start for {phone_number}: {e}")
 
 
+async def _raw_login_entry(phone_number: str) -> Optional[dict]:
+    """{"user_id": …, "started_at": …} for an in-flight login, or None if
+    there genuinely is none. Raises on a Redis failure instead of hiding
+    it — a caller that must tell "nobody started this" apart from "the
+    registry could not be asked" (verify_otp, the sweep) uses this
+    directly; _login_started_by below is the swallow-and-log wrapper most
+    callers want instead."""
+    r = await get_redis()
+    raw = await r.get(_login_registry_key(phone_number))
+    return json.loads(raw) if raw else None
+
+
 async def _login_started_by(phone_number: str) -> Optional[dict]:
     """{"user_id": …, "started_at": …} for an in-flight login, or None if
     nothing is recorded — including once AUTH_INSTANCE_TTL has passed, since
-    Redis drops the key on its own."""
+    Redis drops the key on its own, and if the registry could not be read at
+    all (logged; see _raw_login_entry for a caller that must not conflate
+    the two)."""
     try:
-        r = await get_redis()
-        raw = await r.get(_login_registry_key(phone_number))
-        return json.loads(raw) if raw else None
+        return await _raw_login_entry(phone_number)
     except Exception as e:
         logger.warning(f"[auth] could not read the login registry for {phone_number}: {e}")
         return None
@@ -118,8 +130,18 @@ async def _sweep_auth_instances():
     by hand — a browser whose registry entry has expired is, by definition,
     one nobody came back to finish within the same window that used to be
     checked here.
+
+    A Redis failure must not read as "every phone's entry is gone" —
+    _login_started_by's own swallow-to-None would make every one of them
+    look abandoned on a single hiccup, closing every in-flight login at once
+    instead of only the ones actually left behind. _raw_login_entry is used
+    directly here so that failure skips this pass instead.
     """
-    stale = [p for p in list(auth_instances) if await _login_started_by(p) is None]
+    try:
+        stale = [p for p in list(auth_instances) if await _raw_login_entry(p) is None]
+    except Exception as e:
+        logger.warning(f"[auth] could not read the login registry — skipping the sweep: {e}")
+        return
     for phone in stale:
         await _discard_auth_instance(phone, f"abandoned for {AUTH_INSTANCE_TTL}s")
 
@@ -240,7 +262,21 @@ async def verify_otp(
 ):
     """Verify OTP code and complete login"""
 
-    login = await _login_started_by(phone_number)
+    # Who started this login decides who may finish it (below) — on an
+    # unowned number that is the only thing standing between "my own
+    # in-flight login" and "somebody else's". _login_started_by's
+    # swallow-to-None on a Redis failure would answer "nobody started this",
+    # which reads as permission, not as "unknown" — any divar_auth user could
+    # then finish another user's in-flight login on an unowned number during
+    # an outage. Fail closed instead: the registry could not be asked, so
+    # this refuses rather than guesses.
+    try:
+        login = await _raw_login_entry(phone_number)
+    except Exception as e:
+        logger.warning(f"[auth] could not read the login registry for {phone_number} — "
+                       f"refusing to verify: {e}")
+        raise HTTPException(status_code=503,
+                            detail="سرویس موقتاً در دسترس نیست — چند لحظه بعد دوباره امتحان کنید") from None
     if phone_number not in auth_instances:
         if login is not None:
             # Redis remembers a login in flight; this process has no browser
