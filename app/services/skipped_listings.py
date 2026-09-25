@@ -19,6 +19,7 @@ The two rules are job_log's, for the same reasons:
   it skipped.
 """
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from loguru import logger
 from sqlalchemy import delete, select
@@ -29,8 +30,9 @@ from app.database import async_session_maker
 RETENTION_DAYS = 30
 
 
-async def record(job_id, *, divar_id: str, url: str = None, title: str = None,
-                 reason: str = "unknown", detail: str = None) -> bool:
+async def record(job_id, *, divar_id: str, url: Optional[str] = None,
+                 title: Optional[str] = None, reason: str = "unknown",
+                 detail: Optional[str] = None) -> bool:
     """Write down one listing this run did not save. Returns True if stored.
 
     `job_id` is the ScrapingJob.job_id UUID, not the integer primary key.
