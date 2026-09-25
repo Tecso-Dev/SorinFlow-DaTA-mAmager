@@ -1,5 +1,7 @@
-import { ComingTab } from "@/components/crm/coming";
+import { CallsView } from "@/components/crm/calls/calls-view";
+
+export const metadata = { title: "تماس‌های امروز" };
 
 export default function Page() {
-  return <ComingTab slug="calls" />;
+  return <CallsView />;
 }
