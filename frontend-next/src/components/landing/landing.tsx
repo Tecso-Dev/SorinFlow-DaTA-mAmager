@@ -9,7 +9,7 @@ import {
   ArrowLeft, Bell, BrainCircuit, Building2, FileSearch, Fingerprint, KeyRound, Lock, Mail, MessageSquareText,
   Phone, ScanSearch, Send, ShieldCheck, UserRoundCog, Users, Workflow,
 } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import Link from "next/link";
 import { useState } from "react";
 import { cn } from "cn";
@@ -84,9 +84,9 @@ function Nav({ brand, portalOpen }: { brand: string; portalOpen: boolean }) {
             </a>
           ))}
           {portalOpen && (
-            <Link href="/portal" className={cn(pill, "hidden sm:inline-flex")}>
+            <a href="/portal" className={cn(pill, "hidden sm:inline-flex")}>
               {LANDING.footer.portal}
-            </Link>
+            </a>
           )}
           <Link href="/panel/login" className={cn(pill, "border-transparent bg-foreground text-background hover:shadow-[0_8px_30px_-6px_rgb(99_102_241/0.6)]")}>
             ورود
@@ -101,10 +101,11 @@ function Nav({ brand, portalOpen }: { brand: string; portalOpen: boolean }) {
 
 function Hero({ portalOpen }: { portalOpen: boolean }) {
   const h = LANDING.hero;
-  const reduce = useReducedMotion();
   // Transform only (no fade) on the headline: it is the page's largest paint.
+  // No branch on reduced motion here: the server cannot know it, and the
+  // global MotionConfig (reducedMotion="user") already skips transforms.
   const rise = (i: number) => ({
-    initial: reduce ? false : { y: 60 },
+    initial: { y: 60 },
     animate: { y: 0 },
     transition: { duration: 0.8, delay: i * 0.12, ease: EASE },
   });
@@ -118,16 +119,16 @@ function Hero({ portalOpen }: { portalOpen: boolean }) {
         </motion.span>
       </h1>
       <motion.div
-        initial={reduce ? false : { opacity: 0, y: 30 }}
+        initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.9, delay: 0.5, ease: EASE }}
         className="mt-10 flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between"
       >
         <div className="flex flex-wrap gap-3">
           {portalOpen && (
-            <Link href="/portal" className={btn("solid")}>
+            <a href="/portal" className={btn("solid")}>
               {h.portal} <ArrowLeft className="size-4" aria-hidden />
-            </Link>
+            </a>
           )}
           <Link href="/panel/login" className={btn(portalOpen ? "line" : "solid")}>
             {h.panel} <ArrowLeft className="size-4" aria-hidden />
@@ -139,7 +140,7 @@ function Hero({ portalOpen }: { portalOpen: boolean }) {
       <div aria-hidden className="absolute bottom-6 left-1/2 hidden -translate-x-1/2 sm:block">
         <motion.div
           className="h-10 w-6 rounded-full border-2 border-muted-foreground/50"
-          animate={reduce ? undefined : { y: [0, 6, 0] }}
+          animate={{ y: [0, 6, 0] }}
           transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
         >
           <div className="mx-auto mt-2 h-2 w-1 rounded-full bg-muted-foreground/70" />
@@ -275,7 +276,6 @@ function Features({ stats, domain }: { stats: LandingStats; domain: string }) {
 const BARS = [38, 62, 47, 82, 58, 92, 70];
 
 function MockPanel({ stats, domain }: { stats: LandingStats; domain: string }) {
-  const reduce = useReducedMotion();
   const n = (v: number | undefined) => (v == null ? "—" : faNum(v));
   return (
     <div aria-hidden className={cn(glass, "relative aspect-[16/11] overflow-hidden p-4 sm:p-5")}>
@@ -308,7 +308,7 @@ function MockPanel({ stats, domain }: { stats: LandingStats; domain: string }) {
                 key={i}
                 className="flex-1 origin-bottom rounded-t-md bg-linear-to-t from-cyan-400/50 via-violet-500 to-fuchsia-400"
                 style={{ height: `${h}%` }}
-                animate={reduce ? undefined : { scaleY: [0.82, 1.06, 0.82] }}
+                animate={{ scaleY: [0.82, 1.06, 0.82] }}
                 transition={{ duration: 2.6, repeat: Infinity, delay: i * 0.2, ease: "easeInOut" }}
               />
             ))}
@@ -374,7 +374,6 @@ const AI_ICONS = [FileSearch, MessageSquareText, BrainCircuit, Send];
 
 function Ai() {
   const a = LANDING.ai;
-  const reduce = useReducedMotion();
   return (
     <Block id="ai">
       <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-2">
@@ -405,7 +404,7 @@ function Ai() {
                 <div className="relative size-11">
                   <motion.div
                     className="absolute inset-0 rounded-full bg-linear-to-br from-indigo-500 via-violet-500 to-cyan-400"
-                    animate={reduce ? undefined : { rotate: 360 }}
+                    animate={{ rotate: 360 }}
                     transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
                   />
                   <div className="absolute inset-[3px] grid place-items-center rounded-full bg-card">
@@ -424,7 +423,7 @@ function Ai() {
                     <motion.span
                       key={k}
                       className="size-1.5 rounded-full bg-cyan-500"
-                      animate={reduce ? undefined : { opacity: [0.3, 1, 0.3] }}
+                      animate={{ opacity: [0.3, 1, 0.3] }}
                       transition={{ duration: 1.2, repeat: Infinity, delay: k * 0.2 }}
                     />
                   ))}
@@ -476,14 +475,13 @@ function Security() {
 
 /** An extruded shield, lit from the top left, floating over its shadow. */
 function Shield3D() {
-  const reduce = useReducedMotion();
   const face = "M100 18 L168 44 V104 C168 146 138 174 100 190 C62 174 32 146 32 104 V44 Z";
   return (
     <motion.svg
       viewBox="0 0 200 230"
       className="mx-auto w-full max-w-[280px] overflow-visible"
       aria-hidden
-      animate={reduce ? undefined : { y: [0, -8, 0] }}
+      animate={{ y: [0, -8, 0] }}
       transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
     >
       <defs>
@@ -581,7 +579,7 @@ function Footer({ brand, tagline, portalOpen, year }: { brand: string; tagline: 
             <a key={n.href} href={n.href} className={link}>{n.label}</a>
           ))}
           <Link href="/panel/login" className={link}>{f.panel}</Link>
-          {portalOpen && <Link href="/portal" className={link}>{f.portal}</Link>}
+          {portalOpen && <a href="/portal" className={link}>{f.portal}</a>}
         </nav>
         <p className="text-xs text-muted-foreground">{fill(f.rights, brand).replace("{year}", year)}</p>
       </div>

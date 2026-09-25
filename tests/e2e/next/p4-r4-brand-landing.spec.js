@@ -60,9 +60,12 @@ test('the particle scene starts on a WebGL browser, and a reduced-motion visitor
 
   const ctx = await browser.newContext({ reducedMotion: 'reduce', baseURL: test.info().project.use.baseURL });
   const still = await ctx.newPage();
+  const problems = watchProblems(still);
   await still.goto('/');
   await still.waitForTimeout(3000);
   await expect(still.getByTestId('nebula')).toHaveAttribute('data-live', '0');
+  // the server cannot know the preference: the first render must still hydrate
+  expect(problems).toEqual([]);
   await ctx.close();
 });
 
@@ -85,6 +88,8 @@ test('metadata: title, canonical, OpenGraph image and JSON-LD come from settings
 
   for (const icon of ['link[rel="icon"][type="image/png"]', 'link[rel="apple-touch-icon"]']) {
     const href = await page.locator(icon).first().getAttribute('href');
+    // served from /_next/static, which the ingress already sends to the web pod
+    expect(href).toMatch(/^\/_next\/static\//);
     expect((await page.request.get(href)).ok()).toBeTruthy();
   }
 });
