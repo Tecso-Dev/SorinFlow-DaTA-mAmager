@@ -1,5 +1,5 @@
-import { ComingTab } from "@/components/crm/coming";
+import { ReportTab } from "@/components/crm/report/report-tab";
 
 export default function Page() {
-  return <ComingTab slug="report" />;
+  return <ReportTab />;
 }
