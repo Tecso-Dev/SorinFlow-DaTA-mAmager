@@ -59,6 +59,7 @@ def office(tmp_path, monkeypatch):
                 User(username="agent", full_name="مشاور", role="admin", permissions=["crm"], hashed_password=h),
                 User(username="guarded", role="admin", permissions=["crm"], hashed_password=h,
                      totp_enabled=True, totp_secret=TOTP_SECRET),
+                User(username="customer", role="visitor", hashed_password=h),
             ])
             await s.commit()
     asyncio.run(build())
@@ -148,6 +149,17 @@ def test_the_bearer_token_of_the_old_panel_still_works_without_csrf(office):
         put = await c.patch("/api/users/me", json={"presence": "away"},
                             headers={"Authorization": f"Bearer {token}"})
         assert put.status_code == 200, put.text
+    office(steps)
+
+
+def test_a_portal_visitor_gets_no_panel_session(office):
+    """A customer's portal account knows its own password; that must not buy it
+    a panel cookie, even one every staff API would refuse."""
+    async def steps(c):
+        r = await c.post("/api/session/login", json={"username": "customer", "password": PW})
+        assert r.status_code == 403, r.text
+        assert not r.headers.get_list("set-cookie")
+        assert (await c.get("/api/session")).status_code == 401
     office(steps)
 
 
