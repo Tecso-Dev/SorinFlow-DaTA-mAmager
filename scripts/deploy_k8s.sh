@@ -352,6 +352,7 @@ wait_rollout() {
 
 wait_rollout backend || rollback_and_diagnose backend
 wait_rollout scheduler || rollback_and_diagnose scheduler
+wait_rollout web || rollback_and_diagnose web
 
 # worker gets terminationGracePeriodSeconds 7200 so an in-flight scrape job
 # can finish draining — `rollout status`/`kubectl wait` would sit and wait
@@ -440,6 +441,16 @@ for h in $hosts; do
 done
 [ "$code" = 200 ] \
   || verify_fail "https://${DOMAIN}:${VERIFY_PORT}/health returned '${code:-nothing}' through Traefik via ${hosts} (the allow-traefik-to-app NetworkPolicy, or Traefik itself, is broken)"
+
+# The new panel the same way: its login page through Traefik (allow-traefik-to-web).
+code=""
+for h in $hosts; do
+  code="$(curl -sk --max-time 10 --resolve "${DOMAIN}:${VERIFY_PORT}:${h}" \
+    -o /dev/null -w '%{http_code}' "https://${DOMAIN}:${VERIFY_PORT}/panel/login" || true)"
+  [ "$code" = 200 ] && break
+done
+[ "$code" = 200 ] \
+  || verify_fail "https://${DOMAIN}:${VERIFY_PORT}/panel/login returned '${code:-nothing}' through Traefik via ${hosts} (the allow-traefik-to-web NetworkPolicy, or the web pod, is broken)"
 
 # A Ready pod that is not on its way out: right after a rollout the old pods
 # are still in their preStop pause, and checking from one of those failed a

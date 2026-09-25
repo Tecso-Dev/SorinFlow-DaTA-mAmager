@@ -83,6 +83,24 @@ spec:
                 name: worker
                 port:
                   number: 8000
+          # The new panel (web.yaml). Prefix matches whole path segments, so
+          # /panel and /panel/crm go to it but /panelx would not. Its assets
+          # live under /_next. The old panel (/dashboard), /api and the rest
+          # stay on the backend until each part moves.
+          - path: /panel
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 3000
+          - path: /_next
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 3000
           - path: /
             pathType: Prefix
             backend:
