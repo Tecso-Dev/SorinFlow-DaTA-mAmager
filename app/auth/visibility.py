@@ -133,11 +133,13 @@ def backfill_owner_ids(conn) -> int:
             continue
         t = sa.table(table, sa.column(name_col), sa.column(id_col), sa.column(RESOLVED))
         name = t.c[name_col]
-        # one match, or NULL: MIN over the matches, kept only when there is one
-        match = (sa.select(func.min(users.c.id))
+        # one match, or NULL: an aggregate with no GROUP BY is always one row,
+        # and the CASE keeps its MIN only when exactly one account matched.
+        # (Not HAVING without GROUP BY — SQLite before 3.39, e.g. Ubuntu
+        # 22.04's, refuses it.)
+        match = (sa.select(sa.case((func.count() == 1, func.min(users.c.id)), else_=None))
                  .where(users.c.role.in_(sorted(STAFF_ROLES)),
                         display_name(users.c.full_name, users.c.username) == name)
-                 .having(func.count() == 1)
                  .scalar_subquery())
         touched += conn.execute(
             sa.update(t)
