@@ -112,7 +112,7 @@ export function FilingTree({
               <span className="text-xs tabular text-muted-foreground">{faNum(c.file_count)}</span>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon-xs" className="opacity-0 group-hover:opacity-100" aria-label="عملیات کمد">
+                  <Button variant="ghost" size="icon-xs" className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100" aria-label="عملیات کمد">
                     <MoreVertical className="size-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -161,7 +161,7 @@ export function FilingTree({
                         </button>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon-xs" className="shrink-0 opacity-0 group-hover:opacity-100" aria-label="عملیات زونکن">
+                            <Button variant="ghost" size="icon-xs" className="shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100" aria-label="عملیات زونکن">
                               <MoreVertical className="size-3.5" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -200,7 +200,7 @@ export function FilingTree({
                                 </button>
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon-xs" className="shrink-0 opacity-0 group-hover:opacity-100" aria-label="عملیات پوشه">
+                                    <Button variant="ghost" size="icon-xs" className="shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100" aria-label="عملیات پوشه">
                                       <MoreVertical className="size-3" />
                                     </Button>
                                   </DropdownMenuTrigger>

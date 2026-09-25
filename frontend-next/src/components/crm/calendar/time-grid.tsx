@@ -135,10 +135,11 @@ export function TimeGrid({
                       title={`${row.title} — ${faDate(new Date(row.start_at as string), { hour: "2-digit", minute: "2-digit" })}`}
                       style={{ "--c": row.color } as React.CSSProperties}
                       className={cn(
-                        "h-full w-full overflow-hidden rounded-md border-s-2 border-s-[var(--c)] bg-[color-mix(in_oklab,var(--c)_18%,var(--card))] px-1.5 py-0.5 text-start text-[10px] leading-3.5 outline-none hover:bg-[color-mix(in_oklab,var(--c)_28%,var(--card))] focus-visible:ring-2 focus-visible:ring-ring",
-                        row.kind !== "event" && "border-dashed opacity-80",
-                        row.status === "canceled" && "opacity-45 line-through",
-                        row.status === "done" && "opacity-70 line-through",
+                        // the event's own colour lives on the accent bar
+                        // only, same reasoning as chip.tsx's EventChip
+                        "h-full w-full overflow-hidden rounded-md border-s-2 border-s-[var(--c)] bg-muted/60 text-foreground px-1.5 py-0.5 text-start text-[10px] leading-3.5 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                        row.kind !== "event" && "border-dashed",
+                        (row.status === "canceled" || row.status === "done") && "text-muted-foreground line-through",
                       )}
                     >
                       <b className="tabular">{faDate(new Date(row.start_at as string), { hour: "2-digit", minute: "2-digit" })}</b>{" "}

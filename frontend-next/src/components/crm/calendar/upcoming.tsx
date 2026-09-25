@@ -41,7 +41,11 @@ export function UpcomingStrip({ onOpenRow }: { onOpenRow: (r: CalendarRow) => vo
                 r.kind !== "event" && "border-dashed",
               )}
             >
-              <span className="flex items-center gap-1.5 text-[11px] font-semibold tabular" style={{ color: r.color }}>
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold tabular">
+                {/* the event colour lives on the accent bar and this dot —
+                    an arbitrary backend colour used as small text often
+                    fails contrast against the card background */}
+                <span className="size-1.5 shrink-0 rounded-full" style={{ background: r.color }} aria-hidden />
                 {today ? "امروز" : faDate(d, { day: "numeric", month: "short" })}
                 {!r.all_day && <span className="text-muted-foreground">· {faDate(d, { hour: "2-digit", minute: "2-digit" })}</span>}
               </span>
