@@ -292,7 +292,9 @@ async def portal_verify(data: PortalVerifyRequest, db: AsyncSession = Depends(ge
     # someone who has been a customer for months.
     if was_unverified:
         from app.services import email_templates as _t
-        await notify_by_email(db, user.email, _t.welcome(user.full_name or "کاربر"),
+        from app.services.site_settings import read_site
+        await notify_by_email(db, user.email,  # type: ignore[arg-type]
+                              _t.welcome(user.full_name or "کاربر", site=await read_site(db)),  # type: ignore[arg-type]
                               template="welcome")
     return _token_for(user)
 

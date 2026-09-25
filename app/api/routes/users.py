@@ -1484,6 +1484,7 @@ async def request_verification(user_id: int,
     from app.config import get_settings
     from app.database import get_redis
     from app.services import email_service, email_templates
+    from app.services.site_settings import read_site
     from app.services.sms_service import send_sms
 
     target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
@@ -1512,12 +1513,13 @@ async def request_verification(user_id: int,
 
     if need_email:
         try:
+            site_cfg = await read_site(db)
             what = "ایمیل" + (" و شمارهٔ موبایل" if need_phone else "")
             subj, html, text = email_templates.notification(
                 f"لطفاً {what} خود را تأیید کنید",
-                f"{who} از شما خواسته {what} خود را در سورین‌فلو تأیید کنید. "
+                f"{who} از شما خواسته {what} خود را در {site_cfg['brandName']} تأیید کنید. "
                 "وارد پنل شوید، به «پروفایل» بروید و کنار هر مورد «ارسال کد» را بزنید.",
-                cta_label="باز کردن پروفایل", cta_url=profile_url)
+                cta_label="باز کردن پروفایل", cta_url=profile_url, site=site_cfg)
             res = await email_service.send(target.email, subj, html, text, db=db)
             sent["email"] = bool(res.get("success"))
         except Exception as e:

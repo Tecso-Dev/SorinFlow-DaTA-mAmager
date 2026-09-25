@@ -122,10 +122,12 @@ async def create_request(data: PropertyRequestCreate,
     await db.refresh(req)
 
     from app.services import email_templates as _t
+    from app.services.site_settings import read_site
     from app.api.routes.public_auth import notify_by_email
     await notify_by_email(db, current_user.email,
                           _t.request_received(req.contact_name or "کاربر",
-                                              _summarise_request(req)),
+                                              _summarise_request(req),
+                                              site=await read_site(db)),
                           template="request_received")
     return req.to_dict()
 
@@ -303,10 +305,11 @@ async def decide_ticket(ticket_id: int, data: UpgradeTicketDecision,
                        request=request)
 
     from app.services import email_templates as _t
+    from app.services.site_settings import read_site
     from app.api.routes.public_auth import notify_by_email
     await notify_by_email(
         db, user.email,
         _t.ticket_decision(user.full_name or "کاربر", bool(data.approve),
-                           data.decision_note or ""),
+                           data.decision_note or "", site=await read_site(db)),
         template="ticket_decision", actor=current_user.username)
     return ticket.to_dict()
