@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Command as CommandIcon, LogOut, Menu, Moon, Search, Sun, UserRound } from "lucide-react";
+import { Bell, CircleHelp, Command as CommandIcon, LogOut, Menu, Moon, Search, Sun, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -22,7 +22,9 @@ import { api, onApiError } from "@/lib/api";
 import { can, displayName, ROLE_LABEL, SESSION_KEY, useSession, type User } from "@/lib/session";
 import type { SiteConfig } from "@/lib/site";
 import { toast } from "@/components/toaster";
+import { ConfirmProvider } from "./kit";
 import { NAV, navItemFor } from "./nav";
+import { PhoneGate } from "./phone-gate";
 
 export type ShellSite = Pick<SiteConfig, "brandName" | "brandNameLatin" | "tagline">;
 
@@ -339,10 +341,11 @@ export function AppShell({ site, children }: { site: ShellSite; children: React.
           </div>
         </header>
         <main id="main" className="relative flex-1 px-4 py-6 sm:px-6 lg:px-8">
-          {children}
+          <ConfirmProvider fallbackIcon={CircleHelp}>{children}</ConfirmProvider>
         </main>
       </div>
       <CommandPalette user={user} open={palette} onOpenChange={setPalette} />
+      <PhoneGate />
     </div>
   );
 }

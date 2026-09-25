@@ -25,6 +25,21 @@ The old panel (`frontend/`) keeps working at `/dashboard` until every section is
   glow, a column of full-width buttons. Never `window.prompt/confirm/alert`.
 - Theme follows the device (next-themes, `storageKey="sf-theme"`), both themes must look right.
 
+## Shared pieces (use them, do not rebuild them)
+- `src/components/panel/kit.tsx`: `PageHeader` (with the `IsoBadge` 3D block), `Section` (card),
+  `Toolbar`, `ToneBadge`/`LabelBadge`, `Empty`, `ErrorNote`, `ListSkeleton`, `Pagination`, `Field`,
+  `NativeSelect`, `RingDialog` (the OTP dialog look, for every form and message dialog) and
+  `useConfirm()` (`if (await confirm({title, danger: true})) …`).
+- `src/components/panel/date-input.tsx`: `JalaliDateInput` (typed or picked, value is a `Date`) and
+  `MonthGrid`. `src/lib/jalali.ts`: `parseJalali`, `formatJalali`, `fromJalali`, `jParts`, `isoDay`.
+- `src/lib/crm.ts`: every CRM label map (lead/deal/task status, contact types, temperature, ...),
+  `price()` (the old panel's «۳٫۵ میلیارد»), `fullDeposit()`, `qs()` and `exportHref()`. An Excel
+  export is a plain `<a href={exportHref(...)} download>`: a GET, the session cookie rides along.
+- `api()` handles `403 phone_unverified` itself: the shell's `PhoneGate` dialog verifies the number
+  and the refused call is made again. Pages do nothing for it.
+- The CRM section is `src/app/panel/(app)/crm/<tab>/page.tsx`, one route per tab
+  (`src/components/crm/tabs.ts`); a tab's own components live in `src/components/crm/<tab>/`.
+
 ## Rules every page follows
 - **Persian, RTL.** `<html dir="rtl">`. Use logical utilities (`ms-`, `me-`, `ps-`, `pe-`,
   `start-`, `end-`, `text-start`, `border-s/e`, `rounded-s/e`). Physical sides only where the
