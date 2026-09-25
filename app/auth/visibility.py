@@ -24,7 +24,7 @@ import sqlalchemy as sa
 from sqlalchemy import and_, false, func, or_, select
 
 from app.auth.permissions import FULL_ACCESS_ROLES, STAFF_ROLES
-from app.models.crm_models import Cabinet, Customer, CustomerMatch, Task
+from app.models.crm_models import ActivityLog, Cabinet, Customer, CustomerMatch, Task
 from app.models.lead import Lead
 from app.models.property import Property
 from app.models.user import User
@@ -229,3 +229,23 @@ def customers_visible_to(query, user):
         return query
     return query.where(or_(Customer.consultant_name.is_(None), Customer.consultant_name == "",
                            _mine(Customer.consultant_user_id, user)))
+
+
+# ── the dashboard's team numbers ─────────────────────────────────────────────
+
+def activity_visible_to(query, user):
+    """Whose calls, visits and closes a dashboard counts: root and
+    super_admin see the whole office's, everybody else their own. The
+    activity log names people by display name, so that is what is matched."""
+    if is_super(user):
+        return query
+    return query.where(ActivityLog.actor == actor(user))
+
+
+def team_visible_to(query, user):
+    """The people the dashboard's team table lists: every staff account for
+    root and super_admin, only oneself for everybody else."""
+    query = query.where(User.is_active == True, User.role.in_(STAFF_ROLES))   # noqa: E712
+    if is_super(user):
+        return query
+    return query.where(_mine(User.id, user))
