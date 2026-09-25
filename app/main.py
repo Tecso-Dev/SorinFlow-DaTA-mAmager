@@ -591,6 +591,10 @@ async def api_key_middleware(request: Request, call_next):
                     # the APK is fetched by a phone that has nothing to
                     # authenticate with yet — installing the app is step one
                     or request.url.path.startswith("/downloads")
+                    # the hero images email_templates.py links to — fetched by
+                    # a mail client, which carries neither a bearer nor a
+                    # cookie, let alone the API key
+                    or request.url.path.startswith("/email-assets")
                     or request.url.path == "/portal")
     is_public = request.url.path in public_paths or is_dashboard
 
@@ -1459,6 +1463,14 @@ try:
     app.mount("/images", StaticFiles(directory=settings.images_path), name="images")
 except Exception as e:
     logger.warning(f"images directory not mountable, skipping: {e}")
+try:
+    # The email hero PNGs (app/services/email_templates.py), committed to the
+    # repo and rendered by scripts/render_email_heroes.py — not user data, so
+    # this one lives under app/ rather than settings.images_path.
+    app.mount("/email-assets", StaticFiles(directory="app/static/email_assets"),
+             name="email-assets")
+except Exception as e:
+    logger.warning(f"email-assets directory not mountable, skipping: {e}")
 try:
     # The forwarder APK. Its own mount and its own media type: a browser on the
     # phone offered application/octet-stream may refuse to install it.
