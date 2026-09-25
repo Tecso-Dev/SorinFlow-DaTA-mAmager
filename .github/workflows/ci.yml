@@ -64,7 +64,10 @@ jobs:
   # parser regression or a broken auth dependency shipped straight to the
   # scraper fleet on every push to main.
   test:
-    runs-on: ubuntu-latest
+    # 22.04 (jammy), not ubuntu-latest: Playwright 1.41's install --with-deps
+    # asks apt for jammy's package names (libasound2 …), which noble no longer
+    # has — and jammy is what the production image is built on anyway.
+    runs-on: ubuntu-22.04
 
     # A real Postgres, not SQLite. The models are Postgres-specific — scraping_jobs
     # .job_id is a postgresql UUID column — so a SQLite run either fails to build

@@ -20,7 +20,10 @@ concurrency:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    # 22.04 (jammy), not ubuntu-latest: Playwright 1.41's install --with-deps
+    # asks apt for jammy's package names (libasound2 …), which noble no longer
+    # has — and jammy is what the production image is built on anyway.
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
 
     services:
