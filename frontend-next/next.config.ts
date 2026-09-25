@@ -13,6 +13,13 @@ const nextConfig: NextConfig = {
   // A self-contained server for the Docker image (node server.js), no
   // node_modules at runtime.
   output: "standalone",
+  // next dev only allows RSC/action fetches whose Origin header matches a
+  // known dev origin; the e2e harness (and a worktree's own dev server)
+  // is reached over 127.0.0.1, which Next does not allowlist by default —
+  // without this, every client-side navigation on 127.0.0.1 hangs on an
+  // empty shell (the initial document still renders; the RSC payload fetch
+  // that fills it does not).
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   // The repo root has its own package.json (eslint for the old panel); without
   // these Next treats it as the workspace and nests the standalone output.
   outputFileTracingRoot: path.join(__dirname),
