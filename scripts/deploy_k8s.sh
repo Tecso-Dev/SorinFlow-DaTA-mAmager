@@ -184,7 +184,7 @@ elif kubectl -n "$NS" get deployment backend >/dev/null 2>&1; then
   echo "share data-pvc at once. Scaling backend to 0 first — a short, accepted downtime"
   echo "(Sobhan's decision), not a bug."
   retry_kubectl kubectl -n "$NS" scale deployment/backend --replicas=0
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     left="$(kubectl -n "$NS" get pods -l app=backend --no-headers 2>/dev/null | grep -vc '^$' || true)"
     [ "${left:-0}" = "0" ] && break
     sleep 5
@@ -209,6 +209,15 @@ rollback_and_diagnose() {
   local dep="$1"
   echo "::error::$dep did not become ready — rolling back to the previous image."
   kubectl -n "$NS" rollout undo "deployment/$dep" || true
+  # undo rewinds the pod template but not apply's record of the last applied
+  # config, so the next deploy would diff against a manifest that is no longer
+  # live and skip re-sending whatever the two share — the rolled-back template
+  # would keep its old fields. Without the record, the next apply sends the
+  # whole manifest.
+  forget_last_applied() {
+    kubectl -n "$NS" annotate "deployment/$1" kubectl.kubernetes.io/last-applied-configuration- >/dev/null 2>&1 || true
+  }
+  forget_last_applied "$dep"
   # The first move to three processes has nothing to undo worker and scheduler
   # TO, and the image backend returns to runs every loop and every scrape in
   # its own process: left beside a live scheduler it would send every Telegram
@@ -218,7 +227,10 @@ rollback_and_diagnose() {
   if [ "${FIRST_TRANSITION:-0}" = 1 ]; then
     echo "::error::first move to separate processes failed — restoring the single previous pod."
     kubectl -n "$NS" scale deployment/worker deployment/scheduler --replicas=0 || true
-    [ "$dep" = backend ] || kubectl -n "$NS" rollout undo deployment/backend || true
+    if [ "$dep" != backend ]; then
+      kubectl -n "$NS" rollout undo deployment/backend || true
+      forget_last_applied backend
+    fi
     kubectl -n "$NS" scale deployment/backend --replicas=1 || true
   fi
   echo "::group::pods"
@@ -244,8 +256,34 @@ rollback_and_diagnose() {
   exit 1
 }
 
-kubectl -n "$NS" rollout status deployment/backend --timeout=300s || rollback_and_diagnose backend
-kubectl -n "$NS" rollout status deployment/scheduler --timeout=300s || rollback_and_diagnose scheduler
+# `rollout status --timeout=300s` alone sat out the full five minutes on a new
+# pod that had crashed at import on its first second — and on the first
+# transition backend is at 0 by then, so those five minutes were the site
+# being down (seen on the k3d rehearsal with a deliberately broken image). A
+# pod of the NEW ReplicaSet that has already restarted twice will not come
+# good by waiting: stop and roll back. Old pods' restart counts are ignored —
+# they are history, not this rollout.
+wait_rollout() {
+  local dep="$1" deadline=$((SECONDS + 300)) rs hash restarts
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    kubectl -n "$NS" rollout status "deployment/$dep" --timeout=5s >/dev/null 2>&1 && return 0
+    rs="$(kubectl -n "$NS" get rs -l "app=$dep" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
+    hash="$([ -n "$rs" ] && kubectl -n "$NS" get rs "$rs" -o jsonpath='{.metadata.labels.pod-template-hash}' 2>/dev/null || true)"
+    if [ -n "$hash" ]; then
+      restarts="$(kubectl -n "$NS" get pods -l "app=$dep,pod-template-hash=$hash" \
+        -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount}{"\n"}{end}' 2>/dev/null | sort -n | tail -1)"
+      if [ "${restarts:-0}" -ge 2 ]; then
+        echo "::error::$dep's new pod has already restarted ${restarts} times — not waiting out the timeout."
+        return 1
+      fi
+    fi
+    sleep 3
+  done
+  return 1
+}
+
+wait_rollout backend || rollback_and_diagnose backend
+wait_rollout scheduler || rollback_and_diagnose scheduler
 
 # worker gets terminationGracePeriodSeconds 7200 so an in-flight scrape job
 # can finish draining — `rollout status`/`kubectl wait` would sit and wait
@@ -263,7 +301,7 @@ else
   say "waiting for worker's new pod to become ready (the old one may keep draining for up to 2h)"
   ok=0
 fi
-for i in $(seq 1 60); do
+for _ in $(seq 1 60); do
   [ "$ok" = 1 ] && break
   new_rs="$(kubectl -n "$NS" get rs -l app=worker --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
   if [ -n "$new_rs" ]; then
@@ -294,14 +332,18 @@ verify_fail() {
 }
 
 say "verifying from inside a backend pod: /ready, redis, DNS, HTTPS egress"
-POD="$(kubectl -n "$NS" get pods -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+# A Ready pod that is not on its way out: right after a rollout the old pods
+# are still in their preStop pause, and checking from one of those failed a
+# healthy deploy and took its NetworkPolicies down with it (k3d rehearsal).
+POD="$(kubectl -n "$NS" get pods -l app=backend -o jsonpath='{range .items[*]}{.metadata.name}|{.metadata.deletionTimestamp}|{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null \
+  | awk -F'|' '$2 == "" && $3 == "True" { print $1; exit }' || true)"
 [ -n "$POD" ] || verify_fail "no backend pod found to verify from"
 
-kubectl -n "$NS" exec "$POD" -c api -- \
+kubectl -n "$NS" exec "$POD" -c backend -- \
   sh -c 'curl -fsS --max-time 5 http://127.0.0.1:8000/ready >/dev/null' \
   || verify_fail "/ready did not answer 200 from inside the pod (postgres/DNS reachability, or the NetworkPolicy itself, is broken)"
 
-kubectl -n "$NS" exec "$POD" -c api -- \
+kubectl -n "$NS" exec "$POD" -c backend -- \
   python3 -c "
 import asyncio
 from app.database import get_redis
@@ -313,10 +355,10 @@ async def main():
 asyncio.run(main())
 " || verify_fail "could not PING redis from inside the pod"
 
-kubectl -n "$NS" exec "$POD" -c api -- sh -c 'getent hosts divar.ir >/dev/null' \
+kubectl -n "$NS" exec "$POD" -c backend -- sh -c 'getent hosts divar.ir >/dev/null' \
   || verify_fail "DNS lookup for divar.ir failed from inside the pod"
 
-kubectl -n "$NS" exec "$POD" -c api -- sh -c 'curl -sS -o /dev/null --max-time 10 https://divar.ir' \
+kubectl -n "$NS" exec "$POD" -c backend -- sh -c 'curl -sS -o /dev/null --max-time 10 https://divar.ir' \
   || verify_fail "HTTPS egress to divar.ir failed from inside the pod (any HTTP status back would have counted)"
 
 say "done — $OVERLAY is on ${IMAGE}"

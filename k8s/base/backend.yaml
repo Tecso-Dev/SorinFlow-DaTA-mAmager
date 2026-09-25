@@ -90,7 +90,14 @@ spec:
       # workflow over the self-hosted runner, so the kubelet must not try to
       # pull it from the registry.
       containers:
-        - name: api
+        # «backend», the name the pre-kustomize manifest gave this container,
+        # not «api»: apply merges containers BY NAME, and after a
+        # `kubectl rollout undo` its record of the last applied config no
+        # longer matches the live template — the next apply then kept the old
+        # container and added the new one beside it, two processes on port
+        # 8000 in every pod (seen on the k3d rehearsal of a failed first move
+        # followed by a retry). The same name updates the one container in place.
+        - name: backend
           image: ghcr.io/tecso-dev/sorinflow-data-manager:latest
           imagePullPolicy: IfNotPresent
           # SIGTERM stops uvicorn accepting at once, but Traefik keeps routing to
