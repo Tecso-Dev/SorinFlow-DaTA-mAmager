@@ -43,9 +43,36 @@ to `dir="ltr"` so it is not visually reversed.
 
 Everything a caller hands in is plain text and is escaped here: a visitor
 chooses their own name at sign-up, and it lands in these messages.
+
+## Brand, domain and hero images — never hard-coded
+
+CLAUDE.md (multi-office readiness): a template never spells out the brand,
+office name or domain itself. Every public function here takes an optional
+`site: dict | None` — the same shape `app.services.site_settings.read_site()`
+returns (`brandName`, `domain`, `agencyName`, `email`, `phone`, ...). A
+caller that has a `db` session fetches it (`await read_site(db)`) and passes
+it through; a caller that does not (or a direct test) gets the same
+env/default fallback `read_site()` itself falls back to
+(`site_settings.defaults()`), so every function stays callable exactly as
+before — no required new argument, no changed positional order.
+
+Each template family shows one small isometric PNG hero, rendered ahead of
+time by `scripts/render_email_heroes.py` into `app/static/email_assets/` and
+served by the backend at `/email-assets/<name>.png` (mounted in app/main.py,
+public in api_key_middleware — see tests/test_security_headers.py). The URL
+is built absolute from the configured domain (`https://{domain}/email-assets/…`)
+rather than embedded inline: Gmail and most other clients strip `data:` URIs
+out of HTML mail entirely (a security measure against tracking/phishing
+payloads), so an inline image silently disappears in the one client that
+matters most. A hosted PNG degrades the same way every marketing email
+already does — blocked-by-default remote images show a placeholder the
+recipient can choose to load — instead of vanishing outright.
 """
 import html as _html
 from datetime import datetime, timezone
+from typing import Optional
+
+from app.services.site_settings import defaults as _site_defaults
 
 BG = "#030305"
 CARD = "#0a0a10"
@@ -65,8 +92,23 @@ GRADIENT = f"linear-gradient(120deg,{VIOLET},{PINK} 40%,{CYAN} 80%)"
 # Tahoma is the one that actually renders Persian on Windows and Outlook.
 FONT = "'Estedad','Vazirmatn',Tahoma,system-ui,-apple-system,sans-serif"
 
-SITE_URL = "https://sorinflow.com"
-BRAND = "سورین‌فلو"
+
+def _site(site: Optional[dict]) -> dict:
+    """The effective site config for a template: caller's dict, or the same
+    env/default fallback app.services.site_settings.read_site() uses when
+    nothing has been saved yet."""
+    out = _site_defaults()
+    if site:
+        out.update({k: v for k, v in site.items() if v})
+    return out
+
+
+def _brand(site: Optional[dict]) -> str:
+    return _site(site)["brandName"]
+
+
+def _site_url(site: Optional[dict]) -> str:
+    return f"https://{_site(site)['domain']}"
 
 
 def _year() -> int:
@@ -104,19 +146,71 @@ _RESPONSIVE_CSS = """
 """
 
 
+# Isometric hero PNGs, one per template family — rendered by
+# scripts/render_email_heroes.py, served from app/static/email_assets/
+# (mounted at /email-assets/, see app/main.py) and referenced by an absolute
+# URL built from the site's own domain. 1200×420 source (2x for a 600×210
+# display) so it stays sharp on a retina screen.
+HERO_FILES = {
+    "auth": ("hero-auth.png", "یک قفل و کلید ایزومتریک"),
+    "welcome": ("hero-welcome.png", "دری باز و یک دست ایزومتریک در حال خوش‌آمدگویی"),
+    "decision": ("hero-decision.png", "یک برگهٔ تاییدشدهٔ ایزومتریک"),
+    "request": ("hero-request.png", "یک پوشهٔ درخواست و ذره‌بین ایزومتریک"),
+    "notification": ("hero-notification.png", "یک زنگولهٔ اطلاع‌رسانی ایزومتریک"),
+}
+
+
+def _hero_img(hero: Optional[str], site: Optional[dict]) -> str:
+    """A fluid hero banner, `width="600"` only for Outlook.
+
+    Same reasoning as the card itself (see the module note on Android/Gmail):
+    a plain `width="600"` attribute would win over every `<style>` and every
+    `max-width` on Gmail's Android app and shrink or side-scroll a 600px
+    image on a 360px screen, so the pixel width is confined to the `mso`
+    branch Outlook alone reads, and everyone else gets a fluid `<img>`.
+    """
+    if not hero or hero not in HERO_FILES:
+        return ""
+    filename, alt = HERO_FILES[hero]
+    src = f"{_site_url(site)}/email-assets/{filename}"
+    alt_esc = _html.escape(alt)
+    return f"""
+<tr>
+  <td style="line-height:0;font-size:0;">
+    <!--[if mso]>
+    <img src="{src}" width="600" height="210" alt="{alt_esc}" style="display:block;border:0;" />
+    <![endif]-->
+    <!--[if !mso]><!-->
+    <img src="{src}" alt="{alt_esc}"
+         style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;" />
+    <!--<![endif]-->
+  </td>
+</tr>"""
+
+
 def shell(*, title: str, preheader: str, body: str,
-          accent: str = VIOLET) -> str:
+          accent: str = VIOLET, site: Optional[dict] = None,
+          hero: Optional[str] = None) -> str:
     """The frame every message shares.
 
     `preheader` is the grey line a client shows next to the subject in the
     inbox list. Left unset it fills itself with whatever HTML comes first,
-    which is usually the word "سورین‌فلو" repeated — so it is set explicitly
-    and then hidden, with a run of zero-width fillers after it so the body
-    does not leak into the preview behind it.
+    which is usually the brand name repeated — so it is set explicitly and
+    then hidden, with a run of zero-width fillers after it so the body does
+    not leak into the preview behind it.
+
+    `site` is the office's brand/domain/contact config (see the module
+    docstring); `hero` names one of HERO_FILES, shown as a banner image
+    under the gradient rule.
     """
+    cfg = _site(site)
+    brand = _html.escape(cfg["brandName"])
+    agency = _html.escape(cfg["agencyName"])
+    site_url = _site_url(site)
     title = _html.escape(str(title or ""))
     preheader = _html.escape(str(preheader or ""))
     filler = "&zwnj;&nbsp;" * 40
+    copyright_line = f"{agency} — {brand}" if agency else brand
     return f"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="fa" dir="rtl">
 <head>
@@ -156,12 +250,12 @@ def shell(*, title: str, preheader: str, body: str,
           <td style="height:4px;line-height:4px;font-size:0;
                      background-color:{VIOLET};background-image:{GRADIENT};">&nbsp;</td>
         </tr>
-
+{_hero_img(hero, site)}
         <tr>
           <td align="center" class="sf-pad" dir="rtl" style="padding:26px 28px 2px 28px;">
             <span style="font-family:{FONT};font-size:19px;font-weight:800;
-                         color:{accent};letter-spacing:-0.2px;">{BRAND}</span>
-            <div style="font-family:{FONT};font-size:11px;color:{DIM};margin-top:2px;">املاک سورین</div>
+                         color:{accent};letter-spacing:-0.2px;">{brand}</span>
+            {f'<div style="font-family:{FONT};font-size:11px;color:{DIM};margin-top:2px;">{agency}</div>' if agency else ""}
           </td>
         </tr>
 
@@ -179,15 +273,15 @@ def shell(*, title: str, preheader: str, body: str,
               style="padding:18px 28px 24px 28px;border-top:1px solid {LINE};
                      font-family:{FONT};font-size:12px;line-height:1.9;
                      color:{DIM};text-align:center;direction:rtl;">
-            این ایمیل از سوی <a href="{SITE_URL}" style="color:{VIOLET};text-decoration:none;">سورین‌فلو</a> ارسال شده است.<br />
+            این ایمیل از سوی <a href="{site_url}" style="color:{VIOLET};text-decoration:none;">{brand}</a> ارسال شده است.<br />
             اگر این درخواست از طرف شما نبوده، این پیام را نادیده بگیرید.
             <div style="margin-top:10px;">
-              <a href="{SITE_URL}/portal" style="color:{DIM};text-decoration:none;">پورتال مشتریان</a>
+              <a href="{site_url}/portal" style="color:{DIM};text-decoration:none;">پورتال مشتریان</a>
               <span style="color:#3a3f4b;">&nbsp;·&nbsp;</span>
-              <a href="{SITE_URL}/dashboard/" style="color:{DIM};text-decoration:none;">پنل</a>
+              <a href="{site_url}/dashboard/" style="color:{DIM};text-decoration:none;">پنل</a>
             </div>
             <div style="margin-top:10px;color:#565c6b;font-size:11px;">
-              © {_year()} املاک سورین — سورین‌فلو
+              © {_year()} {copyright_line}
             </div>
           </td>
         </tr>
@@ -264,70 +358,81 @@ def _p(text: str) -> str:
 
 # ── the messages ────────────────────────────────────────────────────────────
 
-def login_code(code: str, *, minutes: int = 5, name: str = "") -> tuple:
+def login_code(code: str, *, minutes: int = 5, name: str = "",
+              site: Optional[dict] = None) -> tuple:
     """(subject, html, text) for a sign-in / sign-up code."""
+    brand = _brand(site)
     hello = f"{_esc(name)} عزیز،" if name else "سلام،"
     body = (
         _h("کد ورود شما")
         + _p(hello)
-        + _p("برای ادامهٔ ورود یا ثبت‌نام، کد زیر را در صفحهٔ سورین‌فلو وارد کنید:")
+        + _p(f"برای ادامهٔ ورود یا ثبت‌نام، کد زیر را در صفحهٔ {brand} وارد کنید:")
         + _code_block(code)
         + _muted(f"این کد تا {minutes} دقیقهٔ دیگر معتبر است و تنها یک بار قابل استفاده است. "
-                 "آن را با هیچ‌کس در میان نگذارید — همکاران سورین‌فلو هرگز این کد را از شما نمی‌پرسند.")
+                 f"آن را با هیچ‌کس در میان نگذارید — همکاران {brand} هرگز این کد را از شما نمی‌پرسند.")
     )
-    text = (f"{name + ' عزیز،' if name else 'سلام،'}\n\nکد ورود شما به سورین‌فلو: {code}\n"
+    text = (f"{name + ' عزیز،' if name else 'سلام،'}\n\nکد ورود شما به {brand}: {code}\n"
             f"این کد تا {minutes} دقیقه معتبر است.\n\n"
             "اگر این درخواست از طرف شما نبوده، این پیام را نادیده بگیرید.")
-    return ("کد ورود شما به سورین‌فلو", shell(
-        title="کد ورود", preheader=f"کد ورود شما: {code}", body=body), text)
+    return (f"کد ورود شما به {brand}", shell(
+        title="کد ورود", preheader=f"کد ورود شما: {code}", body=body,
+        site=site, hero="auth"), text)
 
 
-def verify_email_code(code: str, *, minutes: int = 5, name: str = "") -> tuple:
+def verify_email_code(code: str, *, minutes: int = 5, name: str = "",
+                      site: Optional[dict] = None) -> tuple:
     """(subject, html, text) for proving an address from the profile page."""
+    brand = _brand(site)
     hello = f"{_esc(name)} عزیز،" if name else "سلام،"
     body = (
         _h("تأیید ایمیل شما")
         + _p(hello)
-        + _p("برای تأیید این ایمیل در سورین‌فلو، کد زیر را در صفحهٔ پروفایل وارد کنید:")
+        + _p(f"برای تأیید این ایمیل در {brand}، کد زیر را در صفحهٔ پروفایل وارد کنید:")
         + _code_block(code)
         + _muted(f"این کد تا {minutes} دقیقهٔ دیگر معتبر است و تنها یک بار قابل استفاده است. "
                  "اگر شما این درخواست را نداده‌اید، این پیام را نادیده بگیرید.")
     )
-    text = (f"{name + ' عزیز،' if name else 'سلام،'}\n\nکد تأیید ایمیل شما در سورین‌فلو: {code}\n"
+    text = (f"{name + ' عزیز،' if name else 'سلام،'}\n\nکد تأیید ایمیل شما در {brand}: {code}\n"
             f"این کد تا {minutes} دقیقه معتبر است.\n\n"
             "اگر این درخواست از طرف شما نبوده، این پیام را نادیده بگیرید.")
-    return ("تأیید ایمیل شما در سورین‌فلو", shell(
-        title="تأیید ایمیل", preheader=f"کد تأیید ایمیل: {code}", body=body), text)
+    return (f"تأیید ایمیل شما در {brand}", shell(
+        title="تأیید ایمیل", preheader=f"کد تأیید ایمیل: {code}", body=body,
+        site=site, hero="auth"), text)
 
 
-def welcome(name: str, *, portal_url: str = f"{SITE_URL}/portal") -> tuple:
+def welcome(name: str, *, portal_url: str = "", site: Optional[dict] = None) -> tuple:
+    brand = _brand(site)
+    portal_url = portal_url or f"{_site_url(site)}/portal"
     body = (
         _h(f"{_esc(name)} عزیز، خوش آمدید 👋")
-        + _p("حساب شما در سورین‌فلو ساخته شد.")
-        + _p("سورین‌فلو ملک‌هایی را که دنبالشان هستید پیدا می‌کند: کافی است "
+        + _p(f"حساب شما در {brand} ساخته شد.")
+        + _p(f"{brand} ملک‌هایی را که دنبالشان هستید پیدا می‌کند: کافی است "
              "درخواست خود را ثبت کنید تا مشاوران ما گزینه‌های منطبق را برایتان بفرستند.")
         + _button("ثبت درخواست ملک", portal_url)
         + _muted("اگر سوالی داشتید کافی است به همین ایمیل پاسخ دهید.")
     )
     text = (f"{name} عزیز، خوش آمدید.\n\n"
-            "حساب شما در سورین‌فلو ساخته شد.\n"
+            f"حساب شما در {brand} ساخته شد.\n"
             f"برای ثبت درخواست ملک: {portal_url}\n")
-    return ("به سورین‌فلو خوش آمدید", shell(
-        title="خوش آمدید", preheader="حساب شما در سورین‌فلو ساخته شد",
-        body=body), text)
+    return (f"به {brand} خوش آمدید", shell(
+        title="خوش آمدید", preheader=f"حساب شما در {brand} ساخته شد",
+        body=body, site=site, hero="welcome"), text)
 
 
-def ticket_decision(name: str, approved: bool, note: str = "") -> tuple:
+def ticket_decision(name: str, approved: bool, note: str = "",
+                    site: Optional[dict] = None) -> tuple:
+    brand = _brand(site)
+    dashboard_url = f"{_site_url(site)}/dashboard/"
     if approved:
         body = (
             _h("درخواست شما تایید شد ✅")
-            + _p(f"{_esc(name)} عزیز، درخواست دسترسی شما به پنل سورین‌فلو تایید شد.")
+            + _p(f"{_esc(name)} عزیز، درخواست دسترسی شما به پنل {brand} تایید شد.")
             + _p("از این پس می‌توانید با همان ایمیل یا شمارهٔ خود وارد پنل شوید.")
             + (_muted(f"یادداشت مدیر: {_esc(note)}") if note else "")
-            + _button("ورود به پنل", f"{SITE_URL}/dashboard/", SUCCESS)
+            + _button("ورود به پنل", dashboard_url, SUCCESS)
         )
         subject = "درخواست دسترسی شما تایید شد"
-        text = f"{name} عزیز، درخواست دسترسی شما تایید شد.\n{SITE_URL}/dashboard/"
+        text = f"{name} عزیز، درخواست دسترسی شما تایید شد.\n{dashboard_url}"
         accent = SUCCESS
     else:
         body = (
@@ -339,10 +444,11 @@ def ticket_decision(name: str, approved: bool, note: str = "") -> tuple:
         subject = "نتیجهٔ درخواست دسترسی شما"
         text = f"{name} عزیز، درخواست دسترسی شما پذیرفته نشد.\n{note}"
         accent = GOLD
-    return (subject, shell(title=subject, preheader=subject, body=body, accent=accent), text)
+    return (subject, shell(title=subject, preheader=subject, body=body, accent=accent,
+                           site=site, hero="decision"), text)
 
 
-def request_received(name: str, summary: str) -> tuple:
+def request_received(name: str, summary: str, site: Optional[dict] = None) -> tuple:
     body = (
         _h("درخواست شما ثبت شد")
         + _p(f"{_esc(name)} عزیز، درخواست ملک شما ثبت شد و در حال بررسی است.")
@@ -357,11 +463,12 @@ def request_received(name: str, summary: str) -> tuple:
     text = f"{name} عزیز، درخواست ملک شما ثبت شد.\n\n{summary}"
     return ("درخواست ملک شما ثبت شد", shell(
         title="درخواست ثبت شد", preheader="درخواست ملک شما ثبت شد و در حال بررسی است",
-        body=body), text)
+        body=body, site=site, hero="request"), text)
 
 
 def notification(title: str, message: str, *, cta_label: str = "",
-                 cta_url: str = "", accent: str = VIOLET) -> tuple:
+                 cta_url: str = "", accent: str = VIOLET,
+                 site: Optional[dict] = None) -> tuple:
     """The generic one, for anything without a dedicated template.
 
     `message` is plain text, and its line breaks are kept: the identity-check
@@ -372,24 +479,26 @@ def notification(title: str, message: str, *, cta_label: str = "",
         _button(cta_label, cta_url, accent) if cta_label and cta_url else "")
     text = f"{title}\n\n{message}" + (f"\n\n{cta_url}" if cta_url else "")
     return (title, shell(title=title, preheader=message[:120],
-                         body=body, accent=accent), text)
+                         body=body, accent=accent, site=site,
+                         hero="notification"), text)
 
 
-def test_message() -> tuple:
+def test_message(site: Optional[dict] = None) -> tuple:
     """Proves the whole path: SMTP, templates, Persian, RTL and the palette."""
+    brand = _brand(site)
     body = (
         _h("اتصال ایمیل برقرار است ✅")
-        + _p("این یک پیام آزمایشی از پنل سورین‌فلو است.")
+        + _p(f"این یک پیام آزمایشی از پنل {brand} است.")
         + _p("اگر این ایمیل را می‌بینید، تنظیمات SMTP درست است و سامانه می‌تواند "
              "کد ورود، پیام خوش‌آمد و اطلاع‌رسانی‌ها را ارسال کند.")
         + _code_block("123456")
         + _muted("کد بالا فقط نمونهٔ نمایشی است و کاربردی ندارد.")
     )
-    text = ("پیام آزمایشی سورین‌فلو.\n"
+    text = (f"پیام آزمایشی {brand}.\n"
             "اگر این را می‌بینید، تنظیمات SMTP درست است.")
-    return ("پیام آزمایشی سورین‌فلو", shell(
+    return (f"پیام آزمایشی {brand}", shell(
         title="پیام آزمایشی", preheader="تنظیمات ایمیل درست کار می‌کند",
-        body=body), text)
+        body=body, site=site, hero="notification"), text)
 
 
 # Everything the panel can send by name, so the UI can list them without

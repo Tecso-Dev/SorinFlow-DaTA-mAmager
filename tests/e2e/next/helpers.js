@@ -39,6 +39,25 @@ async function scrollThrough(page) {
   await page.evaluate(() => window.scrollTo(0, 0));
 }
 
+/** Polls (not page.waitForFunction — an async predicate there is truthy as
+ * soon as it returns a Promise, not once that promise resolves, so it never
+ * actually waits) until public/sw.js has written `url` into `cacheName`. */
+async function waitForServiceWorkerCache(page, cacheName, url, timeoutMs = 15_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const hit = await page.evaluate(
+      async ([name, u]) => {
+        const c = await caches.open(name);
+        return (await c.match(u)) !== undefined;
+      },
+      [cacheName, url],
+    );
+    if (hit) return;
+    await page.waitForTimeout(150);
+  }
+  throw new Error(`${url} never appeared in cache "${cacheName}" within ${timeoutMs}ms`);
+}
+
 /** Serious and critical WCAG 2 A/AA violations; the new panel has no baseline. */
 async function a11y(page) {
   const r = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
@@ -47,4 +66,6 @@ async function a11y(page) {
     .map((v) => `${v.id}: ${v.help} @ ${v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join(' | ')}`);
 }
 
-module.exports = { PASSWORD, signIn, watchProblems, noHorizontalScroll, scrollThrough, a11y };
+module.exports = {
+  PASSWORD, signIn, watchProblems, noHorizontalScroll, scrollThrough, a11y, waitForServiceWorkerCache,
+};

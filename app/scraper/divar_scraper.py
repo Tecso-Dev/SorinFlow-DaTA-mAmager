@@ -3144,10 +3144,13 @@ class DivarScraper:
                     "۳) کد ملی را وارد و مراحل را کامل کنید\n\n"
                     "آدرس مستقیم: https://divar.ir/my-divar/identity-confirmation"
                 )
+                from app.services.site_settings import read_site
+                site_cfg = await read_site(db)
                 subj, html, text = email_templates.notification(
                     "دیوار تأیید هویت می‌خواهد — اسکرپر شماره نمی‌گیرد", body,
                     cta_label="تأیید هویت در دیوار",
-                    cta_url="https://divar.ir/my-divar/identity-confirmation")
+                    cta_url="https://divar.ir/my-divar/identity-confirmation",
+                    site=site_cfg)
                 for to in tos:
                     try:
                         await email_service.send(to, subj, html, text, db=db)

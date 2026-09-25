@@ -31,6 +31,7 @@ from app.services import audit
 from app.services import email_service as mail
 from app.services import email_templates as tpl
 from app.services import secret_box
+from app.services.site_settings import read_site
 
 router = APIRouter()
 _super_admin = Depends(_role_dep(ROLE_ROOT, ROLE_SUPER_ADMIN))
@@ -170,7 +171,7 @@ async def send_test(to: str = Query(..., description="recipient"),
     """Send the styled test message — proves SMTP, templates, Persian and RTL."""
     if not mail.valid_email(to):
         raise HTTPException(400, "آدرس ایمیل معتبر نیست")
-    subject, html, text = tpl.test_message()
+    subject, html, text = tpl.test_message(site=await read_site(db))
     result = await mail.send(to, subject, html, text, db=db)
     await log_email(db, to, subject, "test", result, user.username)
     if not result.get("success"):
@@ -198,7 +199,8 @@ async def send_one(payload: SendIn, db: AsyncSession = Depends(get_db),
 
     _, html, text = tpl.notification(
         payload.subject, payload.message,
-        cta_label=payload.cta_label or "", cta_url=payload.cta_url or "")
+        cta_label=payload.cta_label or "", cta_url=payload.cta_url or "",
+        site=await read_site(db))
     result = await mail.send(payload.to, payload.subject, html, text, db=db)
     await log_email(db, payload.to, payload.subject, "notification", result, user.username)
     if not result.get("success"):
@@ -208,17 +210,24 @@ async def send_one(payload: SendIn, db: AsyncSession = Depends(get_db),
 
 # ── templates ───────────────────────────────────────────────────────────────
 
+# Each sample takes the live site config (falls back to the env/default one
+# when called with none, so a bare _SAMPLES[name]() still works), so a
+# preview looks exactly like what a real send would look like — same brand,
+# same domain, same hero.
 _SAMPLES = {
-    "login_code": lambda: tpl.login_code("۸۳۹۲۴۱".translate(
-        str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")), name="سبحان"),
-    "welcome": lambda: tpl.welcome("سبحان"),
-    "ticket_decision": lambda: tpl.ticket_decision("سبحان", True, "خوش آمدید به تیم"),
-    "request_received": lambda: tpl.request_received(
-        "سبحان", "آپارتمان ۲ خوابه، تهران — سعادت‌آباد، بودجه تا ۸ میلیارد تومان"),
-    "notification": lambda: tpl.notification(
+    "login_code": lambda site=None: tpl.login_code("۸۳۹۲۴۱".translate(
+        str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")), name="سبحان", site=site),
+    "welcome": lambda site=None: tpl.welcome("سبحان", site=site),
+    "ticket_decision": lambda site=None: tpl.ticket_decision(
+        "سبحان", True, "خوش آمدید به تیم", site=site),
+    "request_received": lambda site=None: tpl.request_received(
+        "سبحان", "آپارتمان ۲ خوابه، تهران — سعادت‌آباد، بودجه تا ۸ میلیارد تومان",
+        site=site),
+    "notification": lambda site=None: tpl.notification(
         "یک ملک منطبق پیدا شد", "ملکی مطابق با درخواست شما ثبت شده است.",
-        cta_label="مشاهدهٔ ملک", cta_url="https://sorinflow.com/portal"),
-    "test": lambda: tpl.test_message(),
+        cta_label="مشاهدهٔ ملک", cta_url=f"https://{(site or {}).get('domain', 'sorinflow.com')}/portal",
+        site=site),
+    "test": lambda site=None: tpl.test_message(site=site),
 }
 
 
@@ -228,7 +237,8 @@ async def list_templates(_: User = Depends(get_current_user)):
 
 
 @router.get("/preview/{name}", response_class=HTMLResponse)
-async def preview_template(name: str, _: User = Depends(get_current_user)):
+async def preview_template(name: str, db: AsyncSession = Depends(get_db),  # noqa: B008
+                           _: User = Depends(get_current_user)):  # noqa: B008
     """Render a template with sample data, so the panel can show it.
 
     Returned as a document rather than JSON because the panel drops it straight
@@ -236,7 +246,7 @@ async def preview_template(name: str, _: User = Depends(get_current_user)):
     """
     if name not in _SAMPLES:
         raise HTTPException(404, "قالب یافت نشد")
-    _, html, _text = _SAMPLES[name]()
+    _, html, _text = _SAMPLES[name](await read_site(db))
     return HTMLResponse(html)
 
 
@@ -346,9 +356,11 @@ async def email_broadcast(payload: BroadcastIn,
             f"تعداد گیرندگان تغییر کرده است: {len(addresses)} به جای "
             f"{payload.confirm_count}. دوباره بررسی و تایید کنید.")
 
+    site_cfg = await read_site(db)
     _, html, text = tpl.notification(
         payload.subject, payload.message,
-        cta_label=payload.cta_label or "", cta_url=payload.cta_url or "")
+        cta_label=payload.cta_label or "", cta_url=payload.cta_url or "",
+        site=site_cfg)
 
     logger.info(f"[email] broadcast '{payload.subject}' to {len(addresses)} "
                 f"addresses by {user.username}")
@@ -373,13 +385,16 @@ class BroadcastPreviewIn(BaseModel):
 
 
 @router.post("/broadcast/preview", response_class=HTMLResponse)
-async def broadcast_preview(payload: BroadcastPreviewIn, _: User = _super_admin):
+async def broadcast_preview(payload: BroadcastPreviewIn,
+                            db: AsyncSession = Depends(get_db),  # noqa: B008
+                            _: User = _super_admin):
     """What the recipients will see — the same template the broadcast uses,
     rendered from what is in the form right now, so the send is never the
     first time anybody looks at it."""
     _, html, _text = tpl.notification(
         payload.subject or "موضوع ایمیل", payload.message or "متن ایمیل اینجا می‌آید.",
-        cta_label=payload.cta_label or "", cta_url=payload.cta_url or "")
+        cta_label=payload.cta_label or "", cta_url=payload.cta_url or "",
+        site=await read_site(db))
     return HTMLResponse(html)
 
 
