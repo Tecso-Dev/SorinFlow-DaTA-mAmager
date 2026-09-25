@@ -1,6 +1,6 @@
 // Stream D: وظایف / یادآورها / پیامک / ارزیابی روزانه (DPA) / گزارش.
 const { test, expect } = require('@playwright/test');
-const { signIn, watchProblems, noHorizontalScroll, scrollThrough, a11y } = require('./helpers');
+const { signIn, watchProblems, noHorizontalScroll, scrollThrough, closeToasts, a11y } = require('./helpers');
 
 const stamp = Date.now();
 
@@ -19,6 +19,13 @@ test.describe('tasks', () => {
     await dialog.getByLabel('اولویت').selectOption('urgent');
     await dialog.getByRole('button', { name: 'ثبت وظیفه' }).click();
     await expect(page.getByText('وظیفه ثبت شد').first()).toBeVisible();
+    // this suite shares one database across every project in the same run,
+    // so by the time iphone's own pass gets here the list already carries
+    // desktop's and android's own rows — enough that the new one lands
+    // near the bottom of a short phone viewport, right where the toast
+    // sits (its own card, not just the viewport's now-clickthrough empty
+    // margin). Closing it deterministically beats waiting out its 5s.
+    await closeToasts(page);
 
     const row = page.getByRole('row', { name: new RegExp(title) });
     await expect(row).toBeVisible();
@@ -31,6 +38,7 @@ test.describe('tasks', () => {
     await editDialog.getByRole('button', { name: 'ذخیرهٔ تغییرات' }).click();
     await expect(page.getByText('وظیفه ذخیره شد').first()).toBeVisible();
     await expect(row.getByText('کم')).toBeVisible();
+    await closeToasts(page);
 
     // quick done via checkbox
     await row.getByRole('checkbox').click();

@@ -40,6 +40,24 @@ async function scrollThrough(page) {
 }
 
 /**
+ * Close every toast on screen. toaster.tsx's viewport gives up pointer
+ * events over its own empty margin, but the toast card itself keeps them
+ * (so its own close button still works) — a row that a create/edit toast
+ * happens to sit over (a short phone viewport, a list already carrying
+ * other rows from earlier in the same run) is still genuinely covered for
+ * the toast's whole 5s duration. Closing it outright, right after the
+ * toast's own text was asserted, is deterministic; waiting for it to time
+ * itself out is not worth the risk.
+ */
+async function closeToasts(page) {
+  const closeButtons = page.getByRole('button', { name: 'بستن' });
+  const n = await closeButtons.count();
+  for (let i = 0; i < n; i++) {
+    await closeButtons.first().click().catch(() => {});
+  }
+}
+
+/**
  * Wait out every finite, running entrance animation before axe measures the
  * page. Every panel section fades/lifts in with Reveal/AnimatedRow
  * (motion/react, viz.tsx) the first time it's on screen; axe sampling that
@@ -76,4 +94,4 @@ async function a11y(page) {
     .map((v) => `${v.id}: ${v.help} @ ${v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join(' | ')}`);
 }
 
-module.exports = { PASSWORD, signIn, watchProblems, noHorizontalScroll, scrollThrough, settleAnimations, a11y };
+module.exports = { PASSWORD, signIn, watchProblems, noHorizontalScroll, scrollThrough, closeToasts, settleAnimations, a11y };
