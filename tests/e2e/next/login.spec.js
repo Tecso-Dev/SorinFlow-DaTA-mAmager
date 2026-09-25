@@ -5,8 +5,8 @@ const { PASSWORD, watchProblems, noHorizontalScroll, a11y } = require('./helpers
 
 test('a page of the panel without a session goes to the login page and comes back after it', async ({ page }) => {
   const problems = watchProblems(page);
-  await page.goto('/panel/crm');
-  await expect(page).toHaveURL(/\/panel\/login\?next=%2Fpanel%2Fcrm/);
+  await page.goto('/panel/crm/leads');
+  await expect(page).toHaveURL(/\/panel\/login\?next=%2Fpanel%2Fcrm%2Fleads/);
   await expect(page.getByRole('heading', { name: 'ورود به پنل' })).toBeVisible();
   await noHorizontalScroll(page);
   expect(await a11y(page)).toEqual([]);
@@ -18,7 +18,7 @@ test('a page of the panel without a session goes to the login page and comes bac
 
   await page.getByLabel(/رمز/).first().fill(PASSWORD);
   await page.getByRole('button', { name: /^ورود$/ }).click();
-  await expect(page).toHaveURL(/\/panel\/crm$/);
+  await expect(page).toHaveURL(/\/panel\/crm\/leads$/);
 
   const cookies = await page.context().cookies();
   const session = cookies.find((c) => c.name === 'sf_session');
