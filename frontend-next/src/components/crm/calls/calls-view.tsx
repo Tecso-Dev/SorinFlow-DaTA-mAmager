@@ -74,7 +74,13 @@ export function CallsView() {
         hint="نوبت تماس‌ها، مشتری‌های هم‌خوان و ملک‌هایی که ارزان شدند"
       />
 
-      <div className="-mx-4 flex snap-x gap-2.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 lg:grid-cols-5">
+      <div
+        // scrolls sideways on a phone, so the keyboard must reach it too
+        tabIndex={0}
+        role="group"
+        aria-label="خلاصهٔ امروز"
+        className="-mx-4 flex snap-x gap-2.5 overflow-x-auto px-4 pb-1 outline-none [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-ring sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 lg:grid-cols-5"
+      >
         {tiles.map((t, i) => (
           <Reveal key={t.label} delay={i * 0.05} className="min-w-[9.5rem] shrink-0 snap-start sm:min-w-0">
             <Tilt className="h-full rounded-2xl">

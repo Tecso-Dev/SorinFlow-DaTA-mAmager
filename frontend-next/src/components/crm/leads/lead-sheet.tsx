@@ -23,6 +23,7 @@ import { faDate, faNum } from "@/lib/format";
 import { can, useSession } from "@/lib/session";
 import { BinderDialog, ShareDialog, VisitEventDialog } from "./dialogs";
 import { useLeadActions } from "./lead-actions";
+import { PhotoStrip } from "./lightbox";
 import { MatchDialog, type MatchTarget } from "./match-dialog";
 import { PropertyDetails } from "./property-details";
 import { AgencyBadge, day, DupBadge, PhoneWithCopy, SerialBadge } from "./shared";
@@ -115,6 +116,9 @@ export function LeadSheet({ id, onClose }: { id: number | null; onClose: () => v
                 <TabsTrigger value="history"><History /> تاریخچه</TabsTrigger>
               </TabsList>
               <TabsContent value="details" className="mt-2">
+                {!!l.property_detail?.images?.length && (
+                  <div className="mb-3"><PhotoStrip images={l.property_detail.images} size={104} /></div>
+                )}
                 <Facts l={l} />
                 {l.property_detail && (
                   <div className="mt-3">
@@ -122,6 +126,7 @@ export function LeadSheet({ id, onClose }: { id: number | null; onClose: () => v
                       p={l.property_detail}
                       invalidate={[["crm", "lead", l.id], ["crm", "leads"]]}
                       editable={can(user, { perm: "properties" })}
+                      photos={false}
                     />
                   </div>
                 )}
