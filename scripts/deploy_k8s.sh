@@ -59,7 +59,33 @@ say()  { echo; echo "── [$(date +%H:%M:%S)] $*"; }
 retry_kubectl() { "$@" || { sleep 10; "$@"; }; }
 
 TMP_PREFIX="$(mktemp -d)/sorinflow-deploy"
-trap 'rm -rf "$(dirname "$TMP_PREFIX")"' EXIT
+# Armed only between scaling backend to 0 for the very first move off the
+# root image (step 3 below) and the apply that hands its replica count back
+# to the new Deployment spec, right before the rollout waits begin. A failure
+# in that window — the ownership Job timing out, or the apply itself failing
+# — used to exit with backend at 0 and nothing to bring it back: the site
+# stayed down until someone noticed and scaled it up by hand.
+FIRST_TRANSITION_INFLIGHT=0
+cleanup_and_recover() {
+  local status=$?
+  if [ "$FIRST_TRANSITION_INFLIGHT" = 1 ]; then
+    echo "::error::exiting with backend scaled to 0 mid first-transition — restoring the single previous pod."
+    if [ -n "$(kubectl -n "$NS" get deployment backend -o jsonpath='{.spec.template.spec.securityContext.runAsUser}' 2>/dev/null || true)" ]; then
+      kubectl -n "$NS" rollout undo deployment/backend || true
+      kubectl -n "$NS" annotate deployment/backend kubectl.kubernetes.io/last-applied-configuration- >/dev/null 2>&1 || true
+    fi
+    # The old all-in-one image must never run two pods at once (migration
+    # lock deadlock, every background loop firing twice) — force Recreate
+    # before scaling it back up, same as rollback_and_diagnose below.
+    kubectl -n "$NS" patch deployment backend --type=merge \
+      -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}' || true
+    kubectl -n "$NS" scale deployment/worker deployment/scheduler --replicas=0 || true
+    kubectl -n "$NS" scale deployment/backend --replicas=1 || true
+  fi
+  rm -rf "$(dirname "$TMP_PREFIX")"
+  exit "$status"
+}
+trap cleanup_and_recover EXIT
 
 # Prints stdin, keeping only whole "---"-separated YAML documents that
 # contain a line equal to $1 once leading/trailing whitespace is stripped —
@@ -183,6 +209,7 @@ elif kubectl -n "$NS" get deployment backend >/dev/null 2>&1; then
   echo "The old image scrapes in-process AS ROOT, so it and a uid-1000 pod cannot safely"
   echo "share data-pvc at once. Scaling backend to 0 first — a short, accepted downtime"
   echo "(Sobhan's decision), not a bug."
+  FIRST_TRANSITION_INFLIGHT=1
   retry_kubectl kubectl -n "$NS" scale deployment/backend --replicas=0
   for _ in $(seq 1 60); do
     left="$(kubectl -n "$NS" get pods -l app=backend --no-headers 2>/dev/null | grep -vc '^$' || true)"
@@ -200,6 +227,10 @@ say "applying api, worker, scheduler and the ingress"
 APP="${TMP_PREFIX}.app.yaml"
 { select_doc "kind: Deployment" < "$RENDERED"; select_doc "kind: Ingress" < "$RENDERED"; } > "$APP"
 retry_kubectl kubectl apply -f "$APP"
+# Past this point backend's own spec.replicas governs its count again, and a
+# failure is the ordinary wait_rollout/rollback_and_diagnose pair's job below
+# — the first-transition EXIT trap's window ends here.
+FIRST_TRANSITION_INFLIGHT=0
 
 # Kept from deploy.yml: `kubectl get pods` above only ever ran when the
 # rollout succeeded, which is precisely when nobody needs it — the 65048fc
@@ -231,6 +262,11 @@ rollback_and_diagnose() {
       kubectl -n "$NS" rollout undo deployment/backend || true
       forget_last_applied backend
     fi
+    # The old all-in-one image must never run two pods at once (migration
+    # lock deadlock, every background loop firing twice) — RollingUpdate is
+    # only safe for the split-role images this rollout failed to reach.
+    kubectl -n "$NS" patch deployment backend --type=merge \
+      -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}' || true
     kubectl -n "$NS" scale deployment/backend --replicas=1 || true
   fi
   echo "::group::pods"
