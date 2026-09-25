@@ -13,6 +13,7 @@ export type User = {
   full_name: string | null;
   role: Role;
   is_active: boolean;
+  divar_phone: string | null;
   phone: string | null;
   phone_verified: boolean;
   email_verified: boolean;
