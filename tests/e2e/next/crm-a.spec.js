@@ -93,8 +93,10 @@ test.describe('calls', () => {
       await dlg.getByLabel('یادداشت (اختیاری)').fill('قیمت قطعی است');
       await dlg.getByRole('button', { name: 'ثبت' }).click();
       await expect(card('answered')).toHaveCount(0);
+      // the card leaves once the POST answers; the read that follows may
+      // still race the response, so it is polled rather than read once
+      await expect.poll(async () => (await api(page, s, 'GET', `/crm/leads/${leads[0].id}`)).last_call_outcome).toBe('answered');
       const answered = await api(page, s, 'GET', `/crm/leads/${leads[0].id}`);
-      expect(answered.last_call_outcome).toBe('answered');
       expect(answered.notes).toContain('قیمت قطعی است');
 
       // دوباره زنگ بزن: tomorrow 10:00
@@ -102,8 +104,8 @@ test.describe('calls', () => {
       await page.getByRole('radio', { name: 'فردا ۱۰ صبح' }).click();
       await page.getByRole('dialog').getByRole('button', { name: 'ثبت' }).click();
       await expect(card('callback')).toHaveCount(0);
+      await expect.poll(async () => (await api(page, s, 'GET', `/crm/leads/${leads[1].id}`)).last_call_outcome).toBe('callback');
       const cb = await api(page, s, 'GET', `/crm/leads/${leads[1].id}`);
-      expect(cb.last_call_outcome).toBe('callback');
       expect(new Date(cb.next_call_at).getTime()).toBeGreaterThan(Date.now());
 
       // بازدید: a Jalali date and time goes to the calendar
@@ -121,7 +123,7 @@ test.describe('calls', () => {
       await expect(page.getByRole('dialog')).toContainText('این لید بسته می‌شود');
       await page.getByRole('dialog').getByRole('button', { name: 'ثبت' }).click();
       await expect(card('wrong')).toHaveCount(0);
-      expect((await api(page, s, 'GET', `/crm/leads/${leads[3].id}`)).status).toBe('rejected');
+      await expect.poll(async () => (await api(page, s, 'GET', `/crm/leads/${leads[3].id}`)).status).toBe('rejected');
 
       // پاسخ نداد: one tap
       await card('none').getByRole('button', { name: 'پاسخ نداد' }).click();
