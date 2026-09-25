@@ -182,3 +182,88 @@ class TestNothingPendingOutlivesItsTTL:
         await otp_store.note_identity_required("0912888", job_id="no-ttl-job")
         assert await r.ttl(otp_store._switch_key("no-ttl-job")) == -1
         assert await r.ttl(otp_store._identity_key("0912888")) == -1
+
+
+class TestSubmitNeverRevivesAClearedPrompt:
+    """The old submit() checked existence, then wrote with plain
+    HSET-family commands: HSET/HSETNX on a hash key that no longer exists
+    auto-vivifies it, with no TTL at all, and nothing here ever prunes an
+    untimed key — an immortal prompt. WATCH/MULTI must catch a deletion that
+    lands in exactly the gap between the check and the write."""
+
+    async def test_a_prompt_cleared_between_the_read_and_the_write_is_refused(self, _redis, monkeypatch):
+        """Simulates the race directly rather than racing real asyncio
+        scheduling: the waiter (a timeout, a cancel, a switch) deletes the
+        prompt at the exact moment submit()'s own read has already happened
+        but its transaction has not yet committed."""
+        await otp_store.request("race-job:ad1", "0912")
+        pkey = otp_store._prompt_key("race-job:ad1")
+        r = await otp_store.get_redis()
+
+        import fakeredis.aioredis
+        waiter = fakeredis.aioredis.FakeRedis(server=_redis, decode_responses=True)
+
+        real_pipeline = type(r).pipeline
+
+        def _pipeline(self, *a, **kw):
+            p = real_pipeline(self, *a, **kw)
+            real_hgetall = p.hgetall
+
+            async def _hgetall(key, *aa, **kk):
+                result = await real_hgetall(key, *aa, **kk)
+                if key == pkey:
+                    # the waiter clears the prompt right here — after
+                    # submit() has read it (still open, no code yet) but
+                    # before its MULTI/EXEC commits
+                    await waiter.delete(pkey)
+                return result
+            p.hgetall = _hgetall
+            return p
+        monkeypatch.setattr(type(r), "pipeline", _pipeline, raising=True)
+
+        assert await otp_store.submit("race-job:ad1", "112233") is False
+        assert not await r.exists(pkey), "submit() must not recreate a prompt the waiter cleared"
+        assert await r.ttl(otp_store._signal_key("race-job:ad1")) in (-2, -1), \
+            "and must not signal a waiter that already gave up"
+
+    async def test_an_already_answered_prompt_refuses_a_second_submit(self, _redis):
+        """Unchanged behaviour, now enforced by WATCH/MULTI instead of
+        HSETNX: a stale resend racing a fresh one, or a replayed POST, must
+        not overwrite the first code or re-signal a waiter that moved on."""
+        await otp_store.request("race-job:ad2", "0912")
+        assert await otp_store.submit("race-job:ad2", "111111") is True
+        assert await otp_store.submit("race-job:ad2", "999999") is False
+        r = await otp_store.get_redis()
+        assert await r.hget(otp_store._prompt_key("race-job:ad2"), "code") == "111111"
+
+
+class TestARequestStartsClean:
+
+    async def test_a_stale_signal_from_an_earlier_round_does_not_wake_the_new_one(self):
+        """The same key — the same listing, retried in the same job — can be
+        requested twice. A push nothing ever consumed from the first round
+        must not make wait_code() report a code the new prompt was never
+        given."""
+        key = "retry-job:ad1"
+        await otp_store.request(key, "0912")
+        r = await otp_store.get_redis()
+        # a stale, never-consumed signal left over from an earlier round —
+        # e.g. submit() pushed it just as the waiter's timeout gave up
+        await r.rpush(otp_store._signal_key(key), "1")
+
+        await otp_store.request(key, "0912")   # the same listing, retried
+        assert await otp_store.wait_code(key, 1) is False, \
+            "a leftover signal must not wake the new prompt instantly"
+        assert await otp_store.pop_code(key) is None, "and there is genuinely no code yet"
+
+    async def test_a_stale_code_from_an_earlier_round_is_not_inherited(self):
+        key = "retry-job:ad2"
+        await otp_store.request(key, "0912")
+        assert await otp_store.submit(key, "555555") is True
+
+        await otp_store.request(key, "0912")   # retried before anyone popped the old code
+        r = await otp_store.get_redis()
+        assert await r.hget(otp_store._prompt_key(key), "code") is None
+        # and the prompt can be answered again, cleanly
+        assert await otp_store.submit(key, "666666") is True
+        assert await otp_store.pop_code(key) == "666666"

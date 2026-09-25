@@ -39,6 +39,7 @@ import time
 from typing import Any, Tuple, Optional
 
 from loguru import logger
+from redis.exceptions import WatchError
 
 from app.database import get_redis
 
@@ -275,9 +276,17 @@ async def request(key: str, phone_hint: str = "") -> bool:
     """Register a wait for `key`. Returns True if a code parked earlier for
     this account was claimed on the spot — the caller's wait is already over
     before it begins, same as the old code finding its asyncio.Event
-    pre-set."""
+    pre-set.
+
+    Starts from a clean slate. The same key — the same listing, retried in
+    the same job — can be requested again, and a leftover `code` field or a
+    stale entry still sitting in signal:{key} from that earlier round would
+    let wait_code() below wake instantly on a code this new prompt was never
+    given.
+    """
     r = await _redis()
     pkey = _prompt_key(key)
+    await r.delete(pkey, _signal_key(key))
     await r.hset(pkey, mapping={"phone_hint": phone_hint, "ts": time.time(),
                                 "resend": "0", "resends": "0"})
     await r.expire(pkey, wait_window() + 60)
@@ -365,17 +374,32 @@ async def restart_clock(key: str) -> None:
 @_redis_safe(False)
 async def submit(key: str, code: str, sent_stamp_ms: Optional[int] = None,
                  source: str = "panel") -> bool:
+    """Answer one open prompt.
+
+    WATCH/MULTI, not the exists-then-HSETNX pair this used to be: between
+    that exists check and the write, the waiter (a timeout, a cancel, a
+    switch) could clear the prompt — and the HSET after it would then
+    silently recreate the hash from nothing, with no TTL at all, an immortal
+    key nothing ever prunes. WATCH catches exactly that: if the prompt
+    changes or disappears before this commits, the whole write is refused
+    instead of reviving it.
+    """
     r = await _redis()
     pkey = _prompt_key(key)
-    if not await r.exists(pkey):
-        return False
-    # HSETNX: the one atomic step. A prompt already answered has a `code`
-    # field, and a second submit() (a stale resend racing a fresh one, a
-    # replayed POST) must not overwrite it or re-signal a waiter that already
-    # moved on.
-    if not await r.hsetnx(pkey, "code", code):
-        return False
-    await r.hset(pkey, "source", source)
+    async with r.pipeline(transaction=True) as p:
+        await p.watch(pkey)
+        entry = await p.hgetall(pkey)
+        # A prompt already answered has a `code` field, and a second
+        # submit() (a stale resend racing a fresh one, a replayed POST) must
+        # not overwrite it or re-signal a waiter that already moved on.
+        if not entry or entry.get("code"):
+            return False
+        p.multi()
+        p.hset(pkey, mapping={"code": code, "source": source})
+        try:
+            await p.execute()
+        except WatchError:
+            return False
     # When the SMS was sent, if the forwarder told us. The extractor reads it
     # back after it types the code, and that difference is the one number a
     # forwarder is judged by.
