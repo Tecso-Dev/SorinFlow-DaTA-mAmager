@@ -124,4 +124,5 @@ ACTIONS = {
     "leads_bulk": "تغییر یا حذف گروهی لیدها",
     "portal_ticket_decide": "تصمیم دربارهٔ درخواست ارتقای پرتال",
     "dashboard_target_set": "تعیین هدف ماه داشبورد",
+    "site_settings_save": "ذخیرهٔ تنظیمات هویت سایت",
 }

@@ -6,7 +6,7 @@ from app.api.routes import (
     properties, scraper, auth, stats, proxies, crm, users, filing,
     public_auth, portal, gcp, monitoring, sms, email, forwarder, backup, ai,
     ai_reader, ai_embed, ai_photo, ai_need, ai_assistant, telegram_link, audit,
-    session,
+    session, site,
 )
 from app.auth.dependencies import require_permission, get_staff_user
 
@@ -16,6 +16,10 @@ router = APIRouter()
 router.include_router(users.router, prefix="/users", tags=["Users"])
 # /session — the same login, with the token in an httpOnly cookie (new panel)
 router.include_router(session.router, prefix="/session", tags=["Users"])
+# /public/site — brand and contact details every page shows (no auth);
+# /settings/site — root and super_admin edit them
+router.include_router(site.public_router, prefix="/public", tags=["Site"])
+router.include_router(site.router, prefix="/settings", tags=["Site"])
 # /users/me/telegram — one's own Telegram account for the assistant «سورین»;
 # staff only, since what it links to is panel data.
 router.include_router(telegram_link.router, prefix="/users", tags=["Users"],
