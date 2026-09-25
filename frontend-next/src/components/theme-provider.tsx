@@ -6,7 +6,7 @@ export function ThemeProvider({ nonce, children }: { nonce?: string; children: R
   return (
     <NextThemes
       attribute="class"
-      defaultTheme="dark"
+      defaultTheme="system"
       enableSystem
       disableTransitionOnChange
       storageKey="sf-theme"

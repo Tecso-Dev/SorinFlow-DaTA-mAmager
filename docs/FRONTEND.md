@@ -52,5 +52,5 @@ The old panel (`frontend/`) keeps working at `/dashboard` until every section is
 
 ## Checks before a commit
 ```bash
-cd frontend-next && npx tsc --noEmit && npm run lint && npx next build
+cd frontend-next && npm ci && npx next typegen && npx tsc --noEmit && npm run lint && npx next build
 ```
