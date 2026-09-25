@@ -529,6 +529,72 @@ def test_a_second_0009_that_added_cookies_enabled_does_not_strand_is_enabled():
     assert "is_enabled" in cols
 
 
+def test_migrate_steps_skip_a_database_already_at_head_but_run_on_an_unversioned_one():
+    """Every _migrate_* step is pre-Alembic DDL — `ALTER TABLE ... ADD COLUMN
+    IF NOT EXISTS` still takes ACCESS EXCLUSIVE even though nothing changes —
+    and app/migrate.py runs init_db() against the live database on every
+    deploy. Once a database is already at this image's head there is nothing
+    left for them to do, so a deploy that touches no schema must not pay that
+    lock. A database Alembic has never stamped still needs them, same as
+    always — the boot path that gives a pre-Alembic database its baseline
+    (see test_a_second_0009... above for why that must survive even a wrong
+    alembic_version row, which this does not touch)."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    import app.database as db
+
+    SCHEMA = "sf_migrate_gate"
+    saved_engine, saved_maker = db.engine, db.async_session_maker
+    db.engine = create_async_engine(
+        PG_URL, connect_args={"server_settings": {"search_path": SCHEMA}})
+    db.async_session_maker = async_sessionmaker(
+        db.engine, expire_on_commit=False, autocommit=False, autoflush=False)
+
+    async def _is_enabled_exists():
+        async with db.engine.begin() as c:
+            return bool((await c.execute(text(
+                "SELECT 1 FROM information_schema.columns WHERE table_name='cookies' "
+                "AND column_name='is_enabled' AND table_schema=current_schema()"))).first())
+
+    async def _go():
+        eng = create_async_engine(PG_URL)
+        async with eng.begin() as c:
+            await c.execute(text(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE"))
+            await c.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        await eng.dispose()
+
+        await db.init_db()                                    # fresh -> stamped at head
+        assert await _is_enabled_exists(), "create_all did not build the column"
+
+        async with db.engine.begin() as c:
+            await c.execute(text("ALTER TABLE cookies DROP COLUMN is_enabled"))
+        assert not await _is_enabled_exists()
+
+        await db.init_db()                                    # already at head
+        skipped_at_head = not await _is_enabled_exists()
+
+        async with db.engine.begin() as c:
+            await c.execute(text("DROP TABLE alembic_version"))   # unversioned again
+        await db.init_db()                                    # behind head: must catch up
+        ran_when_unversioned = await _is_enabled_exists()
+        return skipped_at_head, ran_when_unversioned
+
+    try:
+        skipped_at_head, ran_when_unversioned = _run(_go())
+    finally:
+        async def _drop_schema():
+            eng = create_async_engine(PG_URL)
+            async with eng.begin() as c:
+                await c.execute(text(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE"))
+            await eng.dispose()
+        _run(db.engine.dispose())
+        _run(_drop_schema())
+        db.engine, db.async_session_maker = saved_engine, saved_maker
+
+    assert skipped_at_head, "a _migrate_* step ran on a database already at this image's head"
+    assert ran_when_unversioned, "an unversioned database's _migrate_* steps did not run"
+
+
 def test_the_boot_refuses_a_users_table_without_totp_last_step():
     """Were Alembic 0010 and its boot ALTER both to lose the lock race, every
     user load would 500 on a pod reporting Ready. The boot check refuses, so
