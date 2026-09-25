@@ -98,11 +98,13 @@ function useProgress(active: boolean, duration = 1.4) {
   const reduce = useReducedMotion();
   const [p, setP] = useState(0);
   useEffect(() => {
-    if (!active || reduce) return;
-    const c = animate(0, 1, { duration, ease: EASE, onUpdate: setP });
+    if (!active) return;
+    // Reduced motion jumps to the end, but only after hydration: the server
+    // cannot know the preference, so the first client render must match it.
+    const c = animate(0, 1, { duration: reduce ? 0 : duration, ease: EASE, onUpdate: setP });
     return () => c.stop();
   }, [active, reduce, duration]);
-  return reduce ? 1 : p;
+  return p;
 }
 
 /* ───────────────────────── 3D skyline (isometric districts) ───────────────────────── */
@@ -113,7 +115,8 @@ const iso = (x: number, y: number, z: number, s: number): [number, number] => [(
 const pts = (list: [number, number][]) => list.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(" ");
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
-export type District = { name: string; count: number; ppm: number; delta: number };
+/** ppm: average price per square metre in million toman, null when no listing gave one. */
+export type District = { name: string; count: number; ppm: number | null; delta: number | null };
 
 /** Each district is a building: height = active listings, colour = price per
  *  square metre, from --viz-low (cheaper) to --viz-high (dearer). */
@@ -126,15 +129,16 @@ export function Skyline({ data, compact = false, legend = !compact }: { data: Di
   const s = compact ? 30 : 44;
   const cols = 3;
   const gap = 1.75;
-  const maxCount = Math.max(...data.map((d) => d.count));
-  const minP = Math.min(...data.map((d) => d.ppm));
-  const maxP = Math.max(...data.map((d) => d.ppm));
+  const maxCount = Math.max(1, ...data.map((d) => d.count));
+  const priced = data.map((d) => d.ppm).filter((v): v is number => v !== null);
+  const minP = priced.length ? Math.min(...priced) : 0;
+  const maxP = priced.length ? Math.max(...priced) : 0;
   const H = 2.7;
 
   const blocks = data.map((d, i) => {
     const x0 = (i % cols) * gap;
     const y0 = Math.floor(i / cols) * gap;
-    const t = (d.ppm - minP) / Math.max(1, maxP - minP);
+    const t = d.ppm === null ? 0.5 : (d.ppm - minP) / Math.max(1, maxP - minP);
     const grow = clamp01((p * 1.35 - i * 0.07) / 1);
     const h = Math.max(0.05, (d.count / maxCount) * H * (1 - Math.pow(1 - grow, 3)));
     const base = `color-mix(in oklab, var(--viz-high) ${Math.round(t * 100)}%, var(--viz-low))`;
@@ -228,7 +232,7 @@ export function Skyline({ data, compact = false, legend = !compact }: { data: Di
               />
               <span className="flex-1 truncate font-medium">{d.name}</span>
               <span className="text-xs text-muted-foreground tabular">{faNum(d.count)} آگهی</span>
-              <span className="w-14 text-end font-semibold tabular">{faNum(d.ppm)}</span>
+              <span className="w-14 text-end font-semibold tabular">{d.ppm === null ? "—" : faNum(d.ppm)}</span>
             </li>
           ))}
           <li className="px-2 pt-1 text-[11px] text-muted-foreground">عدد آخر: میانگین هر متر، میلیون تومان</li>
@@ -327,7 +331,7 @@ const HOURS = Array.from({ length: 12 }, (_, i) => 8 + i);
 export function CallHeatmap({ grid }: { grid: number[][] }) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true });
-  const max = Math.max(...grid.flat());
+  const max = Math.max(1, ...grid.flat());
   return (
     <div ref={ref} className="overflow-x-auto">
       <div className="grid min-w-[520px] grid-cols-[4.5rem_repeat(12,minmax(0,1fr))] gap-1 text-[10px]">
@@ -367,13 +371,16 @@ export function CallHeatmap({ grid }: { grid: number[][] }) {
 
 /* ───────────────────────── deals by month ───────────────────────── */
 
+// crm_deals.deal_type, with the old panel's labels
 const dealsConfig = {
-  sale: { label: "خرید و فروش", color: "var(--chart-1)" },
-  rent: { label: "رهن و اجاره", color: "var(--chart-3)" },
-  presale: { label: "پیش‌فروش", color: "var(--chart-2)" },
+  buy: { label: "خرید و فروش", color: "var(--chart-1)" },
+  rent: { label: "اجاره", color: "var(--chart-3)" },
+  lease: { label: "رهن", color: "var(--chart-2)" },
 } satisfies ChartConfig;
 
-export function DealsByMonth({ data }: { data: { month: string; sale: number; rent: number; presale: number }[] }) {
+export type DealMonth = { month: string; buy: number; rent: number; lease: number };
+
+export function DealsByMonth({ data }: { data: DealMonth[] }) {
   return (
     <>
       <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
@@ -390,9 +397,9 @@ export function DealsByMonth({ data }: { data: { month: string; sale: number; re
           <XAxis dataKey="month" reversed tickLine={false} axisLine={false} tickMargin={8} />
           <YAxis orientation="right" tickLine={false} axisLine={false} width={28} tickFormatter={(v: number) => faNum(v)} />
           <ChartTooltip cursor={{ fill: "var(--muted)", opacity: 0.5 }} content={<ChartTooltipContent indicator="dot" />} />
-          <Bar dataKey="sale" stackId="d" fill="var(--color-sale)" radius={[0, 0, 4, 4]} />
+          <Bar dataKey="buy" stackId="d" fill="var(--color-buy)" radius={[0, 0, 4, 4]} />
           <Bar dataKey="rent" stackId="d" fill="var(--color-rent)" />
-          <Bar dataKey="presale" stackId="d" fill="var(--color-presale)" radius={[6, 6, 0, 0]} />
+          <Bar dataKey="lease" stackId="d" fill="var(--color-lease)" radius={[6, 6, 0, 0]} />
         </BarChart>
       </ChartContainer>
     </>
@@ -401,12 +408,11 @@ export function DealsByMonth({ data }: { data: { month: string; sale: number; re
 
 /* ───────────────────────── team radar ───────────────────────── */
 
-const radarConfig = {
-  best: { label: "سارا احمدی", color: "var(--chart-1)" },
-  avg: { label: "میانگین تیم", color: "var(--chart-3)" },
-} satisfies ChartConfig;
-
-export function TeamRadar({ data }: { data: { metric: string; best: number; avg: number }[] }) {
+export function TeamRadar({ data, bestLabel }: { data: { metric: string; best: number; avg: number }[]; bestLabel: string }) {
+  const radarConfig = {
+    best: { label: bestLabel, color: "var(--chart-1)" },
+    avg: { label: "میانگین تیم", color: "var(--chart-3)" },
+  } satisfies ChartConfig;
   return (
     <>
       <ChartContainer config={radarConfig} className="mx-auto aspect-square max-h-[260px] w-full">
@@ -436,9 +442,8 @@ export function TeamRadar({ data }: { data: { metric: string; best: number; avg:
 export function TargetGauge({ items }: { items: { label: string; value: number; target: number; unit: string; color: string }[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true });
-  const reduce = useReducedMotion();
   const main = items[0];
-  const pct = (main.value / main.target) * 100;
+  const pct = main.target > 0 ? (main.value / main.target) * 100 : 0;
   const arc = (r: number) => `M ${120 + r} 120 A ${r} ${r} 0 0 0 ${120 - r} 120`;
   return (
     <div ref={ref} className="flex flex-col items-center">
@@ -454,8 +459,8 @@ export function TargetGauge({ items }: { items: { label: string; value: number; 
                 stroke={it.color}
                 strokeWidth={16}
                 strokeLinecap="round"
-                initial={{ pathLength: reduce ? it.value / it.target : 0 }}
-                animate={inView ? { pathLength: Math.min(1, it.value / it.target) } : undefined}
+                initial={{ pathLength: 0 }}
+                animate={inView ? { pathLength: Math.min(1, it.value / Math.max(1, it.target)) } : undefined}
                 transition={{ duration: 1.4, delay: 0.15 + i * 0.2, ease: EASE }}
               />
             </g>
