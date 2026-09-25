@@ -1643,6 +1643,13 @@ class DivarScraper:
         'buy', 'rent', 'residential', 'apartment', 'villa',
     ]
 
+    # A listing Divar no longer has: deleted by its poster, expired, or never
+    # there. Its page answers 410 Gone and says so in words, «این صفحه حذف
+    # شده یا وجود ندارد» as served and «در پایین، آگهی‌های مشابه با آگهی حذف
+    # شده را ببینید.» once the browser has put other people's ads under it.
+    GONE_FROM_DIVAR = "در دیوار حذف شده"
+    GONE_MARKERS = ("صفحه حذف شده", "آگهی حذف شده")
+
     async def scrape_property_detail(
         self, url: str, target_category: Optional[str] = None,
         source_title: Optional[str] = None,
@@ -1662,13 +1669,24 @@ class DivarScraper:
             logger.info(f"Scraping property detail: {url}")
 
             await self._check_rate_limit()
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            assert self.page is not None   # opened by initialize(); a None lands in the except below
+            response = await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
             # If Divar redirected to a CAPTCHA or home page, skip this property
             actual_url = self.page.url
             if '/v/' not in actual_url:
                 logger.warning(f"Detail page redirected away from property: {url} → {actual_url}, skipping")
                 self._last_detail_error = "صفحه باز نشد"
+                return None
+
+            # Gone from Divar. Everything past this point would have worked on
+            # the similar ads Divar shows in its place: job 076c865a looked for
+            # a contact button that was not there, counted a reveal for it,
+            # downloaded twenty of those ads' photos, and then filed the
+            # listing as «عنوان نبود». Stop before any of it.
+            if getattr(response, "status", None) == 410:
+                logger.info(f"{url}: Divar answered 410 — the listing is gone")
+                self._last_detail_error = self.GONE_FROM_DIVAR
                 return None
 
             from urllib.parse import unquote
@@ -1763,6 +1781,21 @@ class DivarScraper:
                 )
             except Exception:
                 pass
+
+            # The same page, said in words, for when the status did not say
+            # 410. Asked only of a page without an h1: every listing has its
+            # title there and this page has none, so an ad whose description
+            # merely mentions «آگهی حذف شده» is never taken for one. Read from
+            # the text the page shows, not its HTML: the inline state script
+            # carries a live ad's description before React has drawn its h1.
+            if not await self.page.query_selector("h1"):
+                shown = BeautifulSoup(await self.page.content(), "lxml").get_text(" ")
+                shown = shown.replace("\u200c", " ")   # «حذف‌شده»
+                if any(m in shown for m in self.GONE_MARKERS):
+                    logger.info(f"{url}: the page says the listing is gone")
+                    self._last_detail_error = self.GONE_FROM_DIVAR
+                    return None
+
             await self._simulate_scroll()
             await asyncio.sleep(0.3)
 
@@ -3605,6 +3638,7 @@ class DivarScraper:
         "has_storage": "انباری",
         "has_balcony": "بالکن",
         "category": "خارج از دسته‌بندی",
+        "deleted": GONE_FROM_DIVAR,
     }
 
     # Divar's own words for what kind of ad this is, mapped to the two the
@@ -4275,6 +4309,9 @@ class DivarScraper:
             # saves nothing is otherwise indistinguishable from a broken one.
             skip_tally: Dict[str, int] = {}
             fail_tally: Dict[str, int] = {}
+            # Listings Divar had deleted: neither a failure nor a filter's
+            # doing, and every sentence built from skip_tally says «با فیلترها».
+            gone = 0
             category_drops: List[str] = []   # a handful, for the log
             # Handed to each detail scrape so it can tell, before asking Divar
             # for contact info, whether this ad is going to be discarded anyway.
@@ -4658,6 +4695,16 @@ class DivarScraper:
                                 job.job_id, divar_id=listing['divar_id'],
                                 url=listing.get('url'), title=listing.get('title'),
                                 reason="failed", detail=_save_why)
+                    elif detail is None and getattr(self, "_last_detail_error", None) == self.GONE_FROM_DIVAR:
+                        # Deleted on Divar. Nothing went wrong here and a retry
+                        # will find it just as gone, so it is not «ناموفق»: a
+                        # bucket of its own, with Divar's own words beside it.
+                        gone += 1
+                        await skipped_listings.record(
+                            job.job_id, divar_id=listing['divar_id'],
+                            url=listing.get('url'), title=listing.get('title'),
+                            reason="deleted",
+                            detail="دیوار می‌گوید این آگهی حذف شده یا دیگر وجود ندارد")
                     elif detail is None:
                         # None = real scrape error (network failure, parse error, etc.)
                         job.failed_items += 1
@@ -4789,6 +4836,9 @@ class DivarScraper:
                     f"{self._FILTER_LABELS_FA.get(k, k)}: {v}" for k, v in top)
                 dropped = f"{sum(skip_tally.values())} آگهی با فیلترها حذف شد ({named})"
                 finish_reason = f"{finish_reason}؛ {dropped}" if finish_reason else dropped
+            if gone:
+                _gone = f"{gone} آگهی در دیوار حذف شده بود"
+                finish_reason = f"{finish_reason}؛ {_gone}" if finish_reason else _gone
 
             # A run whose OTP prompts went unanswered finishes fast and looks
             # normal, but half its listings have no phone number. Say so.
@@ -4857,7 +4907,7 @@ class DivarScraper:
             # difference pass unremarked.
             _dropped = sum(skip_tally.values())
             _accounted = (job.new_items + job.updated_items
-                          + job.failed_items + _dropped)
+                          + job.failed_items + _dropped + gone)
             _parts = [f"{job.new_items} تازه", f"{job.updated_items} تکراری"]
             if job.failed_items:
                 _named = "، ".join(f"{k}: {v}" for k, v in
@@ -4866,6 +4916,8 @@ class DivarScraper:
                               + (f" ({_named})" if _named else ""))
             _parts += [f"{v} {self._FILTER_LABELS_FA.get(k, k)}"
                        for k, v in sorted(skip_tally.items(), key=lambda kv: -kv[1])]
+            if gone:
+                _parts.append(f"{gone} {self.GONE_FROM_DIVAR}")
             _unreached = len(all_listings) - examined
             if _unreached > 0:
                 _parts.append(f"{_unreached} بررسی‌نشده")
