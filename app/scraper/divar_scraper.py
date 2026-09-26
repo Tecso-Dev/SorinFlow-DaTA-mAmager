@@ -1560,6 +1560,28 @@ class DivarScraper:
 
         return listings, last_post_date
     
+    @staticmethod
+    def _date_skip(posted: Optional[datetime], target_day, max_age_hours) -> Optional[str]:
+        """Why the publish-date filters drop an ad, or None.
+
+        The exact-day filter compares TEHRAN days — the day the person picked
+        in the panel. posted_at is UTC, and an ad posted at 01:00 Tehran time
+        is still the previous day in UTC.
+        """
+        if target_day:
+            if not posted:
+                return "posted_at unknown; date filter active"
+            from app.scraper.parsers import TEHRAN_OFFSET
+            day = (posted + TEHRAN_OFFSET).date()
+            if day > target_day:
+                return f"posted {day} is after {target_day}"
+            if day < target_day:
+                return f"posted {day} is before {target_day}"
+            return None
+        if max_age_hours and posted and posted < datetime.now() - timedelta(hours=max_age_hours):
+            return f"posted_at {posted} older than {max_age_hours}h"
+        return None
+
     def pre_contact_skip(self, detail: Dict[str, Any], listing_type: str,
                          f: Dict[str, Any]) -> Optional[str]:
         """Why this ad would be dropped, judged from the page alone.
@@ -1570,6 +1592,14 @@ class DivarScraper:
         the scrape loop and remains the authority — this only avoids paying for
         an answer we are going to discard.
         """
+        # The date first: on 1405/07/04 a date-filtered run revealed 26
+        # numbers and kept none of them, and those reveals are what brought
+        # Divar's code prompts.
+        why = self._date_skip(detail.get("posted_at"), f.get("target_day"),
+                              f.get("max_age_hours"))
+        if why:
+            return why
+
         adv = f.get("advertiser_type")
         if adv:
             actual = detail.get("advertiser_type")
@@ -2527,6 +2557,9 @@ class DivarScraper:
             return None
         normalized = normalize_persian_digits(text)
         now = datetime.now()
+        # «دقایقی پیش» / «لحظاتی پیش»: just posted, and no number to read
+        if 'دقایقی' in normalized or 'لحظاتی' in normalized:
+            return now
         m = re.search(r'(\d+)', normalized)
         n = int(m.group(1)) if m else 1
         if 'دقیقه' in normalized:
@@ -2550,9 +2583,18 @@ class DivarScraper:
                 // <time datetime="..."> element
                 const timeEl = document.querySelector('time[datetime]');
                 if (timeEl) return timeEl.getAttribute('datetime');
-                // Small text elements that contain relative time keywords
+                // Divar's own publish date, exact to the minute: «انتشار
+                // آگهی: ۴ مهر ۱۴۰۵، ۰۸:۴۶». It sits where «... پیش» used to,
+                // which is why every date-filtered run of 1405/07/04 found
+                // no date at all and dropped every listing.
+                for (const el of document.querySelectorAll('p, span')) {
+                    const t = (el.innerText || '').trim();
+                    if (t.startsWith('انتشار آگهی')) return t;
+                }
+                // Relative time: «۳ ساعت پیش در ارومیه» now lives in the
+                // header's info-row title.
                 const candidates = document.querySelectorAll(
-                    'p[class*="--small"], span[class*="--small"], [class*="publish"], [class*="date"]'
+                    'p[class*="--small"], span[class*="--small"], [class*="publish"], [class*="date"], [class*="info-row__title"]'
                 );
                 for (const el of candidates) {
                     const t = (el.innerText || '').trim();
@@ -2569,7 +2611,8 @@ class DivarScraper:
                 return datetime.fromisoformat(raw.replace('Z', '+00:00')).replace(tzinfo=None)
             except Exception:
                 pass
-            return self._parse_relative_time(raw)
+            from app.scraper.parsers import parse_divar_published
+            return parse_divar_published(raw) or self._parse_relative_time(raw)
         except Exception as e:
             logger.debug(f"Could not extract posted_at: {e}")
             return None
@@ -4328,6 +4371,7 @@ class DivarScraper:
                 'has_elevator': has_elevator, 'has_parking': has_parking,
                 'has_storage': has_storage, 'has_balcony': has_balcony,
                 'has_images': has_images,
+                'target_day': target_day, 'max_age_hours': max_age_hours,
             }
             
             # Scrape each property detail
@@ -4501,22 +4545,11 @@ class DivarScraper:
                             elif actual_type != advertiser_type:
                                 skip = _skip(f"advertiser_type {actual_type} != {advertiser_type}")
 
-                        # ── Age filter ─────────────────────────────────────────────
-                        if not skip and max_age_hours and not date_mode:
-                            posted = detail.get('posted_at')
-                            if posted and posted < datetime.now() - timedelta(hours=max_age_hours):
-                                skip = _skip(f"posted_at {posted} older than {max_age_hours}h")
-
-                        # ── Exact publish-date filter (date mode) ─────────────────
-                        if not skip and date_mode:
-                            posted = detail.get('posted_at')
-                            if not posted:
-                                skip = _skip("posted_at unknown; date filter active")
-                            elif posted.date() > target_day:
-                                skip = _skip(f"posted {posted.date()} is after {target_day}")
-                            elif posted.date() < target_day:
-                                skip = _skip(
-                                    f"posted {posted.date()} is before {target_day}")
+                        # ── Publish-date filters: age, or the exact day ────────────
+                        if not skip:
+                            why = self._date_skip(detail.get('posted_at'), target_day, max_age_hours)
+                            if why:
+                                skip = _skip(why)
 
                         if skip:
                             # Same as the other site: a filtered-out listing is
