@@ -296,3 +296,54 @@ class TestThroughTheApp:
     def test_without_the_scraper_permission_there_is_no_schedule(self, client):
         _mk_user("sc_crm", "admin", ["crm"])
         assert client.get("/api/scraper/schedules", headers=_tok(client, "sc_crm")).status_code == 403
+
+
+def _audit_rows(schedule_id):
+    """(action, actor_user_id, summary) for one schedule, oldest first."""
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from app.models.audit_event import AuditEvent
+
+    async def _go():
+        eng = create_async_engine(os.environ["DATABASE_URL"])
+        try:
+            async with eng.connect() as c:
+                return (await c.execute(
+                    select(AuditEvent.action, AuditEvent.actor_user_id, AuditEvent.summary)
+                    .where(AuditEvent.target_type == "scrape_schedule",
+                           AuditEvent.target_id == str(schedule_id))
+                    .order_by(AuditEvent.created_at, AuditEvent.id))).all()
+        finally:
+            await eng.dispose()
+    return asyncio.run(_go())
+
+
+class TestItIsInTheAuditLog:
+    """1405/07/04: two schedules were deleted and nothing could say who or
+    when — not the log, not «رویدادها»."""
+
+    def test_create_edit_and_delete_each_leave_a_row(self, client):
+        uid = _mk_user("sc_audit", "admin", ["scraper"])
+        me = _tok(client, "sc_audit")
+        r = client.post("/api/scraper/schedules", headers=me, json={
+            "name": "صبح", "hour": 8, "minute": 0,
+            "config": {"city": "urmia", "category": "buy-apartment"}})
+        sid = r.json()["id"]
+        assert client.patch(f"/api/scraper/schedules/{sid}", headers=me,
+                            json={"enabled": False}).status_code == 200
+        assert client.delete(f"/api/scraper/schedules/{sid}", headers=me).status_code == 200
+
+        rows = _audit_rows(sid)
+        assert [a for a, _, _ in rows] == [
+            "scrape_schedule_create", "scrape_schedule_update", "scrape_schedule_delete"]
+        assert all(actor == uid for _, actor, _ in rows)
+        assert "خاموش" in rows[1][2] and "حذف شد" in rows[2][2] and "08:00" in rows[2][2]
+
+    def test_an_edit_that_changes_nothing_is_not_a_row(self, client):
+        _mk_user("sc_same", "admin", ["scraper"])
+        me = _tok(client, "sc_same")
+        sid = client.post("/api/scraper/schedules", headers=me, json={
+            "name": "x", "hour": 9, "minute": 0,
+            "config": {"city": "urmia", "category": "buy-apartment"}}).json()["id"]
+        client.patch(f"/api/scraper/schedules/{sid}", headers=me, json={"hour": 9})
+        assert [a for a, _, _ in _audit_rows(sid)] == ["scrape_schedule_create"]
