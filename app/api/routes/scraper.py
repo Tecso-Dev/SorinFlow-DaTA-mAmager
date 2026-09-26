@@ -1309,6 +1309,46 @@ class OtpInbound(BaseModel):
     network: Optional[str] = None
 
 
+_REFUSED_FA = {
+    401: "امضا یا شناسهٔ دستگاه پذیرفته نشد — تنظیمات برنامه را دوباره با QR وارد کنید",
+    403: "این گوشی اجازهٔ جواب دادن برای این شمارهٔ دیوار را ندارد",
+    422: "بدنهٔ درخواست خراب بود",
+    503: "روی سرور فورواردری تنظیم نشده",
+}
+
+
+async def _note_refused(request: Request, db, body: Optional["OtpInbound"], status: int) -> None:
+    """A phone that tried and was refused, on the record. Never raises.
+
+    A refusal used to leave no trace — nothing in the SMS log, nothing in the
+    device's events, the device not even «seen» — so a phone sending every
+    code into a 401 looked exactly like a phone that never got one, and
+    «فورواردر کار نمی‌کند» could not be told apart from «پیامکی نیامد».
+    Only for a device id that exists: its owner is who needs to see it, and
+    anonymous junk is not worth a row.
+    """
+    from app.scraper import otp_store
+    from app.services import forwarder as _fw
+    from app.services import sms_log
+    try:
+        dev_id = (request.headers.get("X-Forwarder-Id") or "").strip()
+        device = await _fw.resolve_device(db, dev_id) if dev_id else None
+        ip = request.client.host if request.client else "?"
+        if device is None:
+            logger.warning(f"[otp-inbound] refused {status} from {ip} (no known device)")
+            return
+        kind = body.kind if body and body.kind in ("contact", "login", "test") else None
+        await sms_log.record(
+            sms_log.INBOUND,
+            f"درخواست گوشی «{device.label or device.device_id}» رد شد ({status}) — "
+            + _REFUSED_FA.get(status, "خطای دیگر"),
+            level="warning", route="forwarder", status=status, actor=f"forwarder@{ip}",
+            account=(otp_store._digits(body.account) if body else None) or None,
+            kind=kind, device=device.device_id, reason=f"refused_{status}")
+    except Exception as e:
+        logger.warning(f"[otp-inbound] could not record a refusal: {e}")
+
+
 def _mask_code(code: Optional[str]) -> str:
     c = code or ""
     return ("*" * max(len(c) - 2, 0)) + c[-2:] if c else ""
@@ -1330,10 +1370,15 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         body = OtpInbound.model_validate_json(raw)
     except Exception as e:
+        await _note_refused(request, db, None, 422)
         raise HTTPException(status_code=422, detail=f"bad body: {type(e).__name__}")
 
     now_ms = int(time.time() * 1000)
-    device = await _verify_forwarder(request, raw, db=db, account=body.account)
+    try:
+        device = await _verify_forwarder(request, raw, db=db, account=body.account)
+    except HTTPException as e:
+        await _note_refused(request, db, body, e.status_code)
+        raise
 
     # `code` is trusted only if it IS a code. A stock forwarder that does not
     # expand %Regex=…% sends the placeholder text itself, and handing that to
@@ -1367,7 +1412,15 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
         if not hit:
             # Not a miss — an arrival ahead of the request. Park it; the
             # scraper claims it the moment it opens one for this account.
-            if await otp_store.park_early_code(body.account, code, body.sentStamp):
+            #
+            # Unless it is older than Divar would accept. The app keeps a
+            # failed delivery and offers «RETRY FAILED» on it days later; a
+            # two-day-old code parked here would be claimed by the next prompt
+            # for this account and typed into Divar, burning the attempt.
+            # sentStamp is the SMS centre's clock, not the phone's.
+            if latency_ms is not None and latency_ms > otp_store.EARLY_TTL * 1000:
+                reason = "stale_code"
+            elif await otp_store.park_early_code(body.account, code, body.sentStamp):
                 reason = "parked_early"
             else:
                 reason = "no_pending_for_account"

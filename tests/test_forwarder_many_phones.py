@@ -162,3 +162,78 @@ class TestTheAlertLooksAtBothSims:
         src = inspect.getsource(ContactExtractor._notify_code_needed)
         assert "for p in d.sims()" in src
         assert "same_phone(d.sim_phone, self.account_phone)" not in src
+
+
+def _count_inbound_events():
+    from sqlalchemy import func, select
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from app.models.sms_log import SmsEvent
+
+    async def _go():
+        eng = create_async_engine(os.environ["DATABASE_URL"])
+        try:
+            async with eng.connect() as c:
+                return (await c.execute(select(func.count(SmsEvent.id))
+                                        .where(SmsEvent.stage == "inbound"))).scalar()
+        finally:
+            await eng.dispose()
+    return asyncio.run(_go())
+
+
+def _my_phone(client, h, sim):
+    dev = next(d for d in client.get("/api/forwarder/devices", headers=h).json()["devices"]
+               if d["sim_phone"] == sim)
+    secret = client.get(f"/api/forwarder/devices/{dev['id']}/config", headers=h).json()["device"]["secret"]
+    return dev, secret
+
+
+class TestARefusedPhoneLeavesATrace:
+    """«فورواردر کار نمی‌کند» could not be told apart from «پیامکی نیامد»:
+    a refused POST left nothing in the SMS log, nothing in the device's
+    events, and did not even count as the phone being seen."""
+
+    def test_a_bad_signature_shows_in_the_phones_own_events(self, client, people):
+        h = _tok(client, "mp_a")
+        dev, _ = _my_phone(client, h, "09351110001")
+        body = json.dumps({"kind": "contact", "account": "09351110001",
+                           "code": "523969", "text": "Code: 523969"}).encode()
+        r = client.post("/api/scraper/otp-inbound", data=body,
+                        headers={"X-Forwarder-Id": dev["device_id"], "X-Signature": "00" * 32,
+                                 "Content-Type": "application/json"})
+        assert r.status_code == 401
+        ev = client.get(f"/api/forwarder/devices/{dev['id']}/events", headers=h).json()["events"]
+        assert ev and ev[0]["reason"] == "refused_401" and ev[0]["level"] == "warning", ev
+        assert ev[0]["code"] is None, "a refused body's code is not repeated back"
+
+    def test_a_body_that_does_not_parse_still_names_the_phone(self, client, people):
+        h = _tok(client, "mp_a")
+        dev, _ = _my_phone(client, h, "09351110001")
+        r = client.post("/api/scraper/otp-inbound", data=b"{not json",
+                        headers={"X-Forwarder-Id": dev["device_id"],
+                                 "Content-Type": "application/json"})
+        assert r.status_code == 422
+        ev = client.get(f"/api/forwarder/devices/{dev['id']}/events", headers=h).json()["events"]
+        assert ev[0]["reason"] == "refused_422", ev
+
+    def test_an_unknown_device_writes_nothing(self, client, people):
+        before = _count_inbound_events()
+        r = client.post("/api/scraper/otp-inbound", data=b'{"kind":"contact"}',
+                        headers={"X-Forwarder-Id": "no-such-device", "X-Signature": "00" * 32,
+                                 "Content-Type": "application/json"})
+        assert r.status_code == 401
+        assert _count_inbound_events() == before
+
+    def test_a_days_old_code_is_not_parked_for_the_next_prompt(self, client, people):
+        """«RETRY FAILED» in the app re-sends a delivery that failed days ago."""
+        import time
+        h = _tok(client, "mp_a")
+        dev, secret = _my_phone(client, h, "09351110001")
+        old = int((time.time() - 2 * 86400) * 1000)
+        body = json.dumps({"kind": "contact", "account": "09351110001", "code": "147071",
+                           "sentStamp": old, "receivedStamp": old}).encode()
+        sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        r = client.post("/api/scraper/otp-inbound", data=body,
+                        headers={"X-Forwarder-Id": dev["device_id"], "X-Signature": sig,
+                                 "Content-Type": "application/json"})
+        assert r.status_code == 200, r.text
+        assert r.json()["reason"] == "stale_code"
