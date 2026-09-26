@@ -359,7 +359,7 @@ async def drain(tasks: List[asyncio.Task]) -> None:
     """SIGTERM on a worker: take nothing new, let what runs finish.
 
     No timeout of our own. A scrape cut short loses its place in the feed and
-    whatever code somebody typed for it; Kubernetes' grace period (7200 s on
+    whatever code somebody typed for it; Kubernetes' grace period (7 days on
     the worker) is the ceiling. The process heartbeat and each run's claim
     refresher keep going meanwhile, and nothing here touches Chromium — each
     run closes its own browser as it ends.

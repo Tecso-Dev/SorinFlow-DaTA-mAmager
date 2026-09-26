@@ -353,7 +353,7 @@ wait_rollout() {
 wait_rollout backend || rollback_and_diagnose backend
 wait_rollout scheduler || rollback_and_diagnose scheduler
 
-# worker gets terminationGracePeriodSeconds 7200 so an in-flight scrape job
+# worker gets terminationGracePeriodSeconds 604800 (7 days) so an in-flight scrape job
 # can finish draining — `rollout status`/`kubectl wait` would sit and wait
 # for that old pod to fully disappear too. All that actually matters here is
 # that the NEW pod came up; the old one is left alone to drain on its own
@@ -366,7 +366,7 @@ if [ "$WORKER_REPLICAS" = 0 ]; then
   say "worker is set to 0 replicas in this overlay — nothing to wait for"
   ok=1
 else
-  say "waiting for worker's new pod to become ready (the old one may keep draining for up to 2h)"
+  say "waiting for worker's new pod to become ready (the old one may keep draining until its scrape ends, up to 7 days)"
   ok=0
 fi
 for _ in $(seq 1 60); do
