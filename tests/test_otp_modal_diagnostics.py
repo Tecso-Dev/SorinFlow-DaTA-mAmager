@@ -40,13 +40,19 @@ class FakeEl:
 
 
 class FakePage:
-    """Answers query_selector from a dict of selector -> element."""
+    """Answers from a dict of selector -> element, or -> [elements] in page
+    order when a selector matches more than one."""
 
     def __init__(self, elements=None):
         self.elements = elements or {}
 
+    async def query_selector_all(self, sel):
+        v = self.elements.get(sel)
+        return v if isinstance(v, list) else ([v] if v else [])
+
     async def query_selector(self, sel):
-        return self.elements.get(sel)
+        found = await self.query_selector_all(sel)
+        return found[0] if found else None
 
 
 def extractor(page):
@@ -79,9 +85,34 @@ class TestModalText:
     @pytest.mark.asyncio
     async def test_a_raising_page_still_returns_a_string(self):
         class Exploding:
-            async def query_selector(self, sel):
+            async def query_selector_all(self, sel):
                 raise RuntimeError("page closed")
         assert await extractor(Exploding())._modal_text() == ""
+
+    @pytest.mark.asyncio
+    async def test_hidden_dialogs_ahead_of_the_real_one_are_passed_over(self):
+        """What divar.ir serves now: four pre-rendered hidden dialogs (the PWA
+        prompt among them) before the one on screen. Reading only the first
+        match logged «modal says: ''» on every code prompt of 1405/07/04."""
+        hidden = [FakeEl(text="", visible=False) for _ in range(4)]
+        real = FakeEl(text="کد تایید به شمارهٔ ۰۹۱۲ پیامک شد")
+        page = FakePage({".kt-new-modal": hidden + [real]})
+        assert await extractor(page)._modal_text() == "کد تایید به شمارهٔ ۰۹۱۲ پیامک شد"
+
+
+class TestFindModalInput:
+    @pytest.mark.asyncio
+    async def test_a_hidden_field_ahead_of_the_visible_one_is_skipped(self):
+        hidden = FakeEl({"name": "otp", "maxlength": "6"}, visible=False)
+        shown = FakeEl({"name": "otp", "maxlength": "6"})
+        page = FakePage({'input[maxlength="6"]': [hidden, shown]})
+        assert await extractor(page)._find_modal_input() is shown
+
+    @pytest.mark.asyncio
+    async def test_the_search_box_is_never_the_code_box(self):
+        search = FakeEl({"placeholder": "جستجو در همهٔ آگهی‌ها"})
+        page = FakePage({'.kt-new-modal input': [search]})
+        assert await extractor(page)._find_modal_input() is None
 
 
 class TestInputAttrs:
