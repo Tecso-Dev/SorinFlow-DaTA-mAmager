@@ -9960,11 +9960,22 @@ function _cqWhen(iso) {
     return `${d.toLocaleDateString('fa-IR')} ${d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
+// How many the person has expanded the list to. Kept across reloads — the
+// list reloads after every recorded call, and resetting it to the first 40
+// then would throw away where they had scrolled to. The server caps it at 500.
+let _cqWant = 40;
+
+// eslint-disable-next-line no-unused-vars -- called from the list's own onclick
+function loadMoreCalls() {
+    _cqWant = Math.min(_cqWant + 40, 500);
+    loadCalls();
+}
+
 async function loadCalls() {
     const box = document.getElementById('calls-list');
     if (!box) return;
     try {
-        const d = await apiCall('/crm/calls/today?limit=40');
+        const d = await apiCall(`/crm/calls/today?limit=${_cqWant}`);
         _cqItems = d.items || [];
         document.getElementById('calls-count').textContent = formatNumber(d.total || 0);
         document.getElementById('calls-stats').textContent =
@@ -9975,7 +9986,11 @@ async function loadCalls() {
             box.innerHTML = `<div class="cq-empty"><i class="bi bi-cup-hot"></i> فعلاً کسی منتظر تماس نیست.
                 ${d.total ? '' : 'اسکرپ بعدی که تمام شود، لیدهای تازه اینجا می‌آیند.'}</div>`;
         } else {
-            box.innerHTML = _cqItems.map(_cqCard).join('');
+            // «۴۰ از ۴۴۵»: the badge counts the whole queue, the list is its head
+            const more = (d.total || 0) > _cqItems.length && _cqWant < 500
+                ? ` <button class="btn btn-sm btn-outline-secondary ms-2" onclick="loadMoreCalls()">نمایش ۴۰ تای بعدی</button>` : '';
+            box.innerHTML = _cqItems.map(_cqCard).join('') +
+                `<div class="text-muted small text-center py-2">نمایش ${formatNumber(_cqItems.length)} از ${formatNumber(d.total || 0)}${more}</div>`;
         }
         if (['root', 'super_admin'].includes(_currentUser?.role)) loadCallsSummary();
     } catch (e) {
