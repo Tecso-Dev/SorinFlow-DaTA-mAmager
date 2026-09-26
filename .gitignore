@@ -37,6 +37,7 @@ logs/
 data/cookies/
 data/images/
 data/debug/
+data/backups/
 
 # Debug screenshots
 debug_*.png
@@ -102,6 +103,7 @@ k8s/*secret*.yaml
 data/cookies/
 data/images/
 data/debug/
+data/backups/
 debug_*.png
 graphify-out/
 docker-compose.override.yml
