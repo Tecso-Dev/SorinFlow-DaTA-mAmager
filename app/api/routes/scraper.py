@@ -504,6 +504,20 @@ async def _my_schedule(db, user, schedule_id: int):
     return row
 
 
+async def _audit_schedule(action: str, row, user, request, summary: str, **detail) -> None:
+    """Schedules are daily scrapes on somebody's Divar account, and they used
+    to appear and vanish with no trace: on 1405/07/04 two were deleted and
+    nothing — not the log, not «رویدادها» — could say who or when."""
+    from app.services import audit
+    cfg = row.config or {}
+    await audit.record(
+        action, actor=user, target_type="scrape_schedule", target_id=row.id,
+        summary=summary, request=request,
+        detail={"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}",
+                "city": cfg.get("city"), "category": cfg.get("category"),
+                "owner_user_id": row.owner_user_id, **detail})
+
+
 def _schedule_view(row, owners: dict) -> dict:
     d = row.to_dict()
     d["owner_name"] = owners.get(row.owner_user_id)
@@ -531,7 +545,7 @@ async def list_schedules(db: AsyncSession = Depends(get_db),
 
 
 @router.post("/schedules", dependencies=[Depends(require_verified_phone)])
-async def create_schedule(data: ScheduleIn, db: AsyncSession = Depends(get_db),
+async def create_schedule(data: ScheduleIn, request: Request, db: AsyncSession = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
     """Save the form as a daily run. Validated the way a run is: the config
     has to be one the scraper would accept today, not at 08:00 tomorrow."""
@@ -552,15 +566,18 @@ async def create_schedule(data: ScheduleIn, db: AsyncSession = Depends(get_db),
     await db.commit()
     await db.refresh(row)
     logger.info(f"[schedule] {current_user.username} saved «{row.name}» at {row.hour:02d}:{row.minute:02d}")
+    await _audit_schedule("scrape_schedule_create", row, current_user, request,
+                          f"زمان‌بندی «{row.name}» برای ساعت {row.hour:02d}:{row.minute:02d} ساخته شد")
     return _schedule_view(row, {current_user.id: current_user.full_name or current_user.username})
 
 
 @router.patch("/schedules/{schedule_id}")
-async def edit_schedule(schedule_id: int, data: ScheduleEdit,
+async def edit_schedule(schedule_id: int, data: ScheduleEdit, request: Request,
                         db: AsyncSession = Depends(get_db),
                         current_user: User = Depends(get_current_user)):
     from app.services.scrape_scheduler import next_occurrence
     row = await _my_schedule(db, current_user, schedule_id)
+    before = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled}
     if data.name is not None:
         row.name = data.name.strip() or row.name
     if data.hour is not None:
@@ -574,15 +591,29 @@ async def edit_schedule(schedule_id: int, data: ScheduleEdit,
     row.next_run_at = next_occurrence(row.hour, row.minute)
     await db.commit()
     await db.refresh(row)
+    after = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled}
+    changed = {k: [before[k], after[k]] for k in before if before[k] != after[k]}
+    if changed:
+        words = {"enabled": "روشن" if row.enabled else "خاموش", "at": f"ساعت {after['at']}",
+                 "name": f"اسم «{row.name}»"}
+        await _audit_schedule("scrape_schedule_update", row, current_user, request,
+                              f"زمان‌بندی «{before['name']}»: " + "، ".join(words[k] for k in changed),
+                              changed=changed)
     return _schedule_view(row, {})
 
 
 @router.delete("/schedules/{schedule_id}")
-async def delete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db),
+async def delete_schedule(schedule_id: int, request: Request, db: AsyncSession = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
+    from types import SimpleNamespace
     row = await _my_schedule(db, current_user, schedule_id)
+    # what it was, read before the row is gone, recorded once it really is
+    gone = SimpleNamespace(id=row.id, name=row.name, hour=row.hour, minute=row.minute,
+                           config=row.config, owner_user_id=row.owner_user_id)
     await db.delete(row)
     await db.commit()
+    await _audit_schedule("scrape_schedule_delete", gone, current_user, request,
+                          f"زمان‌بندی «{gone.name}» (ساعت {gone.hour:02d}:{gone.minute:02d}) حذف شد")
     return {"success": True}
 
 

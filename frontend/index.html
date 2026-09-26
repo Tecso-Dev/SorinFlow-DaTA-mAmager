@@ -1044,11 +1044,15 @@
 
                     <div class="col-md-8">
                         <!-- saved scrapes that fire themselves -->
-                        <div class="card mb-3 d-none" id="schedules-card">
+                        <div class="card mb-3" id="schedules-card">
                             <div class="card-header d-flex align-items-center gap-2">
                                 <i class="bi bi-alarm"></i> اسکرپ‌های زمان‌بندی‌شده
                                 <span class="badge bg-secondary" id="schedules-count">۰</span>
-                                <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadSchedules()" title="تازه‌سازی">
+                                <button class="btn btn-sm btn-outline-primary ms-auto" onclick="saveAsSchedule()"
+                                        title="فیلترهای فرم «اسکرپینگ جدید»، هر روز در ساعتی که می‌گویید">
+                                    <i class="bi bi-plus-lg"></i> افزودن
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="loadSchedules()" title="تازه‌سازی">
                                     <i class="bi bi-arrow-clockwise"></i>
                                 </button>
                             </div>
@@ -5315,7 +5319,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260926a"></script>
+<script src="js/app.js?v=20260926b"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
 <script src="js/ai/reader.js?v=20260924b"></script>
 <script src="js/ai/embed.js?v=20260924b"></script>

@@ -4108,8 +4108,19 @@ async function loadSchedules() {
         const d = await apiCall('/scraper/schedules');
         const rows = d.schedules || [];
         document.getElementById('schedules-count').textContent = formatNumber(rows.length);
-        card.classList.toggle('d-none', rows.length === 0);
-        const fa = iso => iso ? `${new Date(iso).toLocaleDateString('fa-IR')} ${new Date(iso).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}` : '—';
+        // Always on screen. It used to hide itself when the list was empty,
+        // so deleting the last schedule took the whole section with it and
+        // left nothing to say where schedules are made (1405/07/04).
+        if (!rows.length) {
+            tb.innerHTML = `<tr><td colspan="6" class="text-muted small text-center py-3">
+                هنوز زمان‌بندی‌ای نیست. در فرم «اسکرپینگ جدید» شهر، دسته‌بندی و فیلترها را تنظیم کنید
+                و «افزودن» یا «هر روز خودکار اجرا شود» را بزنید.</td></tr>`;
+            return;
+        }
+        // Tehran time, like the hour it is set in: «بعدی: ۰۶:۳۰» on a
+        // European laptop for an 08:00 schedule read as the wrong time.
+        const tz = { timeZone: 'Asia/Tehran' };
+        const fa = iso => iso ? `${new Date(iso).toLocaleDateString('fa-IR', tz)} ${new Date(iso).toLocaleTimeString('fa-IR', { ...tz, hour: '2-digit', minute: '2-digit' })}` : '—';
         tb.innerHTML = rows.map(s => {
             const c = s.config || {};
             const what = `${esc(s.city_name || c.city)} / ${esc(s.category_name || c.category)}` +
