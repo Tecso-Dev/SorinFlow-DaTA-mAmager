@@ -5916,6 +5916,7 @@ async function initiateLogin() {
 
             _clearOtpBoxes();
             document.querySelector('.otp-box')?.focus();
+            _watchForwardedLoginCode(phone);
         } else {
             showToast('خطا', result.message || 'خطا در ارسال کد', 'danger');
             btn.disabled = false;
@@ -5930,6 +5931,36 @@ async function initiateLogin() {
 
 function _getOtpCode() {
     return [...document.querySelectorAll('.otp-box')].map(b => b.value).join('');
+}
+
+// The phone's forwarder parks a Divar LOGIN code on the server for three
+// minutes (/scraper/login-code). Nothing here used to ask for it, so a code
+// the phone had already delivered still had to be typed by hand — which is
+// what «فورواردر کار نمی‌کند» looked like from this form.
+let _loginCodeWatch = null;
+function _watchForwardedLoginCode(phone) {
+    clearInterval(_loginCodeWatch);
+    const until = Date.now() + 180000;
+    const stop = () => { clearInterval(_loginCodeWatch); _loginCodeWatch = null; };
+    _loginCodeWatch = setInterval(async () => {
+        const form = document.getElementById('auth-verify-form');
+        // gone, timed out, another number, or the person is typing it already
+        if (Date.now() > until || loginPhoneNumber !== phone || !form
+                || form.style.display === 'none' || _getOtpCode().length) return stop();
+        try {
+            const r = await apiCall(`/scraper/login-code/${encodeURIComponent(phone)}`);
+            if (!_loginCodeWatch || !r || !/^\d{6}$/.test(r.code || '')) return;
+            stop();
+            document.querySelectorAll('.otp-box').forEach((b, i) => {
+                b.value = r.code[i] || '';
+                b.classList.toggle('filled', !!b.value);
+            });
+            showToast('کد رسید', 'کد ورود از گوشی رسید و وارد شد', 'success');
+            verifyCode();
+        } catch (e) {
+            if (e.status === 403 || e.status === 404) stop();   // not mine to read — type it
+        }
+    }, 2000);
 }
 
 function _clearOtpBoxes() {
