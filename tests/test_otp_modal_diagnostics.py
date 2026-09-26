@@ -20,6 +20,7 @@ os.environ.setdefault("SECRET_KEY", "0123456789abcdef0123456789abcdef")
 os.environ.setdefault("LOGS_PATH", "/tmp")
 os.environ.setdefault("IMAGES_PATH", "/tmp")
 
+from app.scraper import contact_extractor as ce_mod  # noqa: E402
 from app.scraper.contact_extractor import ContactExtractor  # noqa: E402
 
 
@@ -272,3 +273,51 @@ class TestAskingDivarForAnotherCode:
         assert 'id="otp2-resend"' in html and "ارسال دوباره کد" in html
         assert "function resendDivarOtp" in js and "/resend" in js
         assert '@router.post("/otp/{key}/resend")' in api
+
+
+class TestANoticeIsNotTheNumber:
+    """With the hidden-dialog fix _acknowledge_notice sees the real dialog for
+    the first time — including the contact dialog that shows the number. A
+    click there would hide the number before _scan_for_phone reads it."""
+
+    class Modal(FakeEl):
+        def __init__(self, text, tel=False, buttons=("بستن",)):
+            super().__init__(text=text)
+            self.tel = tel
+            self.buttons = [FakeEl(text=b) for b in buttons]
+            self.clicked = []
+            for b in self.buttons:
+                async def click(_b=b, **kw):
+                    self.clicked.append(_b._text)
+                b.click = click
+
+        async def query_selector(self, sel):
+            if sel == 'a[href^="tel:"]':
+                return FakeEl() if self.tel else None
+            return None                                   # no input
+
+        async def query_selector_all(self, sel):
+            return self.buttons
+
+    async def ack(self, modal):
+        page = FakePage({".kt-new-modal": modal})
+        e = extractor(page)
+        return await e._acknowledge_notice()
+
+    @pytest.mark.asyncio
+    async def test_a_dialog_with_a_tel_link_is_left_open(self, monkeypatch):
+        m = self.Modal("اطلاعات تماس\nتماس", tel=True)
+        assert await self.ack(m) is False and m.clicked == []
+
+    @pytest.mark.asyncio
+    async def test_a_dialog_showing_the_number_in_persian_digits_is_left_open(self):
+        m = self.Modal("شمارهٔ موبایل\n۰۹۱۲ ۳۴۵ ۶۷۸۹")
+        assert await self.ack(m) is False and m.clicked == []
+
+    @pytest.mark.asyncio
+    async def test_a_real_notice_is_still_acknowledged(self, monkeypatch):
+        async def instant(_):
+            return None
+        monkeypatch.setattr(ce_mod.asyncio, "sleep", instant)
+        m = self.Modal("پیش از تماس این نکات را بخوانید", buttons=("متوجه شدم",))
+        assert await self.ack(m) is True and m.clicked == ["متوجه شدم"]

@@ -14,7 +14,7 @@ from typing import Optional, List
 
 from loguru import logger
 
-from app.scraper.parsers import parse_persian_number
+from app.scraper.parsers import normalize_persian_digits, parse_persian_number
 from app.scraper.captcha_solver import PuzzleCaptchaSolver
 from app.config import get_settings
 
@@ -453,6 +453,13 @@ class ContactExtractor:
             if await modal.query_selector('input'):
                 return False
             text = ((await modal.inner_text()) or "").strip()
+            # Nor one that is already SHOWING the number: that is the answer,
+            # and «dismissing» it hides what _scan_for_phone is about to read.
+            # Until the hidden-dialog fix this function never saw a dialog at
+            # all, so this is the first time the contact dialog can reach it.
+            if await modal.query_selector('a[href^="tel:"]') or \
+                    re.search(r"0\d{10}", normalize_persian_digits(text).replace(" ", "")):
+                return False
             buttons = await modal.query_selector_all('button, [role="button"], a.kt-button')
             labelled = []
             for b in buttons:
