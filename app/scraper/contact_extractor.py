@@ -14,7 +14,7 @@ from typing import Optional, List
 
 from loguru import logger
 
-from app.scraper.parsers import parse_persian_number
+from app.scraper.parsers import normalize_persian_digits, parse_persian_number
 from app.scraper.captcha_solver import PuzzleCaptchaSolver
 from app.config import get_settings
 
@@ -445,12 +445,7 @@ class ContactExtractor:
     async def _acknowledge_notice(self) -> bool:
         """Dismiss a no-input modal, logging what it said. True if one was."""
         try:
-            modal = None
-            for sel in ('.kt-new-modal', '[role="dialog"]', '.kt-modal'):
-                el = await self.page.query_selector(sel)
-                if el and await el.is_visible():
-                    modal = el
-                    break
+            modal = await self._first_visible(*self._MODAL_SELECTORS)
             if modal is None:
                 return False
             # A modal WITH an input is the code prompt (or a phone step), and
@@ -458,6 +453,13 @@ class ContactExtractor:
             if await modal.query_selector('input'):
                 return False
             text = ((await modal.inner_text()) or "").strip()
+            # Nor one that is already SHOWING the number: that is the answer,
+            # and «dismissing» it hides what _scan_for_phone is about to read.
+            # Until the hidden-dialog fix this function never saw a dialog at
+            # all, so this is the first time the contact dialog can reach it.
+            if await modal.query_selector('a[href^="tel:"]') or \
+                    re.search(r"0\d{10}", normalize_persian_digits(text).replace(" ", "")):
+                return False
             buttons = await modal.query_selector_all('button, [role="button"], a.kt-button')
             labelled = []
             for b in buttons:
@@ -698,16 +700,34 @@ class ContactExtractor:
     _INPUT_ATTRS = ("name", "id", "type", "inputmode", "maxlength",
                     "placeholder", "autocomplete")
 
-    async def _modal_text(self) -> str:
-        """The visible text of whichever dialog is on screen, or ''."""
-        for sel in ('.kt-new-modal', '[role="dialog"]', '.kt-modal'):
+    _MODAL_SELECTORS = ('.kt-new-modal', '[role="dialog"]', '.kt-modal')
+
+    async def _first_visible(self, *selectors):
+        """The first VISIBLE match, trying the selectors in order, or None.
+
+        Every match, not query_selector's first one: Divar now keeps several
+        hidden, pre-rendered dialogs (its PWA prompt among them) ahead of the
+        real one. The first `.kt-new-modal` on the page is invisible, so the
+        dialog actually on screen was never looked at — the job log said
+        «modal says: ''» on every code prompt, and the notice and submit
+        lookups below had the same blind spot.
+        """
+        for sel in selectors:
             try:
-                el = await self.page.query_selector(sel)
-                if el and await el.is_visible():
-                    return ((await el.inner_text()) or "").strip()
+                for el in await self.page.query_selector_all(sel):
+                    if await el.is_visible():
+                        return el
             except Exception:
                 continue
-        return ""
+        return None
+
+    async def _modal_text(self) -> str:
+        """The visible text of whichever dialog is on screen, or ''."""
+        try:
+            el = await self._first_visible(*self._MODAL_SELECTORS)
+            return ((await el.inner_text()) or "").strip() if el else ""
+        except Exception:
+            return ""
 
     async def _input_attrs(self, el) -> dict:
         """The attributes that say what a field is for. Never raises."""
@@ -743,11 +763,14 @@ class ContactExtractor:
 
     async def _find_modal_input(self):
         """The visible field of whatever modal is up, or None."""
-        # Instant query_selector — NOT wait_for_selector (avoids N×3s delays)
+        # Instant lookups — NOT wait_for_selector (avoids N×3s delays). Every
+        # match, for the reason in _first_visible: a hidden dialog's field
+        # can come first.
         for sel in self._MODAL_INPUT_SELECTORS:
             try:
-                el = await self.page.query_selector(sel)
-                if el and await el.is_visible():
+                for el in await self.page.query_selector_all(sel):
+                    if not await el.is_visible():
+                        continue
                     placeholder = (await el.get_attribute('placeholder') or '').lower()
                     if 'search' in placeholder or 'جستجو' in placeholder:
                         continue
@@ -1154,6 +1177,12 @@ class ContactExtractor:
                     pass
 
             logger.info(f"OTP code received, entering into page")
+            # Found again, not reused. The box found before the wait belongs
+            # to the page as it was then; a code typed by hand arrives minutes
+            # later, Divar re-renders the dialog meanwhile, and filling the old
+            # handle raised «Element is not attached to the DOM» — the code
+            # the person typed was thrown away.
+            otp_input = await self._find_modal_input() or otp_input
             await otp_input.click()
             await otp_input.fill(code)
             await asyncio.sleep(0.5)
@@ -1168,8 +1197,8 @@ class ContactExtractor:
                 '[role="dialog"] button',
             ]:
                 try:
-                    btn = await self.page.query_selector(btn_sel)
-                    if btn and await btn.is_visible():
+                    btn = await self._first_visible(btn_sel)
+                    if btn:
                         await btn.click()
                         logger.info(f"OTP form submitted via button: {btn_sel}")
                         submitted = True
