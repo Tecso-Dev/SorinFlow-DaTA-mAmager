@@ -91,12 +91,16 @@ spec:
           # the supervisor loop touches HEARTBEAT_FILE and a stall in any one
           # background loop is expected to be noticed and restarted from
           # inside the process — this is the outer safety net for when the
-          # whole process wedges.
+          # whole process wedges. The startup probe wants the file fresh, for
+          # the reason given in worker.yaml: /tmp outlives a container restart.
           startupProbe:
             exec:
-              command: ["sh", "-c", "test -f /tmp/sorinflow-heartbeat"]
+              command:
+                - sh
+                - -c
+                - test $(( $(date +%s) - $(stat -c %Y /tmp/sorinflow-heartbeat) )) -lt 90
             periodSeconds: 5
-            failureThreshold: 60
+            failureThreshold: 120
           livenessProbe:
             exec:
               command:
