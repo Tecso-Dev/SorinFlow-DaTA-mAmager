@@ -1044,11 +1044,15 @@
 
                     <div class="col-md-8">
                         <!-- saved scrapes that fire themselves -->
-                        <div class="card mb-3 d-none" id="schedules-card">
+                        <div class="card mb-3" id="schedules-card">
                             <div class="card-header d-flex align-items-center gap-2">
                                 <i class="bi bi-alarm"></i> اسکرپ‌های زمان‌بندی‌شده
                                 <span class="badge bg-secondary" id="schedules-count">۰</span>
-                                <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadSchedules()" title="تازه‌سازی">
+                                <button class="btn btn-sm btn-outline-primary ms-auto" onclick="saveAsSchedule()"
+                                        title="فیلترهای فرم «اسکرپینگ جدید»، هر روز در ساعتی که می‌گویید">
+                                    <i class="bi bi-plus-lg"></i> افزودن
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="loadSchedules()" title="تازه‌سازی">
                                     <i class="bi bi-arrow-clockwise"></i>
                                 </button>
                             </div>
@@ -5116,6 +5120,16 @@
             </div>
             <div class="modal-body">
                 <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                    <!-- Each role writes its own file since the roles became
+                         separate pods; this only ever read scraper.log, so
+                         scheduled scrapes, backups and the photo AI were out
+                         of reach from the panel. -->
+                    <select id="scraper-log-file" class="form-select form-select-sm" style="width:220px"
+                            aria-label="کدام لاگ" onchange="loadScraperLog()">
+                        <option value="scraper.log">اسکرپر و ورود دیوار</option>
+                        <option value="scheduler.log">زمان‌بندی، بکاپ و هوش تصویری</option>
+                        <option value="api.log">پنل و API</option>
+                    </select>
                     <select id="scraper-log-preset" class="form-select form-select-sm" style="width:230px"
                             onchange="document.getElementById('scraper-log-grep').value = this.value; loadScraperLog();">
                         <option value="">همهٔ خطوط</option>
@@ -5315,7 +5329,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260925p3"></script>
+<script src="js/app.js?v=20260927c"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
 <script src="js/ai/reader.js?v=20260924b"></script>
 <script src="js/ai/embed.js?v=20260924b"></script>

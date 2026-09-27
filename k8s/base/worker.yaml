@@ -55,11 +55,12 @@ spec:
         sorinflow.com/synced-secrets: "unsynced"
     spec:
       # A running scrape job (Chromium mid-page-load, a login waiting on an
-      # SMS code) can legitimately take a while to reach a safe stopping
-      # point. 2 hours is generous on purpose: the drain logic above means
-      # this pod is doing real, finishing work for the whole window, not
-      # hanging.
-      terminationGracePeriodSeconds: 7200
+      # SMS code) is let finish, however long it takes: some runs take far
+      # longer than the 2 hours this used to be (Sobhan, 1405/07/04:
+      # «محدودیت زمانی اسکرپر را بردار»). 7 days is «no limit» for a scrape.
+      # Nothing else waits on it: deploy_k8s.sh never waits for the old pod,
+      # and the probes below restart a wedged process with their own 60 s.
+      terminationGracePeriodSeconds: 604800
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -132,11 +133,26 @@ spec:
           # check a heartbeat file the process itself touches every <=15s
           # (HEARTBEAT_FILE, default /tmp/sorinflow-heartbeat); a stuck event
           # loop stops updating it and the pod is restarted.
+          #
+          # The startup probe wants the file FRESH, not merely present: /tmp
+          # is an emptyDir, which outlives a container restart. After the
+          # server restarted on 1405/07/04 the previous container's file
+          # passed «test -f» at once, liveness judged the new process — still
+          # booting, 4.5 minutes with everything starting together — by that
+          # old file, and the restart it asked for arrived as a SIGTERM that
+          # PID 1 could not handle yet. The kill then came at the end of the
+          # pod's grace period, two hours later, in the middle of two scrapes.
+          # Both probes carry their own 60 s so a restart never waits out the
+          # drain window above.
           startupProbe:
             exec:
-              command: ["sh", "-c", "test -f /tmp/sorinflow-heartbeat"]
+              command:
+                - sh
+                - -c
+                - test $(( $(date +%s) - $(stat -c %Y /tmp/sorinflow-heartbeat) )) -lt 90
             periodSeconds: 5
-            failureThreshold: 60
+            failureThreshold: 120
+            terminationGracePeriodSeconds: 60
           livenessProbe:
             exec:
               command:
@@ -145,6 +161,7 @@ spec:
                 - test $(( $(date +%s) - $(stat -c %Y /tmp/sorinflow-heartbeat) )) -lt 90
             periodSeconds: 30
             failureThreshold: 3
+            terminationGracePeriodSeconds: 60
       volumes:
         - name: app-data
           persistentVolumeClaim:

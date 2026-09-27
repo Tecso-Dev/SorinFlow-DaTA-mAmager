@@ -332,7 +332,10 @@ async def device_events(device_id: int, limit: int = 50,
             d = _json.loads(e.details) if e.details else {}
         except Exception:
             d = {}
-        if row.sims() and not any(fw.same_phone(d.get("account"), p) for p in row.sims()):
+        # this phone's SIMs — or a refusal naming this device, which may
+        # carry no account at all (a body that did not parse)
+        if row.sims() and not any(fw.same_phone(d.get("account"), p) for p in row.sims()) \
+                and d.get("device") != row.device_id:
             continue
         out.append({
             "at": e.created_at.isoformat() if e.created_at else None,

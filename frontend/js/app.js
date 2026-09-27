@@ -4108,8 +4108,19 @@ async function loadSchedules() {
         const d = await apiCall('/scraper/schedules');
         const rows = d.schedules || [];
         document.getElementById('schedules-count').textContent = formatNumber(rows.length);
-        card.classList.toggle('d-none', rows.length === 0);
-        const fa = iso => iso ? `${new Date(iso).toLocaleDateString('fa-IR')} ${new Date(iso).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}` : '—';
+        // Always on screen. It used to hide itself when the list was empty,
+        // so deleting the last schedule took the whole section with it and
+        // left nothing to say where schedules are made (1405/07/04).
+        if (!rows.length) {
+            tb.innerHTML = `<tr><td colspan="6" class="text-muted small text-center py-3">
+                هنوز زمان‌بندی‌ای نیست. در فرم «اسکرپینگ جدید» شهر، دسته‌بندی و فیلترها را تنظیم کنید
+                و «افزودن» یا «هر روز خودکار اجرا شود» را بزنید.</td></tr>`;
+            return;
+        }
+        // Tehran time, like the hour it is set in: «بعدی: ۰۶:۳۰» on a
+        // European laptop for an 08:00 schedule read as the wrong time.
+        const tz = { timeZone: 'Asia/Tehran' };
+        const fa = iso => iso ? `${new Date(iso).toLocaleDateString('fa-IR', tz)} ${new Date(iso).toLocaleTimeString('fa-IR', { ...tz, hour: '2-digit', minute: '2-digit' })}` : '—';
         tb.innerHTML = rows.map(s => {
             const c = s.config || {};
             const what = `${esc(s.city_name || c.city)} / ${esc(s.category_name || c.category)}` +
@@ -5162,11 +5173,17 @@ async function loadScraperLog() {
     const body = document.getElementById('scraper-log-body');
     if (!body) return;
     const grep = document.getElementById('scraper-log-grep')?.value.trim() || '';
+    const file = document.getElementById('scraper-log-file')?.value || 'scraper.log';
     body.textContent = 'در حال بارگیری...';
     try {
         const data = await apiCall(
-            `/stats/logs?lines=300${grep ? '&grep=' + encodeURIComponent(grep) : ''}`);
+            `/stats/logs?lines=300&log=${encodeURIComponent(file)}${grep ? '&grep=' + encodeURIComponent(grep) : ''}`);
         const lines = data.lines || [];
+        if (data.note === 'log file not found') {
+            // a local run is one process in one file; on the server each role has its own
+            body.textContent = 'این لاگ هنوز ساخته نشده است. در اجرای محلی همه‌چیز در «اسکرپر و ورود دیوار» نوشته می‌شود.';
+            return;
+        }
         if (data.note) { body.textContent = data.note; return; }
         if (!lines.length) {
             body.textContent = grep
@@ -5528,7 +5545,7 @@ function _renderJobsTable(items) {
                     </div>` : ''}
             </td>
             <td>
-                <div class="job-progress">
+                <div class="job-progress"${job.max_items ? ` title="${job.new_items} از ${job.max_items} آگهی تازهٔ درخواستی"` : ''}>
                     <div class="progress" style="height:5px;background:var(--border,#333);border-radius:3px;">
                         <div class="progress-bar" role="progressbar"
                              style="width:${job.progress}%;border-radius:3px;"></div>
@@ -5555,7 +5572,9 @@ function _renderJobsTable(items) {
                 <span class="text-muted">/</span>
                 <bdi class="text-muted" title="از قبل موجود بود — یا همان بود و رد شد، یا با اطلاعات تازه به‌روز شد">${job.updated_items}</bdi>
             </td>
-            <td class="job-when">${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
+            <!-- Tehran time, like the schedules card: a run its 08:00 schedule
+                 started read «۰۶:۳۰» on a European laptop. -->
+            <td class="job-when">${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' }) : '---'}</td>
             <td class="job-actions">
                 <button class="btn btn-sm btn-outline-secondary" onclick="showJobLog('${job.job_id}')"
                         title="گزارش این اسکرپ">
@@ -5916,6 +5935,7 @@ async function initiateLogin() {
 
             _clearOtpBoxes();
             document.querySelector('.otp-box')?.focus();
+            _watchForwardedLoginCode(phone);
         } else {
             showToast('خطا', result.message || 'خطا در ارسال کد', 'danger');
             btn.disabled = false;
@@ -5930,6 +5950,36 @@ async function initiateLogin() {
 
 function _getOtpCode() {
     return [...document.querySelectorAll('.otp-box')].map(b => b.value).join('');
+}
+
+// The phone's forwarder parks a Divar LOGIN code on the server for three
+// minutes (/scraper/login-code). Nothing here used to ask for it, so a code
+// the phone had already delivered still had to be typed by hand — which is
+// what «فورواردر کار نمی‌کند» looked like from this form.
+let _loginCodeWatch = null;
+function _watchForwardedLoginCode(phone) {
+    clearInterval(_loginCodeWatch);
+    const until = Date.now() + 180000;
+    const stop = () => { clearInterval(_loginCodeWatch); _loginCodeWatch = null; };
+    _loginCodeWatch = setInterval(async () => {
+        const form = document.getElementById('auth-verify-form');
+        // gone, timed out, another number, or the person is typing it already
+        if (Date.now() > until || loginPhoneNumber !== phone || !form
+                || form.style.display === 'none' || _getOtpCode().length) return stop();
+        try {
+            const r = await apiCall(`/scraper/login-code/${encodeURIComponent(phone)}`);
+            if (!_loginCodeWatch || !r || !/^\d{6}$/.test(r.code || '')) return;
+            stop();
+            document.querySelectorAll('.otp-box').forEach((b, i) => {
+                b.value = r.code[i] || '';
+                b.classList.toggle('filled', !!b.value);
+            });
+            showToast('کد رسید', 'کد ورود از گوشی رسید و وارد شد', 'success');
+            verifyCode();
+        } catch (e) {
+            if (e.status === 403 || e.status === 404) stop();   // not mine to read — type it
+        }
+    }, 2000);
 }
 
 function _clearOtpBoxes() {
@@ -9280,7 +9330,8 @@ async function promptSetDivarPhone(id) {
 }
 
 async function deleteUser(id) {
-    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'آیا از حذف این کاربر اطمینان دارید؟' })) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'آیا از حذف این کاربر اطمینان دارید؟',
+                            note: 'گوشی‌های فورواردر و اسکرپ‌های زمان‌بندی‌شدهٔ او هم حذف می‌شوند. لیدها، آگهی‌ها و شماره‌های دیوارش می‌مانند.' })) return;
     try {
         await apiCall(`/users/${id}`, { method: 'DELETE' });
         showToast('موفق', 'کاربر حذف شد', 'success');
@@ -9918,11 +9969,22 @@ function _cqWhen(iso) {
     return `${d.toLocaleDateString('fa-IR')} ${d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
+// How many the person has expanded the list to. Kept across reloads — the
+// list reloads after every recorded call, and resetting it to the first 40
+// then would throw away where they had scrolled to. The server caps it at 500.
+let _cqWant = 40;
+
+// eslint-disable-next-line no-unused-vars -- called from the list's own onclick
+function loadMoreCalls() {
+    _cqWant = Math.min(_cqWant + 40, 500);
+    loadCalls();
+}
+
 async function loadCalls() {
     const box = document.getElementById('calls-list');
     if (!box) return;
     try {
-        const d = await apiCall('/crm/calls/today?limit=40');
+        const d = await apiCall(`/crm/calls/today?limit=${_cqWant}`);
         _cqItems = d.items || [];
         document.getElementById('calls-count').textContent = formatNumber(d.total || 0);
         document.getElementById('calls-stats').textContent =
@@ -9933,7 +9995,11 @@ async function loadCalls() {
             box.innerHTML = `<div class="cq-empty"><i class="bi bi-cup-hot"></i> فعلاً کسی منتظر تماس نیست.
                 ${d.total ? '' : 'اسکرپ بعدی که تمام شود، لیدهای تازه اینجا می‌آیند.'}</div>`;
         } else {
-            box.innerHTML = _cqItems.map(_cqCard).join('');
+            // «۴۰ از ۴۴۵»: the badge counts the whole queue, the list is its head
+            const more = (d.total || 0) > _cqItems.length && _cqWant < 500
+                ? ` <button class="btn btn-sm btn-outline-secondary ms-2" onclick="loadMoreCalls()">نمایش ۴۰ تای بعدی</button>` : '';
+            box.innerHTML = _cqItems.map(_cqCard).join('') +
+                `<div class="text-muted small text-center py-2">نمایش ${formatNumber(_cqItems.length)} از ${formatNumber(d.total || 0)}${more}</div>`;
         }
         if (['root', 'super_admin'].includes(_currentUser?.role)) loadCallsSummary();
     } catch (e) {
@@ -13868,7 +13934,7 @@ async function showJobLog(jobId) {
                   <div class="d-flex justify-content-between gap-2">
                     <span class="small ${lvl}">${esc(label)}</span>
                     <span class="text-muted" style="font-size:.72rem" dir="ltr">${
-                       e.created_at ? new Date(e.created_at).toLocaleString('fa-IR') : ''}</span>
+                       e.created_at ? new Date(e.created_at).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' }) : ''}</span>
                   </div>
                   <div style="font-size:.85rem">${esc(e.message || '')}</div>
                   ${extra}

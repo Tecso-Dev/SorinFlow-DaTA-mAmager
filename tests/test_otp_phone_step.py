@@ -94,6 +94,11 @@ class TwoScreenPage:
         return None
 
     async def query_selector_all(self, sel):
+        # dialogs and fields are looked up with query_selector_all too now
+        if sel in (".kt-new-modal", '[role="dialog"]', ".kt-modal") \
+                or sel in ContactExtractor._MODAL_INPUT_SELECTORS:
+            el = await self.query_selector(sel)
+            return [el] if el else []
         if self.step == "phone" and self.advances:
             # pressing it is what moves Divar on
             class Pressable(FakeEl):

@@ -23,14 +23,17 @@ empty and is retried on a later pass.
 import asyncio
 import base64
 import io
+import re
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import urlparse
 
+import httpx
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import String, and_, cast, func, null, or_, select, update
 
 from app.config import get_settings
 from app.database import async_session_maker
@@ -103,6 +106,66 @@ def _local_path(rel: str, root: Path) -> Optional[Path]:
     return root / parts[2] / parts[3]
 
 
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-]{4,32}")
+
+
+def _divar_photo_url(url) -> bool:
+    """A photo on Divar's own CDN — the only remote address ever fetched:
+    `images` comes from scraped pages, and fetching wherever it points
+    would let a stored URL aim this process at anything."""
+    try:
+        p = urlparse(str(url or ""))
+    except ValueError:
+        return False
+    return p.scheme == "https" and (p.hostname or "").endswith(".divarcdn.com")
+
+
+async def fetch_remote_photos(prop, root: Path, *, client: Optional[httpx.AsyncClient] = None) -> int:
+    """Download the photos a listing only links to, into the same
+    /images/<divar_id>/img_N.jpg the scraper writes, and point the listing
+    at them. Returns how many were saved; never raises.
+
+    A run with «دانلود تصاویر» off (job 37 on 1405/07/04) or a download that
+    failed at scrape time leaves Divar links in `images`: the panel shows
+    them straight from Divar, but nothing here could look at them — every
+    such listing was stamped «عکسی روی دیسک نیست» — and the photo would go
+    with the listing. Same caps as the scraper's own download."""
+    imgs = list(prop.images or [])
+    todo = [(i, u) for i, u in enumerate(imgs[:max(int(settings.max_images_per_property), 0)])
+            if _divar_photo_url(u)]
+    if not todo or not _SAFE_ID.fullmatch(str(prop.divar_id or "")):
+        return 0
+    folder = Path(root) / str(prop.divar_id)
+    saved = 0
+    own = client is None
+    http = client or httpx.AsyncClient(timeout=20, follow_redirects=False)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        for i, url in todo:
+            try:
+                r = await http.get(url, headers={"Referer": f"https://divar.ir/v/{prop.divar_id}"})
+                if r.status_code != 200 or len(r.content) > int(settings.max_image_bytes):
+                    continue
+                with Image.open(io.BytesIO(r.content)) as im:
+                    if im.size[0] * im.size[1] > int(settings.max_image_pixels):
+                        continue
+                    im.convert("RGB").save(folder / f"img_{i + 1}.jpg", "JPEG", quality=85)
+                imgs[i] = f"/images/{prop.divar_id}/img_{i + 1}.jpg"
+                saved += 1
+            except Exception as e:
+                logger.debug(f"[photo] {prop.divar_id}: photo {i + 1} not fetched: {type(e).__name__}: {e}")
+    except Exception as e:
+        logger.warning(f"[photo] {prop.divar_id}: photos not fetched: {type(e).__name__}: {e}")
+    finally:
+        if own:
+            await http.aclose()
+    if saved:
+        prop.images = imgs
+        prop.images_downloaded = True
+        logger.info(f"[photo] {prop.divar_id}: {saved} photo(s) fetched from Divar's links")
+    return saved
+
+
 def prepare_images(prop, images_root: Path) -> List[bytes]:
     """The first MAX_PHOTOS photos that are on disk, as small RGB JPEGs.
     A file that will not open is skipped, not fatal — one corrupt download
@@ -151,9 +214,14 @@ async def tag_property(db, prop, *, images_root=None) -> Optional[Dict[str, Any]
     if prop.ai_photo_fp is not None and prop.ai_photo_fp != prop.ai_content_fp:
         prop.ai_photo_attempts = 0     # the content moved; the old failure streak no longer applies
     root = Path(images_root) if images_root else Path(settings.images_path)
+    await fetch_remote_photos(prop, root)
     jpegs = prepare_images(prop, root)
     if not jpegs:
-        prop.ai_photo_tags = {"skipped": "no_photos", "prompt_version": PROMPT_VERSION}
+        marker = {"skipped": "no_photos", "prompt_version": PROMPT_VERSION}
+        if any(_divar_photo_url(u) for u in prop.images or []):
+            # the Divar links were tried too — _remote_only() does not offer it again
+            marker["remote"] = "unreachable"
+        prop.ai_photo_tags = marker
         prop.ai_photos_at = datetime.now(timezone.utc)
         await db.commit()
         return None
@@ -225,12 +293,38 @@ def _pending(cursor: int):
             .order_by(Property.id.asc()))
 
 
+async def _requeue_remote_only(db) -> int:
+    """Listings stamped «no photos» while their photos were only Divar links
+    — before tag_property fetched them — are put back in the queue: the
+    stamp is cleared and the cursor moved back to the first of them, so the
+    ordinary pass (retries, attempt cap and all) takes them again. A fetch
+    that fails is stamped «unreachable» and is not requeued again. Returns
+    how many were requeued."""
+    ids = (await db.execute(
+        select(Property.id).where(
+            Property.is_active == True,                                     # noqa: E712
+            Property.ai_photo_tags["skipped"].as_string() == "no_photos",
+            Property.ai_photo_tags["remote"].as_string().is_(None),
+            cast(Property.images, String).like("%divarcdn.com%"))
+    )).scalars().all()
+    if not ids:
+        return 0
+    await db.execute(update(Property).where(Property.id.in_(ids))
+                     .values(ai_photos_at=None, ai_photo_tags=null()))
+    if min(ids) <= await _cursor(db):
+        await secret_box.put(db, KEY_CURSOR, str(min(ids) - 1), "photo_tagger")
+    await db.commit()
+    logger.info(f"[photo] {len(ids)} listing(s) with only Divar photo links put back in the queue")
+    return len(ids)
+
+
 async def run_once(db, *, limit: int = BATCH) -> Dict[str, Any]:
     """One pass. The cursor only moves past listings that were stored (tags
     or the no-photo marker): a listing the model refused keeps ai_photos_at
     empty and stays in front of the cursor, so the next pass tries it first
     — and the ones after it that did succeed are kept out by ai_photos_at,
     so nothing is paid for twice."""
+    await _requeue_remote_only(db)
     since = await _cursor(db)
     props = (await db.execute(_pending(since).limit(limit))).scalars().all()
     res: Dict[str, Any] = {"scanned": len(props), "tagged": 0, "skipped": 0, "failed": 0,

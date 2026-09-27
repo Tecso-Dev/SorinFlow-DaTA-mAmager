@@ -10,6 +10,12 @@ select = ["E", "F", "W", "B", "ASYNC"]
 # buys nothing.
 ignore = ["E501"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency markers are meant to sit in argument defaults — that
+# is how the framework is used, not a mutable default. Without this, adding
+# one parameter to an existing route's signature fails the gate on B008.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.params.Depends", "fastapi.params.Query"]
+
 [tool.mypy]
 python_version = "3.10"
 # Most of this codebase (and everything it imports) has no type stubs; without
