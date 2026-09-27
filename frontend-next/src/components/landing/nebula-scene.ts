@@ -226,32 +226,40 @@ function simorgh(N: number, rnd: Rand) {
       // bias toward the leading edge, so the wing has a drawn outline
       const across = v < 0.45 ? 0 : Math.pow(rnd(), 0.6);
       q = wing(side, u, across);
+      q[1] += 0.4;
     } else if (part < 0.68) {
       // the body: a teardrop standing upright
       const t = u;
-      const r = 0.72 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 0.94 + 0.03)), 0.8);
+      const r = 0.78 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 0.94 + 0.03)), 0.8);
       const th = v * Math.PI * 2;
-      q = [Math.cos(th) * r, 2.2 - t * 4.4, Math.sin(th) * r * 0.8];
-    } else if (part < 0.78) {
-      // neck and head, curving up and forward
-      const t = u, bend = t * t;
-      const r = 0.34 * (1 - 0.45 * t) + (t > 0.8 ? 0.4 * (t - 0.8) * 5 * 0.25 : 0);
-      const th = v * Math.PI * 2;
-      q = [-bend * 1.5 + Math.cos(th) * r, 2.2 + t * 2.5, Math.sin(th) * r];
-    } else if (part < 0.86) {
-      // the crest
+      q = [Math.cos(th) * r, 1.5 - t * 3.7, Math.sin(th) * r * 0.8];
+    } else if (part < 0.75) {
+      // the neck, leaning forward out of the shoulders
+      const t = u, th = v * Math.PI * 2;
+      const r = 0.3 * (1 - 0.25 * t);
+      q = [-t * t * 0.85 + Math.cos(th) * r, 1.5 + t * 1.5, Math.sin(th) * r];
+    } else if (part < 0.83) {
+      // the head, a small ball ending in a beak that points the way it flies
+      const beak = u > 0.72;
+      const t = beak ? (u - 0.72) / 0.28 : 0;
+      const th = v * Math.PI * 2, r = beak ? 0.2 * (1 - t) : 0.56 * Math.pow(rnd(), 0.35);
+      q = [-0.85 - (beak ? 0.55 + t * 0.85 : 0) + Math.cos(th) * r, 3 - (beak ? 0.12 + t * 0.3 : 0) + Math.sin(th) * r * 0.9, Math.sin(th * 2) * r * 0.5];
+    } else if (part < 0.88) {
+      // the crest, sweeping back over the crown
       const k = Math.floor(v * 3);
-      q = [-1.5 - u * (1.4 + k * 0.2), 4.9 + u * (0.9 - k * 0.35) + k * 0.12, (k - 1) * 0.18 + j()];
+      q = [-0.6 + u * (1.5 + k * 0.4), 3.5 + u * (1.1 - k * 0.45) + k * 0.1, (k - 1) * 0.16 + j()];
     } else {
       // three tail plumes with an eye near the end of each
       const k = Math.floor(v * 3) - 1;
       const t = u;
       const eye = t > 0.72 && t < 0.86 ? 0.28 : 0.1;
-      q = [k * (0.35 + t * 2.4) + (rnd() - 0.5) * eye * 2, -2.2 - t * 4.6, -0.3 + (rnd() - 0.5) * eye];
+      q = [k * (0.35 + t * 2.2) + (rnd() - 0.5) * eye * 2, -2.2 - t * 3.6, -0.3 + (rnd() - 0.5) * eye];
     }
-    p[i * 3] = q[0] * 1.32 + j();
-    p[i * 3 + 1] = q[1] * 1.32 + j();
-    p[i * 3 + 2] = q[2] * 1.32 - 1 + j();
+    // scaled to the same reach as the other formations, so the morph into the
+    // infinity of the last section barely has to move the wings
+    p[i * 3] = q[0] * 0.74 + j();
+    p[i * 3 + 1] = q[1] * 0.74 - 0.2 + j();
+    p[i * 3 + 2] = q[2] * 0.74 - 1 + j();
   }
   return p;
 }

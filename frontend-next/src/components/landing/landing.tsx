@@ -525,7 +525,7 @@ function Shield3D() {
  *  bird's shape before it settles into the ∞ of the last section. */
 function SimorghBand() {
   return (
-    <div id="simorgh" className="relative mx-auto flex max-w-7xl scroll-mt-20 justify-center px-4 py-[10vh] sm:px-[6vw]">
+    <div id="simorgh" className="relative mx-auto flex max-w-7xl scroll-mt-20 justify-center px-4 py-[18vh] sm:px-[6vw]">
       <Reveal>
         <SimorghLines className="h-[min(46vw,320px)] w-[min(46vw,320px)]" opacity={0.28} />
       </Reveal>
