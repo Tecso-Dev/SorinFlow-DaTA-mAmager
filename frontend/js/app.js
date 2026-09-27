@@ -5173,11 +5173,17 @@ async function loadScraperLog() {
     const body = document.getElementById('scraper-log-body');
     if (!body) return;
     const grep = document.getElementById('scraper-log-grep')?.value.trim() || '';
+    const file = document.getElementById('scraper-log-file')?.value || 'scraper.log';
     body.textContent = 'در حال بارگیری...';
     try {
         const data = await apiCall(
-            `/stats/logs?lines=300${grep ? '&grep=' + encodeURIComponent(grep) : ''}`);
+            `/stats/logs?lines=300&log=${encodeURIComponent(file)}${grep ? '&grep=' + encodeURIComponent(grep) : ''}`);
         const lines = data.lines || [];
+        if (data.note === 'log file not found') {
+            // a local run is one process in one file; on the server each role has its own
+            body.textContent = 'این لاگ هنوز ساخته نشده است. در اجرای محلی همه‌چیز در «اسکرپر و ورود دیوار» نوشته می‌شود.';
+            return;
+        }
         if (data.note) { body.textContent = data.note; return; }
         if (!lines.length) {
             body.textContent = grep
