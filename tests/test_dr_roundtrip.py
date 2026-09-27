@@ -8,7 +8,7 @@ calls dr_backup.sh makes onto local equivalents:
 
   * `get secret ... -o json|jsonpath=...`   -> a fixture secret JSON
   * `exec postgres-0 -- pg_dump/pg_dumpall/psql`  -> `docker exec` into a
-    throwaway Postgres container (p1e-pg)
+    throwaway Postgres container (p1e-pg-<pid>)
   * `exec deploy/backend -- python -m app.services.dr_backup ship|alert`
     -> the real module, for real, with TELEGRAM_API_BASE pointed at a local
     fake HTTP server in this process instead of api.telegram.org
@@ -39,7 +39,20 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("DR_TEST_PY") or sys.executable
-PG_CONTAINER = "p1e-pg"
+
+
+def _free_port() -> int:
+    import socket
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+# Per run, not fixed: with one name and one port, a second suite running on
+# the same machine (another session, another worktree) began by `docker rm
+# -f`-ing the first one's database in the middle of its round trip.
+PG_CONTAINER = f"p1e-pg-{os.getpid()}"
+PG_PORT = _free_port()
 
 FAKE_KUBECTL = r"""#!/usr/bin/env bash
 # Fake kubectl for the DR round-trip test. Understands exactly the calls
@@ -189,7 +202,7 @@ def pipeline(tmp_path_factory):
     # ── throwaway postgres (never sorinflow-local-*) ────────────────────────
     subprocess.run(["docker", "rm", "-f", PG_CONTAINER], capture_output=True)
     subprocess.run(["docker", "run", "-d", "--name", PG_CONTAINER,
-                     "-e", "POSTGRES_PASSWORD=x", "-p", "5498:5432", "postgres:16-alpine"],
+                     "-e", "POSTGRES_PASSWORD=x", "-p", f"127.0.0.1:{PG_PORT}:5432", "postgres:16-alpine"],
                     check=True, capture_output=True)
     # Over TCP, not the socket: the image's first boot runs a temporary server
     # on the Unix socket only, answers «ready», then shuts it down and starts
@@ -265,7 +278,7 @@ def pipeline(tmp_path_factory):
     env["PG_CONTAINER"] = PG_CONTAINER
     env["FAKE_REPO_DIR"] = str(REPO)
     env["FAKE_PY"] = PY
-    env["FAKE_DATABASE_URL"] = "postgresql+asyncpg://postgres:x@127.0.0.1:5498/divar_scraper"
+    env["FAKE_DATABASE_URL"] = f"postgresql+asyncpg://postgres:x@127.0.0.1:{PG_PORT}/divar_scraper"
     env["FAKE_TG_API_BASE"] = tg_base
 
     try:
