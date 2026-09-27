@@ -336,6 +336,7 @@ class DivarScraper:
                     proxy = await self._get_working_proxy(phone_number)
                     if proxy is None:
                         logger.warning("[proxy] PROXY_ENABLED but no proxy reaches Divar — going direct")
+                await self._wait_for_released_profile(phone_number)
                 await self._open_browser_for(phone_number, proxy)
 
                 if phone_number:
@@ -475,7 +476,103 @@ class DivarScraper:
             f"[pace] Divar answered {status} — refusal #{self._refusals}, "
             f"backing off {wait:.0f}s")
 
-    async def _human_like_delay(self, min_delay: float = None, max_delay: float = None):
+    async def _live_run_on(self, account: str) -> bool:
+        """Whether another run that is running or waiting for a code is on
+        this account — the one case where its profile is really in use.
+        When that cannot be told, yes: the caller then fails as it always
+        did instead of waiting on a guess."""
+        if self.db_session is None:
+            return True
+        from sqlalchemy import select as _select
+        try:
+            q = _select(ScrapingJob.id).where(
+                ScrapingJob.divar_phone == account,
+                ScrapingJob.status.in_(("running", "paused")))
+            mine = getattr(self, "_job_id_str", None)
+            if mine:
+                q = q.where(ScrapingJob.job_id != uuid.UUID(str(mine)))
+            found = (await self.db_session.execute(q.limit(1))).first() is not None
+            # nothing may hold a transaction across the sleep that follows
+            await self.db_session.commit()
+            return found
+        except Exception as e:
+            logger.warning(f"[browser] could not tell who holds {account}: {e}")
+            try:
+                await self.db_session.rollback()
+            except Exception:
+                pass
+            return True
+
+    async def _wait_for_released_profile(self, account: Optional[str], *,
+                                         limit: float = 180.0, step: float = 3.0) -> None:
+        """Wait for the browser of a run that has already ended on this account.
+
+        Cancelling a run only marks its row; its browser closes — and releases
+        the account's profile lock — once the run reaches its next check,
+        which takes the rest of the listing in hand and the pause after it.
+        A run started on the same number meanwhile failed at once with «در
+        یک اسکرپ دیگر در حال اجراست» (1405/07/05). When no live run holds
+        the number, the holder is one on its way out, so wait for it (up to
+        the lock's own 120 s TTL and then some). When a live run holds it,
+        return at once and let the open fail as it always has."""
+        if not account:
+            return
+        from app.scraper.stealth import profile_in_use
+        if not await profile_in_use(account) or await self._live_run_on(account):
+            return
+        logger.info(f"[browser] {account} is still open in a run that has ended — waiting for it to close")
+        await self._log_run(
+            "این شماره هنوز در مرورگر یک اسکرپ لغوشده یا تمام‌شده باز است — "
+            "تا بسته شدنش صبر می‌کنیم (حداکثر ۳ دقیقه)", level="info", phone=account)
+        started = time.monotonic()
+        while time.monotonic() - started < limit:
+            await asyncio.sleep(step)
+            if not await profile_in_use(account):
+                waited = time.monotonic() - started
+                logger.info(f"[browser] {account} released after {waited:.0f}s")
+                await self._log_run(f"مرورگر قبلی بعد از {waited:.0f} ثانیه بسته شد — شروع می‌کنیم",
+                                    level="info", phone=account)
+                return
+            if await self._live_run_on(account):
+                return
+
+    async def _cancelled_now(self) -> bool:
+        """Whether the current run has been cancelled, asked without leaving
+        a transaction open: the caller is in the middle of a sleep, and
+        Postgres closes a connection idle in a transaction after 60 s."""
+        job = getattr(self, "current_job", None)
+        if job is None or self.db_session is None:
+            return False
+        from sqlalchemy import select as _select
+        try:
+            status = (await self.db_session.execute(
+                _select(ScrapingJob.status).where(ScrapingJob.id == job.id))).scalar_one_or_none()
+            await self.db_session.commit()
+            return status == "cancelled"
+        except Exception as e:
+            logger.debug(f"[pace] cancel check failed: {e}")
+            try:
+                await self.db_session.rollback()
+            except Exception:
+                pass
+            return False
+
+    async def _pause(self, seconds: float, stop_on_cancel: bool) -> bool:
+        """Sleep; with stop_on_cancel, in steps of at most 2 s that end early
+        once the run is cancelled. True when a cancel cut it short."""
+        if not stop_on_cancel:
+            await asyncio.sleep(seconds)
+            return False
+        end = time.monotonic() + seconds
+        while (left := end - time.monotonic()) > 0:
+            await asyncio.sleep(min(2.0, left))
+            if await self._cancelled_now():
+                return True
+        return False
+
+    async def _human_like_delay(self, min_delay: Optional[float] = None,
+                                max_delay: Optional[float] = None,
+                                *, stop_on_cancel: bool = False):
         """Wait between actions, and wait out any backoff we owe Divar.
 
         Two changes from a flat random.uniform(0.35, 0.9):
@@ -486,12 +583,18 @@ class DivarScraper:
           quick, occasionally a long pause while somebody reads something. A
           tight uniform window is a signature in itself, and it is also simply
           harder on the server than the same work spread out.
+
+        stop_on_cancel is for the pause between listings: a cancelled run
+        used to sit out the whole of it — up to five minutes of cooldown —
+        before its next check noticed, holding the account's browser all the
+        while, so a new run on that number could not open it.
         """
         now = time.monotonic()
         if now < self._cooldown_until:
             owed = self._cooldown_until - now
             logger.info(f"[pace] cooling down for {owed:.0f}s before the next request")
-            await asyncio.sleep(owed)
+            if await self._pause(owed, stop_on_cancel):
+                return
 
         min_d = min_delay or self.stealth_config.min_delay
         max_d = max_delay or self.stealth_config.max_delay
@@ -500,7 +603,7 @@ class DivarScraper:
             delay = random.uniform(max_d, max_d * 4)
         else:
             delay = random.uniform(min_d, max_d)
-        await asyncio.sleep(delay)
+        await self._pause(delay, stop_on_cancel)
     
     async def _simulate_scroll(self):
         """Simulate human-like scrolling"""
@@ -4576,7 +4679,7 @@ class DivarScraper:
                             # Nothing may hold a transaction across a sleep —
                             # see the note at the other delay below.
                             await self.db_session.commit()
-                            await self._human_like_delay()
+                            await self._human_like_delay(stop_on_cancel=True)
                             continue
 
                         # Download images if enabled — replace the Divar (webp)
@@ -4789,7 +4892,7 @@ class DivarScraper:
                     # connection idle in a transaction for 60s, so any of those
                     # would end the run.
                     await self.db_session.commit()
-                    await self._human_like_delay()
+                    await self._human_like_delay(stop_on_cancel=True)
 
                 except Exception as e:
                     logger.error(f"Failed to process listing: {e}")
