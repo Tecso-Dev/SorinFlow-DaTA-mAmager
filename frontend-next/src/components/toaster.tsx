@@ -51,7 +51,7 @@ export function Toaster() {
           <T.Root
             key={it.id}
             onOpenChange={(open) => !open && drop(it.id)}
-            className="flex items-start gap-3 rounded-2xl border bg-popover p-4 text-popover-foreground shadow-xl data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom-4"
+            className="pointer-events-auto flex items-start gap-3 rounded-2xl border bg-popover p-4 text-popover-foreground shadow-xl data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom-4"
           >
             <Icon className={cn("mt-0.5 size-5 shrink-0", TONE[it.tone])} />
             <div className="min-w-0 flex-1">
@@ -64,7 +64,12 @@ export function Toaster() {
           </T.Root>
         );
       })}
-      <T.Viewport className="fixed bottom-4 end-4 z-[100] flex w-[min(380px,calc(100vw-2rem))] flex-col gap-2 outline-none" />
+      {/* the viewport sizes itself to the widest possible toast (w-[min(380px,...)])
+          whether or not one is that wide right now; without pointer-events-none
+          its empty margin still sits over the page and eats clicks near the
+          bottom of the screen for as long as a toast is showing (duration
+          5000ms) — each toast opts back in with its own pointer-events-auto */}
+      <T.Viewport className="pointer-events-none fixed bottom-4 end-4 z-[100] flex w-[min(380px,calc(100vw-2rem))] flex-col gap-2 outline-none" />
     </T.Provider>
   );
 }

@@ -385,7 +385,7 @@ export function TasksTab() {
           ) : q.isError ? (
             <ErrorNote error={q.error} />
           ) : q.data.items.length === 0 ? (
-            <Empty icon={ListChecks} action={<Button size="sm" onClick={() => setDialogTask(null)}>وظیفهٔ تازه</Button>}>
+            <Empty icon={ListChecks} action={<Button size="sm" onClick={() => setDialogTask(null)}>ثبت اولین وظیفه</Button>}>
               وظیفه‌ای ثبت نشده است.
             </Empty>
           ) : view === "table" ? (
