@@ -182,7 +182,7 @@ export function RemindersTab() {
           ) : q.isError ? (
             <ErrorNote error={q.error} />
           ) : q.data.items.length === 0 ? (
-            <Empty icon={Bell} action={<Button size="sm" onClick={() => setDialogReminder(null)}>یادآور تازه</Button>}>
+            <Empty icon={Bell} action={<Button size="sm" onClick={() => setDialogReminder(null)}>ثبت اولین یادآور</Button>}>
               یادآوری ثبت نشده است.
             </Empty>
           ) : (

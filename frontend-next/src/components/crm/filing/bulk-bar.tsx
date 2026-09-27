@@ -29,7 +29,7 @@ export function BulkBar({
 
   const btn = (icon: React.ReactNode, label: string, onClick: () => void, danger = false) => (
     <Button variant={danger ? "destructive" : "ghost"} size="sm" className="gap-1.5" onClick={onClick}>
-      {icon} <span className="hidden sm:inline">{label}</span>
+      {icon} <span className="sr-only sm:not-sr-only sm:inline">{label}</span>
     </Button>
   );
 
