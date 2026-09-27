@@ -14,7 +14,12 @@ test('owner sees the Kavenegar settings, sends a single message and the events l
   await page.getByLabel('شمارهٔ گیرنده').first().fill('09121234567');
   await page.getByLabel('متن پیام').first().fill(`تست ای‌توای ${Date.now()}`);
   await page.getByRole('button', { name: 'ارسال', exact: true }).click();
-  await expect(page.getByText(/ارسال (شد|ناموفق بود)/).first()).toBeVisible({ timeout: 10_000 });
+  // scoped to the toast region (toaster.tsx): a page-wide text search also
+  // matches the history filter's own always-present <option value="sent">
+  // ارسال شد</option> below, which is never "visible" (a closed select's
+  // option), so a plain .first() could hang the full 10s on that instead.
+  const notifications = page.getByRole('region', { name: /Notifications/ });
+  await expect(notifications.getByText(/ارسال (شد|ناموفق بود)/).first()).toBeVisible({ timeout: 10_000 });
 
   await scrollThrough(page);
   await noHorizontalScroll(page);
