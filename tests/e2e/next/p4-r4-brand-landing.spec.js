@@ -14,7 +14,8 @@ test('the landing page renders every section on the server, with the brand from 
   const s = await site(page);
   // Server-rendered: the words are in the HTML before any script runs.
   const html = await (await page.request.get('/')).text();
-  for (const id of ['top', 'features', 'how', 'ai', 'security', 'contact']) expect(html).toContain(`id="${id}"`);
+  const ids = ['top', 'overview', 'features', 'path', 'tour', 'ai', 'ownership', 'security', 'tech', 'contact'];
+  for (const id of ids) expect(html).toContain(`id="${id}"`);
   expect(html).toContain(s.brandName);
 
   await page.goto('/');
@@ -22,7 +23,8 @@ test('the landing page renders every section on the server, with the brand from 
   await expect(page.getByRole('link', { name: 'ورود', exact: true })).toHaveAttribute('href', '/panel/login');
   await expect(page.getByRole('link', { name: s.brandName }).first()).toBeVisible();
   await scrollThrough(page);
-  for (const name of ['یک پلتفرم،', 'از آگهی تا قرارداد،', 'دستیاری که', 'دادهٔ دفتر،', 'بیایید']) {
+  for (const name of ['کار دفتر املاک', 'یک پلتفرم،', 'از آگهی', 'همان چیزی که', 'دستیاری که',
+    'این محصول', 'دادهٔ دفتر،', 'معماری', 'بیایید']) {
     await expect(page.getByRole('heading', { level: 2, name: new RegExp(name) })).toBeVisible();
   }
   await expect(page.getByRole('contentinfo')).toContainText(s.brandName);
@@ -135,4 +137,86 @@ test('the panel shell and the login page wear the logo, not a letter', async ({ 
   await signIn(page, 'agent1');
   await page.goto('/panel');
   await expect(page.locator('a[href="/panel"] svg[viewBox="0 0 64 64"]').locator('visible=true').first()).toBeVisible();
+});
+
+test('the scroll badge is made of the brand name, follows the page and takes you back up', async ({ page }) => {
+  const s = await site(page);
+  await page.goto('/');
+  const badge = page.getByRole('button', { name: /درصد صفحه پیمایش شده/ });
+  await expect(badge).toBeVisible();
+  // the ring is the brand's Latin name, never a hard-coded one
+  await expect(badge.locator('textPath')).toContainText(s.brandNameLatin.toUpperCase());
+  // at the top it reads zero and does nothing
+  await expect(badge).toHaveAccessibleName(/^۰ درصد/);
+  await expect(badge).toBeDisabled();
+
+  const read = async () => (await badge.getAttribute('aria-label')).match(/^(\S+) درصد/)[1];
+  const half = await page.evaluate(() => document.documentElement.scrollHeight / 2);
+  await page.evaluate((y) => window.scrollTo(0, y), half);
+  await expect.poll(read).not.toBe('۰');
+  const middle = await read();
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect.poll(read).toBe('۱۰۰');
+  expect(middle).not.toBe('۱۰۰');
+
+  await badge.click();
+  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 10_000 }).toBeLessThan(10);
+});
+
+test('each rail pins itself and slides sideways, and drops the pin for a reduced-motion visitor', async ({ page, browser }) => {
+  await page.goto('/');
+  for (const id of ['path', 'tour']) {
+    const rail = page.locator(`#${id}`);
+    const track = rail.locator('.w-max');
+    // tall enough to scroll through, and wider than the screen
+    const { tall, wide } = await rail.evaluate((el) => ({
+      tall: el.offsetHeight > window.innerHeight * 2,
+      wide: el.querySelector('.w-max').scrollWidth > window.innerWidth,
+    }));
+    expect(tall, `#${id} is not tall enough to pin`).toBeTruthy();
+    expect(wide, `#${id} has nothing to slide`).toBeTruthy();
+
+    const at = async () => track.evaluate((t) => new DOMMatrixReadOnly(getComputedStyle(t).transform).m41);
+    // absolute positions, not scrollIntoView + scrollBy: a section several
+    // screens tall counts as "in view" the moment its top edge appears, so a
+    // relative scroll lands somewhere different for each rail
+    const box = await rail.evaluate((el) => ({ top: el.offsetTop, h: el.offsetHeight }));
+    await page.evaluate((y) => window.scrollTo(0, y), box.top + 40);
+    await page.waitForTimeout(400);
+    const start = await at();
+    await page.evaluate((y) => window.scrollTo(0, y), box.top + box.h * 0.5);
+    await page.waitForTimeout(400);
+    // RTL: the first panel sits at the right, so the row travels to the right
+    expect(await at(), `#${id} did not slide the right way`).toBeGreaterThan(start + 50);
+    // and the strip stays put while it does
+    const top = await rail.locator('.sticky').evaluate((el) => el.getBoundingClientRect().top);
+    expect(Math.abs(top)).toBeLessThan(5);
+  }
+
+  const ctx = await browser.newContext({ reducedMotion: 'reduce', baseURL: test.info().project.use.baseURL });
+  const still = await ctx.newPage();
+  await still.goto('/');
+  for (const id of ['path', 'tour']) {
+    const rail = still.locator(`#${id}`);
+    await expect(rail.locator('.sticky')).toHaveCount(0);
+    await expect(rail.locator('article')).not.toHaveCount(0);
+  }
+  await ctx.close();
+});
+
+test('the repository link is the one in the settings, and nothing else reaches the page', async ({ page }) => {
+  const s = await site(page);
+  await page.goto('/');
+  const links = page.locator('#tech a[target="_blank"], footer a[target="_blank"]');
+  if (!s.github) {
+    await expect(links).toHaveCount(0);
+    return;
+  }
+  expect(s.github, 'the backend let through a link that is not https').toMatch(/^https:\/\//);
+  for (const a of await links.all()) {
+    expect(await a.getAttribute('href')).toBe(s.github);
+    // an outbound link must not hand the destination a handle on this window
+    expect(await a.getAttribute('rel')).toContain('noopener');
+  }
 });

@@ -6,13 +6,14 @@
 // the settings — and nothing reveals a host, a version or an address.
 
 import { GitBranch, Layers, Radio, ShieldCheck, Sparkles } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import { useState } from "react";
 import { cn } from "cn";
 import { IsoBadge } from "@/components/panel/kit";
 import { Reveal, Tilt } from "@/components/viz";
 import { LANDING } from "@/content/landing";
 import { faNum } from "@/lib/format";
+import { usePrefersStill } from "@/lib/use-still";
 
 const grad = "bg-linear-to-l from-indigo-600 via-violet-600 to-cyan-600 bg-clip-text text-transparent dark:from-indigo-300 dark:via-violet-300 dark:to-cyan-300";
 const glass = "rounded-3xl border bg-card/70 backdrop-blur-xl shadow-[0_24px_60px_-30px_rgb(49_46_129/0.45)] dark:bg-white/[0.035] dark:shadow-[0_30px_80px_-30px_rgb(0_0_0/0.8)]";
@@ -119,7 +120,7 @@ export function Ownership({ brand }: { brand: string }) {
 /** The brand's name on a slowly turning plinth — the only thing that stands in
  *  for an owner, because nothing else about one belongs on a public page. */
 function Monogram({ brand }: { brand: string }) {
-  const still = useReducedMotion();
+  const still = usePrefersStill();
   return (
     <div className="relative mx-auto grid aspect-square w-full max-w-[380px] place-items-center">
       <div aria-hidden className="absolute inset-[12%] rounded-full bg-[radial-gradient(circle_at_35%_30%,rgb(139_92_246/0.35),transparent_68%)] blur-2xl" />
@@ -233,7 +234,7 @@ export function Tech({ github }: { github: string }) {
 /** The four layers as isometric plates, the chosen one lifted and lit, with a
  *  request travelling down the stack and its answer coming back up. */
 function Stack({ active }: { active: number }) {
-  const still = useReducedMotion();
+  const still = usePrefersStill();
   const GAP = 66, T = 13, TOP = 26;
   const top = "M100 0 L192 40 L100 80 L8 40 Z";
   const leftFace = `M8 40 L100 80 L100 ${80 + T} L8 ${40 + T} Z`;

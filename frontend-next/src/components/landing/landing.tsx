@@ -6,8 +6,8 @@
 // and carries a 3D piece; the particle scene behind them is nebula.tsx.
 
 import {
-  ArrowLeft, Bell, BrainCircuit, Building2, FileSearch, Fingerprint, KeyRound, Lock, Mail, MessageSquareText,
-  Phone, ScanSearch, Send, ShieldCheck, UserRoundCog, Users, Workflow,
+  ArrowLeft, Bell, BrainCircuit, FileSearch, Fingerprint, Lock, Mail, MessageSquareText,
+  Phone, ScanSearch, Send, ShieldCheck, UserRoundCog, Users,
 } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
@@ -43,7 +43,6 @@ const ANCHORS: NebulaAnchor[] = [
   { id: "overview", formation: "nebula" },
   { id: "features", formation: "city" },
   { id: "path", formation: "house" },
-  { id: "how", formation: "house" },
   { id: "tour", formation: "nebula" },
   { id: "ai", formation: "house" },
   { id: "ownership", formation: "infinity" },
@@ -69,7 +68,6 @@ export function Landing({
         <Overview />
         <Features stats={stats} domain={site.domain} />
         <PathRail />
-        <How />
         <TourRail domain={site.domain} />
         <Ai />
         <Ownership brand={brand} />
@@ -346,41 +344,6 @@ function MockPanel({ stats, domain }: { stats: LandingStats; domain: string }) {
         </div>
       </div>
     </div>
-  );
-}
-
-/* ───────────────────────── how it works: an isometric staircase ───────────────────────── */
-
-const STEP_ICONS = [FileSearch, Building2, Workflow, KeyRound];
-
-function How() {
-  const h = LANDING.how;
-  return (
-    <Block id="how">
-      <Heading eyebrow={h.eyebrow} title={h.title} />
-      <ol className="mt-14 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 lg:items-end lg:[--stair:28px]">
-        {h.steps.map((s, i) => {
-          const Icon = STEP_ICONS[i];
-          return (
-            // each step stands one stair higher than the last
-            <li key={s.title} className="relative" style={{ marginBottom: `calc(var(--stair, 0px) * ${i})` }}>
-              <Reveal delay={i * 0.1}>
-                <Tilt className="rounded-3xl">
-                  <div className={cn(glass, "relative p-6 shadow-[5px_7px_0_0_rgb(99_102_241/0.28),9px_13px_0_0_rgb(79_70_229/0.14)] dark:shadow-[5px_7px_0_0_rgb(49_46_129/0.75),9px_13px_0_0_rgb(30_27_75/0.8)]")}>
-                    <div className="flex items-center justify-between">
-                      <IsoBadge icon={Icon} className="scale-90" />
-                      <span className={cn("text-5xl font-black opacity-80", grad)}>{faNum(i + 1)}</span>
-                    </div>
-                    <h3 className="mt-5 text-xl font-extrabold">{s.title}</h3>
-                    <p className="mt-2 text-sm leading-7 text-muted-foreground">{s.text}</p>
-                  </div>
-                </Tilt>
-              </Reveal>
-            </li>
-          );
-        })}
-      </ol>
-    </Block>
   );
 }
 

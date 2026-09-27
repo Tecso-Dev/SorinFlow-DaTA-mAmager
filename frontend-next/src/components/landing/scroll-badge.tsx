@@ -6,10 +6,11 @@
 // Clicking it goes back to the top.
 
 import { ArrowUp } from "lucide-react";
-import { motion, useMotionValueEvent, useReducedMotion, useScroll, useTransform } from "motion/react";
+import { motion, useMotionValueEvent, useScroll, useTransform } from "motion/react";
 import { useState } from "react";
 import { cn } from "cn";
 import { faNum } from "@/lib/format";
+import { usePrefersStill } from "@/lib/use-still";
 
 const R = 41; // the text ring's radius inside a 0 0 100 100 box
 const CIRC = 2 * Math.PI * R;
@@ -18,7 +19,7 @@ const RING = `M50 ${50 - R} A${R} ${R} 0 1 1 49.99 ${50 - R}`;
 
 export function ScrollBadge({ brandLatin }: { brandLatin: string }) {
   const { scrollYProgress } = useScroll();
-  const still = useReducedMotion();
+  const still = usePrefersStill();
   const [pct, setPct] = useState(0);
 
   useMotionValueEvent(scrollYProgress, "change", (v) => {

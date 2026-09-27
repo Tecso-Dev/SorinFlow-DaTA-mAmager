@@ -7,11 +7,12 @@
 // panels are stylised mock-ups, so no office's data is ever on the public page.
 
 import { ArrowLeft, BadgeCheck, CalendarClock, FileSignature, PhoneCall, ScanLine, Sparkles, Users } from "lucide-react";
-import { motion, useReducedMotion, useScroll, useTransform } from "motion/react";
+import { motion, useScroll, useTransform } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "cn";
 import { LANDING } from "@/content/landing";
 import { faNum } from "@/lib/format";
+import { usePrefersStill } from "@/lib/use-still";
 
 const grad = "bg-linear-to-l from-indigo-600 via-violet-600 to-cyan-600 bg-clip-text text-transparent dark:from-indigo-300 dark:via-violet-300 dark:to-cyan-300";
 const glass = "rounded-3xl border bg-card/70 backdrop-blur-xl shadow-[0_24px_60px_-30px_rgb(49_46_129/0.45)] dark:bg-white/[0.035] dark:shadow-[0_30px_80px_-30px_rgb(0_0_0/0.8)]";
@@ -31,10 +32,11 @@ function Rail({
   const outer = useRef<HTMLDivElement>(null);
   const view = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
-  const still = useReducedMotion();
+  const stacked = usePrefersStill();
   const [distance, setDistance] = useState(0);
 
-  // How far the row has to travel: everything of it that does not fit.
+  // How far the row has to travel: everything of it that does not fit. While
+  // stacked there is no track to measure, so the distance stays at nothing.
   useEffect(() => {
     const measure = () => {
       const t = track.current, v = view.current;
@@ -45,7 +47,7 @@ function Rail({
     if (track.current) ro.observe(track.current);
     if (view.current) ro.observe(view.current);
     return () => ro.disconnect();
-  }, []);
+  }, [stacked]);
 
   const { scrollYProgress } = useScroll({ target: outer, offset: ["start start", "end end"] });
   const x = useTransform(scrollYProgress, [0, 1], [0, distance]);
@@ -67,7 +69,7 @@ function Rail({
   );
 
   // Reduced motion: no pin and no sideways travel, just the panels stacked.
-  if (still) {
+  if (stacked) {
     return (
       <section id={id} className="mx-auto max-w-7xl scroll-mt-20 px-4 py-[14vh] sm:px-[6vw]">
         {head}
@@ -99,7 +101,7 @@ function Rail({
 /** One panel of a rail: a fixed-width card the row slides past. */
 function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <article className={cn(glass, "flex h-full w-[82vw] shrink-0 flex-col overflow-hidden p-6 sm:w-[min(62vw,620px)] sm:p-8", className)}>
+    <article className={cn(glass, "relative flex h-full w-[82vw] shrink-0 flex-col overflow-hidden p-6 sm:w-[min(62vw,620px)] sm:p-8", "motion-reduce:w-auto", className)}>
       {children}
     </article>
   );
