@@ -31,6 +31,24 @@ const ORDER: { key: ConceptKey; letter: string; name: string; blurb: string }[] 
     name: "برج‌ها و مدار",
     blurb: "سه برج که هر کدام از قبلی بلندتر است و حلقه‌ای از داده که دورشان می‌چرخد.",
   },
+  {
+    key: "simorgh",
+    letter: "د",
+    name: "سیمرغ بی‌نهایت",
+    blurb: "سیمرغی که دو بالش می‌چرخند و نشان بی‌نهایت می‌سازند و تنش روی محل تقاطع می‌ایستد.",
+  },
+  {
+    key: "ribbonSimorgh",
+    letter: "هـ",
+    name: "روبان بی‌نهایت",
+    blurb: "نوار سه‌بعدی‌ای که هم بی‌نهایت است و هم S؛ یک سرش سر سیمرغ می‌شود و سر دیگرش پرهای دم.",
+  },
+  {
+    key: "roofSimorgh",
+    letter: "و",
+    name: "سیمرغ و خانه",
+    blurb: "سیمرغی با بال‌های گشوده که بام خانه‌ای ایزومتریک‌اند — ملک و پناه — و نشان بی‌نهایتی در دمش.",
+  },
 ];
 
 const SIZES = [16, 32, 64, 128, 256];
@@ -42,9 +60,12 @@ export function BrandGallery({ site }: { site: Site }) {
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-10 px-4 py-10 sm:px-6">
       <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-black tracking-tight sm:text-3xl">سه پیشنهاد برای لوگوی {site.brandName}</h1>
+        <h1 className="text-2xl font-black tracking-tight sm:text-3xl">
+          {ORDER.length} پیشنهاد برای لوگوی {site.brandName}
+        </h1>
         <p className="text-sm text-muted-foreground">
           هر کدام در اندازهٔ ۱۶ تا ۲۵۶ پیکسل، روی زمینهٔ تیره و روشن، به‌شکل آیکون برنامه و در زبانهٔ مرورگر.
+          سه گزینهٔ آخر با سیمرغ و نشان بی‌نهایت ساخته شده‌اند.
           فعلاً گزینهٔ «{ORDER.find((o) => o.key === CURRENT_CONCEPT)?.letter}» در سایت استفاده می‌شود.
         </p>
       </header>

@@ -23,7 +23,26 @@ const unit = (a: V3): V3 => {
 };
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp = (v: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
-export const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Round to `dp` decimals, the same way in every JavaScript engine.
+ *
+ * This art is computed twice — once in Node when the page is server-rendered,
+ * once in the browser — and the two must agree to the character or React
+ * reports a hydration mismatch and keeps the server's attribute. Math.cos,
+ * Math.sin and Math.pow are only required to be *nearly* the same everywhere,
+ * so a plain Math.round(n * 100) flips whenever a value sits within a hair of
+ * a .005 boundary; over tens of thousands of numbers that is a certainty.
+ * Rounding to two extra decimals first lands both engines on exactly the same
+ * value, and the second rounding then cannot disagree.
+ */
+export function round(n: number, dp: number) {
+  const coarse = 10 ** (dp + 2);
+  const k = 10 ** dp;
+  return Math.round((Math.round(n * coarse) / coarse) * k) / k;
+}
+
+export const r2 = (n: number) => round(n, 2);
 
 /* ───────────────────────── light and colour ───────────────────────── */
 
@@ -43,7 +62,7 @@ export const RAMPS = {
 } as const satisfies Record<string, Ramp>;
 
 const hex2rgb = (h: string): V3 => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
-const rgb2hex = (c: V3) => `#${c.map((v) => clamp(Math.round(v), 0, 255).toString(16).padStart(2, "0")).join("")}`;
+const rgb2hex = (c: V3) => `#${c.map((v) => clamp(round(v, 0), 0, 255).toString(16).padStart(2, "0")).join("")}`;
 
 /** The colour at `x` (0 = deepest shadow, 1 = brightest light) along a ramp. */
 export function rampAt(ramp: Ramp, x: number): V3 {
@@ -100,7 +119,9 @@ function faceOf(pts: V3[], normal: V3, paint: Paint, along: number, layer: numbe
     if (cull) return null;
     n = mul(n, -1);
   }
-  const z = pts.reduce((s, p) => s + p[2], 0) / pts.length;
+  // rounded, because render() sorts on this: two engines that disagree in the
+  // last bit would otherwise paint the facets in a different order
+  const z = round(pts.reduce((s, p) => s + p[2], 0) / pts.length, 3);
   return { pts, color: paint(light(n), back, along), z, layer };
 }
 
@@ -168,7 +189,10 @@ export class Scene {
       const l = Math.hypot(dx, dy) || 1;
       let nx = -dy / l, ny = dx / l;
       const ox = edge[i][0] - other[i][0], oy = edge[i][1] - other[i][1];
-      if (nx * ox + ny * oy < 0) (nx = -nx), (ny = -ny);
+      if (nx * ox + ny * oy < 0) {
+        nx = -nx;
+        ny = -ny;
+      }
       facing.push(clamp((nx * LIGHT2[0] + ny * LIGHT2[1] - 0.25) / 0.6));
     }
     let i = 0;
@@ -184,7 +208,13 @@ export class Scene {
         zmax = Math.max(zmax, zs[i]);
         i++;
       }
-      this.faces.push({ pts: edge.slice(start, i + 1), color: [255, 255, 255], z: zmax + 0.01, layer, line: (opacity * sum) / (i - start) });
+      this.faces.push({
+        pts: edge.slice(start, i + 1),
+        color: [255, 255, 255],
+        z: round(zmax + 0.01, 3),
+        layer,
+        line: round((opacity * sum) / (i - start), 3),
+      });
     }
   }
 
@@ -286,7 +316,7 @@ export function trace(at: (t: number) => Pt, n: number, t0 = 0, t1 = 1) {
     if (i) length += Math.hypot(p[0] - ps[i - 1][0], p[1] - ps[i - 1][1]);
     ps.push(p);
   }
-  return { d: path2(ps), length: Math.round(length * 10) / 10 };
+  return { d: path2(ps), length: round(length, 1) };
 }
 
 /** An ellipse turned along a direction (a feather's eye, a pupil). */
@@ -297,7 +327,7 @@ function dotAlong(at: (t: number) => Pt, t: number, rx: number, ry: number, fill
   const [x1, y1] = at(Math.min(1, t + 0.02));
   const [x0, y0] = at(Math.max(0, t - 0.02));
   const rot = (Math.atan2(y1 - y0, x1 - x0) * 180) / Math.PI - 90;
-  return { cx: r2(x), cy: r2(y), rx, ry, rot: Math.round(rot), fill };
+  return { cx: r2(x), cy: r2(y), rx: r2(rx), ry: r2(ry), rot: round(rot, 0), fill };
 }
 
 /* ───────────────────────── the Simorgh's parts ───────────────────────── */
@@ -328,7 +358,7 @@ function headAndNeck(s: Scene, o: Pt, k: number, layer: number) {
   });
   crestOf(s, [o[0] + 0.2 * k, o[1] - 17.2 * k], k, 1, layer - 1);
   const eye = P(-3.4, -16.2);
-  return { eye: { cx: r2(eye[0]), cy: r2(eye[1]), rx: 0.8 * k, ry: 0.8 * k, rot: 0, fill: "#fcd34d" } as Dot };
+  return { eye: { cx: r2(eye[0]), cy: r2(eye[1]), rx: r2(0.8 * k), ry: r2(0.8 * k), rot: 0, fill: "#fcd34d" } as Dot };
 }
 
 /** Three cyan plumes sweeping back from a crown at `o`, `dir` = +1 to the
