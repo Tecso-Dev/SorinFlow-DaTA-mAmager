@@ -102,6 +102,20 @@ class TestTheRequestedNumber:
     def test_a_whole_day_run_has_no_cap_and_follows_the_count(self):
         assert self.run(120, 30, 25, None).progress == 25.0
 
+    def test_a_search_run_sent_without_a_number_measures_against_100(self):
+        """The scraper falls back to 100 (max_items or 100); so does the bar."""
+        j = job(4253, 40)
+        j.new_items, j.config = 50, {"city": "urmia"}
+        assert j.max_items == 100 and j.progress == 50.0
+
+    def test_a_whole_day_run_without_a_number_has_no_target(self):
+        j = job(120, 30)
+        j.new_items, j.config = 25, {"posted_date": "2026-09-26"}
+        assert j.max_items is None and j.progress == 25.0
+
+    def test_a_run_from_before_the_config_column_has_no_target(self):
+        assert job(120, 30).max_items is None
+
     def test_saving_past_the_target_clamps(self):
         assert self.run(4253, 260, 201, 200).progress == 100.0
 

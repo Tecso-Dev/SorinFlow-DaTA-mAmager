@@ -100,10 +100,16 @@ class ScrapingJob(Base):
     
     @property
     def max_items(self) -> Optional[int]:
-        """New listings the run was asked for; None for a whole-day run."""
+        """New listings the run was asked for; None for a whole-day run.
+        A search run sent without a number stops at 100, the scraper's own
+        fallback, so the bar measures against the same 100."""
         cfg: Any = self.config
-        cap = cfg.get("max_items") if isinstance(cfg, dict) else None
-        return cap if isinstance(cap, int) else None
+        if not isinstance(cfg, dict) or not cfg:
+            return None
+        cap = cfg.get("max_items")
+        if isinstance(cap, int) and cap > 0:
+            return cap
+        return None if cfg.get("posted_date") or cfg.get("urls") else 100
 
     @property
     def progress(self) -> float:
