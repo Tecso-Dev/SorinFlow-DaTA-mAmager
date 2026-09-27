@@ -40,6 +40,12 @@ module.exports = defineConfig({
     {
       command: 'bash scripts/e2e_up.sh',
       cwd: root,
+      // portal-visitor.spec.js and admin-portal.spec.js sign up through the
+      // public portal, which app/api/routes/public_auth.py 404s while this
+      // is off; e2e_up.sh defaults it off for the old panel's own /portal
+      // redirect test (tests/e2e/specs/smoke.spec.js), so this suite turns
+      // it on for its own backend instead of changing that shared default.
+      env: { ...process.env, PUBLIC_AUTH_ENABLED: 'true' },
       url: `${api}/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,
