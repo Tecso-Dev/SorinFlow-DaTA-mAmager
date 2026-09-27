@@ -300,12 +300,19 @@ class ContactExtractor:
             'button[data-action="call"]',
         ]
 
-        for attempt in range(3):
-            for selector in phone_selectors:
+        # One lookup for every selector at once, a few times a second apart.
+        # It was a wait_for_selector per selector — 13 × 800 ms × 3 rounds plus
+        # the pauses, 36 s on every listing that shows no number (chat-only
+        # ones included), for a number that, when it appears at all, is on
+        # the page by the time this runs.
+        combined = ", ".join(phone_selectors)
+        for attempt in range(4):
+            try:
+                found = await self.page.query_selector_all(combined)
+            except Exception:
+                found = []
+            for phone_elem in found:
                 try:
-                    phone_elem = await self.page.wait_for_selector(selector, timeout=800)
-                    if not phone_elem:
-                        continue
                     try:
                         is_visible = await phone_elem.is_visible()
                     except Exception:
@@ -313,7 +320,7 @@ class ContactExtractor:
                     if not is_visible:
                         continue
 
-                    logger.info(f"Found phone element with selector: {selector}")
+                    logger.info("Found phone element")
                     href = await phone_elem.get_attribute('href')
                     phone_text = (
                         href.replace('tel:', '').strip()
@@ -334,7 +341,8 @@ class ContactExtractor:
                             return phone_str
                 except Exception:
                     continue
-            await asyncio.sleep(1.5)
+            if attempt < 3:
+                await asyncio.sleep(1.0)
 
         # Regex fallback: only valid Iranian mobile numbers (09xxxxxxxxx)
         try:
