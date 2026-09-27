@@ -115,9 +115,13 @@ class TestTheStreakEarlyStopIsGone:
 
     def test_the_publish_date_filter_still_drops_older_listings(self):
         """Removing the early stop must not stop the filtering."""
-        assert "is before" in SCRAPER
-        i = SCRAPER.index("is before")
-        assert "_skip" in SCRAPER[max(0, i - 200):i]
+        from datetime import date, datetime
+        from app.scraper.divar_scraper import DivarScraper
+        why = DivarScraper._date_skip(datetime(2026, 9, 20, 9, 0), date(2026, 9, 26), None)
+        assert why and "is before" in why
+        # …and the scrape loop acts on it
+        i = SCRAPER.index("self._date_skip(detail.get('posted_at')")
+        assert "_skip(why)" in SCRAPER[i:i + 200]
 
     def test_collection_is_bounded_by_date_not_by_count(self):
         """What makes removing the break safe: the pool is already the day."""

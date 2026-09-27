@@ -1439,11 +1439,28 @@ async def delete_user(
     # Captured before the delete: the row (and the id/username it would
     # otherwise carry into the audit record) is gone after commit.
     target_id, target_username = user.id, user.username
+
+    # A person's forwarder phones and scheduled scrapes are theirs alone: the
+    # phone answers for their Divar numbers, a schedule runs on their account.
+    # Both tables point at users with no ON DELETE rule, so Postgres refused
+    # to delete anyone who had either (رسا, 1405/07/05) and the panel showed
+    # only an error. They go with the person, in the same transaction; leads,
+    # properties and Divar numbers keep their rows with the owner cleared.
+    from sqlalchemy import delete as sa_delete
+    from app.models.forwarder import ForwarderDevice
+    from app.models.scrape_schedule import ScrapeSchedule
+    phones = (await db.execute(
+        sa_delete(ForwarderDevice).where(ForwarderDevice.user_id == target_id))).rowcount or 0
+    schedules = (await db.execute(
+        sa_delete(ScrapeSchedule).where(ScrapeSchedule.owner_user_id == target_id))).rowcount or 0
     await db.delete(user)
     await db.commit()
+    summary = f"کاربر «{target_username}» حذف شد"
+    gone = [f"{phones} گوشی فورواردر"] * bool(phones) + [f"{schedules} زمان‌بندی اسکرپ"] * bool(schedules)
+    if gone:
+        summary += " — همراه با " + " و ".join(gone)
     await audit.record("user_delete", actor=current_user, target_type="user",
-                       target_id=target_id, summary=f"کاربر «{target_username}» حذف شد",
-                       request=request)
+                       target_id=target_id, summary=summary, request=request)
     return {"success": True, "message": "کاربر حذف شد"}
 
 

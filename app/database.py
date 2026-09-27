@@ -446,7 +446,12 @@ async def _guard(conn):
     and with a connection pool the connection goes back to the pool after
     boot: a plain SET would ride along into ordinary requests, which would
     then give up on a lock after 5 s and on any query after 120 s.
+
+    Postgres only: sqlite has no SET, and there it raised into the caller,
+    which then skipped the step it was guarding.
     """
+    if conn.dialect.name != "postgresql":
+        return
     await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
     await conn.execute(text("SET LOCAL statement_timeout = '120s'"))
 

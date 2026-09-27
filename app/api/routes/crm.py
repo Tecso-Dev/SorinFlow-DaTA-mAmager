@@ -619,11 +619,14 @@ def _queue_query(user):
     # newest listing first — the freshest number is the likeliest to answer.
     return q.order_by(
         Lead.next_call_at.is_(None), Lead.next_call_at.asc(),
-        Lead.call_attempts.asc(), Lead.created_at.desc())
+        Lead.call_attempts.asc(), Lead.created_at.desc(), Lead.id.desc())   # id: a stable order when a scrape saved many at once
 
 
 @router.get("/calls/today")
-async def calls_today(limit: int = Query(30, ge=1, le=100),
+# up to 500: the panel asks for as many as the person has expanded to, and a
+# reload after every call must bring the same list back (1405/07/04: 445
+# waiting, 40 shown, no way to more).
+async def calls_today(limit: int = Query(30, ge=1, le=500),
                       db: AsyncSession = Depends(get_db),
                       current_user: User = Depends(get_current_user)):
     agent = _agent_name(current_user)

@@ -29,6 +29,8 @@ os.environ.setdefault("IMAGES_PATH", "/tmp")
 # table.
 # per run: the suite's sqlite file outlives a run, and these usernames are unique
 NS = f"audit{uuid.uuid4().hex[:6]}"
+# its own name, so the other tests' counts under NS do not see it
+LATE = f"late{uuid.uuid4().hex[:6]}"
 
 
 def _q(params):
@@ -98,6 +100,11 @@ async def _seed_events(_schema):
                       summary="تلاش ورود ناموفق", created_at=now - timedelta(days=1)),
             AuditEvent(action="user_delete", actor_username=f"{NS}_sobhan", actor_role="root",
                       summary="کاربر حذف شد", created_at=now - timedelta(days=40)),
+            # 21:00 UTC is 00:30 the next day in Tehran — the hours when a
+            # Tehran day and the UTC day disagree
+            AuditEvent(action="settings_change", actor_username=LATE, actor_role="root",
+                      summary="بعد از نیمه‌شب تهران",
+                      created_at=datetime(2026, 3, 10, 21, 0, tzinfo=timezone.utc)),
         ])
         await db.commit()
 
@@ -171,6 +178,17 @@ class TestListingEvents:
         body = client.get("/api/audit/events", headers=_auth(root_user),
                           params=_q({"since": today, "until": today})).json()
         assert any(i["action"] == "login_success" for i in body["items"]), body
+
+    def test_a_day_is_a_tehran_day_at_any_hour(self, client, root_user):
+        """An event at 00:30 Tehran (21:00 UTC the day before) belongs to the
+        Tehran day — on sqlite too, where a Tehran-aware bound used to be
+        compared as Tehran wall time against UTC."""
+        def days(since, until):
+            body = client.get("/api/audit/events", headers=_auth(root_user),
+                              params={"actor": LATE, "since": since, "until": until}).json()
+            return [i["summary"] for i in body["items"]]
+        assert days("2026-03-11", "2026-03-11") == ["بعد از نیمه‌شب تهران"]
+        assert days("2026-03-10", "2026-03-10") == []
 
     def test_bad_since_is_a_400_not_a_500(self, client, root_user):
         r = client.get("/api/audit/events", headers=_auth(root_user),

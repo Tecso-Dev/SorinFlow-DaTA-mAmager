@@ -504,6 +504,20 @@ async def _my_schedule(db, user, schedule_id: int):
     return row
 
 
+async def _audit_schedule(action: str, row, user, request, summary: str, **detail) -> None:
+    """Schedules are daily scrapes on somebody's Divar account, and they used
+    to appear and vanish with no trace: on 1405/07/04 two were deleted and
+    nothing — not the log, not «رویدادها» — could say who or when."""
+    from app.services import audit
+    cfg = row.config or {}
+    await audit.record(
+        action, actor=user, target_type="scrape_schedule", target_id=row.id,
+        summary=summary, request=request,
+        detail={"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}",
+                "city": cfg.get("city"), "category": cfg.get("category"),
+                "owner_user_id": row.owner_user_id, **detail})
+
+
 def _schedule_view(row, owners: dict) -> dict:
     d = row.to_dict()
     d["owner_name"] = owners.get(row.owner_user_id)
@@ -531,7 +545,7 @@ async def list_schedules(db: AsyncSession = Depends(get_db),
 
 
 @router.post("/schedules", dependencies=[Depends(require_verified_phone)])
-async def create_schedule(data: ScheduleIn, db: AsyncSession = Depends(get_db),
+async def create_schedule(data: ScheduleIn, request: Request, db: AsyncSession = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
     """Save the form as a daily run. Validated the way a run is: the config
     has to be one the scraper would accept today, not at 08:00 tomorrow."""
@@ -552,15 +566,18 @@ async def create_schedule(data: ScheduleIn, db: AsyncSession = Depends(get_db),
     await db.commit()
     await db.refresh(row)
     logger.info(f"[schedule] {current_user.username} saved «{row.name}» at {row.hour:02d}:{row.minute:02d}")
+    await _audit_schedule("scrape_schedule_create", row, current_user, request,
+                          f"زمان‌بندی «{row.name}» برای ساعت {row.hour:02d}:{row.minute:02d} ساخته شد")
     return _schedule_view(row, {current_user.id: current_user.full_name or current_user.username})
 
 
 @router.patch("/schedules/{schedule_id}")
-async def edit_schedule(schedule_id: int, data: ScheduleEdit,
+async def edit_schedule(schedule_id: int, data: ScheduleEdit, request: Request,
                         db: AsyncSession = Depends(get_db),
                         current_user: User = Depends(get_current_user)):
     from app.services.scrape_scheduler import next_occurrence
     row = await _my_schedule(db, current_user, schedule_id)
+    before = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled}
     if data.name is not None:
         row.name = data.name.strip() or row.name
     if data.hour is not None:
@@ -574,15 +591,29 @@ async def edit_schedule(schedule_id: int, data: ScheduleEdit,
     row.next_run_at = next_occurrence(row.hour, row.minute)
     await db.commit()
     await db.refresh(row)
+    after = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled}
+    changed = {k: [before[k], after[k]] for k in before if before[k] != after[k]}
+    if changed:
+        words = {"enabled": "روشن" if row.enabled else "خاموش", "at": f"ساعت {after['at']}",
+                 "name": f"اسم «{row.name}»"}
+        await _audit_schedule("scrape_schedule_update", row, current_user, request,
+                              f"زمان‌بندی «{before['name']}»: " + "، ".join(words[k] for k in changed),
+                              changed=changed)
     return _schedule_view(row, {})
 
 
 @router.delete("/schedules/{schedule_id}")
-async def delete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db),
+async def delete_schedule(schedule_id: int, request: Request, db: AsyncSession = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
+    from types import SimpleNamespace
     row = await _my_schedule(db, current_user, schedule_id)
+    # what it was, read before the row is gone, recorded once it really is
+    gone = SimpleNamespace(id=row.id, name=row.name, hour=row.hour, minute=row.minute,
+                           config=row.config, owner_user_id=row.owner_user_id)
     await db.delete(row)
     await db.commit()
+    await _audit_schedule("scrape_schedule_delete", gone, current_user, request,
+                          f"زمان‌بندی «{gone.name}» (ساعت {gone.hour:02d}:{gone.minute:02d}) حذف شد")
     return {"success": True}
 
 
@@ -661,6 +692,7 @@ async def get_scraping_jobs(
             error_message=j.error_message,
             progress=j.progress,
             divar_count=j.divar_count,
+            max_items=j.max_items,
             resumed_from=str(j.resumed_from) if j.resumed_from else None,
             can_resume=bool(j.config) and j.status in ("failed", "cancelled"),
             divar_phone=j.divar_phone,
@@ -820,6 +852,7 @@ async def get_scraping_job(
         error_message=job.error_message,
         progress=job.progress,
         divar_count=job.divar_count,
+        max_items=job.max_items,
         resumed_from=str(job.resumed_from) if job.resumed_from else None,
         can_resume=bool(job.config) and job.status in ("failed", "cancelled"),
         started_at=job.started_at,
@@ -1309,6 +1342,46 @@ class OtpInbound(BaseModel):
     network: Optional[str] = None
 
 
+_REFUSED_FA = {
+    401: "امضا یا شناسهٔ دستگاه پذیرفته نشد — تنظیمات برنامه را دوباره با QR وارد کنید",
+    403: "این گوشی اجازهٔ جواب دادن برای این شمارهٔ دیوار را ندارد",
+    422: "بدنهٔ درخواست خراب بود",
+    503: "روی سرور فورواردری تنظیم نشده",
+}
+
+
+async def _note_refused(request: Request, db, body: Optional["OtpInbound"], status: int) -> None:
+    """A phone that tried and was refused, on the record. Never raises.
+
+    A refusal used to leave no trace — nothing in the SMS log, nothing in the
+    device's events, the device not even «seen» — so a phone sending every
+    code into a 401 looked exactly like a phone that never got one, and
+    «فورواردر کار نمی‌کند» could not be told apart from «پیامکی نیامد».
+    Only for a device id that exists: its owner is who needs to see it, and
+    anonymous junk is not worth a row.
+    """
+    from app.scraper import otp_store
+    from app.services import forwarder as _fw
+    from app.services import sms_log
+    try:
+        dev_id = (request.headers.get("X-Forwarder-Id") or "").strip()
+        device = await _fw.resolve_device(db, dev_id) if dev_id else None
+        ip = request.client.host if request.client else "?"
+        if device is None:
+            logger.warning(f"[otp-inbound] refused {status} from {ip} (no known device)")
+            return
+        kind = body.kind if body and body.kind in ("contact", "login", "test") else None
+        await sms_log.record(
+            sms_log.INBOUND,
+            f"درخواست گوشی «{device.label or device.device_id}» رد شد ({status}) — "
+            + _REFUSED_FA.get(status, "خطای دیگر"),
+            level="warning", route="forwarder", status=status, actor=f"forwarder@{ip}",
+            account=(otp_store._digits(body.account) if body else None) or None,
+            kind=kind, device=device.device_id, reason=f"refused_{status}")
+    except Exception as e:
+        logger.warning(f"[otp-inbound] could not record a refusal: {e}")
+
+
 def _mask_code(code: Optional[str]) -> str:
     c = code or ""
     return ("*" * max(len(c) - 2, 0)) + c[-2:] if c else ""
@@ -1330,10 +1403,15 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         body = OtpInbound.model_validate_json(raw)
     except Exception as e:
+        await _note_refused(request, db, None, 422)
         raise HTTPException(status_code=422, detail=f"bad body: {type(e).__name__}")
 
     now_ms = int(time.time() * 1000)
-    device = await _verify_forwarder(request, raw, db=db, account=body.account)
+    try:
+        device = await _verify_forwarder(request, raw, db=db, account=body.account)
+    except HTTPException as e:
+        await _note_refused(request, db, body, e.status_code)
+        raise
 
     # `code` is trusted only if it IS a code. A stock forwarder that does not
     # expand %Regex=…% sends the placeholder text itself, and handing that to
@@ -1367,7 +1445,15 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
         if not hit:
             # Not a miss — an arrival ahead of the request. Park it; the
             # scraper claims it the moment it opens one for this account.
-            if await otp_store.park_early_code(body.account, code, body.sentStamp):
+            #
+            # Unless it is older than Divar would accept. The app keeps a
+            # failed delivery and offers «RETRY FAILED» on it days later; a
+            # two-day-old code parked here would be claimed by the next prompt
+            # for this account and typed into Divar, burning the attempt.
+            # sentStamp is the SMS centre's clock, not the phone's.
+            if latency_ms is not None and latency_ms > otp_store.EARLY_TTL * 1000:
+                reason = "stale_code"
+            elif await otp_store.park_early_code(body.account, code, body.sentStamp):
                 reason = "parked_early"
             else:
                 reason = "no_pending_for_account"

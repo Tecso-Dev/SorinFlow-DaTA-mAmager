@@ -6,7 +6,7 @@ import re
 import json
 import uuid
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Any
 from urllib.parse import urljoin
 
@@ -33,6 +33,38 @@ def normalize_persian_digits(text: str) -> str:
     text = text.replace('‌', '').replace(' ', ' ')
     text = ' '.join(text.split())
     return text
+
+
+_JALALI_MONTHS = ("فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+                  "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند")
+_PUBLISHED_RE = re.compile(r"(\d{1,2})\s+(" + "|".join(_JALALI_MONTHS)
+                           + r")\s+(\d{4})(?:\D{1,4}(\d{1,2}):(\d{2}))?")
+# The container has no tzdata; Tehran is a fixed +03:30.
+TEHRAN_OFFSET = timedelta(hours=3, minutes=30)
+
+
+def parse_divar_published(text: Optional[str]) -> Optional[datetime]:
+    """«انتشار آگهی: ۴ مهر ۱۴۰۵، ۰۸:۴۶» → naive UTC datetime, or None.
+
+    Divar's listing page now states the publish date outright, in Tehran
+    time, where the scraper used to find «۳ ساعت پیش». The first date in the
+    text is taken: the same line also carries «آخرین به‌روز‌رسانی».
+    """
+    from app.services.dpa_service import to_jalali
+
+    m = _PUBLISHED_RE.search(normalize_persian_digits(text or ""))
+    if not m:
+        return None
+    want = f"{int(m.group(3))}/{_JALALI_MONTHS.index(m.group(2)) + 1:02d}/{int(m.group(1)):02d}"
+    day = datetime.now(timezone.utc).replace(tzinfo=None) + TEHRAN_OFFSET + timedelta(days=1)
+    # ponytail: walks back through to_jalali, the only calendar code here —
+    # at most a year of steps; a real Jalali→Gregorian if older ads matter
+    for _ in range(400):
+        if to_jalali(day) == want:
+            return (datetime(day.year, day.month, day.day,
+                             int(m.group(4) or 0), int(m.group(5) or 0)) - TEHRAN_OFFSET)
+        day -= timedelta(days=1)
+    return None
 
 
 def parse_persian_number(text: str) -> Optional[int]:

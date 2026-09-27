@@ -22,6 +22,15 @@ from app.scraper.stealth import (StealthConfig, open_browser, apply_device, Devi
 settings = get_settings()
 
 
+def _debug_file(name: str) -> Path:
+    """Where a login debug file goes. The container's root filesystem is
+    read-only, so the old /app/debug_*.png writes failed on every login and
+    left only a warning; the data volume beside the images is writable."""
+    folder = Path(settings.images_path).parent / "debug"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / name
+
+
 class DivarAuth:
     """Handle Divar.ir authentication with cookies and session management"""
     
@@ -628,8 +637,8 @@ class DivarAuth:
                         maxlength = await inp.get_attribute('maxlength') or ''
                         vis = await inp.is_visible()
                         logger.error(f"Input {i}: type={itype}, name={name}, maxlength={maxlength}, visible={vis}")
-                    with open("/app/debug_otp_page.html", 'w', encoding='utf-8') as f:
-                        f.write(await self.page.content())
+                    page_html = await self.page.content()
+                    _debug_file("debug_otp_page.html").write_text(page_html, encoding='utf-8')
                 except Exception as e:
                     logger.error(f"Failed to debug page content: {e}")
                 raise Exception(f"Could not find code input field. Page URL: {current_url}")
@@ -656,7 +665,7 @@ class DivarAuth:
             
             # Debug: Take screenshot before clicking login
             try:
-                await self.page.screenshot(path="/app/debug_before_login_click.png")
+                await self.page.screenshot(path=str(_debug_file("debug_before_login_click.png")))
                 logger.info("Screenshot saved: debug_before_login_click.png")
             except Exception as e:
                 logger.warning(f"Could not take screenshot: {e}")
@@ -715,7 +724,7 @@ class DivarAuth:
 
             # Debug: Take screenshot after the attempt
             try:
-                await self.page.screenshot(path="/app/debug_after_login_click.png")
+                await self.page.screenshot(path=str(_debug_file("debug_after_login_click.png")))
             except Exception as e:
                 logger.warning(f"Could not take screenshot after login: {e}")
             

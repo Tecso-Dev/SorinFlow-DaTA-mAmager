@@ -39,6 +39,10 @@ def sink(message) -> None:
         if not settings.gcp_enabled:
             return
         rec = message.record
+        # The patcher in app.main stamps «request_id» («-» outside a
+        # request); this read «req_id», which nothing sets, so every exported
+        # line had req_id null and could not be tied to its request.
+        rid = rec["extra"].get("request_id")
         if _buffer.maxlen and len(_buffer) == _buffer.maxlen:
             _stats["dropped"] += 1
         _buffer.append({
@@ -49,7 +53,7 @@ def sink(message) -> None:
             "function": rec["function"],
             "line": rec["line"],
             "job_id": rec["extra"].get("job_id"),
-            "req_id": rec["extra"].get("req_id"),
+            "req_id": rid if rid and rid != "-" else None,
         })
         _stats["buffered"] = len(_buffer)
     except Exception:

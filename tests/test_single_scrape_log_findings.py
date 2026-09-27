@@ -135,6 +135,9 @@ class FakePage:
     async def query_selector(self, sel):
         return self._m if sel == '.kt-new-modal' else None
 
+    async def query_selector_all(self, sel):     # how dialogs are looked up now
+        return [self._m] if (sel == '.kt-new-modal' and self._m) else []
+
 
 def extractor(modal):
     e = ContactExtractor.__new__(ContactExtractor)

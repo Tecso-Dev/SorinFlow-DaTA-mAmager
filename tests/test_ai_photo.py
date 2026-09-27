@@ -421,3 +421,89 @@ class TestThePanelsSide:
         assert "apiCall('/ai/photo/status')" in js and "برچسب‌زنی دوباره" in js
         for bad in ("prompt(", "confirm(", "alert(", "--bs-"):
             assert bad not in js
+
+
+# ── photos that are only Divar links (1405/07/04, job 37 without image download) ──
+
+CDN = "https://s100.divarcdn.com/static/photo/neda/webp_post/x/{}.webp"
+
+
+def _jpeg_bytes(size=(800, 600)):
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", size, (90, 140, 200)).save(buf, "JPEG", quality=80)
+    return buf.getvalue()
+
+
+def _cdn_or_model(req):
+    """What the fake network answers: a photo for Divar's CDN, the model for
+    the gateway — both go through the same patched httpx in these tests."""
+    if (req.url.host or "").endswith("divarcdn.com"):
+        return httpx.Response(200, content=_jpeg_bytes(), headers={"content-type": "image/jpeg"})
+    return _answer(json.dumps(GOOD))
+
+
+class TestPhotosThatAreOnlyLinks:
+
+    async def test_a_divar_link_is_fetched_saved_and_pointed_at(self, tmp_path):
+        p = _prop(divar_id="gawuPdMe", images=[CDN.format(1), CDN.format(2)], has_images=True)
+        asked = []
+
+        def handler(req):
+            asked.append(str(req.url))
+            return _cdn_or_model(req)
+        async with _REAL_CLIENT(transport=httpx.MockTransport(handler)) as c:
+            n = await pt.fetch_remote_photos(p, tmp_path, client=c)
+        assert n == 2 and len(asked) == 2
+        assert p.images == ["/images/gawuPdMe/img_1.jpg", "/images/gawuPdMe/img_2.jpg"]
+        assert p.images_downloaded is True
+        assert (tmp_path / "gawuPdMe" / "img_1.jpg").is_file()
+
+    async def test_nothing_but_divars_cdn_is_ever_requested(self, tmp_path):
+        bad = ["http://169.254.169.254/latest/meta-data", "https://evil.example/a.jpg",
+               "http://s100.divarcdn.com/a.webp", "https://divarcdn.com.evil.example/a.webp"]
+        p = _prop(divar_id="gaSafe01", images=list(bad), has_images=True)
+        asked = []
+        async with _REAL_CLIENT(transport=httpx.MockTransport(lambda r: asked.append(r) or _cdn_or_model(r))) as c:
+            assert await pt.fetch_remote_photos(p, tmp_path, client=c) == 0
+        assert asked == [] and p.images == bad
+
+    async def test_a_listing_with_only_links_is_tagged(self, db, tmp_path, configured, monkeypatch):
+        p = _prop(divar_id="gaLinks1", images=[CDN.format(1)], has_images=True)
+        db.add(p)
+        await db.commit()
+        _gateway(monkeypatch, _cdn_or_model)
+        tags = await pt.tag_property(db, p, images_root=tmp_path / "images")
+        assert tags and tags["condition"] == "renovated" and tags["photos"] == 1
+        assert p.images == ["/images/gaLinks1/img_1.jpg"]
+
+    async def test_a_link_that_is_gone_is_stamped_unreachable(self, db, tmp_path, configured, monkeypatch):
+        p = _prop(divar_id="gaGone01", images=[CDN.format(1)], has_images=True)
+        db.add(p)
+        await db.commit()
+        _gateway(monkeypatch, lambda r: httpx.Response(404) if (r.url.host or "").endswith("divarcdn.com")
+                 else _answer(json.dumps(GOOD)))
+        assert await pt.tag_property(db, p, images_root=tmp_path / "images") is None
+        assert p.ai_photo_tags["skipped"] == "no_photos" and p.ai_photo_tags["remote"] == "unreachable"
+
+    async def test_listings_stamped_before_the_fetch_existed_are_taken_again(self, db, tmp_path, configured, monkeypatch):
+        """Behind the cursor, stamped «عکسی روی دیسک نیست» — job 37's 190."""
+        root = tmp_path / "images"
+        monkeypatch.setattr(pt.settings, "images_path", str(root))
+        old = _prop(divar_id="gaOld001", images=[CDN.format(1)], has_images=True,
+                    ai_photo_tags={"skipped": "no_photos", "prompt_version": pt.PROMPT_VERSION},
+                    ai_photos_at=datetime.now(timezone.utc))
+        dead = _prop(divar_id="gaDead01", images=[CDN.format(2)], has_images=True,
+                     ai_photo_tags={"skipped": "no_photos", "remote": "unreachable",
+                                    "prompt_version": pt.PROMPT_VERSION},
+                     ai_photos_at=datetime.now(timezone.utc))
+        db.add_all([old, dead])
+        await db.commit()
+        await secret_box.put(db, pt.KEY_CURSOR, str(dead.id), "photo_tagger")   # both behind it
+        _gateway(monkeypatch, _cdn_or_model)
+        res = await pt.run_once(db)
+        assert res["tagged"] == 1, res
+        await db.refresh(old)
+        await db.refresh(dead)
+        assert old.ai_photo_tags["condition"] == "renovated" and old.images == ["/images/gaOld001/img_1.jpg"]
+        assert dead.ai_photo_tags.get("remote") == "unreachable", "an unreachable link is not retried"

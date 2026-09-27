@@ -268,3 +268,20 @@ class TestThroughTheApp:
         assert ids[0] in [x["id"] for x in d["items"]]
         r = client.post(f"/api/crm/leads/{ids[0]}/call", headers=root, json={"outcome": "answered"})
         assert r.status_code == 200, r.text
+
+
+class TestALongQueue:
+    """1405/07/04: 445 leads waiting, the panel showed 40 with no way to see
+    more, and the server refused anything past 100."""
+
+    def test_more_than_a_hundred_come_back_in_the_same_order(self, client):
+        _seed("cq_long", "صف بلند", [{"phone": f"0914{1000000 + i:07d}"}
+                                      for i in range(120)])
+        h = _tok(client, "cq_long")
+        r = client.get("/api/crm/calls/today?limit=150", headers=h)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["total"] >= 120 and len(d["items"]) == min(d["total"], 150)
+        again = client.get("/api/crm/calls/today?limit=150", headers=h).json()
+        assert [x["id"] for x in again["items"]] == [x["id"] for x in d["items"]], \
+            "a queue saved in one scrape shuffles between reloads"
