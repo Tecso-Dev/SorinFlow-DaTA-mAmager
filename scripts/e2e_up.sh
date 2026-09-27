@@ -39,6 +39,20 @@ export FORWARDER_WATCH_MINUTES=0       # would email about forwarders that don't
 export PROXY_ENABLED=false
 export GCP_ENABLED=false
 export PUBLIC_AUTH_ENABLED="${PUBLIC_AUTH_ENABLED:-false}"  # the new panel's portal specs turn this on (playwright.next.config.js)
+# app/services/sms_service.py:_send_console — logs the code instead of
+# sending it. Without it, portal sign-up's verification code has no SMS
+# provider (no Kavenegar key here) and no working SMTP either, so
+# verification.py's own "fail closed rather than lose a code" rule burns it
+# and every registration 503s before the debug_code the panel shows ever
+# gets issued (app/services/verification.py:issue_code).
+export AUTH_SMS_PROVIDER="${AUTH_SMS_PROVIDER:-console}"
+# app/services/verification.py's IP_SIGNUP_LIMIT: 5/hour per client IP in
+# production, correct there — but every browser project in the new panel's
+# e2e suite (playwright.next.config.js: desktop, android, iphone) registers
+# through this same 127.0.0.1, well past 5 in one run, and re-running the
+# suite again inside the same hour (as the coordinator does, to check for
+# flakiness) only makes it worse. Raised here, not in production.
+export AUTH_IP_SIGNUP_LIMIT="${AUTH_IP_SIGNUP_LIMIT:-1000}"
 export DIGEST_HOUR=-1                  # the daily Telegram digest
 export TELEGRAM_BOT_TOKEN=
 export TELEGRAM_CHAT_ID=
