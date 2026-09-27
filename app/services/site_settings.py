@@ -23,7 +23,7 @@ SITE_KEY = "site.config"
 
 # camelCase on the wire: the panel's SiteConfig type (frontend-next/src/lib/site.ts)
 FIELDS = ("brandName", "brandNameLatin", "tagline", "agencyName", "domain", "phone", "email",
-          "telegram", "instagram", "address", "seoTitle", "seoDescription")
+          "telegram", "instagram", "github", "address", "seoTitle", "seoDescription")
 
 
 def defaults() -> dict:
@@ -34,8 +34,9 @@ def defaults() -> dict:
         "tagline": env("SITE_TAGLINE", "CRM املاک و اسکرپر دیوار"),
         "agencyName": env("SITE_AGENCY_NAME", ""),
         "domain": env("SITE_DOMAIN", env("DOMAIN", "sorinflow.com")),
-        "phone": "", "email": "", "telegram": "", "instagram": "", "address": "",
-        "seoTitle": "", "seoDescription": "",
+        "phone": "", "email": "", "telegram": "", "instagram": "",
+        "github": env("SITE_GITHUB", ""),
+        "address": "", "seoTitle": "", "seoDescription": "",
     }
 
 

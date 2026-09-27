@@ -14,6 +14,7 @@ export type SiteConfig = {
   email: string;
   telegram: string;
   instagram: string;
+  github: string;
   address: string;
   seoTitle: string;
   seoDescription: string;
@@ -29,6 +30,7 @@ const fallback = (): SiteConfig => ({
   email: "",
   telegram: "",
   instagram: "",
+  github: process.env.SITE_GITHUB ?? "",
   address: "",
   seoTitle: "",
   seoDescription: "",

@@ -20,7 +20,7 @@ import { can, useSession } from "@/lib/session";
 
 type SiteConfig = {
   brandName: string; brandNameLatin: string; tagline: string; agencyName: string; domain: string;
-  phone: string; email: string; telegram: string; instagram: string; address: string;
+  phone: string; email: string; telegram: string; instagram: string; github: string; address: string;
   seoTitle: string; seoDescription: string;
 };
 type FieldKey = keyof SiteConfig;
@@ -37,6 +37,7 @@ const TEXT_FIELDS: { key: FieldKey; label: string; hint?: string; max: number }[
   { key: "email", label: "ایمیل تماس", max: 120 },
   { key: "telegram", label: "آیدی تلگرام", max: 120 },
   { key: "instagram", label: "آیدی اینستاگرام", max: 120 },
+  { key: "github", label: "نشانی مخزن گیت‌هاب", hint: "با https:// شروع شود؛ در صفحهٔ اصلی لینک می‌شود", max: 200 },
 ];
 
 function LivePreview({ site }: { site: SiteConfig }) {
@@ -110,7 +111,7 @@ function Form({ initial }: { initial: SiteConfig }) {
               <Field key={f.key} label={f.label} htmlFor={`site-${f.key}`} hint={f.hint}>
                 <Input
                   id={`site-${f.key}`}
-                  dir={f.key === "domain" || f.key === "telegram" || f.key === "instagram" ? "ltr" : undefined}
+                  dir={f.key === "domain" || f.key === "telegram" || f.key === "instagram" || f.key === "github" ? "ltr" : undefined}
                   maxLength={f.max}
                   value={site[f.key]}
                   onChange={(e) => set(f.key, e.target.value)}

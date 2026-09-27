@@ -39,6 +39,9 @@ class SiteIn(BaseModel):
     email: Optional[str] = Field(None, max_length=120, pattern=r"^$|^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
     telegram: Optional[str] = Field(None, max_length=120)
     instagram: Optional[str] = Field(None, max_length=120)
+    # a full https URL to the public repository, or nothing; anything else
+    # would land in an href on the landing page
+    github: Optional[str] = Field(None, max_length=200, pattern=r"^$|^https://[A-Za-z0-9.-]+\.[A-Za-z]{2,}(/[A-Za-z0-9._~\-/]*)?$")
     address: Optional[str] = Field(None, max_length=300)
     seoTitle: Optional[str] = Field(None, max_length=120)
     seoDescription: Optional[str] = Field(None, max_length=300)

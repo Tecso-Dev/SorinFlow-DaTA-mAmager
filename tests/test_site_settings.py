@@ -96,3 +96,20 @@ def test_an_emptied_brand_falls_back_and_bad_values_are_refused(office):
     assert office("GET", "/api/public/site").json()["brandName"] == "دفتر نمونه"
     assert office("PUT", "/api/settings/site", "boss", json={"email": "not-an-email"}).status_code == 422
     assert office("PUT", "/api/settings/site", "boss", json={"domain": "http://x"}).status_code == 422
+
+
+def test_the_github_link_is_a_setting_and_only_an_https_url_is_kept(office):
+    """The landing page renders this one straight into an href, so a
+    `javascript:` or `data:` value saved by a super_admin would be a stored
+    XSS on the public page for every visitor — the field has to refuse
+    anything that is not an https URL, and stay optional."""
+    assert "github" in office("GET", "/api/public/site").json()
+    ok = office("PUT", "/api/settings/site", "boss",
+                json={"github": "https://github.com/Tecso-Dev/SorinFlow-DaTA-mAmager"})
+    assert ok.status_code == 200, ok.text
+    assert office("GET", "/api/public/site").json()["github"].startswith("https://github.com/")
+    for bad in ("javascript:alert(1)", "http://github.com/x", "data:text/html,x", "//evil.example"):
+        assert office("PUT", "/api/settings/site", "boss", json={"github": bad}).status_code == 422, bad
+    # and it can be cleared again
+    assert office("PUT", "/api/settings/site", "boss", json={"github": ""}).status_code == 200
+    assert office("GET", "/api/public/site").json()["github"] == ""
