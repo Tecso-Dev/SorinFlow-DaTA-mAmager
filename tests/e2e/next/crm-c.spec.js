@@ -54,11 +54,17 @@ test.describe('تقویم', () => {
     await expect(page.getByRole('heading', { name: 'تقویم' })).toBeVisible();
     // the month grid: Saturday first — the header shows «شنبه» on a wide
     // viewport and the short «ش» on a narrow one, never both (both spans are
-    // always in the DOM, so .or().first() would deterministically grab the
-    // hidden one — check each one's own visibility instead)
-    const satFull = await page.getByText('شنبه', { exact: true }).first().isVisible().catch(() => false);
-    const satShort = await page.getByText('ش', { exact: true }).first().isVisible().catch(() => false);
-    expect(satFull || satShort).toBeTruthy();
+    // always in the DOM once mounted, so .or().first() would deterministically
+    // grab the hidden one — check each one's own visibility instead). The grid
+    // itself only mounts once the events query resolves (calendar-page.tsx
+    // shows a Skeleton in its place until then), so this polls instead of
+    // reading isVisible() once — a one-shot read right after the heading
+    // (which is not data-gated) could still catch the Skeleton.
+    await expect.poll(async () => {
+      const satFull = await page.getByText('شنبه', { exact: true }).first().isVisible().catch(() => false);
+      const satShort = await page.getByText('ش', { exact: true }).first().isVisible().catch(() => false);
+      return satFull || satShort;
+    }, { timeout: 10_000 }).toBeTruthy();
     await expect(page.getByText(/^مهر|^آبان|^آذر|^دی|^بهمن|^اسفند|^فروردین|^اردیبهشت|^خرداد|^تیر|^مرداد|^شهریور/).first()).toBeVisible();
 
     // exact: the upcoming strip's own cards also start with «امروز»
