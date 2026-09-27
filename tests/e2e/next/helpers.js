@@ -105,9 +105,24 @@ async function settleAnimations(page) {
 }
 
 /** Serious and critical WCAG 2 A/AA violations; the new panel has no baseline. */
-async function a11y(page) {
+// `exclude`: CSS selectors axe must not descend into. `legacy`: forces
+// axe-core-playwright's pre-runPartial mode. Both exist for the
+// sandbox="allow-same-origin" iframe with no allow-scripts on /panel/email
+// (email-view.tsx's template preview — deliberately script-less, since it
+// can carry admin-authored template HTML): the default mode establishes an
+// isolated world per frame via CDP to inject axe into it, and that fails on
+// this one hard enough to take the whole run down (Target.createTarget /
+// "already closed", https://github.com/dequelabs/axe-core-npm/blob/develop/packages/playwright/error-handling.md)
+// — exclude() alone still throws the same way, since axe still has to reach
+// the frame first to know it's excluded. Legacy mode runs axe only in the
+// top frame (via window.postMessage to any same-origin frame instead of a
+// CDP isolated world per frame), which sidesteps that path entirely.
+async function a11y(page, { exclude = [], legacy = false } = {}) {
   await settleAnimations(page);
-  const r = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
+  const builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']);
+  for (const selector of exclude) builder.exclude(selector);
+  if (legacy) builder.setLegacyMode(true);
+  const r = await builder.analyze();
   return r.violations
     .filter((v) => v.impact === 'serious' || v.impact === 'critical')
     .map((v) => `${v.id}: ${v.help} @ ${v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join(' | ')}`);
