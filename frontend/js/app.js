@@ -5566,7 +5566,9 @@ function _renderJobsTable(items) {
                 <span class="text-muted">/</span>
                 <bdi class="text-muted" title="از قبل موجود بود — یا همان بود و رد شد، یا با اطلاعات تازه به‌روز شد">${job.updated_items}</bdi>
             </td>
-            <td class="job-when">${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR') : '---'}</td>
+            <!-- Tehran time, like the schedules card: a run its 08:00 schedule
+                 started read «۰۶:۳۰» on a European laptop. -->
+            <td class="job-when">${job.started_at ? new Date(job.started_at).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' }) : '---'}</td>
             <td class="job-actions">
                 <button class="btn btn-sm btn-outline-secondary" onclick="showJobLog('${job.job_id}')"
                         title="گزارش این اسکرپ">
@@ -13925,7 +13927,7 @@ async function showJobLog(jobId) {
                   <div class="d-flex justify-content-between gap-2">
                     <span class="small ${lvl}">${esc(label)}</span>
                     <span class="text-muted" style="font-size:.72rem" dir="ltr">${
-                       e.created_at ? new Date(e.created_at).toLocaleString('fa-IR') : ''}</span>
+                       e.created_at ? new Date(e.created_at).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' }) : ''}</span>
                   </div>
                   <div style="font-size:.85rem">${esc(e.message || '')}</div>
                   ${extra}
