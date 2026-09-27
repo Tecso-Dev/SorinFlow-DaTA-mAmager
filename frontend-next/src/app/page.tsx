@@ -109,11 +109,13 @@ export default async function Home() {
       <Landing
         site={{
           brandName: site.brandName,
+          brandNameLatin: site.brandNameLatin,
           tagline: site.tagline,
           domain: site.domain,
           phone: site.phone,
           email: site.email,
           telegram: site.telegram,
+          github: site.github,
         }}
         stats={stats}
         portalOpen={!!auth?.enabled}

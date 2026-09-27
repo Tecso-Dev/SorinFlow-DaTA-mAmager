@@ -19,14 +19,19 @@ import { CountUp, Reveal, Tilt } from "@/components/viz";
 import { fill, LANDING } from "@/content/landing";
 import { faNum } from "@/lib/format";
 import { Nebula, type NebulaAnchor } from "./nebula";
+import { PathRail, TourRail } from "./rails";
+import { ScrollBadge } from "./scroll-badge";
+import { Overview, Ownership, Tech } from "./sections";
 
 export type LandingSite = {
   brandName: string;
+  brandNameLatin: string;
   tagline: string;
   domain: string;
   phone: string;
   email: string;
   telegram: string;
+  github: string;
 };
 export type LandingStats = { total_properties: number; total_leads: number; phone_rate: number; dpa_today_top: number } | null;
 
@@ -35,10 +40,15 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 // Which particle formation each section shows as it scrolls into view.
 const ANCHORS: NebulaAnchor[] = [
   { id: "top", formation: "nebula" },
+  { id: "overview", formation: "nebula" },
   { id: "features", formation: "city" },
+  { id: "path", formation: "house" },
   { id: "how", formation: "house" },
+  { id: "tour", formation: "nebula" },
   { id: "ai", formation: "house" },
+  { id: "ownership", formation: "infinity" },
   { id: "security", formation: "key" },
+  { id: "tech", formation: "key" },
   { id: "contact", formation: "infinity" },
 ];
 
@@ -56,13 +66,19 @@ export function Landing({
       <main className="relative z-10">
         <Hero portalOpen={portalOpen} />
         <Stats stats={stats} />
+        <Overview />
         <Features stats={stats} domain={site.domain} />
+        <PathRail />
         <How />
+        <TourRail domain={site.domain} />
         <Ai />
+        <Ownership brand={brand} />
         <Security />
+        <Tech github={site.github} />
         <Contact site={site} />
       </main>
-      <Footer brand={brand} tagline={site.tagline} portalOpen={portalOpen} year={year} />
+      <Footer brand={brand} tagline={site.tagline} portalOpen={portalOpen} year={year} github={site.github} />
+      <ScrollBadge brandLatin={site.brandNameLatin} />
     </div>
   );
 }
@@ -563,7 +579,7 @@ function Contact({ site }: { site: LandingSite }) {
 
 /* ───────────────────────── footer ───────────────────────── */
 
-function Footer({ brand, tagline, portalOpen, year }: { brand: string; tagline: string; portalOpen: boolean; year: string }) {
+function Footer({ brand, tagline, portalOpen, year, github }: { brand: string; tagline: string; portalOpen: boolean; year: string; github: string }) {
   const f = LANDING.footer;
   const link = "text-sm text-muted-foreground transition hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring rounded";
   return (
@@ -580,6 +596,9 @@ function Footer({ brand, tagline, portalOpen, year }: { brand: string; tagline: 
           ))}
           <Link href="/panel/login" className={link}>{f.panel}</Link>
           {portalOpen && <a href="/portal" className={link}>{f.portal}</a>}
+          {github && (
+            <a href={github} target="_blank" rel="noopener noreferrer" className={link}>گیت‌هاب</a>
+          )}
         </nav>
         <p className="text-xs text-muted-foreground">{fill(f.rights, brand).replace("{year}", year)}</p>
       </div>
