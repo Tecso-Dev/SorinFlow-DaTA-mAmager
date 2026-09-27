@@ -303,10 +303,46 @@ async function loadRequests() {
   } catch (e) { box.innerHTML = `<p class="msg err">${esc(e.message)}</p>`; }
 }
 
+// The site's own dialog, not the browser's confirm(): the page's colours,
+// right to left, and a button that says what it does.
+function askConfirm(message, okLabel) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.className = 'pf-ask';
+    ov.setAttribute('role', 'dialog');
+    ov.setAttribute('aria-modal', 'true');
+    ov.innerHTML = `<div class="pf-ask-box card"><p>${esc(message)}</p>
+      <div class="pf-ask-actions">
+        <button type="button" class="btn sm danger" data-ok>${esc(okLabel)}</button>
+        <button type="button" class="btn sm ghost" data-no>انصراف</button>
+      </div></div>`;
+    const onKey = e => { if (e.key === 'Escape') done(false); };
+    const done = v => { document.removeEventListener('keydown', onKey); ov.remove(); resolve(v); };
+    ov.addEventListener('click', e => { if (e.target === ov) done(false); });
+    ov.querySelector('[data-ok]').addEventListener('click', () => done(true));
+    ov.querySelector('[data-no]').addEventListener('click', () => done(false));
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(ov);
+    ov.querySelector('[data-no]').focus();
+  });
+}
+
+// An error said where it happened, instead of the browser's alert().
+function showError(box, message) {
+  if (!box) return;
+  const old = box.querySelector(':scope > .msg.err.pf-inline');
+  if (old) old.remove();
+  const p = document.createElement('p');
+  p.className = 'msg err pf-inline';
+  p.setAttribute('role', 'alert');
+  p.textContent = message;
+  box.prepend(p);
+}
+
 async function deleteRequest(id) {
-  if (!confirm('این درخواست حذف شود؟')) return;
+  if (!await askConfirm('این درخواست حذف شود؟', 'حذف')) return;
   try { await api('/portal/requests/' + id, { method: 'DELETE' }); await loadRequests(); }
-  catch (e) { alert(e.message); }
+  catch (e) { showError($('req-list'), e.message); }
 }
 
 function loadTicket(ticket) {
@@ -339,7 +375,7 @@ async function submitTicket() {
     await api('/portal/tickets', { method: 'POST', body: JSON.stringify({ message: ($('tk-msg').value || '').trim() || null }) });
     const me = await api('/portal/me');
     loadTicket(me.ticket);
-  } catch (e) { alert(e.message); withSpinner(btn, false, 'ارسال درخواست دسترسی'); }
+  } catch (e) { showError($('ticket-box'), e.message); withSpinner(btn, false, 'ارسال درخواست دسترسی'); }
 }
 
 // ─── boot ───────────────────────────────────────────────────
