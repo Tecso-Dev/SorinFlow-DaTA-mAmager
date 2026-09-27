@@ -9324,7 +9324,8 @@ async function promptSetDivarPhone(id) {
 }
 
 async function deleteUser(id) {
-    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'آیا از حذف این کاربر اطمینان دارید؟' })) return;
+    if (!await askConfirm({ icon: 'bi-trash3', title: 'حذف', tone: 'danger', okLabel: 'حذف', body: 'آیا از حذف این کاربر اطمینان دارید؟',
+                            note: 'گوشی‌های فورواردر و اسکرپ‌های زمان‌بندی‌شدهٔ او هم حذف می‌شوند. لیدها، آگهی‌ها و شماره‌های دیوارش می‌مانند.' })) return;
     try {
         await apiCall(`/users/${id}`, { method: 'DELETE' });
         showToast('موفق', 'کاربر حذف شد', 'success');
