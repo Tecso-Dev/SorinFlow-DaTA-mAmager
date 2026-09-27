@@ -52,6 +52,29 @@ def test_the_sink_does_nothing_while_disabled():
     assert len(pipeline._buffer) == 0
 
 
+def test_an_exported_line_carries_its_request_id(monkeypatch):
+    """The patcher stamps extra["request_id"]; the sink read "req_id", which
+    nothing set, so every exported line had req_id null."""
+    from loguru import logger
+    from app.log_redaction import inject_request_id, request_id_var
+    from app.services.gcp import pipeline
+    monkeypatch.setattr(pipeline.settings, "gcp_enabled", True)
+    handler = logger.add(pipeline.sink, level="INFO")
+    try:
+        log = logger.patch(inject_request_id)
+        token = request_id_var.set("a1b2c3d4")
+        try:
+            log.info("inside a request")
+        finally:
+            request_id_var.reset(token)
+        log.info("in a background loop")
+    finally:
+        logger.remove(handler)
+    by_msg = {r["message"]: r for r in pipeline._buffer}
+    assert by_msg["inside a request"]["req_id"] == "a1b2c3d4"
+    assert by_msg["in a background loop"]["req_id"] is None
+
+
 def test_client_reports_itself_unconfigured_rather_than_raising():
     from app.services.gcp import gcp_client
     assert gcp_client.enabled is False

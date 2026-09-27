@@ -30,7 +30,12 @@ def _parse_iso(value: str, field: str) -> datetime:
     except ValueError:
         raise HTTPException(status_code=400, detail=f"{field} نامعتبر است (فرمت ISO 8601)")
     # the panel sends a bare day — a Tehran day, not the database session's
-    return when.replace(tzinfo=TEHRAN) if when.tzinfo is None else when
+    when = when.replace(tzinfo=TEHRAN) if when.tzinfo is None else when
+    # Compared in UTC, the way created_at is stored. On sqlite a Tehran-aware
+    # value was written without its offset — Tehran wall time against UTC —
+    # so from 20:30 to 24:00 UTC «today» missed today's events. Postgres
+    # compares the instants either way.
+    return when.astimezone(timezone.utc)
 
 
 def _is_bare_date(value: str) -> bool:

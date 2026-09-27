@@ -68,6 +68,11 @@ input[dir="ltr"]{direction:ltr;text-align:left}
  border-radius:10px;color:var(--muted);cursor:pointer;font-family:inherit;font-size:.9rem}
 .tabs button.on{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600}
 .msg{padding:.7rem .9rem;border-radius:10px;font-size:.85rem;margin-top:1rem}
+.pf-ask{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
+ padding:16px;background:rgba(0,0,0,.55)}
+.pf-ask-box{width:100%;max-width:360px;margin:0}
+.pf-ask-box p{margin:0 0 .9rem}
+.pf-ask-actions{display:flex;gap:.5rem}
 .msg.err{background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.35);color:var(--err)}
 .msg.ok{background:rgba(47,191,113,.12);border:1px solid rgba(47,191,113,.35);color:var(--ok)}
 .hide{display:none !important}
@@ -343,6 +348,6 @@ input[dir="ltr"]{direction:ltr;text-align:left}
      mount lives under /dashboard, so a relative "js/portal.js" resolves to
      /js/portal.js — which nothing serves, leaving the page with no script at
      all and every button dead. -->
-<script src="/dashboard/js/portal.js?v=2"></script>
+<script src="/dashboard/js/portal.js?v=3"></script>
 </body>
 </html>
