@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import uuid
+from typing import Any, Optional
 from app.database import Base
 
 
@@ -86,6 +87,7 @@ class ScrapingJob(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "progress": self.progress,
             "divar_count": self.divar_count,
+            "max_items": self.max_items,
             "resumed_from": str(self.resumed_from) if self.resumed_from else None,
             "divar_phone": self.divar_phone,
             "accounts_used": self.accounts_used or [],
@@ -97,15 +99,28 @@ class ScrapingJob(Base):
         }
     
     @property
+    def max_items(self) -> Optional[int]:
+        """New listings the run was asked for; None for a whole-day run."""
+        cfg: Any = self.config
+        cap = cfg.get("max_items") if isinstance(cfg, dict) else None
+        return cap if isinstance(cap, int) else None
+
+    @property
     def progress(self) -> float:
         """Percent complete, never above 100.
 
         The denominator is Divar's own count, and the candidate pool can run
         past it — Divar's result page injects promoted ads its total leaves
-        out — so without the clamp a run read 123% and kept going."""
-        if self.total_items == 0:
-            return 0.0
-        return min(100.0, round((self.scraped_items / self.total_items) * 100, 2))
+        out — so without the clamp a run read 123% and kept going.
+
+        A run with a requested number stops at whichever comes first: that
+        many new listings saved, or the listings walked. Against Divar's count
+        alone, job 37 read 4% with 176 of its 200 saved and then jumped to
+        100%, so the bar is the nearer of the two ends."""
+        walked = (self.scraped_items or 0) / self.total_items if self.total_items else 0.0
+        cap = self.max_items or 0
+        saved = (self.new_items or 0) / cap if cap > 0 else 0.0
+        return min(100.0, round(max(walked, saved) * 100, 2))
 
 
 class ScrapingLog(Base):

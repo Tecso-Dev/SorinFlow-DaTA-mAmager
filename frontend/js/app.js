@@ -5539,7 +5539,7 @@ function _renderJobsTable(items) {
                     </div>` : ''}
             </td>
             <td>
-                <div class="job-progress">
+                <div class="job-progress"${job.max_items ? ` title="${job.new_items} از ${job.max_items} آگهی تازهٔ درخواستی"` : ''}>
                     <div class="progress" style="height:5px;background:var(--border,#333);border-radius:3px;">
                         <div class="progress-bar" role="progressbar"
                              style="width:${job.progress}%;border-radius:3px;"></div>

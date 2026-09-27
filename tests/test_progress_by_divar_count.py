@@ -81,6 +81,37 @@ class TestItCannotLie:
         assert job(0, 0).progress == 0
 
 
+class TestTheRequestedNumber:
+    """A run for 200 stops when 200 new listings are saved. Against Divar's
+    4253 alone, job 37 sat at 4% with 176 saved and then jumped to 100%."""
+
+    @staticmethod
+    def run(total, scraped, new, max_items):
+        j = job(total, scraped)
+        j.new_items, j.config = new, {"max_items": max_items}
+        return j
+
+    def test_job_37_reads_88_not_4(self):
+        assert self.run(4253, 182, 176, 200).progress == 88.0
+
+    def test_walking_the_pool_still_moves_the_bar_when_nothing_is_new(self):
+        """A rescrape of listings we already have saves nothing new; the
+        bar still follows the listings it has been through."""
+        assert self.run(10, 5, 0, 10).progress == 50.0
+
+    def test_a_whole_day_run_has_no_cap_and_follows_the_count(self):
+        assert self.run(120, 30, 25, None).progress == 25.0
+
+    def test_saving_past_the_target_clamps(self):
+        assert self.run(4253, 260, 201, 200).progress == 100.0
+
+    def test_the_target_reaches_the_panel(self):
+        from app.schemas import ScrapingJobResponse
+        assert "max_items" in ScrapingJobResponse.model_fields
+        assert self.run(4253, 182, 176, 200).to_dict()["max_items"] == 200
+        assert "آگهی تازهٔ درخواستی" in APP_JS
+
+
 class TestThePanelShowsBothNumbers:
     def test_the_counts_are_shown_beside_the_bar(self):
         """Moved out of the bar's cell into their own column — the pair was

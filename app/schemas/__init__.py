@@ -194,6 +194,7 @@ class ScrapingJobResponse(BaseModel):
     finish_reason: Optional[str] = None
     progress: float = 0.0
     divar_count: Optional[int] = None       # what Divar said existed at the start
+    max_items: Optional[int] = None         # new listings asked for (none: a whole day)
     resumed_from: Optional[str] = None      # the run this one continues
     can_resume: bool = False                 # settings stored, and not running
     started_at: Optional[datetime] = None
