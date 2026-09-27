@@ -654,6 +654,61 @@ export const HOUSE_ART = (() => {
   };
 })();
 
+/* ───────────────────────── the line-art Simorgh ───────────────────────── */
+// The same bird as «د», reduced to open strokes for a faint watermark behind
+// a showcase panel. Drawn in a 220×220 box so it can be scaled freely.
+
+export const SIMORGH_LINES = (() => {
+  const cx = 110, cy = 112, a = 96, tilt = 0.14;
+  const lem = (t: number) => {
+    const k = 1 + Math.sin(t) ** 2;
+    return [Math.cos(t) / k, (Math.sin(t) * Math.cos(t)) / k] as const;
+  };
+  // the ∞ the wings trace, and the two wing edges just inside it
+  const wingAt = (inset: number) => (u: number): Pt => {
+    const t = u * Math.PI * 2;
+    const [X, Y] = lem(t);
+    const th = X >= 0 ? tilt : -tilt;
+    const x = X * (a - inset), y = Y * (a - inset) * 1.05;
+    return [cx + x * Math.cos(th) - y * Math.sin(th), cy - (x * Math.sin(th) + y * Math.cos(th))];
+  };
+  const body = chain([
+    [[110, 158], [117, 140], [118, 118], [112, 96]],
+    [[112, 96], [108, 74], [112, 58], [104, 44]],
+    [[104, 44], [98, 34], [84, 34], [78, 44]],
+  ]);
+  const chest = chain([[[110, 158], [103, 140], [102, 118], [108, 96]]]);
+  // the head: round the crown, down to a hooked beak and back along the jaw
+  const head = chain([
+    [[104, 44], [100, 30], [86, 26], [76, 34]],
+    [[76, 34], [70, 39], [64, 44], [69, 48]],
+    [[69, 48], [76, 50], [86, 52], [96, 52]],
+  ]);
+  const crest = [
+    chain([[[98, 30], [104, 14], [118, 6], [134, 10]]]),
+    chain([[[103, 36], [112, 24], [126, 21], [140, 27]]]),
+  ];
+  const tails = [
+    chain([[[110, 158], [110, 178], [107, 192], [110, 214]]]),
+    chain([[[108, 158], [101, 178], [82, 190], [72, 210]]]),
+    chain([[[112, 158], [119, 178], [138, 190], [148, 210]]]),
+  ];
+  const strokes = [
+    trace(wingAt(13), 96).d,
+    trace(wingAt(30), 96).d,
+    trace(body, 40).d,
+    trace(chest, 24).d,
+    trace(head, 36).d,
+    ...crest.map((c) => trace(c, 14).d),
+    ...tails.map((c) => trace(c, 20).d),
+  ];
+  return {
+    infinity: trace(wingAt(0), 120).d,
+    strokes,
+    eyes: tails.map((c) => dotAlong(c, 0.76, 5, 7, "none")),
+  };
+})();
+
 /* ───────────────────────── the ∞ loader's path ───────────────────────── */
 
 /** The lemniscate used by the page loader, in a 120×60 box. */

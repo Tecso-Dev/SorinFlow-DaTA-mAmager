@@ -12,7 +12,7 @@ import {
   ShaderMaterial, Timer, WebGLRenderer,
 } from "three";
 
-export type Formation = "nebula" | "city" | "house" | "key" | "infinity";
+export type Formation = "nebula" | "city" | "house" | "key" | "simorgh" | "infinity";
 
 export type NebulaOptions = {
   /** Section elements in page order and the formation each one shows. */
@@ -200,6 +200,62 @@ function key(N: number, rnd: Rand) {
   return p;
 }
 
+/** The Simorgh in flight: a body, a long neck and head, two wings swept back
+ *  from the shoulders and three long tail plumes. The points sit along the
+ *  feather shafts and the outlines, so it reads as a bird and not a cloud —
+ *  and the next formation, the infinity, is where its wings already are. */
+function simorgh(N: number, rnd: Rand) {
+  const p = new Float32Array(N * 3);
+  /** One wing: a swept quarter-ellipse from the shoulder out to the tip. */
+  const wing = (side: number, s: number, across: number): V3 => {
+    const a = s * (Math.PI * 0.55);
+    const span = 6.2, chord = 1.9 - 1.5 * s;
+    return [
+      side * (0.5 + Math.sin(a) * span),
+      1.1 - (1 - Math.cos(a)) * 2.6 - across * chord,
+      -0.6 - across * 0.5 - s * 0.7,
+    ];
+  };
+  for (let i = 0; i < N; i++) {
+    const part = rnd(), u = rnd(), v = rnd();
+    const j = () => (rnd() - 0.5) * 0.12;
+    let q: V3;
+    if (part < 0.52) {
+      // the wings, most of the bird
+      const side = rnd() < 0.5 ? -1 : 1;
+      // bias toward the leading edge, so the wing has a drawn outline
+      const across = v < 0.45 ? 0 : Math.pow(rnd(), 0.6);
+      q = wing(side, u, across);
+    } else if (part < 0.68) {
+      // the body: a teardrop standing upright
+      const t = u;
+      const r = 0.72 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 0.94 + 0.03)), 0.8);
+      const th = v * Math.PI * 2;
+      q = [Math.cos(th) * r, 2.2 - t * 4.4, Math.sin(th) * r * 0.8];
+    } else if (part < 0.78) {
+      // neck and head, curving up and forward
+      const t = u, bend = t * t;
+      const r = 0.34 * (1 - 0.45 * t) + (t > 0.8 ? 0.4 * (t - 0.8) * 5 * 0.25 : 0);
+      const th = v * Math.PI * 2;
+      q = [-bend * 1.5 + Math.cos(th) * r, 2.2 + t * 2.5, Math.sin(th) * r];
+    } else if (part < 0.86) {
+      // the crest
+      const k = Math.floor(v * 3);
+      q = [-1.5 - u * (1.4 + k * 0.2), 4.9 + u * (0.9 - k * 0.35) + k * 0.12, (k - 1) * 0.18 + j()];
+    } else {
+      // three tail plumes with an eye near the end of each
+      const k = Math.floor(v * 3) - 1;
+      const t = u;
+      const eye = t > 0.72 && t < 0.86 ? 0.28 : 0.1;
+      q = [k * (0.35 + t * 2.4) + (rnd() - 0.5) * eye * 2, -2.2 - t * 4.6, -0.3 + (rnd() - 0.5) * eye];
+    }
+    p[i * 3] = q[0] * 1.32 + j();
+    p[i * 3 + 1] = q[1] * 1.32 + j();
+    p[i * 3 + 2] = q[2] * 1.32 - 1 + j();
+  }
+  return p;
+}
+
 function infinity(N: number, rnd: Rand) {
   const p = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) {
@@ -263,6 +319,7 @@ export function startNebula(canvas: HTMLCanvasElement, opts: NebulaOptions): Neb
     city: () => city(N, rnd),
     house: () => house(N, rnd),
     key: () => key(N, rnd),
+    simorgh: () => simorgh(N, rnd),
     infinity: () => infinity(N, rnd),
   };
   const cache = new Map<Formation, Float32Array>();
