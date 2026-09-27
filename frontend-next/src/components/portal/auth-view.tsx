@@ -97,12 +97,12 @@ function PasswordInput({
         onKeyUp={(e) => onCapsLock(e.getModifierState("CapsLock"))}
         onKeyDown={(e) => onCapsLock(e.getModifierState("CapsLock"))}
         onBlur={() => onCapsLock(false)}
-        className="h-11 pe-11 text-left"
+        className="h-11 pl-11 text-left"
       />
       <button
         type="button"
         onClick={() => setShow((v) => !v)}
-        className="absolute inset-y-0 end-0 grid w-11 place-items-center text-muted-foreground hover:text-foreground"
+        className="absolute inset-y-0 left-0 grid w-11 place-items-center text-muted-foreground hover:text-foreground"
         aria-label={show ? "پنهان کردن رمز" : "نمایش رمز"}
       >
         {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}

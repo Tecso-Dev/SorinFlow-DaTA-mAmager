@@ -191,12 +191,12 @@ export function LoginForm() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onKeyUp={(e) => setCaps(e.getModifierState("CapsLock"))}
-                className="h-11 pe-11 text-left"
+                className="h-11 pl-11 text-left"
               />
               <button
                 type="button"
                 onClick={() => setShowPw((v) => !v)}
-                className="absolute inset-y-0 end-0 grid w-11 place-items-center text-muted-foreground hover:text-foreground"
+                className="absolute inset-y-0 left-0 grid w-11 place-items-center text-muted-foreground hover:text-foreground"
                 aria-label={showPw ? "پنهان کردن رمز" : "نمایش رمز"}
               >
                 {showPw ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
