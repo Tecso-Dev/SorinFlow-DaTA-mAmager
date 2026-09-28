@@ -1375,18 +1375,19 @@ class DivarScraper:
 
     @staticmethod
     def _cursor_to_datetime(lpd: Optional[int]) -> Optional[datetime]:
-        """Convert the API's last_post_date cursor (epoch in s/ms/µs/ns) to a datetime."""
-        if not lpd:
+        """The API's last_post_date cursor (epoch in s/ms/µs/ns, or RFC 3339
+        text) as a moment in Tehran time — so its .date() is the day the
+        person picked, not the server's.
+
+        It was datetime.fromtimestamp(ts): the server's own clock, which is
+        UTC in the container, so a cursor at 01:30 Tehran time read as the
+        day before and the date walk stopped short of its day.
+        """
+        from app.services.divar_count import cursor_moment
+        try:
+            return cursor_moment(lpd)
+        except (OverflowError, OSError, ValueError):
             return None
-        v = float(lpd)
-        for div in (1, 1e3, 1e6, 1e9):
-            ts = v / div
-            if 1e9 <= ts < 4e9:  # plausible epoch-seconds range (2001..2096)
-                try:
-                    return datetime.fromtimestamp(ts)
-                except (OverflowError, OSError, ValueError):
-                    return None
-        return None
 
     async def _collect_listings_robust(
         self, city: str, category: str, target_count: int,
