@@ -421,6 +421,11 @@ async def _llm_rerank(prompt_items: List[Dict[str, Any]], context: str) -> Dict[
                               max_tokens=60 * max(1, len(prompt_items)), timeout=25)
         data = out.get("data") or {}
         return {int(r["id"]): str(r.get("reason", ""))[:120] for r in data.get("results", []) if r.get("id")}
+    except _llm.QuotaExhausted as e:
+        # the gateway has no credit: llm.py logged that once, where the refusal
+        # came; a line for every page that asks would only repeat it
+        logger.debug(f"[match] LLM re-rank skipped: {e}")
+        return {}
     except Exception as e:
         logger.warning(f"[match] LLM re-rank skipped: {e}")
         return {}
@@ -449,6 +454,18 @@ def _spawn(coro) -> None:
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+
+
+async def _gateway_paused() -> bool:
+    """True while the AI gateway has no credit (llm.pause_state, which every
+    pod reads): a call scheduled now would be refused at the door, and the
+    page that asked would be told to check back for reasons that will not
+    come. Never raises — an unreadable settings table is not a pause."""
+    try:
+        from app.services import llm as _llm
+        return await _llm.pause_state() is not None
+    except Exception:
+        return False
 
 
 def _fingerprint(*parts: Any) -> str:
@@ -499,6 +516,8 @@ async def _attach_reasons(kind: str, source_id: int, results: List[Dict[str, Any
             if reasons.get(row["id"]):
                 row["ai_reason"] = reasons[row["id"]]
         return False
+    if await _gateway_paused():
+        return False          # nothing will be written, so nobody is told to wait for it
     lock_key = f"match:reason:lock:{kind}:{source_id}:{fp}"
     try:
         got_lock = await r.set(lock_key, "1", nx=True, ex=LOCK_TTL)
@@ -555,6 +574,8 @@ async def _cached_semantic_candidates(need: str, city: Optional[str],
             return {int(pid): score for pid, score in json.loads(cached)}
         except Exception:
             return {}
+    if await _gateway_paused():
+        return {}             # the embedder cannot be asked: no background call to fill a cache it would not fill
     lock_key = f"match:semantic:lock:{fp}"
     try:
         got_lock = await r.set(lock_key, "1", nx=True, ex=LOCK_TTL)

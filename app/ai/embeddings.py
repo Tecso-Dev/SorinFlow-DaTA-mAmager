@@ -413,7 +413,12 @@ async def run_once(db, *, limit: int = LIMIT) -> Dict[str, Any]:
     and the cursor below is reporting only. The cursor moves past what
     landed, so a batch the gateway refused is retried next pass; then the
     new ones are checked for duplicates. `stopped` names why the pass ended
-    early, or is None."""
+    early, or is None. While the gateway has no credit (llm.pause_state) the
+    pass ends before it starts, with one note in the log for the whole pause."""
+    pause = await llm.pause_state(db)
+    llm.note_pause("embed", pause)
+    if pause:
+        return {"scanned": 0, "embedded": 0, "duplicates": 0, "cursor": await _cursor(db), "stopped": "QuotaExhausted"}
     since = await _cursor(db)
     props = (await db.execute(
         select(Property).where(_due())

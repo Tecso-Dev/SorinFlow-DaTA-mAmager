@@ -129,6 +129,9 @@ async def enrich_needs(db) -> int:
     from app.ai import need_parser
     from app.services import llm as _llm
 
+    if await _llm.pause_state(db):
+        return 0      # the gateway has no credit: one line at the refusal, not one «deferred» per request per pass
+
     rows = (await db.execute(select(PropertyRequest).where(
         PropertyRequest.status.in_(OPEN),
         PropertyRequest.customer_id.isnot(None),

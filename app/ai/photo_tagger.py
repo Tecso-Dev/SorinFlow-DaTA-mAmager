@@ -323,7 +323,18 @@ async def run_once(db, *, limit: int = BATCH) -> Dict[str, Any]:
     or the no-photo marker): a listing the model refused keeps ai_photos_at
     empty and stays in front of the cursor, so the next pass tries it first
     — and the ones after it that did succeed are kept out by ai_photos_at,
-    so nothing is paid for twice."""
+    so nothing is paid for twice.
+
+    While the gateway has no credit (llm.pause_state — the pause the first
+    refusal set, in app_settings, for every pod) the pass ends before it
+    starts: a listing looked at now would first have its photos fetched from
+    Divar and shrunk, and then be refused at the door. Nothing is counted
+    against any listing for it."""
+    pause = await llm.pause_state(db)
+    llm.note_pause("photo", pause)
+    if pause:
+        return {"scanned": 0, "tagged": 0, "skipped": 0, "failed": 0, "cursor": await _cursor(db),
+                "stopped": "QuotaExhausted"}
     await _requeue_remote_only(db)
     since = await _cursor(db)
     props = (await db.execute(_pending(since).limit(limit))).scalars().all()
