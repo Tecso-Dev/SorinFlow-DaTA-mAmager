@@ -516,7 +516,7 @@ def client():
         (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler) = saved
 
 
-def _seed_user(username):
+def _seed_user(username, phone="09120000071"):
     import asyncio
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     from app.models.user import User
@@ -530,7 +530,7 @@ def _seed_user(username):
                 s.add(User(username=username, full_name=f"route {username}", role="admin",
                            permissions=["forwarder", "divar_auth"],
                            hashed_password=get_password_hash("pw123456"), is_active=True,
-                           divar_phone="09120000071"))
+                           divar_phone=phone))
                 await s.commit()
         finally:
             await eng.dispose()
@@ -572,3 +572,14 @@ class TestThePhoneCardSaysSo:
         assert ev[0]["rerouted"] is True and ev[0]["labeled"] == d10(sim1)
         assert ev[0]["account"] == d10(sim2) and ev[0]["code"] == "****99"
         assert "به " + sim2 + " داده شد" in ev[0]["message"], ev[0]["message"]
+
+        # Somebody else's phone with no SIM listed sees none of it. It used to
+        # skip the filter altogether and list every user's codes and numbers.
+        _seed_user("route_other", phone="09120000081")
+        r = client.post("/api/users/token", data={"username": "route_other", "password": "pw123456"})
+        h2 = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        other = client.post("/api/forwarder/devices", headers=h2, json={"label": "no sim"}).json()
+        assert other.get("id"), other
+        assert client.get(f"/api/forwarder/devices/{other['id']}/events", headers=h2).json()["events"] == []
+        card2 = client.get("/api/forwarder/devices", headers=h2).json()["devices"]
+        assert [d["mislabelled"] for d in card2] == [None]

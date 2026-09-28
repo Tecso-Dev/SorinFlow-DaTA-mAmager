@@ -137,12 +137,18 @@ async def _mislabelled(db: AsyncSession, devices) -> dict:
 
     Two kinds, both recorded by the inbound path: a code labelled A that went
     to B because B was the number just clicked, and a code held under A that
-    A's next challenge refused because it had arrived before A was clicked.
-    Either means the app is labelling this phone's SIMs wrongly — which only
-    the phone's owner can fix, so it goes on their phone's card.
+    A's next challenge refused because it had arrived when A had not been
+    clicked at all. Either means the app is labelling this phone's SIMs
+    wrongly — which only the phone's owner can fix, so it goes on their card.
+    A late code of A's own, refused the same way, is not counted.
+
+    Narrowed to the caller's own device ids in the query itself, so nobody
+    else's traffic can crowd them out of the row limit.
     """
     import json as _json
     from datetime import timedelta
+
+    from sqlalchemy import or_
 
     from app.models.sms_log import SmsEvent
 
@@ -154,8 +160,10 @@ async def _mislabelled(db: AsyncSession, devices) -> dict:
         rows = (await db.execute(
             select(SmsEvent)
             .where(SmsEvent.stage == "inbound", SmsEvent.created_at >= since,
-                   SmsEvent.details.like('%"rerouted": true%')
-                   | SmsEvent.details.like('%"arrived_before_click"%'))
+                   # device ids are hex, so nothing in them needs escaping
+                   or_(*[SmsEvent.details.like(f'%"device": "{i}"%') for i in sorted(ids)]),
+                   or_(SmsEvent.details.like('%"rerouted": true%'),
+                       SmsEvent.details.like('%"arrived_before_click"%')))
             .order_by(SmsEvent.created_at.desc(), SmsEvent.id.desc())
             .limit(1000)
         )).scalars().all()
@@ -169,11 +177,12 @@ async def _mislabelled(db: AsyncSession, devices) -> dict:
         except Exception:
             continue
         dev = d.get("device")
-        if dev not in ids:
+        rerouted = d.get("rerouted") is True
+        if dev not in ids or not (rerouted or d.get("reason") == "arrived_before_click"):
             continue
         m = out.setdefault(dev, {"count": 0, "rerouted": 0, "refused": 0})
         m["count"] += 1
-        m["rerouted" if d.get("rerouted") else "refused"] += 1
+        m["rerouted" if rerouted else "refused"] += 1
         if m["count"] == 1:      # newest first
             m.update(last_at=ev.created_at.isoformat() if ev.created_at else None,
                      last_labeled=d.get("labeled") or d.get("account"),
@@ -391,10 +400,11 @@ async def device_events(device_id: int, limit: int = 50,
             d = _json.loads(e.details) if e.details else {}
         except Exception:
             d = {}
-        # this phone's SIMs — or a refusal naming this device, which may
-        # carry no account at all (a body that did not parse)
-        if row.sims() and not any(fw.same_phone(d.get("account"), p) for p in row.sims()) \
-                and d.get("device") != row.device_id:
+        # this phone's own events, and anything about its SIMs' numbers —
+        # which are its owner's. A phone with no SIM listed used to skip this
+        # test altogether and see every user's codes and numbers.
+        if d.get("device") != row.device_id \
+                and not any(fw.same_phone(d.get("account"), p) for p in row.sims()):
             continue
         out.append({
             "at": e.created_at.isoformat() if e.created_at else None,
