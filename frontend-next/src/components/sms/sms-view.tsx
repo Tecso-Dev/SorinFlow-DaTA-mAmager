@@ -20,9 +20,13 @@ import {
   Empty, ErrorNote, Field, ListSkeleton, NativeSelect, PageHeader, Pagination, RingDialog, Section, ToneBadge,
   Toolbar,
 } from "@/components/panel/kit";
+import { IsoPhone } from "@/components/panel/motion3d";
+import { Lottie } from "@/components/ui/lottie";
 import { api, ApiError } from "@/lib/api";
 import { qs } from "@/lib/crm";
 import { faDate, faNum, parseDigits } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
+import smsLottie from "@/lotties/sms.json";
 import { useSession, can, type User } from "@/lib/session";
 
 /* ───────────────────────── types (app/api/routes/sms.py) ───────────────────────── */
@@ -274,7 +278,7 @@ function EventsCard() {
       ) : q.isError ? (
         <ErrorNote error={q.error} />
       ) : q.data.events.length === 0 ? (
-        <Empty icon={MessageSquareText}>رویدادی ثبت نشده است.</Empty>
+        <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />}>رویدادی ثبت نشده است.</Empty>
       ) : (
         <ul tabIndex={0} aria-label="رویدادهای سرویس پیامک" className="flex max-h-80 flex-col gap-2 overflow-y-auto text-sm">
           {q.data.events.map((e) => (
@@ -329,7 +333,8 @@ function SingleSendCard() {
 
   return (
     <Section title="ارسال پیام تکی">
-      <div className="grid gap-3">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_84px] sm:items-center">
+        <div className="grid gap-3">
         <Field label="شمارهٔ گیرنده" htmlFor="sms-single-to">
           <Input id="sms-single-to" dir="ltr" placeholder="09xxxxxxxxx" value={to} onChange={(e) => setTo(e.target.value)} className="max-w-56" />
         </Field>
@@ -340,6 +345,8 @@ function SingleSendCard() {
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
           ارسال
         </Button>
+        </div>
+        <Lottie animationData={smsLottie} className="hidden sm:block" label="در حال ارسال پیامک" />
       </div>
     </Section>
   );
@@ -513,7 +520,7 @@ function HistoryCard() {
       ) : q.isError ? (
         <ErrorNote error={q.error} />
       ) : q.data.items.length === 0 ? (
-        <Empty icon={MessageSquareText}>پیامی یافت نشد.</Empty>
+        <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />}>پیامی یافت نشد.</Empty>
       ) : (
         <div className="overflow-x-auto">
           <Table aria-label="تاریخچهٔ پیامک">
@@ -561,7 +568,12 @@ export function SmsView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader icon={MessageSquareText} title="پیامک" hint="ارسال، گروه‌ها و تاریخچهٔ پیامک‌های کاوه‌نگار" />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_150px]">
+        <PageHeader icon={MessageSquareText} title="پیامک" hint="ارسال، گروه‌ها و تاریخچهٔ پیامک‌های کاوه‌نگار" />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <IsoPhone tone="cyan" />
+        </Reveal>
+      </div>
       <Tiles account={account.data} stats={stats.data} />
       {isBoss && <Reveal><SettingsCard /></Reveal>}
       <div className="grid gap-5 xl:grid-cols-2">
