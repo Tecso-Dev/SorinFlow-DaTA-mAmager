@@ -89,7 +89,7 @@ class TestTheDenominatorDecisionWasReversedDeliberately:
         from app.models.scraping_job import ScrapingJob
         j = ScrapingJob(); j.total_items, j.scraped_items = 113, 119
         assert j.progress == 100.0, "a pool larger than the count must clamp"
-        i = SCRAPER.index('job.status = "completed"')
+        i = SCRAPER.index("# Complete job")
         assert "job.scraped_items = job.total_items" in SCRAPER[i:i + 700], \
             "a pool smaller than the count must be filled on completion"
 

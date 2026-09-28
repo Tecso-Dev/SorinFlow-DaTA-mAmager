@@ -84,6 +84,12 @@ _NO_BROWSER = object()
 # How long close() waits on one cleanup step before moving on to the next.
 _CLOSE_STEP_TIMEOUT = 60.0
 
+# The statuses a run moves its own row between. Anything else on the row was
+# written from outside — «لغو», the queue's sweep — and a run that reads it
+# stops, and never writes over it (DivarScraper._move_status).
+_LIVE_STATUSES = ("running", "paused")
+_STOPPED_STATUSES = ("cancelled", "failed", "completed")
+
 
 class DivarScraper:
     """Main scraper class for Divar.ir real estate listings"""
@@ -558,19 +564,114 @@ class DivarScraper:
             if await self._live_run_on(account):
                 return
 
+    def _job_pk(self):
+        """The run's row id, read without an attribute load: after a rollback
+        the ORM object is expired, and touching job.id then is a lazy load —
+        MissingGreenlet on this async session."""
+        job = getattr(self, "current_job", None)
+        if job is None:
+            return None
+        try:
+            from sqlalchemy import inspect as _sa_inspect
+            ident = _sa_inspect(job).identity
+        except Exception:
+            ident = None
+        return ident[0] if ident else job.__dict__.get("id")
+
+    async def _move_status(self, to: str, *, only_from: tuple = _LIVE_STATUSES) -> bool:
+        """Set this run's status to `to` only while its row still says one of
+        `only_from`. True when it moved. In the session's current transaction:
+        the caller commits.
+
+        The run wrote its status through the ORM object, which holds what the
+        row said when it was last read. A cancel committed since then was
+        written over: waiting for an SMS code wrote «paused» over it, the code
+        (or the timeout) «running», and the run went on to the end; the end
+        of the run wrote «completed» over a cancel, or over the sweep's
+        «failed», that landed during its last listing. As a conditional
+        UPDATE, whatever the button or the sweep wrote wins. The object is
+        told the row's real status either way, without marking it changed.
+        """
+        job = getattr(self, "current_job", None)
+        db = getattr(self, "db_session", None)
+        if job is None or db is None:
+            return False
+        from sqlalchemy import update as _update
+        from sqlalchemy.orm.attributes import set_committed_value
+        pk = self._job_pk()
+        moved = (await db.execute(
+            _update(ScrapingJob)
+            .where(ScrapingJob.id == pk, ScrapingJob.status.in_(only_from))
+            .values(status=to)
+            .returning(ScrapingJob.id)
+            .execution_options(synchronize_session=False))).scalar_one_or_none() is not None
+        if moved:
+            set_committed_value(job, "status", to)
+        else:
+            now = (await db.execute(
+                select(ScrapingJob.status).where(ScrapingJob.id == pk))).scalar_one_or_none()
+            if isinstance(now, str):
+                set_committed_value(job, "status", now)
+        return moved
+
+    async def _finish_status(self, status: str) -> bool:
+        """The run's last word on its own status — `status` is whatever the
+        run concluded — unless a cancel or the sweep got there first, in which
+        case that stays. The caller commits, with the rest of the finish."""
+        moved = await self._move_status(status)
+        if not moved:
+            logger.info(f"Job {getattr(self, '_job_id_str', None) or self._job_pk()} became "
+                        f"«{getattr(self.current_job, 'status', None)}» while it was finishing — "
+                        f"left so, not «{status}»")
+        return moved
+
+    async def _pause_for_code(self) -> None:
+        """ContactExtractor's on_pause: the row reads «paused» while the run
+        waits for an SMS code — unless the run was stopped meanwhile. Then it
+        stays stopped, and the wait's first check (_cancelled_now) ends it."""
+        job = getattr(self, "current_job", None)
+        if job is None:
+            return
+        moved = await self._move_status("paused")
+        await self.db_session.commit()
+        jid = getattr(self, "_job_id_str", None) or str(job.job_id)
+        if not moved:
+            logger.info(f"Job {jid} is «{job.status}» — not pausing it for a code")
+            return
+        logger.info(f"Job {jid} PAUSED — awaiting OTP code")
+        from app.services import job_log
+        await job_log.record(jid, job_log.PAUSE,
+                             "دیوار کد تأیید خواست — اسکرپ متوقف شد تا کد وارد شود",
+                             level="warning")
+
+    async def _resume_after_code(self) -> None:
+        """ContactExtractor's on_resume: «paused» back to «running» — and only
+        that. A cancel that came during the wait stays a cancel."""
+        job = getattr(self, "current_job", None)
+        if job is None:
+            return
+        moved = await self._move_status("running", only_from=("paused",))
+        await self.db_session.commit()
+        if moved:
+            jid = getattr(self, "_job_id_str", None) or str(job.job_id)
+            logger.info(f"Job {jid} RESUMED")
+            from app.services import job_log
+            await job_log.record(jid, job_log.RESUME, "کد وارد شد — اسکرپ ادامه پیدا کرد")
+
     async def _cancelled_now(self) -> bool:
-        """Whether the current run has been cancelled, asked without leaving
-        a transaction open: the caller is in the middle of a sleep, and
-        Postgres closes a connection idle in a transaction after 60 s."""
+        """Whether the current run has been stopped from outside — cancelled,
+        or failed by the queue's sweep — asked without leaving a transaction
+        open: the caller is in the middle of a sleep, and Postgres closes a
+        connection idle in a transaction after 60 s."""
         job = getattr(self, "current_job", None)
         if job is None or self.db_session is None:
             return False
         from sqlalchemy import select as _select
         try:
             status = (await self.db_session.execute(
-                _select(ScrapingJob.status).where(ScrapingJob.id == job.id))).scalar_one_or_none()
+                _select(ScrapingJob.status).where(ScrapingJob.id == self._job_pk()))).scalar_one_or_none()
             await self.db_session.commit()
-            return status == "cancelled"
+            return status in _STOPPED_STATUSES
         except Exception as e:
             logger.debug(f"[pace] cancel check failed: {e}")
             try:
@@ -2171,35 +2272,12 @@ class DivarScraper:
                 else f"single:{_divar_id}"
             )
             # Flip the job's status while the scraper is blocked on an OTP code,
-            # so the dashboard clearly shows it as paused → running.
-            async def _pause_job():
-                if self.current_job:
-                    self.current_job.status = "paused"
-                    await self.db_session.commit()
-                    logger.info(f"Job {self.current_job.job_id} PAUSED — awaiting OTP code")
-                    from app.services import job_log
-                    await job_log.record(
-                        self.current_job.job_id, job_log.PAUSE,
-                        "دیوار کد تأیید خواست — اسکرپ متوقف شد تا کد وارد شود",
-                        level="warning")
-
-            async def _resume_job():
-                if self.current_job:
-                    # don't override a cancellation that happened meanwhile
-                    await self.db_session.refresh(self.current_job)
-                    if self.current_job.status == "paused":
-                        self.current_job.status = "running"
-                        await self.db_session.commit()
-                        logger.info(f"Job {self.current_job.job_id} RESUMED")
-                        from app.services import job_log
-                        await job_log.record(self.current_job.job_id, job_log.RESUME,
-                                             "کد وارد شد — اسکرپ ادامه پیدا کرد")
-
-            async def _job_cancelled():
-                if not self.current_job:
-                    return False
-                await self.db_session.refresh(self.current_job)
-                return self.current_job.status == "cancelled"
+            # so the dashboard clearly shows it as paused → running — never
+            # over a cancel (see _move_status), and the wait checks for one
+            # every slice without holding a transaction open.
+            _pause_job = self._pause_for_code
+            _resume_job = self._resume_after_code
+            _job_cancelled = self._cancelled_now
 
             # Everything above came free with the page. Contact info does not:
             # it clicks «اطلاعات تماس», solves a captcha, and spends one of the
@@ -4177,11 +4255,15 @@ class DivarScraper:
                 raise ValueError(f"Job {job_id} not found")
             # A job can be cancelled while still «pending» — the background task
             # starts a moment later, and claiming "running" here would bring a
-            # job the user already stopped back to life.
-            if job.status == "cancelled":
-                logger.info(f"Job {job_id} was cancelled before it started — not running it")
+            # job the user already stopped back to life. One conditional write,
+            # not a read and then a write: a cancel committed in between was
+            # written over.
+            self.current_job = job
+            started = await self._move_status("running", only_from=("pending",))
+            await self.db_session.commit()
+            if not started:
+                logger.info(f"Job {job_id} was {job.status} before it started — not running it")
                 return job
-            job.status = "running"
             job.started_at = datetime.now()
             self._note_account(job)
             from app.services import job_log
@@ -4509,10 +4591,13 @@ class DivarScraper:
                         logger.info(f"Reached target of {max_items} saved listings — stopping")
                         break
 
-                    # Check if job was cancelled
+                    # Check if job was cancelled — or failed by the queue's
+                    # sweep: either way the row says the run is over, and a
+                    # run that carries on does work nobody sees, on a number a
+                    # «ادامه» of it is about to want.
                     await self.db_session.refresh(job)
-                    if job.status == "cancelled":
-                        logger.info(f"Job {job.job_id} was cancelled, stopping scraping")
+                    if job.status in _STOPPED_STATUSES:
+                        logger.info(f"Job {job.job_id} is {job.status}, stopping scraping")
                         return job
 
                     # Counted here rather than from `i`, so that candidates the
@@ -4564,7 +4649,15 @@ class DivarScraper:
                         wants_contact=lambda pd: self.pre_contact_skip(
                             pd, _listing_type, _pre_filters),
                     )
-                    
+                    # A cancel that landed while the ad was open — as often as
+                    # not while it sat on a code prompt — stops the run here,
+                    # before the photos and the save. Only a number already
+                    # revealed is kept: that reveal is spent either way.
+                    if not (detail and detail.get("phone_number")) and await self._cancelled_now():
+                        logger.info(f"Job {self._job_id_str} was stopped during a listing — "
+                                    "not finishing it")
+                        return job
+
                     if detail:
                         # Merge with listing data
                         property_data = {**listing, **detail}
@@ -4933,8 +5026,8 @@ class DivarScraper:
                     except Exception:
                         pass
             
-            # Complete job
-            job.status = "completed"
+            # Complete job — unless a cancel or the sweep got there first
+            await self._finish_status("completed")
             job.completed_at = datetime.now()
             # A run that met its target stops with candidates left over. The
             # work is over, so the bar reads full rather than freezing at the

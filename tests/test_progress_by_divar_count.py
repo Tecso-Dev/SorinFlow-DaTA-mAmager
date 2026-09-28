@@ -74,7 +74,7 @@ class TestItCannotLie:
     def test_completion_still_fills_a_run_that_fell_short(self):
         """The rule from the earlier fix survives: a finished run is finished
         whatever Divar said it held."""
-        i = SCRAPER.index('job.status = "completed"')
+        i = SCRAPER.index("# Complete job")
         assert "job.scraped_items = job.total_items" in SCRAPER[i:i + 700]
 
     def test_an_empty_total_does_not_divide_by_zero(self):

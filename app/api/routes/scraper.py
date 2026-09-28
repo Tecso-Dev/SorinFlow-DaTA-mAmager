@@ -6,7 +6,7 @@ import json
 import time
 from fastapi import Request, APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, false, delete
+from sqlalchemy import select, false, delete, update
 from typing import Optional, List
 from datetime import datetime
 import sys
@@ -898,10 +898,23 @@ async def cancel_scraping_job(
             status_code=400,
             detail=f"این تسک قبلاً تمام شده است ({_STATUS_FA.get(job.status, job.status)})")
 
-    was = job.status
-    job.status = "cancelled"
-    job.completed_at = datetime.now()
+    # Only over a status the run can still be in, in one statement: the row
+    # was read above, and a run that finished in between had its ending
+    # written over with «cancelled».
+    was, pk = job.status, job.id
+    cancelled = (await db.execute(
+        update(ScrapingJob)
+        .where(ScrapingJob.id == pk, ScrapingJob.status.in_(("pending", "running", "paused")))
+        .values(status="cancelled", completed_at=datetime.now())
+        .returning(ScrapingJob.id)
+        .execution_options(synchronize_session=False))).scalar_one_or_none()
     await db.commit()
+    if cancelled is None:
+        now = (await db.execute(
+            select(ScrapingJob.status).where(ScrapingJob.id == pk))).scalar_one_or_none() or "—"
+        raise HTTPException(
+            status_code=400,
+            detail=f"این تسک قبلاً تمام شده است ({_STATUS_FA.get(now, now)})")
 
     # If it was blocked on an SMS-OTP code, drop the request: the scraper wakes
     # out of its wait on the cancelled status, and the prompt in the dashboard

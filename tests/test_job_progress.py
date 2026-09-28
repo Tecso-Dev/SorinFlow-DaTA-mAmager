@@ -81,11 +81,11 @@ class TestTheDenominatorIsThePool:
 
 class TestARunThatStopsAtItsTargetStillReadsFull:
     def test_completion_fills_the_bar(self):
-        src = SCRAPER[SCRAPER.index('job.status = "completed"'):]
+        src = SCRAPER[SCRAPER.index("# Complete job"):]
         assert "job.scraped_items = job.total_items" in src[:600]
 
     def test_it_is_set_before_the_row_is_committed(self):
-        i = SCRAPER.index('job.status = "completed"')
+        i = SCRAPER.index("# Complete job")
         window = SCRAPER[i:i + 600]
         assert window.index("job.scraped_items = job.total_items") < \
             window.index("await self.db_session.commit()")
