@@ -440,3 +440,50 @@ class TestWhatTheApiSays:
         kw = sq.job_kwargs(await _row(resp.job_id))
         assert kw["owner_user_id"] == 11 and kw["max_items"] == 5 and kw["job_id"] == resp.job_id
         assert json.dumps(kw)                   # nothing in it that a later change could not store
+
+
+class TestARowTheRunCannotBeBuiltFrom:
+    """A pending row whose saved config no longer validates (a field the
+    form has since tightened, a schedule saved by an older release) raised
+    out of _take, which took the consumer down with it. The supervisor
+    restarted it, the sweep put the row back five minutes later, and the
+    same row crashed it again — for a day, until the 24-hour rule failed
+    it, with every scrape behind it waiting."""
+
+    @pytest.mark.parametrize("config,field", [
+        ({"category": "rent-apartment", "owner_user_id": None}, "city"),
+        ({"city": "urmia", "category": "rent-apartment", "max_items": "many",
+          "owner_user_id": None}, "max_items"),
+    ], ids=["missing-city", "not-a-number"])
+    async def test_it_is_failed_in_words_and_the_queue_goes_on(self, queue, monkeypatch, config, field):
+        runs = _stand_in(monkeypatch)
+        bad = await _job(queue, config=config)
+        good = await _job(queue)
+        await sq.enqueue(bad)
+        await sq.enqueue(good)
+        consumer = asyncio.create_task(sq.consume())
+        await _until(lambda: runs or consumer.done())
+        await asyncio.sleep(0.05)
+        assert not consumer.done(), "the consumer died on the unreadable row"
+        consumer.cancel()
+        await asyncio.gather(consumer, return_exceptions=True)
+        assert [r["job_id"] for r in runs] == [good], "the scrape behind it never ran"
+
+        row = await _row(bad)
+        assert row.status == "failed" and row.completed_at is not None
+        assert row.finish_reason and field in row.finish_reason
+        assert "تازه" in row.finish_reason, "it must say what to do instead"
+        assert "نامشخص" not in row.finish_reason and len(row.finish_reason) <= 300
+        assert await queue.redis.get(sq.CLAIM.format(bad)) is None, "the claim is let go"
+        async with database.async_session_maker() as db:
+            lines = (await db.execute(select(ScrapingLog).where(
+                ScrapingLog.job_id == uuid.UUID(bad)))).scalars().all()
+        assert [line.level for line in lines] == ["error"]
+        assert lines[0].message == row.finish_reason
+
+    async def test_a_row_cancelled_meanwhile_keeps_its_cancel(self, queue):
+        """The failure is written only onto a row still pending."""
+        jid = await _job(queue, config={"category": "rent-apartment"})
+        await _set_status(jid, "cancelled")
+        await sq._fail_unreadable(jid, ValueError("config is not a dict"))
+        assert (await _row(jid)).status == "cancelled"
