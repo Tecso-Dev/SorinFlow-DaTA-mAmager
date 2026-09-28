@@ -314,3 +314,58 @@ class TestAFailedOpenLeavesNothingBehind:
             await st.open_browser(_FakePlaywright(_FakeContext(page_fails=True)),
                                   headless=True, account="09120001515")
         assert str(st.profile_dir("09120001515")) not in st._PROFILES_IN_USE
+
+
+class TestTheScraperCloseRunsEveryStep:
+    """DivarScraper.close() ends every run: the HTTP client, the browser (and
+    with it the number's lock), then the Playwright driver. It was one try
+    block, so the first step that raised skipped the rest — a driver process
+    left behind per run, and a lock left for the refresher to keep alive."""
+
+    class _Http:
+        is_closed = False
+
+        async def aclose(self):
+            raise RuntimeError("connection pool is already closed")
+
+    class _Driver:
+        def __init__(self, fails=False):
+            self.stopped, self.fails = 0, fails
+
+        async def stop(self):
+            self.stopped += 1
+            if self.fails:
+                raise RuntimeError("Connection closed")
+
+    async def _scraper(self, account, *, close_fails=False):
+        from app.scraper.divar_scraper import DivarScraper
+        rkey, token, fallback = await st._acquire_profile_lock(account)
+        ctx = _FakeContext(close_fails=close_fails)
+        ctx._sorinflow_profile_key = str(st.profile_dir(account))
+        ctx._sorinflow_lock = (rkey, token, fallback)
+        s = DivarScraper.__new__(DivarScraper)      # no browser, no DB: the close path only
+        s._http, s.context, s.page, s.browser = self._Http(), ctx, object(), None
+        s.playwright = self._Driver()
+        return s, ctx
+
+    async def test_a_failing_http_close_does_not_keep_the_browser_or_the_driver(self, _redis):
+        s, ctx = await self._scraper("09120002121")
+        driver = s.playwright
+        await s.close()
+        assert ctx.closed == 1, "the browser was never closed"
+        assert await st.profile_in_use("09120002121") is False, "the number stays locked"
+        assert driver.stopped == 1, "a Playwright driver is left behind for every run"
+
+    async def test_a_failing_browser_close_still_stops_the_driver(self, _redis):
+        s, ctx = await self._scraper("09120002222", close_fails=True)
+        driver = s.playwright
+        await s.close()
+        assert driver.stopped == 1
+        assert await st.profile_in_use("09120002222") is False
+
+    async def test_closing_twice_is_harmless(self, _redis):
+        s, ctx = await self._scraper("09120002323")
+        driver = s.playwright
+        await s.close()
+        await s.close()
+        assert ctx.closed == 1 and driver.stopped == 1

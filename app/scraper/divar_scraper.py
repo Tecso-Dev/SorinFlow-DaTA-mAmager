@@ -81,6 +81,9 @@ def _is_dropped_connection(e: BaseException) -> bool:
 # is the shared anonymous profile a run with no number opens.
 _NO_BROWSER = object()
 
+# How long close() waits on one cleanup step before moving on to the next.
+_CLOSE_STEP_TIMEOUT = 60.0
+
 
 class DivarScraper:
     """Main scraper class for Divar.ir real estate listings"""
@@ -435,20 +438,39 @@ class DivarScraper:
         return self._http
 
     async def close(self):
-        """Close browser and cleanup resources"""
-        try:
-            if self._http is not None and not self._http.is_closed:
-                await self._http.aclose()
-            # The context owns the browser in a persistent profile, and
-            # context.browser is None — closing it releases both, and the
-            # profile guard with them.
-            if self.context:
-                await close_context(self.context)
-            if self.playwright:
-                await self.playwright.stop()
-            logger.info("Scraper closed successfully")
-        except Exception as e:
-            logger.error(f"Error closing scraper: {e}")
+        """Close browser and cleanup resources.
+
+        Each step on its own. They were one try block, so the first that
+        raised — an HTTP pool already closed, a browser that had crashed —
+        skipped the rest: a Playwright driver left running per run, and the
+        number's profile lock left for the refresher to keep alive. Each
+        handle is dropped before its close, so a second call does nothing.
+        A step that hangs is given up on after a minute: the driver's stop
+        takes whatever Chromium is left with it."""
+        http, self._http = getattr(self, "_http", None), None
+        if http is not None and not http.is_closed:
+            try:
+                await http.aclose()
+            except Exception as e:
+                logger.warning(f"[browser] closing the HTTP client failed: {e}")
+        # The context owns the browser in a persistent profile, and
+        # context.browser is None — closing it releases both, and the
+        # profile guard with them (close_context releases even when the
+        # close itself fails).
+        ctx = getattr(self, "context", None)
+        self.browser = self.context = self.page = None
+        if ctx is not None:
+            try:
+                await asyncio.wait_for(close_context(ctx), _CLOSE_STEP_TIMEOUT)
+            except Exception as e:
+                logger.warning(f"[browser] closing the browser failed: {type(e).__name__}: {e}")
+        driver, self.playwright = getattr(self, "playwright", None), None
+        if driver is not None:
+            try:
+                await asyncio.wait_for(driver.stop(), _CLOSE_STEP_TIMEOUT)
+            except Exception as e:
+                logger.warning(f"[browser] stopping Playwright failed: {type(e).__name__}: {e}")
+        logger.info("Scraper closed")
     
     async def _get_working_proxy(self, account: Optional[str] = None) -> Optional[str]:
         """The proxy for this account — sticky, so one account is always one
