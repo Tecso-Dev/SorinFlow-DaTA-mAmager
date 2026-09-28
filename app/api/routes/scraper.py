@@ -487,6 +487,9 @@ class ScheduleEdit(BaseModel):
     hour: Optional[int] = Field(None, ge=0, le=23)
     minute: Optional[int] = Field(None, ge=0, le=59)
     enabled: Optional[bool] = None
+    # The publish date, relative: 0 = امروز, 1 = دیروز, N = N روز پیش. Left out,
+    # it stays as it is; an explicit null takes the date off (the last day again).
+    posted_days_ago: Optional[int] = Field(None, strict=True)
 
 
 def _sees_every_schedule(user) -> bool:
@@ -509,19 +512,29 @@ async def _audit_schedule(action: str, row, user, request, summary: str, **detai
     to appear and vanish with no trace: on 1405/07/04 two were deleted and
     nothing — not the log, not «رویدادها» — could say who or when."""
     from app.services import audit
+    from app.services.scrape_scheduler import relative_posted_days
     cfg = row.config or {}
     await audit.record(
         action, actor=user, target_type="scrape_schedule", target_id=row.id,
         summary=summary, request=request,
         detail={"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}",
                 "city": cfg.get("city"), "category": cfg.get("category"),
+                "posted_days_ago": relative_posted_days(cfg, getattr(row, "created_at", None)),
                 "owner_user_id": row.owner_user_id, **detail})
 
 
 def _schedule_view(row, owners: dict) -> dict:
+    """What the panel gets. The publish date is always in its relative form,
+    even for a schedule still stored with a fixed one (converted here, at read
+    time), and that schedule carries a one-line note saying so."""
+    from app.services.scrape_scheduler import describe_date
     d = row.to_dict()
     d["owner_name"] = owners.get(row.owner_user_id)
-    cfg = d["config"] or {}
+    date = describe_date(d["config"], row.created_at)
+    cfg = d["config"] = date["config"]
+    d["posted_days_ago"] = date["days_ago"]
+    d["posted_label"] = date["label"]
+    d["date_note"] = date["note"]
     d["city_name"] = (CITIES.get(cfg.get("city")) or {}).get("name", cfg.get("city"))
     d["category_name"] = (CATEGORIES.get(cfg.get("category")) or {}).get("name", cfg.get("category"))
     return d
@@ -548,11 +561,15 @@ async def list_schedules(db: AsyncSession = Depends(get_db),
 async def create_schedule(data: ScheduleIn, request: Request, db: AsyncSession = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
     """Save the form as a daily run. Validated the way a run is: the config
-    has to be one the scraper would accept today, not at 08:00 tomorrow."""
+    has to be one the scraper would accept today, not at 08:00 tomorrow. The
+    publish date is stored relative (`posted_days_ago`), so every firing works
+    out its own day; an older client's fixed `posted_date` is converted."""
     from app.models.scrape_schedule import ScrapeSchedule
-    from app.services.scrape_scheduler import config_for_run, next_occurrence
+    from app.services.scrape_scheduler import ScheduleDateError, next_occurrence, stored_config
     try:
-        cfg = ScrapingJobCreate(**config_for_run(data.config)).model_dump(exclude_none=True)
+        cfg = stored_config(data.config)
+    except ScheduleDateError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"تنظیمات اسکرپ معتبر نیست: {e}")
     if cfg.get("city") not in CITIES or cfg.get("category") not in CATEGORIES:
@@ -575,9 +592,17 @@ async def create_schedule(data: ScheduleIn, request: Request, db: AsyncSession =
 async def edit_schedule(schedule_id: int, data: ScheduleEdit, request: Request,
                         db: AsyncSession = Depends(get_db),
                         current_user: User = Depends(get_current_user)):
-    from app.services.scrape_scheduler import next_occurrence
+    from app.services.scrape_scheduler import (
+        ScheduleDateError, as_relative, check_days_ago, days_ago_label, next_occurrence,
+        relative_posted_days, with_posted_days_ago)
     row = await _my_schedule(db, current_user, schedule_id)
-    before = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled}
+    date_set = "posted_days_ago" in data.model_fields_set
+    try:
+        new_days = None if not date_set or data.posted_days_ago is None else check_days_ago(data.posted_days_ago)
+    except ScheduleDateError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    before = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled,
+              "date": relative_posted_days(row.config, row.created_at)}
     if data.name is not None:
         row.name = data.name.strip() or row.name
     if data.hour is not None:
@@ -586,16 +611,23 @@ async def edit_schedule(schedule_id: int, data: ScheduleEdit, request: Request,
         row.minute = data.minute
     if data.enabled is not None:
         row.enabled = data.enabled
+    # The date is only ever saved in its relative form: one asked for is
+    # stored as asked, and any other edit of a schedule still holding a fixed
+    # date stores what that date was read as (measured from its creation day).
+    row.config = with_posted_days_ago(row.config, new_days) if date_set else as_relative(row.config, row.created_at)
     # Any change re-arms the clock, so a time edited to «in five minutes»
     # fires in five minutes and not at yesterday's hour tomorrow.
     row.next_run_at = next_occurrence(row.hour, row.minute)
     await db.commit()
     await db.refresh(row)
-    after = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled}
+    after = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled,
+             "date": relative_posted_days(row.config, row.created_at)}
     changed = {k: [before[k], after[k]] for k in before if before[k] != after[k]}
     if changed:
         words = {"enabled": "روشن" if row.enabled else "خاموش", "at": f"ساعت {after['at']}",
-                 "name": f"اسم «{row.name}»"}
+                 "name": f"اسم «{row.name}»",
+                 "date": "تاریخ انتشار " + ("«" + days_ago_label(after["date"]) + "»"
+                                            if after["date"] is not None else "برداشته شد")}
         await _audit_schedule("scrape_schedule_update", row, current_user, request,
                               f"زمان‌بندی «{before['name']}»: " + "، ".join(words[k] for k in changed),
                               changed=changed)
@@ -609,7 +641,8 @@ async def delete_schedule(schedule_id: int, request: Request, db: AsyncSession =
     row = await _my_schedule(db, current_user, schedule_id)
     # what it was, read before the row is gone, recorded once it really is
     gone = SimpleNamespace(id=row.id, name=row.name, hour=row.hour, minute=row.minute,
-                           config=row.config, owner_user_id=row.owner_user_id)
+                           config=row.config, created_at=row.created_at,
+                           owner_user_id=row.owner_user_id)
     await db.delete(row)
     await db.commit()
     await _audit_schedule("scrape_schedule_delete", gone, current_user, request,
