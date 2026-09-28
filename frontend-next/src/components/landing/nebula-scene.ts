@@ -12,7 +12,7 @@ import {
   ShaderMaterial, Timer, WebGLRenderer,
 } from "three";
 
-export type Formation = "nebula" | "city" | "house" | "key" | "infinity";
+export type Formation = "nebula" | "city" | "house" | "key" | "simorgh" | "infinity";
 
 export type NebulaOptions = {
   /** Section elements in page order and the formation each one shows. */
@@ -200,6 +200,70 @@ function key(N: number, rnd: Rand) {
   return p;
 }
 
+/** The Simorgh in flight: a body, a long neck and head, two wings swept back
+ *  from the shoulders and three long tail plumes. The points sit along the
+ *  feather shafts and the outlines, so it reads as a bird and not a cloud —
+ *  and the next formation, the infinity, is where its wings already are. */
+function simorgh(N: number, rnd: Rand) {
+  const p = new Float32Array(N * 3);
+  /** One wing: a swept quarter-ellipse from the shoulder out to the tip. */
+  const wing = (side: number, s: number, across: number): V3 => {
+    const a = s * (Math.PI * 0.55);
+    const span = 6.2, chord = 1.9 - 1.5 * s;
+    return [
+      side * (0.5 + Math.sin(a) * span),
+      1.1 - (1 - Math.cos(a)) * 2.6 - across * chord,
+      -0.6 - across * 0.5 - s * 0.7,
+    ];
+  };
+  for (let i = 0; i < N; i++) {
+    const part = rnd(), u = rnd(), v = rnd();
+    const j = () => (rnd() - 0.5) * 0.12;
+    let q: V3;
+    if (part < 0.52) {
+      // the wings, most of the bird
+      const side = rnd() < 0.5 ? -1 : 1;
+      // bias toward the leading edge, so the wing has a drawn outline
+      const across = v < 0.45 ? 0 : Math.pow(rnd(), 0.6);
+      q = wing(side, u, across);
+      q[1] += 0.4;
+    } else if (part < 0.68) {
+      // the body: a teardrop standing upright
+      const t = u;
+      const r = 0.78 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 0.94 + 0.03)), 0.8);
+      const th = v * Math.PI * 2;
+      q = [Math.cos(th) * r, 1.5 - t * 3.7, Math.sin(th) * r * 0.8];
+    } else if (part < 0.75) {
+      // the neck, leaning forward out of the shoulders
+      const t = u, th = v * Math.PI * 2;
+      const r = 0.3 * (1 - 0.25 * t);
+      q = [-t * t * 0.85 + Math.cos(th) * r, 1.5 + t * 1.5, Math.sin(th) * r];
+    } else if (part < 0.83) {
+      // the head, a small ball ending in a beak that points the way it flies
+      const beak = u > 0.72;
+      const t = beak ? (u - 0.72) / 0.28 : 0;
+      const th = v * Math.PI * 2, r = beak ? 0.2 * (1 - t) : 0.56 * Math.pow(rnd(), 0.35);
+      q = [-0.85 - (beak ? 0.55 + t * 0.85 : 0) + Math.cos(th) * r, 3 - (beak ? 0.12 + t * 0.3 : 0) + Math.sin(th) * r * 0.9, Math.sin(th * 2) * r * 0.5];
+    } else if (part < 0.88) {
+      // the crest, sweeping back over the crown
+      const k = Math.floor(v * 3);
+      q = [-0.6 + u * (1.5 + k * 0.4), 3.5 + u * (1.1 - k * 0.45) + k * 0.1, (k - 1) * 0.16 + j()];
+    } else {
+      // three tail plumes with an eye near the end of each
+      const k = Math.floor(v * 3) - 1;
+      const t = u;
+      const eye = t > 0.72 && t < 0.86 ? 0.28 : 0.1;
+      q = [k * (0.35 + t * 2.2) + (rnd() - 0.5) * eye * 2, -2.2 - t * 3.6, -0.3 + (rnd() - 0.5) * eye];
+    }
+    // scaled to the same reach as the other formations, so the morph into the
+    // infinity of the last section barely has to move the wings
+    p[i * 3] = q[0] * 0.74 + j();
+    p[i * 3 + 1] = q[1] * 0.74 - 0.2 + j();
+    p[i * 3 + 2] = q[2] * 0.74 - 1 + j();
+  }
+  return p;
+}
+
 function infinity(N: number, rnd: Rand) {
   const p = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) {
@@ -263,6 +327,7 @@ export function startNebula(canvas: HTMLCanvasElement, opts: NebulaOptions): Neb
     city: () => city(N, rnd),
     house: () => house(N, rnd),
     key: () => key(N, rnd),
+    simorgh: () => simorgh(N, rnd),
     infinity: () => infinity(N, rnd),
   };
   const cache = new Map<Formation, Float32Array>();

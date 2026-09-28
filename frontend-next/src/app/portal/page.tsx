@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import { Skyline } from "@/components/viz";
+import { SimorghLines } from "@/components/brand/simorgh-lines";
 import { AuthView } from "@/components/portal/auth-view";
 import { BACKEND, getSiteConfig } from "@/lib/site";
 
@@ -94,6 +95,8 @@ export default async function PortalPage() {
         <div aria-hidden className="pointer-events-none absolute inset-0">
           <div className="absolute -top-24 -start-24 size-[520px] rounded-full bg-indigo-600/30 blur-3xl" />
           <div className="absolute -bottom-32 end-0 size-[460px] rounded-full bg-violet-600/25 blur-3xl" />
+          {/* the brand's Simorgh, drawn faintly over the glows */}
+          <SimorghLines className="absolute top-[46%] left-[52%] size-[min(78vh,520px)] -translate-x-1/2 -translate-y-1/2" opacity={0.15} />
         </div>
         <div className="relative max-w-md">
           <h2 className="text-3xl leading-[1.5] font-black">دنبال ملک بعدی‌تان بگردید؛ بقیه‌اش با ما.</h2>

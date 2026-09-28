@@ -13,6 +13,7 @@
 import { useReducedMotion } from "motion/react";
 import { useId, useSyncExternalStore } from "react";
 import { cn } from "cn";
+import { HOUSE_ART, RIBBON_ART, WINGS_ART, type Dot, type Facet } from "./simorgh-geometry";
 
 /* ───────────────────────── geometry helpers ───────────────────────── */
 
@@ -338,6 +339,149 @@ export function TowersMark(props: MarkProps) {
   );
 }
 
+/* ═════════════════ the Simorgh concepts (د, هـ, و) ═════════════════ */
+// Three marks built from `simorgh-geometry.ts`: it models each shape as
+// ribbons and low-poly solids, lights them from the top left and flattens
+// them into flat-filled polygons, so there is nothing here but <path>s with
+// presentation attributes. The «شب نیلی» palette lives in that file's ramps.
+
+/** One group of facets: flat fills, plus the white rim lines along lit edges. */
+function Facets({ art, opacity }: { art: Facet[]; opacity?: number }) {
+  return (
+    <g opacity={opacity}>
+      {art.map((f, i) =>
+        f.fill !== undefined ? (
+          // the hairline stroke closes the seams between neighbouring facets
+          <path key={i} d={f.d} fill={f.fill} stroke={f.fill} strokeWidth={0.3} strokeLinejoin="round" />
+        ) : (
+          <path key={i} d={f.d} fill="none" stroke="#ffffff" strokeOpacity={f.line} strokeWidth={0.55} strokeLinejoin="round" strokeLinecap="round" />
+        ),
+      )}
+    </g>
+  );
+}
+
+function Dots({ dots }: { dots: Dot[] }) {
+  return (
+    <>
+      {dots.map((d, i) => (
+        <ellipse key={i} cx={d.cx} cy={d.cy} rx={d.rx} ry={d.ry} transform={`rotate(${d.rot} ${d.cx} ${d.cy})`} fill={d.fill} />
+      ))}
+    </>
+  );
+}
+
+/** A light travelling along `d`, as one short dash chasing round the path.
+ *  SMIL, so it needs no JavaScript and stops with the rest under
+ *  prefers-reduced-motion (the caller does not render it at all then). */
+function RunningLight({ d, length, dur, width = 2.4, colour = "#a5f3fc" }: { d: string; length: number; dur: string; width?: number; colour?: string }) {
+  const dash = Math.max(6, length * 0.07);
+  return (
+    <path
+      d={d}
+      fill="none"
+      stroke={colour}
+      strokeOpacity={0.9}
+      strokeWidth={width}
+      strokeLinecap="round"
+      strokeDasharray={`${r2(dash)} ${r2(length)}`}
+    >
+      <animate attributeName="stroke-dashoffset" values={`${r2(length + dash)};0`} dur={dur} repeatCount="indefinite" />
+    </path>
+  );
+}
+
+/* ───────── (د) wings that sweep round into an ∞ ───────── */
+
+const W = WINGS_ART;
+
+export function SimorghMark(props: MarkProps) {
+  const play = useAnimate(props.animated);
+  const small = (props.size ?? 32) < 24;
+  // the wings beat around the body, a slow breath apart from each other
+  const beat = (from: number) => (
+    <animateTransform
+      attributeName="transform"
+      type="rotate"
+      values={`0 ${W.pivot[0]} ${W.pivot[1]};${from} ${W.pivot[0]} ${W.pivot[1]};0 ${W.pivot[0]} ${W.pivot[1]}`}
+      dur="4.6s"
+      calcMode="spline"
+      keyTimes="0;0.45;1"
+      keySplines="0.4 0 0.2 1;0.4 0 0.2 1"
+      repeatCount="indefinite"
+    />
+  );
+  return (
+    <Svg {...props}>
+      <g>
+        {play && beat(-6.5)}
+        <Facets art={W.wingLeft} />
+      </g>
+      <g>
+        {play && beat(6.5)}
+        <Facets art={W.wingRight} />
+      </g>
+      <Facets art={W.tail} />
+      <Facets art={W.bird} />
+      {!small && <Dots dots={W.dots} />}
+      {play && <RunningLight d={W.spine} length={W.spineLength} dur="5.2s" />}
+    </Svg>
+  );
+}
+
+/* ───────── (هـ) the ∞ ribbon that reads as an S ───────── */
+
+const R = RIBBON_ART;
+
+export function RibbonSimorghMark(props: MarkProps) {
+  const play = useAnimate(props.animated);
+  const small = (props.size ?? 32) < 24;
+  return (
+    <Svg {...props}>
+      <Facets art={R.band} />
+      <Facets art={R.tail} />
+      <Facets art={R.bird} />
+      {!small && <Dots dots={R.dots} />}
+      {play && <RunningLight d={R.spine} length={R.spineLength} dur="4.8s" width={2.8} />}
+    </Svg>
+  );
+}
+
+/* ───────── (و) wings as the roof over an isometric house ───────── */
+
+const H = HOUSE_ART;
+
+export function RoofSimorghMark(props: MarkProps) {
+  const play = useAnimate(props.animated);
+  // at favicon sizes the windows and the eye only muddy the silhouette
+  const small = (props.size ?? 32) < 28;
+  return (
+    <Svg {...props}>
+      <Facets art={H.house} />
+      {!small && <Facets art={H.openings} />}
+      <Facets art={H.tail} />
+      {/* the feathers lift a little, as if the wings were settling */}
+      <g>
+        {play && (
+          <animateTransform
+            attributeName="transform"
+            type="translate"
+            values="0 0;0 -1.1;0 0"
+            dur="4.4s"
+            calcMode="spline"
+            keyTimes="0;0.5;1"
+            keySplines="0.4 0 0.2 1;0.4 0 0.2 1"
+            repeatCount="indefinite"
+          />
+        )}
+        <Facets art={H.bird} />
+      </g>
+      {!small && <Dots dots={H.dots} />}
+      {play && <RunningLight d={H.infinity} length={H.infinityLength} dur="4.2s" width={1.8} colour="#e0f2fe" />}
+    </Svg>
+  );
+}
+
 /* ───────────────────────── lockups ───────────────────────── */
 
 export type LockupProps = MarkProps & {
@@ -368,11 +512,17 @@ function LockupFrame({
 export const HouseLockup = (p: LockupProps) => <LockupFrame Mark={HouseMark} {...p} />;
 export const RibbonLockup = (p: LockupProps) => <LockupFrame Mark={RibbonMark} {...p} />;
 export const TowersLockup = (p: LockupProps) => <LockupFrame Mark={TowersMark} {...p} />;
+export const SimorghLockup = (p: LockupProps) => <LockupFrame Mark={SimorghMark} {...p} />;
+export const RibbonSimorghLockup = (p: LockupProps) => <LockupFrame Mark={RibbonSimorghMark} {...p} />;
+export const RoofSimorghLockup = (p: LockupProps) => <LockupFrame Mark={RoofSimorghMark} {...p} />;
 
 /** Every concept, for the gallery and for the switch in logo.tsx. */
 export const CONCEPTS = {
   house: { Mark: HouseMark, Lockup: HouseLockup },
   ribbon: { Mark: RibbonMark, Lockup: RibbonLockup },
   towers: { Mark: TowersMark, Lockup: TowersLockup },
+  simorgh: { Mark: SimorghMark, Lockup: SimorghLockup },
+  ribbonSimorgh: { Mark: RibbonSimorghMark, Lockup: RibbonSimorghLockup },
+  roofSimorgh: { Mark: RoofSimorghMark, Lockup: RoofSimorghLockup },
 } as const;
 export type ConceptKey = keyof typeof CONCEPTS;

@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Reveal, Tilt } from "@/components/viz";
+import { PageLoader } from "@/components/brand/infinity-loader";
 import {
   Empty, ErrorNote, Field, ListSkeleton, NativeSelect, Section, ToneBadge, useConfirm,
 } from "@/components/panel/kit";
@@ -446,13 +447,9 @@ export function PortalDashboard({ site }: { site: { brandName: string; brandName
     }
   }
 
-  if (session.isPending || session.isError || me.isPending) {
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-        <ListSkeleton rows={6} />
-      </div>
-    );
-  }
+  // Nothing at all is known yet (not even whether this visitor is signed in),
+  // so this is a page-level wait, not a list that is filling in.
+  if (session.isPending || session.isError || me.isPending) return <PageLoader />;
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 sm:px-6">

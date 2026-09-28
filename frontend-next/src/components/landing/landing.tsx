@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { cn } from "cn";
 import { Logo, LogoMark } from "@/components/brand/logo";
+import { SimorghLines } from "@/components/brand/simorgh-lines";
 import { IsoBadge } from "@/components/panel/kit";
 import { CountUp, Reveal, Tilt } from "@/components/viz";
 import { fill, LANDING } from "@/content/landing";
@@ -37,7 +38,9 @@ export type LandingStats = { total_properties: number; total_leads: number; phon
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-// Which particle formation each section shows as it scrolls into view.
+// Which particle formation each section shows as it scrolls into view. The
+// last two are the brand's own motifs: the Simorgh, then the infinity its
+// wings already trace.
 const ANCHORS: NebulaAnchor[] = [
   { id: "top", formation: "nebula" },
   { id: "overview", formation: "nebula" },
@@ -48,6 +51,7 @@ const ANCHORS: NebulaAnchor[] = [
   { id: "ownership", formation: "infinity" },
   { id: "security", formation: "key" },
   { id: "tech", formation: "key" },
+  { id: "simorgh", formation: "simorgh" },
   { id: "contact", formation: "infinity" },
 ];
 
@@ -73,6 +77,7 @@ export function Landing({
         <Ownership brand={brand} />
         <Security />
         <Tech github={site.github} />
+        <SimorghBand />
         <Contact site={site} />
       </main>
       <Footer brand={brand} tagline={site.tagline} portalOpen={portalOpen} year={year} github={site.github} />
@@ -489,6 +494,25 @@ function Shield3D() {
       <path d="M72 104 L93 125 L132 84" fill="none" stroke="#22d3ee" strokeWidth={12} strokeLinecap="round" strokeLinejoin="round" />
       <path d="M72 101 L93 122 L132 81" fill="none" stroke="#ecfeff" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" />
     </motion.svg>
+  );
+}
+
+/* ───────────────────────── the brand's own band ───────────────────────── */
+
+/** A quiet band between security and contact: the line-art Simorgh over the
+ *  infinity its wings trace. It is also where the particle scene takes the
+ *  bird's shape before it settles into the ∞ of the last section. */
+function SimorghBand() {
+  return (
+    <div id="simorgh" className="relative mx-auto flex max-w-7xl scroll-mt-20 justify-center px-4 py-[18vh] sm:px-[6vw]">
+      <Reveal>
+        {/* a deeper line on the light page, where indigo-400 all but vanishes */}
+        <SimorghLines
+          className="h-[min(46vw,320px)] w-[min(46vw,320px)] [--simorgh-glow:#0891b2] [--simorgh-line:#4f46e5] dark:[--simorgh-glow:#22d3ee] dark:[--simorgh-line:#818cf8]"
+          opacity={0.3}
+        />
+      </Reveal>
+    </div>
   );
 }
 

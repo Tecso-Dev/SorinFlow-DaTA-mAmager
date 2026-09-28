@@ -23,6 +23,7 @@ import { can, displayName, ROLE_LABEL, SESSION_KEY, useSession, type User } from
 import type { SiteConfig } from "@/lib/site";
 import { toast } from "@/components/toaster";
 import { LogoMark } from "@/components/brand/logo";
+import { InfinityLoader } from "@/components/brand/infinity-loader";
 import { InstallMenuItem } from "@/components/pwa/install-menu-item";
 import { DivarOtpPopup } from "./divar-otp-popup";
 import { ConfirmProvider, RingDialog } from "./kit";
@@ -251,12 +252,11 @@ function ShellSkeleton() {
           ))}
         </div>
       </aside>
-      <main className="flex-1 p-8">
-        <Skeleton className="h-8 w-64" />
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
-          {Array.from({ length: 6 }, (_, i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
+      <main className="flex flex-1 flex-col p-8">
+        {/* the shell knows nothing yet — not even who is signed in — so the
+            page's own loading mark stands in for the whole of it */}
+        <div className="grid flex-1 place-items-center">
+          <InfinityLoader size={124} />
         </div>
       </main>
     </div>
