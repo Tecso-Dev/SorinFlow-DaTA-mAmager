@@ -10,9 +10,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Field, RingDialog } from "@/components/panel/kit";
+import { Lottie } from "@/components/ui/lottie";
 import { toast } from "@/components/toaster";
 import { useNonce } from "@/components/nonce";
 import { api, ApiError } from "@/lib/api";
+import shieldLottie from "@/lotties/shield.json";
+import successLottie from "@/lotties/success.json";
 
 type SetupResponse = { secret: string; qr_uri: string; enabled: boolean };
 
@@ -22,6 +25,7 @@ function SetupPanel({ onEnabled }: { onEnabled: () => void }) {
   const [qrSrc, setQrSrc] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const [justEnabled, setJustEnabled] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +55,10 @@ function SetupPanel({ onEnabled }: { onEnabled: () => void }) {
     try {
       await api("/users/me/totp/enable", { method: "POST", json: { code } });
       toast.success("احراز هویت دو مرحله‌ای فعال شد");
-      onEnabled();
+      setJustEnabled(true);
+      // A short beat on the success mark before the dialog closes — the
+      // toast alone came and went too fast to register as a celebration.
+      setTimeout(onEnabled, 900);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "کد اشتباه است");
     } finally {
@@ -59,7 +66,21 @@ function SetupPanel({ onEnabled }: { onEnabled: () => void }) {
     }
   }
 
-  if (!data) return <div className="grid h-52 place-items-center"><Loader2 className="size-6 animate-spin text-muted-foreground" /></div>;
+  if (justEnabled) {
+    return (
+      <div className="grid h-52 place-items-center">
+        <Lottie animationData={successLottie} loop={false} className="max-w-[120px]" label="فعال شد" />
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="grid h-52 place-items-center">
+        <Lottie animationData={shieldLottie} className="max-w-[110px]" label="در حال آماده‌سازی" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center gap-4">
