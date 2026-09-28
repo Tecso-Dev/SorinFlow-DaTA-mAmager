@@ -487,3 +487,88 @@ class TestTheScraperNotesItsClicks:
             await a.login_with_phone(B)
         assert d10(B) in seen["login"] and d10(B) not in seen["contact"]
 
+
+# ── on the phone's card, through the real app (Postgres) ─────────────────────
+
+@pytest.fixture(scope="module")
+def client():
+    import app.database as dbm
+    from app.config import get_settings
+    from _fake_redis import fake_server, redis_factory
+    if not str(dbm.engine.url).startswith("postgresql"):
+        pytest.skip("needs Postgres — see test_auth_roles.py", allow_module_level=True)
+    cfg = get_settings()
+    saved = (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler)
+    cfg.environment, cfg.api_key = "test", ""
+    cfg.cookies_path = "/tmp/sorinflow-test-cookies"
+    cfg.scrape_scheduler = False
+    get_redis = redis_factory(fake_server())
+    import app.services.verification as v
+    saved_redis = (dbm.get_redis, v.get_redis, otp_store.get_redis)
+    dbm.get_redis = v.get_redis = otp_store.get_redis = get_redis
+    from fastapi.testclient import TestClient
+    import app.main as m
+    try:
+        with TestClient(m.app) as c:
+            yield c
+    finally:
+        dbm.get_redis, v.get_redis, otp_store.get_redis = saved_redis
+        (cfg.environment, cfg.api_key, cfg.cookies_path, cfg.scrape_scheduler) = saved
+
+
+def _seed_user(username):
+    import asyncio
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from app.models.user import User
+    from app.auth.jwt import get_password_hash
+
+    async def _go():
+        eng = create_async_engine(os.environ["DATABASE_URL"])
+        maker = async_sessionmaker(eng, expire_on_commit=False)
+        try:
+            async with maker() as s:
+                s.add(User(username=username, full_name=f"route {username}", role="admin",
+                           permissions=["forwarder", "divar_auth"],
+                           hashed_password=get_password_hash("pw123456"), is_active=True,
+                           divar_phone="09120000071"))
+                await s.commit()
+        finally:
+            await eng.dispose()
+    asyncio.run(_go())
+
+
+class TestThePhoneCardSaysSo:
+
+    def test_a_rerouted_code_shows_on_the_card_and_in_the_events(self, client, monkeypatch):
+        import asyncio
+        # Back out the autouse wiring: here the app's own fake Redis (from
+        # `client`) is otp_store's, and the SMS log must really be written,
+        # because the card and the events are read back from it.
+        monkeypatch.undo()
+        _seed_user("route_owner")
+        r = client.post("/api/users/token", data={"username": "route_owner", "password": "pw123456"})
+        assert r.status_code == 200, r.text
+        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        sim1, sim2 = "09120000071", "09120000072"
+        dev = client.post("/api/forwarder/devices", headers=h,
+                          json={"label": "dual", "sim_phone": sim1, "sim_phone2": sim2}).json()
+        assert dev.get("device_id"), dev
+
+        asyncio.run(otp_store.note_click(sim2, "contact", opens=True, at_ms=now_ms() - 3000))
+        body = json.dumps(_contact(sim1, code="778899")).encode()
+        sig = hmac.new(dev["secret"].encode(), body, hashlib.sha256).hexdigest()
+        r = client.post("/api/scraper/otp-inbound", data=body,
+                        headers={"X-Forwarder-Id": dev["device_id"], "X-Signature": sig,
+                                 "Content-Type": "application/json"})
+        assert r.status_code == 200 and r.json()["reason"] == "parked_early", r.text
+
+        card = next(d for d in client.get("/api/forwarder/devices", headers=h).json()["devices"]
+                    if d["device_id"] == dev["device_id"])
+        m = card["mislabelled"]
+        assert m and m["count"] == 1 and m["rerouted"] == 1, card
+        assert m["last_labeled"] == d10(sim1) and m["last_account"] == d10(sim2)
+
+        ev = client.get(f"/api/forwarder/devices/{dev['id']}/events", headers=h).json()["events"]
+        assert ev[0]["rerouted"] is True and ev[0]["labeled"] == d10(sim1)
+        assert ev[0]["account"] == d10(sim2) and ev[0]["code"] == "****99"
+        assert "به " + sim2 + " داده شد" in ev[0]["message"], ev[0]["message"]

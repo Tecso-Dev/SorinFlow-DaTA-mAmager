@@ -1382,6 +1382,13 @@ async def _note_refused(request: Request, db, body: Optional["OtpInbound"], stat
         logger.warning(f"[otp-inbound] could not record a refusal: {e}")
 
 
+def _as_phone(d10: Optional[str]) -> str:
+    """9120000001 -> 09120000001: the last ten digits the store keys on, read
+    back the way a person writes a mobile number."""
+    d = d10 or ""
+    return ("0" + d) if len(d) == 10 and d.startswith("9") else (d or "؟")
+
+
 def _mask_code(code: Optional[str]) -> str:
     c = code or ""
     return ("*" * max(len(c) - 2, 0)) + c[-2:] if c else ""
@@ -1550,14 +1557,15 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
 
     # «با برچسب A رسید — به B داده شد» is on the record, because it is the
     # visible sign of a phone that labels its SIMs wrongly (issue #37).
-    head = (f"کد {kind or '?'} با برچسب {label or '؟'} رسید — به {account} داده شد، "
-            "چون همین شماره الان کلیک شده بود — " if rerouted
-            else f"کد {kind or '?'} از {label or '؟'} — ")
+    head = (f"کد {kind or '?'} با برچسب {_as_phone(label)} رسید — به {_as_phone(account)} "
+            "داده شد، چون همین شماره الان کلیک شده بود — " if rerouted
+            else f"کد {kind or '?'} از {_as_phone(label)} — ")
     await sms_log.record(
         sms_log.INBOUND,
         (head
          + ("به اسکرپر داده شد" if matched
             else "زودتر از درخواست رسید — نگه داشته شد" if reason == "parked_early"
+            else "برای فرم ورود نگه داشته شد" if reason == "parked_for_login"
             else "همین پیامک قبلاً رسیده بود — نسخهٔ دوم کنار گذاشته شد" if reason == "duplicate"
             else f"استفاده نشد ({reason})")),
         level=("warning" if rerouted
