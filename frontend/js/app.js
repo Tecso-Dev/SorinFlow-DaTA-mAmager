@@ -4073,13 +4073,62 @@ function _scrapeFormConfig() {
 }
 
 // ═══ Scheduled scrapes ═════════════════════════════════════════
+
+// How far back «N روز پیش» may reach — the server's MAX_POSTED_DAYS_AGO
+// (app/services/scrape_scheduler.py), which is what actually enforces it.
+const SCHEDULE_MAX_DAYS_AGO = 30;
+
+/** «امروز», «دیروز», «۳ روز پیش» — a schedule's publish date in words. */
+function _postedDaysWords(n) {
+    return n === 0 ? 'امروز' : n === 1 ? 'دیروز' : `${formatNumber(n)} روز پیش`;
+}
+
+/** Which day's listings a schedule goes for, asked in the words people use.
+ *  The answer is days before the day it runs (Tehran): 0 is «امروز», 1 is
+ *  «دیروز». It is stored like that and worked out again at every firing —
+ *  a fixed date would search the same old day every morning.
+ *  Resolves undefined if they cancel, null for «no date», else the number. */
+async function askPostedDaysAgo(current = null) {
+    const preset = current === null || current === undefined ? 'none' : current <= 1 ? String(current) : 'n';
+    const pick = await askText({
+        icon: 'bi-calendar-event', title: 'تاریخ انتشار آگهی‌ها',
+        body: 'هر بار که این زمان‌بندی اجرا می‌شود، روز را از نو حساب می‌کند: «دیروز» یعنی دیروزِ همان روز اجرا (به وقت تهران)، نه یک تاریخ ثابت.',
+        field: {
+            label: 'آگهی‌های کدام روز؟', value: preset,
+            options: [['none', 'بدون تاریخ — آگهی‌های ۲۴ ساعت اخیر'], ['0', 'امروز'], ['1', 'دیروز'], ['n', 'چند روز پیش…']],
+            hint: 'با انتخاب یک روز، «تعداد آگهی» خالی یعنی همهٔ آگهی‌های آن روز.',
+        },
+    });
+    if (pick === null) return undefined;
+    if (pick === 'none') return null;
+    if (pick !== 'n') return Number(pick);
+    const n = await askText({
+        icon: 'bi-calendar-event', title: 'چند روز پیش؟',
+        body: 'آگهی‌های منتشرشده در روزی که این‌قدر روز پیش از روز اجراست.',
+        field: { label: 'تعداد روز', value: current > 1 ? String(current) : '2', placeholder: '3', dir: 'ltr', inputmode: 'numeric',
+                 validate: v => { const d = parseInt(_digitsOnly(v), 10);
+                                  return d >= 2 && d <= SCHEDULE_MAX_DAYS_AGO ? '' : `عددی از ۲ تا ${formatNumber(SCHEDULE_MAX_DAYS_AGO)} بنویسید`; } },
+    });
+    return n === null ? undefined : parseInt(_digitsOnly(n), 10);
+}
+
 async function saveAsSchedule() {
     const cfg = _scrapeFormConfig();
     if (!cfg.city || !cfg.category) { showToast('توجه', 'اول شهر و دسته‌بندی را انتخاب کنید', 'warning'); return; }
+    const daysAgo = await askPostedDaysAgo(null);
+    if (daysAgo === undefined) return;
+    if (daysAgo !== null) {
+        cfg.posted_days_ago = daysAgo;
+        // As on the manual form, an empty count is the whole day. The 50 that
+        // _scrapeFormConfig falls back to would cut a busy day short.
+        if (!(parseInt(document.getElementById('scraper-pages')?.value, 10) > 0)) delete cfg.max_items;
+    }
+    const day = daysAgo === null ? '' : _postedDaysWords(daysAgo);
     const when = await askText({
         icon: 'bi-alarm', title: 'اجرای روزانه',
         body: `هر روز <b>${esc(cityName(cfg.city))} / ${esc(categoryName(cfg.category))}</b>${cfg.max_items ? ` تا ${formatNumber(cfg.max_items)} آگهی` : ''} با همین فیلترها اجرا می‌شود — با حساب‌های دیوار خودتان.`,
-        note: cfg.max_age_hours ? '' : 'چون «حداکثر سن آگهی» خالی است، فقط آگهی‌های ۲۴ ساعت اخیر گرفته می‌شود.',
+        note: day ? `آگهی‌های «${esc(day)}»: روز هر بار از نو، به وقت تهران، حساب می‌شود.`
+                  : 'بدون تاریخ انتشار، فقط آگهی‌های ۲۴ ساعت اخیر گرفته می‌شود.',
         field: { label: 'ساعت اجرا (به وقت تهران)', value: '08:00', placeholder: '08:00', dir: 'ltr',
                  validate: v => /^([01]?\d|2[0-3]):[0-5]\d$/.test(v.trim()) ? '' : 'ساعت را مثل 08:00 بنویسید' },
     });
@@ -4092,7 +4141,7 @@ async function saveAsSchedule() {
     if (name === null) return;
     try {
         await apiCall('/scraper/schedules', { method: 'POST', body: JSON.stringify({ name: name.trim(), config: cfg, hour: h, minute: m, enabled: true }) });
-        showToast('ذخیره شد', `هر روز ساعت ${when.trim()} اجرا می‌شود`, 'success');
+        showToast('ذخیره شد', `هر روز ساعت ${when.trim()} اجرا می‌شود${day ? ` — آگهی‌های ${day}` : ''}`, 'success');
         loadSchedules();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
@@ -4123,9 +4172,14 @@ async function loadSchedules() {
         const fa = iso => iso ? `${new Date(iso).toLocaleDateString('fa-IR', tz)} ${new Date(iso).toLocaleTimeString('fa-IR', { ...tz, hour: '2-digit', minute: '2-digit' })}` : '—';
         tb.innerHTML = rows.map(s => {
             const c = s.config || {};
+            // The publish date is «دیروز» and the like, never a fixed day —
+            // and a schedule that was saved with a fixed one says it was converted.
             const what = `${esc(s.city_name || c.city)} / ${esc(s.category_name || c.category)}` +
                 (c.max_items ? ` · ${formatNumber(c.max_items)} آگهی` : '') +
-                (c.max_age_hours ? ` · ${formatNumber(c.max_age_hours)} ساعت اخیر` : '');
+                (s.posted_label ? ` · انتشار: ${esc(s.posted_label)}`
+                    : c.max_age_hours ? ` · ${formatNumber(c.max_age_hours)} ساعت اخیر` : '') +
+                (s.date_note ? `<div class="small text-info">${esc(s.date_note)}</div>` : '');
+            const ago = Number.isInteger(s.posted_days_ago) ? s.posted_days_ago : 'null';
             const lr = s.last_result || {};
             const cls = { started: 'text-success', failed: 'text-danger', skipped: 'text-warning' }[lr.status] || 'text-muted';
             const last = s.last_run_at ? `<div class="small ${cls}">${esc(lr.detail || lr.status || '')}</div><div class="small text-muted">${fa(s.last_run_at)}</div>` : '<span class="text-muted small">هنوز اجرا نشده</span>';
@@ -4139,6 +4193,7 @@ async function loadSchedules() {
                 <td class="text-nowrap">
                     <button class="btn btn-sm btn-outline-primary" onclick="runScheduleNow(${s.id})" title="همین حالا اجرا کن"><i class="bi bi-play-fill"></i></button>
                     <button class="btn btn-sm btn-outline-secondary" onclick="editScheduleTime(${s.id}, '${hh}:${mm}')" title="تغییر ساعت"><i class="bi bi-clock"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="editScheduleDate(${s.id}, ${ago})" title="تغییر تاریخ انتشار"><i class="bi bi-calendar-event"></i></button>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteSchedule(${s.id})" title="حذف"><i class="bi bi-trash"></i></button>
                 </td></tr>`;
         }).join('');
@@ -4163,6 +4218,17 @@ async function editScheduleTime(id, current) {
     const [h, m] = when.trim().split(':').map(Number);
     try {
         await apiCall(`/scraper/schedules/${id}`, { method: 'PATCH', body: JSON.stringify({ hour: h, minute: m }) });
+        loadSchedules();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// eslint-disable-next-line no-unused-vars -- called from the card's own onclick
+async function editScheduleDate(id, current) {
+    const days = await askPostedDaysAgo(current);
+    if (days === undefined) return;
+    try {
+        await apiCall(`/scraper/schedules/${id}`, { method: 'PATCH', body: JSON.stringify({ posted_days_ago: days }) });
+        showToast('ذخیره شد', days === null ? 'بدون تاریخ — آگهی‌های ۲۴ ساعت اخیر' : `آگهی‌های ${_postedDaysWords(days)}`, 'success');
         loadSchedules();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
