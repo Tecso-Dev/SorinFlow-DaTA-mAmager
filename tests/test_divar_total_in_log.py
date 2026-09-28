@@ -85,12 +85,19 @@ class TestTheDenominatorDecisionWasReversedDeliberately:
         i = SCRAPER.index("job.total_items = (job.divar_count")
         assert "else len(all_listings)" in SCRAPER[i:i + 200]
 
-    def test_the_two_failure_modes_are_both_handled(self):
+    async def test_the_two_failure_modes_are_both_handled(self, monkeypatch):
         from app.models.scraping_job import ScrapingJob
         j = ScrapingJob(); j.total_items, j.scraped_items = 113, 119
         assert j.progress == 100.0, "a pool larger than the count must clamp"
-        i = SCRAPER.index('job.status = "completed"')
-        assert "job.scraped_items = job.total_items" in SCRAPER[i:i + 700], \
+        # A pool smaller than the count, on a run that reached the end of
+        # Divar's list: filled on completion. Through the whole run, with
+        # Divar scripted (tests/_scripted_run.py) — 30 candidates, 113 said.
+        from _scripted_run import page, scripted_run, tokens
+        run = scripted_run(monkeypatch)
+        job, _, _ = await run([page(1, tokens("dt", 30), next_page=False, count=113)],
+                              category="rent-apartment")
+        assert job.status == "completed" and job.total_items == 113
+        assert job.scraped_items == 113 and job.progress == 100.0, \
             "a pool smaller than the count must be filled on completion"
 
 

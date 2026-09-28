@@ -90,23 +90,43 @@ class TestARefusalIsNoticed:
 
 
 class TestABlockedRunFails:
-    """The heart of the complaint: a run Divar cut off reported «تکمیل شده»."""
+    """The heart of the complaint: a run Divar cut off reported «تکمیل شده».
 
-    def test_a_refused_collection_fails_the_job(self):
-        src = _run_src()
-        i = src.index('if _stop in ("refused", "partly-refused")')
-        block = src[i:i + 1600]
-        assert 'job.status = "failed"' in block, \
-            "a run Divar refused still completes successfully"
-        assert "job.finish_reason" in block
-        assert "job_log.CHALLENGE" in block
+    Run through start_scraping_job with a scripted browser walk
+    (tests/_scripted_run.py): the search API answers with nothing, so the
+    run falls back to the walk and ends however the walk ended."""
 
-    def test_a_collection_error_fails_the_job(self):
-        src = _run_src()
-        i = src.index('elif _stop == "error"')
-        block = src[i:i + 1200]
-        assert 'job.status = "failed"' in block
-        assert "job_log.ERROR" in block
+    @pytest.fixture
+    def run(self, monkeypatch):
+        from _scripted_run import scripted_run
+        return scripted_run(monkeypatch)
+
+    async def test_a_refused_collection_fails_the_job(self, run):
+        from _scripted_run import listings, page, walk
+        from app.services import job_log
+        job, log, _ = await run([page(1, [], next_page=False)], category="rent-apartment",
+                                browser=walk(listings("rf", 5), ("refused", {"403": 3}), calls=[]))
+        assert job.status == "failed", "a run Divar refused still completes successfully"
+        assert "HTTP 403×3" in job.finish_reason and job.error_message == job.finish_reason
+        assert [e for e in log.stage(job_log.CHALLENGE) if e["level"] == "error"]
+
+    async def test_a_collection_error_with_nothing_collected_fails_the_job(self, run):
+        from _scripted_run import page, walk
+        from app.services import job_log
+        job, log, _ = await run([page(1, [], next_page=False)], category="rent-apartment",
+                                browser=walk([], ("error", "TimeoutError: page crashed"), calls=[]))
+        assert job.status == "failed" and "TimeoutError" in job.finish_reason
+        assert log.stage(job_log.ERROR)
+
+    async def test_a_collection_error_with_listings_in_hand_walks_them_and_ends_partial(self, run):
+        """What was gathered before the error is walked — and the run says
+        it is «ناقص», not «تکمیل شده» and not a failure that threw them away (#28)."""
+        from _scripted_run import listings, page, walk
+        job, _, _ = await run([page(1, [], next_page=False)], category="rent-apartment",
+                              browser=walk(listings("re", 7), ("error", "TimeoutError: page crashed"),
+                                           calls=[]))
+        assert job.status == "partial" and job.updated_items == 7
+        assert "TimeoutError" in job.finish_reason
 
     def test_the_refusal_message_names_the_status_codes(self):
         """«یک خطایی رخ داد» is not a diagnosis. The message has to carry what
