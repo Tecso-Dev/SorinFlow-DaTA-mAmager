@@ -10,12 +10,14 @@ import { Info, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Empty, ErrorNote, ListSkeleton, NativeSelect, Section, ToneBadge, useConfirm } from "@/components/panel/kit";
+import { Lottie } from "@/components/ui/lottie";
 import { toast } from "@/components/toaster";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
 import type { RegistryNumber, RegistryResponse } from "./types";
 
 function when(iso: string | null) {
@@ -111,7 +113,7 @@ export function RegistryCard() {
       ) : registry.isError ? (
         <ErrorNote error={registry.error} />
       ) : !rows.length ? (
-        <Empty icon={ShieldCheck}>هنوز شمارهٔ دیواری ثبت نشده است.</Empty>
+        <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[110px]" />}>هنوز شمارهٔ دیواری ثبت نشده است.</Empty>
       ) : (
         <div className="-mx-5 overflow-x-auto px-5">
           <Table className="text-[13px]">

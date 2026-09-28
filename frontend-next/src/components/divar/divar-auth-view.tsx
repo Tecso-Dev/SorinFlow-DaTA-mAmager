@@ -2,6 +2,8 @@
 
 import { KeyRound } from "lucide-react";
 import { PageHeader } from "@/components/panel/kit";
+import { IsoPhone } from "@/components/panel/motion3d";
+import { Reveal } from "@/components/viz";
 import { useSession } from "@/lib/session";
 import { ImportCard } from "./import-card";
 import { LoginCard } from "./login-card";
@@ -23,12 +25,17 @@ export function DivarAuthView() {
         title="احراز هویت دیوار"
         hint="ورود، نشست‌های ذخیره‌شده و مالکیت شماره‌های دیوار"
       />
-      <div className="grid gap-5 lg:grid-cols-2">
-        <LoginCard />
-        <ImportCard />
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_180px]">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <LoginCard />
+          <ImportCard />
+        </div>
+        <Reveal delay={0.1} className="hidden lg:block">
+          <IsoPhone />
+        </Reveal>
       </div>
-      <SavedSessionsCard />
-      {isRoot && <RegistryCard />}
+      <Reveal delay={0.05}><SavedSessionsCard /></Reveal>
+      {isRoot && <Reveal delay={0.1}><RegistryCard /></Reveal>}
     </div>
   );
 }
