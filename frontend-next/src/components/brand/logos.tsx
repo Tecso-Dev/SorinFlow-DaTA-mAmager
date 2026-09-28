@@ -495,13 +495,16 @@ export type LockupProps = MarkProps & {
   taglineClassName?: string;
 };
 
-/* ═════════════════ the minimal marks (ز, ح, ط) ═════════════════ */
-// The six concepts above are solids: facets, three light values, an outline.
-// These three are the opposite and deliberately so — one stroke weight, no
-// fill, no shading, one gradient along the whole line. Each still carries both
-// ideas, the Simorgh and the infinity, but as a single gesture rather than as
-// a drawing of a bird. That is what survives at 16 px, on a dark tab strip and
-// on a white print-out alike.
+/* ═════════════════ the infinity marks (ز, ح, ط, ی) ═════════════════ */
+// The six concepts above are solids: facets, three light values, an outline,
+// and in the last three a whole bird drawn out. None of them were kept, and
+// the mark is now the infinity on its own — nothing else in it to recognise.
+//
+// Four treatments of the same sign, so the choice is between ways of drawing
+// it rather than between different drawings. One stroke weight each (the
+// ribbon varies on purpose), no fill, no shading, one brand gradient along
+// the whole figure. The Simorgh stays in the site's motifs; it is only the
+// logo that is the sign alone.
 
 const STROKE = 5;
 
@@ -516,81 +519,105 @@ function Ramp({ id }: { id: string }) {
   );
 }
 
-// (ز) One unbroken lemniscate whose crossing sits low, so the two loops read
-// as wings lifting; a short neck and beak rise out of the crossing.
-const Z_LOOP =
-  "M32 37 C21.5 48 6 44.5 6 33.5 C6 23.5 23 24.5 32 37 C41 24.5 58 23.5 58 33.5 C58 44.5 42.5 48 32 37";
-const Z_HEAD = "M32 37 C33 30.5 33.4 28 35.6 25.4 L29.2 23.6";
+// (ز) One unbroken stroke, even weight, round caps: the sign written in a
+// single movement, and the only one of the four you could draw by hand.
+const INF_LINE =
+  "M32 32 C23 19.5 7 19.5 7 32 C7 44.5 23 44.5 32 32 C41 19.5 57 19.5 57 32 C57 44.5 41 44.5 32 32";
 
-export function LineSimorghMark(props: MarkProps) {
+export function InfinityLineMark(props: MarkProps) {
   const id = useGradientIds(["ramp"] as const);
   const play = useAnimate(props.animated);
   return (
     <Svg {...props}>
       <defs><Ramp id={id.ramp} /></defs>
-      <g fill="none" stroke={`url(#${id.ramp})`} strokeWidth={STROKE} strokeLinecap="round" strokeLinejoin="round">
-        <path d={Z_LOOP} />
-        <path d={Z_HEAD} />
-      </g>
-      {play && <RunningLight d={Z_LOOP} length={150} dur="4.6s" width={2.2} />}
+      <path d={INF_LINE} fill="none" stroke={`url(#${id.ramp})`} strokeWidth={STROKE} strokeLinecap="round" strokeLinejoin="round" />
+      {play && <RunningLight d={INF_LINE} length={150} dur="4.6s" width={2.2} />}
     </Svg>
   );
 }
 
-// (ح) The same lemniscate, cut in two: each half is a wing with an open tip,
-// and the gap between them is where the body would be. Nothing is drawn there.
-const H_LEFT = "M30.5 34.5 C20 45 6.5 41.5 6.5 31.5 C6.5 22.5 20.5 22 28 30";
-const H_RIGHT = "M33.5 34.5 C44 45 57.5 41.5 57.5 31.5 C57.5 22.5 43.5 22 36 30";
+// (ح) The same figure cut at the crossing, so the two halves only lean toward
+// each other. What is missing is what you notice.
+const INF_LEFT = "M30 34.5 C20 45 6.5 41.5 6.5 31.5 C6.5 22.5 20.5 22 28 30";
+const INF_RIGHT = "M34 34.5 C44 45 57.5 41.5 57.5 31.5 C57.5 22.5 43.5 22 36 30";
 
-export function WingsMark(props: MarkProps) {
+export function InfinityOpenMark(props: MarkProps) {
   const id = useGradientIds(["ramp"] as const);
   const play = useAnimate(props.animated);
   return (
     <Svg {...props}>
       <defs><Ramp id={id.ramp} /></defs>
       <g fill="none" stroke={`url(#${id.ramp})`} strokeWidth={STROKE} strokeLinecap="round">
-        <path d={H_LEFT} />
-        <path d={H_RIGHT} />
+        <path d={INF_LEFT} />
+        <path d={INF_RIGHT} />
       </g>
       {play && (
         <>
-          <RunningLight d={H_LEFT} length={62} dur="4.2s" width={2.2} />
-          <RunningLight d={H_RIGHT} length={62} dur="4.2s" width={2.2} />
+          <RunningLight d={INF_LEFT} length={62} dur="4.2s" width={2.2} />
+          <RunningLight d={INF_RIGHT} length={62} dur="4.2s" width={2.2} />
         </>
       )}
     </Svg>
   );
 }
 
-// (ط) Two tangent rings: the infinity at its most geometric. The right ring
-// breaks at the top so the stroke ends in a beak instead of closing — the only
-// concession to the bird, and the only thing that makes it ours rather than a
-// mathematics textbook's.
-const T_R = 12.5;
-// tangent at x = 32, so the two rings touch exactly once and read as one sign
-const T_LEFT_C = 32 - T_R;
-const T_RIGHT_C = 32 + T_R;
-const onRing = (cx: number, deg: number): Pt =>
-  [cx + T_R * Math.cos((deg * Math.PI) / 180), 32 + T_R * Math.sin((deg * Math.PI) / 180)];
-/** An arc of the right ring, written out rather than guessed at, so the gap
- *  lands where it is meant to and the beak starts on the stroke's own end. */
-const T_START = onRing(T_RIGHT_C, 295);
-const T_END = onRing(T_RIGHT_C, 250);
-const T_RIGHT = `M${r2(T_START[0])} ${r2(T_START[1])} A${T_R} ${T_R} 0 1 1 ${r2(T_END[0])} ${r2(T_END[1])}`;
-const T_BEAK = `M${r2(T_START[0])} ${r2(T_START[1])} L57 16.4`;
+// (ط) Two rings that touch exactly once, at the centre: the sign at its most
+// geometric, and the one that survives being printed very small.
+const RING_R = 12.5;
+const RING_L_C = 32 - RING_R;
+const RING_R_C = 32 + RING_R;
 
-export function RingsMark(props: MarkProps) {
+export function InfinityRingsMark(props: MarkProps) {
+  const id = useGradientIds(["ramp"] as const);
+  const play = useAnimate(props.animated);
+  const ring = `M${RING_R_C - RING_R} 32 A${RING_R} ${RING_R} 0 1 1 ${RING_R_C + RING_R} 32 A${RING_R} ${RING_R} 0 1 1 ${RING_R_C - RING_R} 32`;
+  return (
+    <Svg {...props}>
+      <defs><Ramp id={id.ramp} /></defs>
+      <g fill="none" stroke={`url(#${id.ramp})`} strokeWidth={STROKE}>
+        <circle cx={RING_L_C} cy="32" r={RING_R} />
+        <circle cx={RING_R_C} cy="32" r={RING_R} />
+      </g>
+      {play && <RunningLight d={ring} length={78.5} dur="5s" width={2.2} />}
+    </Svg>
+  );
+}
+
+// (ی) The ribbon: the same path, but the line is widest where the loops turn
+// and narrowest where they cross, the way a flat brush would leave it.
+//
+// Built by walking the curve and offsetting each side, then written out with
+// the numbers rounded — the server and the browser must agree to the last
+// digit or React will not hydrate the mark it was sent (a float-sorted mark
+// on this branch already failed exactly that way once).
+const INF_RIBBON = (() => {
+  const A = 24.5, B = 25.5, N = 64, WIDE = 3.7, THIN = 1.15;
+  const at = (t: number) => ({ x: 32 + A * Math.cos(t), y: 32 + (B / 2) * Math.sin(2 * t) });
+  const left: Pt[] = [], right: Pt[] = [];
+  for (let i = 0; i <= N; i++) {
+    const t = (i / N) * Math.PI * 2;
+    const { x, y } = at(t);
+    // tangent, then the unit normal to it
+    const dx = -A * Math.sin(t), dy = B * Math.cos(2 * t);
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len, ny = dx / len;
+    const w = THIN + (WIDE - THIN) * Math.abs(Math.cos(t));
+    left.push([x + nx * w, y + ny * w]);
+    right.push([x - nx * w, y - ny * w]);
+  }
+  const d1 = (n: number) => Math.round(n * 10) / 10;
+  const seq = (ps: Pt[]) => ps.map(([x, y]) => `${d1(x)} ${d1(y)}`).join("L");
+  return `M${seq(left)}L${seq(right.reverse())}Z`;
+})();
+
+export function InfinityRibbonMark(props: MarkProps) {
   const id = useGradientIds(["ramp"] as const);
   const play = useAnimate(props.animated);
   return (
     <Svg {...props}>
       <defs><Ramp id={id.ramp} /></defs>
-      <g fill="none" stroke={`url(#${id.ramp})`} strokeWidth={STROKE} strokeLinecap="round">
-        <circle cx={T_LEFT_C} cy="32" r={T_R} />
-        <path d={T_RIGHT} />
-        <path d={T_BEAK} />
-      </g>
-      {play && <RunningLight d={T_RIGHT} length={69} dur="5s" width={2.2} />}
+      <path d={INF_RIBBON} fill={`url(#${id.ramp})`} fillRule="nonzero" />
+      {play && <RunningLight d={INF_LINE} length={150} dur="5.4s" width={1.6} colour="#ecfeff" />}
     </Svg>
   );
 }
@@ -615,9 +642,10 @@ export const TowersLockup = (p: LockupProps) => <LockupFrame Mark={TowersMark} {
 export const SimorghLockup = (p: LockupProps) => <LockupFrame Mark={SimorghMark} {...p} />;
 export const RibbonSimorghLockup = (p: LockupProps) => <LockupFrame Mark={RibbonSimorghMark} {...p} />;
 export const RoofSimorghLockup = (p: LockupProps) => <LockupFrame Mark={RoofSimorghMark} {...p} />;
-export const LineSimorghLockup = (p: LockupProps) => <LockupFrame Mark={LineSimorghMark} {...p} />;
-export const WingsLockup = (p: LockupProps) => <LockupFrame Mark={WingsMark} {...p} />;
-export const RingsLockup = (p: LockupProps) => <LockupFrame Mark={RingsMark} {...p} />;
+export const InfinityLineLockup = (p: LockupProps) => <LockupFrame Mark={InfinityLineMark} {...p} />;
+export const InfinityOpenLockup = (p: LockupProps) => <LockupFrame Mark={InfinityOpenMark} {...p} />;
+export const InfinityRingsLockup = (p: LockupProps) => <LockupFrame Mark={InfinityRingsMark} {...p} />;
+export const InfinityRibbonLockup = (p: LockupProps) => <LockupFrame Mark={InfinityRibbonMark} {...p} />;
 
 /** Every concept, for the gallery and for the switch in logo.tsx. */
 export const CONCEPTS = {
@@ -627,8 +655,9 @@ export const CONCEPTS = {
   simorgh: { Mark: SimorghMark, Lockup: SimorghLockup },
   ribbonSimorgh: { Mark: RibbonSimorghMark, Lockup: RibbonSimorghLockup },
   roofSimorgh: { Mark: RoofSimorghMark, Lockup: RoofSimorghLockup },
-  lineSimorgh: { Mark: LineSimorghMark, Lockup: LineSimorghLockup },
-  wings: { Mark: WingsMark, Lockup: WingsLockup },
-  rings: { Mark: RingsMark, Lockup: RingsLockup },
+  infLine: { Mark: InfinityLineMark, Lockup: InfinityLineLockup },
+  infOpen: { Mark: InfinityOpenMark, Lockup: InfinityOpenLockup },
+  infRings: { Mark: InfinityRingsMark, Lockup: InfinityRingsLockup },
+  infRibbon: { Mark: InfinityRibbonMark, Lockup: InfinityRibbonLockup },
 } as const;
 export type ConceptKey = keyof typeof CONCEPTS;

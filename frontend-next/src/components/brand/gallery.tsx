@@ -12,27 +12,33 @@ import { CONCEPTS, type ConceptKey, type MarkProps } from "./logos";
 
 type Site = { brandName: string; brandNameLatin: string; tagline: string; domain: string };
 
-// The minimal marks come first: they are the newer direction, and the six
-// solids below them are kept only so a choice can still be compared against
-// what was tried.
+// The infinity marks come first: that is the direction now. The six solids
+// below them are kept only so a choice can still be compared against what was
+// tried and turned down.
 const ORDER: { key: ConceptKey; letter: string; name: string; blurb: string }[] = [
   {
-    key: "lineSimorgh",
+    key: "infLine",
     letter: "ز",
     name: "تک‌خط",
-    blurb: "یک خط پیوسته: تقاطعِ پایینِ بی‌نهایت تنِ سیمرغ است و دو حلقه بال‌هایی که بالا می‌روند.",
+    blurb: "یک حرکت پیوسته با ضخامت یکنواخت و سرهای گرد؛ تنها طرحی که با دست هم می‌شود کشیدش.",
   },
   {
-    key: "wings",
+    key: "infOpen",
     letter: "ح",
-    name: "دو بال",
-    blurb: "همان بی‌نهایت، نصف‌شده: هر نیمه یک بال با نوک باز است و فاصلهٔ میان‌شان جای تن پرنده.",
+    name: "باز",
+    blurb: "همان نشان، بریده از محل تقاطع: دو نیمه که فقط به هم تکیه می‌دهند. نبودنِ وسط، خودش دیده می‌شود.",
   },
   {
-    key: "rings",
+    key: "infRings",
     letter: "ط",
     name: "دو حلقه",
-    blurb: "بی‌نهایت در هندسی‌ترین شکلش: دو حلقهٔ مماس، که حلقهٔ راست بالا باز می‌شود و به منقار می‌رسد.",
+    blurb: "دو حلقه که دقیقاً یک بار وسط به هم می‌رسند؛ هندسی‌ترین شکل، و مقاوم‌ترین در چاپ ریز.",
+  },
+  {
+    key: "infRibbon",
+    letter: "ی",
+    name: "روبان",
+    blurb: "همان مسیر، اما خط جایی که حلقه‌ها می‌چرخند پهن است و جایی که هم را قطع می‌کنند باریک — مثل رد یک قلم تخت.",
   },
   {
     key: "house",
@@ -86,7 +92,7 @@ export function BrandGallery({ site }: { site: Site }) {
         </h1>
         <p className="text-sm text-muted-foreground">
           هر کدام در اندازهٔ ۱۶ تا ۲۵۶ پیکسل، روی زمینهٔ تیره و روشن، به‌شکل آیکون برنامه و در زبانهٔ مرورگر.
-          سه گزینهٔ آخر با سیمرغ و نشان بی‌نهایت ساخته شده‌اند.
+          چهار گزینهٔ اول فقط نشان بی‌نهایت‌اند و شش تای بعدی طرح‌های حجمی قبلی‌اند که کنار گذاشته شدند.
           فعلاً گزینهٔ «{ORDER.find((o) => o.key === CURRENT_CONCEPT)?.letter}» در سایت استفاده می‌شود.
         </p>
       </header>
