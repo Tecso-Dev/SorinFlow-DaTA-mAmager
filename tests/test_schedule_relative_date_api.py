@@ -24,6 +24,7 @@ os.environ.setdefault("SECRET_KEY", "0123456789abcdef0123456789abcdef")
 os.environ.setdefault("LOGS_PATH", "/tmp")
 os.environ.setdefault("IMAGES_PATH", "/tmp")
 
+from app.services import scrape_scheduler as sch   # noqa: E402
 from test_schedule_relative_date import _freeze, _tehran   # noqa: E402
 
 # ── through the real app (Postgres, like test_scrape_schedules.py) ────────────
@@ -132,13 +133,14 @@ def _create(client, headers, **config):
     return r.json()
 
 
-def _insert_legacy(owner_id, config, created_at):
+def _insert_legacy(owner_id, config, created_at, next_run_at=None):
     """A schedule as the old route saved it: a fixed date in the config."""
     from app.models.scrape_schedule import ScrapeSchedule
 
     async def _go(s):
         row = ScrapeSchedule(owner_user_id=owner_id, name="قدیمی", hour=8, minute=0, enabled=True,
-                             config={**FORM, "max_items": 30, **config}, created_at=created_at)
+                             config={**FORM, "max_items": 30, **config}, created_at=created_at,
+                             next_run_at=next_run_at)
         s.add(row)
         await s.commit()
         await s.refresh(row)
@@ -452,6 +454,35 @@ class TestRunNow:
         _finish_all_runs()
 
 
+class TestTheClockFiresIt:
+    """The loop that fires schedules at their hour — not the button — on the
+    two kinds of row there are: one saved relative, one saved with a fixed date."""
+
+    def test_each_days_firing_goes_for_that_days_own_date(self, client, monkeypatch):
+        uid, me = _person(client, "rd_tick")
+        _freeze(monkeypatch, _tehran(2026, 9, 27, 8, 30))
+        saved = _create(client, me, posted_days_ago=1)             # its next 08:00 is on the 28th
+        old = _insert_legacy(uid, {"posted_date": "2026-09-26"}, _tehran(2026, 9, 27, 9, 0),
+                             next_run_at=_tehran(2026, 9, 28, 8, 0))
+        seen = _launcher(monkeypatch)
+
+        def firing_at(moment):
+            """What the loop launches for these two schedules at `moment`."""
+            _freeze(monkeypatch, moment)
+            before = len(seen)
+            asyncio.run(sch.tick())
+            return sorted(f["cfg"]["posted_date"] for f in seen[before:] if f["user_id"] == uid)
+
+        assert firing_at(_tehran(2026, 9, 27, 12, 0)) == [], "nothing is due before the hour"
+        assert firing_at(_tehran(2026, 9, 28, 8, 1)) == ["2026-09-27", "2026-09-27"]
+        assert firing_at(_tehran(2026, 9, 28, 8, 2)) == [], "each fires once for the day"
+        # the next morning: the same two schedules, a day on
+        assert firing_at(_tehran(2026, 9, 29, 8, 1)) == ["2026-09-28", "2026-09-28"]
+        assert _row(saved["id"]).config["posted_days_ago"] == 1
+        assert _row(old).config["posted_date"] == "2026-09-26", "nothing was rewritten on the way"
+        assert _row(saved["id"]).last_result["posted_date"] == "2026-09-28"
+
+
 class TestDelete:
 
     def test_a_deleted_schedule_is_gone_and_the_others_stay(self, client):
@@ -487,8 +518,7 @@ class TestDeletingAUserDeletesTheirSchedules:
 
     def test_the_schedules_go_with_the_person_and_nobody_elses(self, client):
         gone_id, theirs = _person(client, "rd_leaver")
-        _mk_user("rd_admin", role="super_admin", permissions=(), phone="09120000317", phone_verified=True)
-        admin = _login(client, "rd_admin")
+        _, admin = _person(client, "rd_admin", role="root", permissions=())
         kept_id, mine = _person(client, "rd_stayer")
         relative = _create(client, theirs, posted_days_ago=1)
         plain = _create(client, theirs, max_items=20)
