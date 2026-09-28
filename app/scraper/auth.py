@@ -468,6 +468,14 @@ class DivarAuth:
                 logger.warning(f"Error finding confirm button: {e}")
 
             if confirm_button:
+                # This click is what makes Divar text the number. Noted first,
+                # so a forwarded login code labelled with the phone's other SIM
+                # still reaches the number being added (issue #37).
+                try:
+                    from app.scraper import otp_store
+                    await otp_store.note_click(phone_number, "login", opens=True)
+                except Exception as e:
+                    logger.debug(f"could not note the login click: {e}")
                 await confirm_button.click()
                 logger.info("Confirm button clicked — waiting for SMS...")
                 # Was 4s. Nothing below waits on it — the screenshot is a debug
