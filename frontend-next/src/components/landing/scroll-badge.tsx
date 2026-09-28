@@ -1,21 +1,36 @@
 "use client";
 
-// The page's scroll indicator: a disc at the bottom-left whose ring IS the
-// brand name, with the percentage of the whole page in the middle. Deliberately
-// not a bar across the top of the page — this is the only progress readout.
-// Clicking it goes back to the top.
+// The page's scroll indicator: a disc at the bottom-left whose outer ring IS
+// the brand name, turning as the page moves, with the percentage of the whole
+// page in the middle. Deliberately not a bar across the top of the page — this
+// is the only progress readout. Clicking it goes back to the top.
 
 import { ArrowUp } from "lucide-react";
-import { motion, useMotionValueEvent, useScroll, useTransform } from "motion/react";
+import { motion, useMotionValueEvent, useScroll, useSpring, useTransform } from "motion/react";
 import { useState } from "react";
 import { cn } from "cn";
 import { faNum } from "@/lib/format";
 import { usePrefersStill } from "@/lib/use-still";
 
-const R = 41; // the text ring's radius inside a 0 0 100 100 box
-const CIRC = 2 * Math.PI * R;
-// clockwise from the top, so Latin letters read left-to-right along the top
-const RING = `M50 ${50 - R} A${R} ${R} 0 1 1 49.99 ${50 - R}`;
+// Three rings inside a 0 0 100 100 box: the name on the outside, the progress
+// arc under it, and the disc that holds the number in the middle.
+const NAME_R = 44;
+const ARC_R = 34;
+
+/** The brand's name repeated around the circle, one <text> per letter.
+ *
+ *  Not <textPath>: it needs a <path> in <defs> and a same-document reference,
+ *  and that reference silently resolves to nothing in more than one engine —
+ *  every glyph then lands on the origin and the ring reads as empty. Placing
+ *  each letter at its own angle has no reference to lose. */
+function ringLetters(word: string) {
+  const unit = `${word} • `;
+  // as many whole repeats as sit comfortably around the circle
+  const repeats = Math.max(1, Math.round(36 / unit.length));
+  const letters = unit.repeat(repeats).split("");
+  const step = 360 / letters.length;
+  return letters.map((char, i) => ({ char, angle: i * step }));
+}
 
 export function ScrollBadge({ brandLatin }: { brandLatin: string }) {
   const { scrollYProgress } = useScroll();
@@ -27,14 +42,12 @@ export function ScrollBadge({ brandLatin }: { brandLatin: string }) {
     setPct((prev) => (prev === next ? prev : next));
   });
 
-  // The ring turns as the page moves; a third of a turn over the whole page is
-  // enough to feel alive without making the name unreadable.
-  const spin = useTransform(scrollYProgress, [0, 1], [0, 120]);
+  // A full turn of the name over the length of the page, eased so it keeps
+  // gliding for a moment after the wheel stops instead of stepping with it.
+  const eased = useSpring(scrollYProgress, { stiffness: 120, damping: 30, restDelta: 0.0005 });
+  const spin = useTransform(eased, [0, 1], [0, 360]);
 
-  // One word per third of the circle, stretched to the exact circumference so
-  // there is never a gap or an overlap whatever the brand is called.
-  const word = (brandLatin || "SorinFlow").toUpperCase();
-  const ring = `${word} • ${word} • ${word} • `;
+  const ring = ringLetters((brandLatin || "SorinFlow").toUpperCase());
   const atTop = pct < 2;
 
   return (
@@ -45,18 +58,18 @@ export function ScrollBadge({ brandLatin }: { brandLatin: string }) {
         disabled={atTop}
         aria-label={`${faNum(pct)} درصد صفحه پیمایش شده — بازگشت به بالای صفحه`}
         className={cn(
-          "group pointer-events-auto relative grid size-[72px] place-items-center rounded-full outline-none transition sm:size-[92px]",
+          "group pointer-events-auto relative grid size-[84px] place-items-center rounded-full outline-none transition sm:size-[108px]",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
           atTop ? "cursor-default" : "hover:scale-[1.06]",
         )}
       >
+        {/* the disc the number sits on, well inside both rings */}
         <span
           aria-hidden
-          className="absolute inset-[9%] rounded-full border bg-background/80 shadow-[0_10px_30px_-12px_rgb(49_46_129/0.6)] backdrop-blur-xl dark:bg-[#07070d]/80 dark:shadow-[0_14px_40px_-14px_rgb(0_0_0/0.9)]"
+          className="absolute inset-[27%] rounded-full border bg-background/85 shadow-[0_10px_30px_-12px_rgb(49_46_129/0.6)] backdrop-blur-xl dark:bg-[#07070d]/85 dark:shadow-[0_14px_40px_-14px_rgb(0_0_0/0.9)]"
         />
         <svg viewBox="0 0 100 100" className="absolute inset-0 size-full overflow-visible" aria-hidden>
           <defs>
-            <path id="sf-scroll-ring" d={RING} fill="none" />
             <linearGradient id="sf-scroll-arc" x1="0" y1="0" x2="1" y2="1">
               <stop offset="0" stopColor="#818cf8" />
               <stop offset="0.5" stopColor="#a78bfa" />
@@ -64,41 +77,57 @@ export function ScrollBadge({ brandLatin }: { brandLatin: string }) {
             </linearGradient>
           </defs>
           {/* the track, and over it the arc the page has covered so far */}
-          <circle cx="50" cy="50" r={R - 7.5} fill="none" strokeWidth="2.5" className="stroke-foreground/12" />
+          <circle cx="50" cy="50" r={ARC_R} fill="none" strokeWidth="3" className="stroke-foreground/12" />
           <motion.circle
             cx="50"
             cy="50"
-            r={R - 7.5}
+            r={ARC_R}
             fill="none"
             stroke="url(#sf-scroll-arc)"
-            strokeWidth="2.5"
+            strokeWidth="3"
             strokeLinecap="round"
             transform="rotate(-90 50 50)"
             style={{ pathLength: scrollYProgress }}
           />
-          <motion.g style={still ? undefined : { rotate: spin, originX: "50px", originY: "50px" }}>
-            <text
-              className="fill-muted-foreground text-[8.4px] font-black tracking-[0.18em] transition group-hover:fill-foreground"
-              style={{ letterSpacing: "0.18em" }}
-            >
-              <textPath href="#sf-scroll-ring" textLength={CIRC} lengthAdjust="spacing" startOffset="0">
-                {ring}
-              </textPath>
-            </text>
+          <motion.g
+            data-testid="scroll-ring"
+            className="fill-foreground/70 transition group-hover:fill-foreground"
+            style={{ rotate: spin, originX: "50px", originY: "50px" }}
+          >
+            {ring.map(({ char, angle }, i) => (
+              <text
+                key={i}
+                x="50"
+                y={50 - NAME_R}
+                textAnchor="middle"
+                dominantBaseline="central"
+                transform={`rotate(${angle.toFixed(2)} 50 50)`}
+                style={{ fontSize: "8.6px", fontWeight: 900 }}
+              >
+                {char}
+              </text>
+            ))}
           </motion.g>
         </svg>
-        <span aria-hidden className="relative flex flex-col items-center leading-none">
-          {atTop ? (
-            <span className="text-[11px] font-black text-muted-foreground tabular-nums sm:text-sm">۰٪</span>
-          ) : (
-            <>
-              <span className="bg-linear-to-l from-indigo-500 via-violet-500 to-cyan-500 bg-clip-text text-[13px] font-black text-transparent tabular-nums sm:text-lg dark:from-indigo-300 dark:via-violet-300 dark:to-cyan-300">
-                {faNum(pct)}٪
-              </span>
-              <ArrowUp className="mt-0.5 size-3 text-muted-foreground opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100" />
-            </>
+        {/* the number is the only thing in flow, so it sits dead centre; the
+            hint floats under it rather than pushing it off the middle */}
+        <span
+          aria-hidden
+          className={cn(
+            "relative text-[13px] leading-none font-black tabular-nums sm:text-[17px]",
+            atTop
+              ? "text-muted-foreground"
+              : "bg-linear-to-l from-indigo-500 via-violet-500 to-cyan-500 bg-clip-text text-transparent dark:from-indigo-300 dark:via-violet-300 dark:to-cyan-300",
           )}
+        >
+          {faNum(pct)}٪
         </span>
+        {!atTop && (
+          <ArrowUp
+            aria-hidden
+            className="absolute bottom-[26%] size-3 text-muted-foreground opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100"
+          />
+        )}
       </button>
     </div>
   );

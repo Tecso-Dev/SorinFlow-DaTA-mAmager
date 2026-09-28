@@ -144,17 +144,28 @@ test('the scroll badge is made of the brand name, follows the page and takes you
   await page.goto('/');
   const badge = page.getByRole('button', { name: /درصد صفحه پیمایش شده/ });
   await expect(badge).toBeVisible();
-  // the ring is the brand's Latin name, never a hard-coded one
-  await expect(badge.locator('textPath')).toContainText(s.brandNameLatin.toUpperCase());
+  // the ring is the brand's Latin name, never a hard-coded one, and it is
+  // really drawn: every letter has to have a box of its own on the page
+  const ring = badge.getByTestId('scroll-ring');
+  await expect(ring).toContainText(s.brandNameLatin.toUpperCase());
+  const drawn = await ring.evaluate((g) => [...g.querySelectorAll('text')]
+    .filter((t) => t.textContent.trim())
+    .map((t) => t.getBoundingClientRect())
+    .filter((r) => r.width > 0 && r.height > 0).length);
+  expect(drawn, 'the ring letters are in the DOM but not on the screen').toBeGreaterThan(20);
+  // and it turns as the page moves
+  const spin = () => ring.evaluate((g) => new DOMMatrixReadOnly(getComputedStyle(g).transform || g.style.transform).m11);
   // at the top it reads zero and does nothing
   await expect(badge).toHaveAccessibleName(/^۰ درصد/);
   await expect(badge).toBeDisabled();
 
   const read = async () => (await badge.getAttribute('aria-label')).match(/^(\S+) درصد/)[1];
+  const upright = await spin();
   const half = await page.evaluate(() => document.documentElement.scrollHeight / 2);
   await page.evaluate((y) => window.scrollTo(0, y), half);
   await expect.poll(read).not.toBe('۰');
   const middle = await read();
+  await expect.poll(spin, { timeout: 5000 }).not.toBe(upright);
 
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await expect.poll(read).toBe('۱۰۰');

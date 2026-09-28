@@ -7,7 +7,7 @@
 // panels are stylised mock-ups, so no office's data is ever on the public page.
 
 import { ArrowLeft, BadgeCheck, CalendarClock, FileSignature, PhoneCall, ScanLine, Sparkles, Users } from "lucide-react";
-import { motion, useScroll, useTransform } from "motion/react";
+import { motion, useScroll, useSpring, useTransform } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "cn";
 import { LANDING } from "@/content/landing";
@@ -15,7 +15,10 @@ import { faNum } from "@/lib/format";
 import { usePrefersStill } from "@/lib/use-still";
 
 const grad = "bg-linear-to-l from-indigo-600 via-violet-600 to-cyan-600 bg-clip-text text-transparent dark:from-indigo-300 dark:via-violet-300 dark:to-cyan-300";
-const glass = "rounded-3xl border bg-card/70 backdrop-blur-xl shadow-[0_24px_60px_-30px_rgb(49_46_129/0.45)] dark:bg-white/[0.035] dark:shadow-[0_30px_80px_-30px_rgb(0_0_0/0.8)]";
+// A moving card must not carry a backdrop filter: the browser re-blurs
+// everything behind all five of them on every frame, which is exactly what
+// made the rail stutter. Opaque card colours, same shadow.
+const solid = "rounded-3xl border bg-card shadow-[0_24px_60px_-30px_rgb(49_46_129/0.45)] dark:bg-[#0c0c17] dark:shadow-[0_30px_80px_-30px_rgb(0_0_0/0.8)]";
 
 /* ─────────────────── the pinned rail ─────────────────── */
 
@@ -50,8 +53,10 @@ function Rail({
   }, [stacked]);
 
   const { scrollYProgress } = useScroll({ target: outer, offset: ["start start", "end end"] });
-  const x = useTransform(scrollYProgress, [0, 1], [0, distance]);
-  const bar = useTransform(scrollYProgress, [0, 1], ["0%", "100%"]);
+  // Through a spring, so the row glides instead of stepping with the wheel.
+  const eased = useSpring(scrollYProgress, { stiffness: 140, damping: 32, restDelta: 0.0005 });
+  const x = useTransform(eased, [0, 1], [0, distance]);
+  const bar = useTransform(eased, [0, 1], ["0%", "100%"]);
 
   const head = (
     <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
@@ -79,11 +84,15 @@ function Rail({
   }
 
   return (
-    <section id={id} ref={outer} className="relative scroll-mt-0" style={{ height: `${count * 62 + 110}vh` }}>
+    <section id={id} ref={outer} className="relative scroll-mt-0" style={{ height: `${count * 45 + 95}vh` }}>
       <div ref={view} className="sticky top-0 flex h-dvh flex-col justify-center overflow-hidden pt-24 pb-10">
         <div className="mx-auto w-full max-w-7xl px-4 sm:px-[6vw]">{head}</div>
-        <div className="mt-8 min-h-0 flex-1" dir="rtl">
-          <motion.div ref={track} className="flex h-full w-max items-stretch gap-5 px-4 sm:gap-7 sm:px-[6vw]" style={{ x }}>
+        <div className="mt-8 flex min-h-0 flex-1 items-center" dir="rtl">
+          <motion.div
+            ref={track}
+            className="flex w-max transform-gpu items-center gap-5 px-4 will-change-transform sm:gap-7 sm:px-[6vw]"
+            style={{ x }}
+          >
             {children}
           </motion.div>
         </div>
@@ -101,7 +110,7 @@ function Rail({
 /** One panel of a rail: a fixed-width card the row slides past. */
 function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <article className={cn(glass, "relative flex h-full w-[82vw] shrink-0 flex-col overflow-hidden p-6 sm:w-[min(62vw,620px)] sm:p-8", "motion-reduce:w-auto", className)}>
+    <article className={cn(solid, "relative flex max-h-full w-[82vw] shrink-0 flex-col overflow-hidden p-6 sm:w-[min(58vw,560px)] sm:p-7", "motion-reduce:w-auto", className)}>
       {children}
     </article>
   );
@@ -138,7 +147,7 @@ export function PathRail() {
                 </li>
               ))}
             </ul>
-            <div className="mt-auto pt-6">
+            <div className="mt-6">
               <Art />
             </div>
             {!last && (
@@ -363,7 +372,7 @@ export function TourRail({ domain }: { domain: string }) {
                 {domain}/panel/{s.key}
               </span>
             </div>
-            <div className="min-h-0 flex-1">
+            <div className="h-[220px] sm:h-[250px]">
               <Art />
             </div>
             <h3 className="mt-5 flex items-baseline gap-3 text-2xl font-black">
