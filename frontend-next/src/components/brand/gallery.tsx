@@ -12,7 +12,28 @@ import { CONCEPTS, type ConceptKey, type MarkProps } from "./logos";
 
 type Site = { brandName: string; brandNameLatin: string; tagline: string; domain: string };
 
+// The minimal marks come first: they are the newer direction, and the six
+// solids below them are kept only so a choice can still be compared against
+// what was tried.
 const ORDER: { key: ConceptKey; letter: string; name: string; blurb: string }[] = [
+  {
+    key: "lineSimorgh",
+    letter: "ز",
+    name: "تک‌خط",
+    blurb: "یک خط پیوسته: تقاطعِ پایینِ بی‌نهایت تنِ سیمرغ است و دو حلقه بال‌هایی که بالا می‌روند.",
+  },
+  {
+    key: "wings",
+    letter: "ح",
+    name: "دو بال",
+    blurb: "همان بی‌نهایت، نصف‌شده: هر نیمه یک بال با نوک باز است و فاصلهٔ میان‌شان جای تن پرنده.",
+  },
+  {
+    key: "rings",
+    letter: "ط",
+    name: "دو حلقه",
+    blurb: "بی‌نهایت در هندسی‌ترین شکلش: دو حلقهٔ مماس، که حلقهٔ راست بالا باز می‌شود و به منقار می‌رسد.",
+  },
   {
     key: "house",
     letter: "الف",

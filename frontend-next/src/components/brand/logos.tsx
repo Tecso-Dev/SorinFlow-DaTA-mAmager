@@ -495,6 +495,106 @@ export type LockupProps = MarkProps & {
   taglineClassName?: string;
 };
 
+/* ═════════════════ the minimal marks (ز, ح, ط) ═════════════════ */
+// The six concepts above are solids: facets, three light values, an outline.
+// These three are the opposite and deliberately so — one stroke weight, no
+// fill, no shading, one gradient along the whole line. Each still carries both
+// ideas, the Simorgh and the infinity, but as a single gesture rather than as
+// a drawing of a bird. That is what survives at 16 px, on a dark tab strip and
+// on a white print-out alike.
+
+const STROKE = 5;
+
+/** The brand ramp along the mark, so a monoline is still the brand's colour. */
+function Ramp({ id }: { id: string }) {
+  return (
+    <linearGradient id={id} x1="4" y1="46" x2="60" y2="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stopColor="#6366f1" />
+      <stop offset="0.5" stopColor="#a78bfa" />
+      <stop offset="1" stopColor="#22d3ee" />
+    </linearGradient>
+  );
+}
+
+// (ز) One unbroken lemniscate whose crossing sits low, so the two loops read
+// as wings lifting; a short neck and beak rise out of the crossing.
+const Z_LOOP =
+  "M32 37 C21.5 48 6 44.5 6 33.5 C6 23.5 23 24.5 32 37 C41 24.5 58 23.5 58 33.5 C58 44.5 42.5 48 32 37";
+const Z_HEAD = "M32 37 C33 30.5 33.4 28 35.6 25.4 L29.2 23.6";
+
+export function LineSimorghMark(props: MarkProps) {
+  const id = useGradientIds(["ramp"] as const);
+  const play = useAnimate(props.animated);
+  return (
+    <Svg {...props}>
+      <defs><Ramp id={id.ramp} /></defs>
+      <g fill="none" stroke={`url(#${id.ramp})`} strokeWidth={STROKE} strokeLinecap="round" strokeLinejoin="round">
+        <path d={Z_LOOP} />
+        <path d={Z_HEAD} />
+      </g>
+      {play && <RunningLight d={Z_LOOP} length={150} dur="4.6s" width={2.2} />}
+    </Svg>
+  );
+}
+
+// (ح) The same lemniscate, cut in two: each half is a wing with an open tip,
+// and the gap between them is where the body would be. Nothing is drawn there.
+const H_LEFT = "M30.5 34.5 C20 45 6.5 41.5 6.5 31.5 C6.5 22.5 20.5 22 28 30";
+const H_RIGHT = "M33.5 34.5 C44 45 57.5 41.5 57.5 31.5 C57.5 22.5 43.5 22 36 30";
+
+export function WingsMark(props: MarkProps) {
+  const id = useGradientIds(["ramp"] as const);
+  const play = useAnimate(props.animated);
+  return (
+    <Svg {...props}>
+      <defs><Ramp id={id.ramp} /></defs>
+      <g fill="none" stroke={`url(#${id.ramp})`} strokeWidth={STROKE} strokeLinecap="round">
+        <path d={H_LEFT} />
+        <path d={H_RIGHT} />
+      </g>
+      {play && (
+        <>
+          <RunningLight d={H_LEFT} length={62} dur="4.2s" width={2.2} />
+          <RunningLight d={H_RIGHT} length={62} dur="4.2s" width={2.2} />
+        </>
+      )}
+    </Svg>
+  );
+}
+
+// (ط) Two tangent rings: the infinity at its most geometric. The right ring
+// breaks at the top so the stroke ends in a beak instead of closing — the only
+// concession to the bird, and the only thing that makes it ours rather than a
+// mathematics textbook's.
+const T_R = 12.5;
+// tangent at x = 32, so the two rings touch exactly once and read as one sign
+const T_LEFT_C = 32 - T_R;
+const T_RIGHT_C = 32 + T_R;
+const onRing = (cx: number, deg: number): Pt =>
+  [cx + T_R * Math.cos((deg * Math.PI) / 180), 32 + T_R * Math.sin((deg * Math.PI) / 180)];
+/** An arc of the right ring, written out rather than guessed at, so the gap
+ *  lands where it is meant to and the beak starts on the stroke's own end. */
+const T_START = onRing(T_RIGHT_C, 295);
+const T_END = onRing(T_RIGHT_C, 250);
+const T_RIGHT = `M${r2(T_START[0])} ${r2(T_START[1])} A${T_R} ${T_R} 0 1 1 ${r2(T_END[0])} ${r2(T_END[1])}`;
+const T_BEAK = `M${r2(T_START[0])} ${r2(T_START[1])} L57 16.4`;
+
+export function RingsMark(props: MarkProps) {
+  const id = useGradientIds(["ramp"] as const);
+  const play = useAnimate(props.animated);
+  return (
+    <Svg {...props}>
+      <defs><Ramp id={id.ramp} /></defs>
+      <g fill="none" stroke={`url(#${id.ramp})`} strokeWidth={STROKE} strokeLinecap="round">
+        <circle cx={T_LEFT_C} cy="32" r={T_R} />
+        <path d={T_RIGHT} />
+        <path d={T_BEAK} />
+      </g>
+      {play && <RunningLight d={T_RIGHT} length={69} dur="5s" width={2.2} />}
+    </Svg>
+  );
+}
+
 function LockupFrame({
   Mark, name, tagline, nameClassName, taglineClassName, className, size = 36, ...mark
 }: LockupProps & { Mark: (p: MarkProps) => React.ReactNode }) {
@@ -515,6 +615,9 @@ export const TowersLockup = (p: LockupProps) => <LockupFrame Mark={TowersMark} {
 export const SimorghLockup = (p: LockupProps) => <LockupFrame Mark={SimorghMark} {...p} />;
 export const RibbonSimorghLockup = (p: LockupProps) => <LockupFrame Mark={RibbonSimorghMark} {...p} />;
 export const RoofSimorghLockup = (p: LockupProps) => <LockupFrame Mark={RoofSimorghMark} {...p} />;
+export const LineSimorghLockup = (p: LockupProps) => <LockupFrame Mark={LineSimorghMark} {...p} />;
+export const WingsLockup = (p: LockupProps) => <LockupFrame Mark={WingsMark} {...p} />;
+export const RingsLockup = (p: LockupProps) => <LockupFrame Mark={RingsMark} {...p} />;
 
 /** Every concept, for the gallery and for the switch in logo.tsx. */
 export const CONCEPTS = {
@@ -524,5 +627,8 @@ export const CONCEPTS = {
   simorgh: { Mark: SimorghMark, Lockup: SimorghLockup },
   ribbonSimorgh: { Mark: RibbonSimorghMark, Lockup: RibbonSimorghLockup },
   roofSimorgh: { Mark: RoofSimorghMark, Lockup: RoofSimorghLockup },
+  lineSimorgh: { Mark: LineSimorghMark, Lockup: LineSimorghLockup },
+  wings: { Mark: WingsMark, Lockup: WingsLockup },
+  rings: { Mark: RingsMark, Lockup: RingsLockup },
 } as const;
 export type ConceptKey = keyof typeof CONCEPTS;
