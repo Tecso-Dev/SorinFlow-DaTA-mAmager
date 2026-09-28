@@ -8,10 +8,12 @@ import { ExternalLink, ListFilter, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Empty, ErrorNote, ListSkeleton, NativeSelect, RingDialog } from "@/components/panel/kit";
+import { Lottie } from "@/components/ui/lottie";
 import { toast } from "@/components/toaster";
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
 import type { ScrapeJob, SkippedResponse } from "./types";
 
 export function SkippedDialog({ job, onClose }: { job: ScrapeJob | null; onClose: () => void }) {
@@ -64,7 +66,9 @@ export function SkippedDialog({ job, onClose }: { job: ScrapeJob | null; onClose
           ) : skipped.isError ? (
             <div className="p-4"><ErrorNote error={skipped.error} /></div>
           ) : items.length === 0 ? (
-            <div className="p-4"><Empty>هیچ آگهی ردشده‌ای با این فیلتر نیست.</Empty></div>
+            <div className="p-4">
+              <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[90px]" />}>هیچ آگهی ردشده‌ای با این فیلتر نیست.</Empty>
+            </div>
           ) : (
             <ul className="divide-y text-xs">
               {items.map((i) => (

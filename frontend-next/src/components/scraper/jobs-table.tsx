@@ -10,10 +10,12 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { cn } from "cn";
 import {
   Empty, ErrorNote, ListSkeleton, NativeSelect, Section, Toolbar, ToneBadge, useConfirm,
 } from "@/components/panel/kit";
+import { Lottie } from "@/components/ui/lottie";
 import { toast } from "@/components/toaster";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +24,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
+import scanLottie from "@/lotties/scan.json";
 import { useSession } from "@/lib/session";
 import { useMyCookies } from "./account-picker";
 import { JobLogDialog } from "./job-log-dialog";
@@ -143,7 +146,11 @@ export function JobsTable({ categories }: { categories: Category[] }) {
       ) : jobs.isError ? (
         <div className="p-5"><ErrorNote error={jobs.error} /></div>
       ) : items.length === 0 ? (
-        <div className="p-5"><Empty icon={SatelliteDish}>هیچ تسکی وجود ندارد.</Empty></div>
+        <div className="p-5">
+          <Empty illustration={<Lottie animationData={scanLottie} className="max-w-[130px]" label="در انتظار اولین اسکرپ" />}>
+            هیچ تسکی وجود ندارد.
+          </Empty>
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <Table className="text-[13px]">
@@ -162,13 +169,24 @@ export function JobsTable({ categories }: { categories: Category[] }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((job) => {
+              {items.map((job, i) => {
                 const mine = job.owner_user_id != null && job.owner_user_id === session?.id;
                 const canSwitch = mine && LIVE.includes(job.status);
                 const canCancel = LIVE.includes(job.status) && (mine || (session ? FULL_ACCESS.has(session.role) : false));
                 const canDelete = FINISHED.includes(job.status) && (job.owner_user_id == null || mine || (session ? FULL_ACCESS.has(session.role) : false));
                 return (
-                  <TableRow key={job.id}>
+                  // A plain motion.tr, not the shared TableRow (it forwards
+                  // straight to a <tr>, not a motion component): same
+                  // classes, and `key`+`initial` mean only a row that just
+                  // appeared (a fresh job, not a 5s poll refresh) animates in.
+                  <motion.tr
+                    key={job.id}
+                    data-slot="table-row"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: Math.min(i, 10) * 0.03 }}
+                    className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+                  >
                     <TableCell className="font-mono text-xs text-muted-foreground" title={job.job_id}>{job.job_id.slice(0, 6)}</TableCell>
                     <TableCell>{job.category_name ? <ToneBadge tone="primary">{job.category_name}</ToneBadge> : "—"}</TableCell>
                     <TableCell>{job.city_name || "—"}</TableCell>
@@ -225,7 +243,7 @@ export function JobsTable({ categories }: { categories: Category[] }) {
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
-                  </TableRow>
+                  </motion.tr>
                 );
               })}
             </TableBody>
