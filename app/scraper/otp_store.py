@@ -17,8 +17,13 @@ Keys, all under `sf:otp:`:
     index            set     every open prompt's key, for get_pending() and
                               find_pending_for_account() without SCANning
     sent:{key}       string  epoch seconds the SMS was sent, popped once
-    early:{account}  string  JSON {code, sent}, a code nothing asked for yet
+    early:{account}  string  JSON {code, sent, sms?, at?}, a code nothing asked for yet
     login:{account}  string  a forwarded LOGIN code, GETDEL on read
+    loginmeta:{acct} string  JSON {sms, at} for that login code, beside it
+    clicks:{kind}    zset    account -> ms of its latest click that texts it
+    asked:{kind}:{a} string  ms of the click that opened this account's challenge
+    used:{sms}       string  this SMS has answered something; its copies are void
+    copies:{sms}     set     accounts holding a parked copy of this SMS
     cancel:{job_id}  string  OTP suppressed for this job until the TTL passes
     strikes:{job_id} string  unanswered-prompt counter since the last reveal
     switch:{job_id}  string  JSON {phone, by, reason, from_phone, at}
@@ -33,10 +38,12 @@ unreachable: a read returns the same thing it would for "nothing pending"
 write returns False/None honestly rather than pretending to have succeeded.
 """
 import functools
+import hashlib
+import hmac
 import json
 import math
 import time
-from typing import Any, Tuple, Optional
+from typing import Any, Dict, Iterable, Tuple, Optional
 
 from loguru import logger
 from redis.exceptions import WatchError
@@ -81,6 +88,26 @@ def _switch_key(job_id) -> str:
 
 def _identity_key(acct: str) -> str:
     return f"{_PREFIX}identity:{acct}"
+
+
+def _login_meta_key(acct: str) -> str:
+    return f"{_PREFIX}loginmeta:{acct}"
+
+
+def _clicks_key(kind: str) -> str:
+    return f"{_PREFIX}clicks:{kind}"
+
+
+def _asked_key(kind: str, acct: str) -> str:
+    return f"{_PREFIX}asked:{kind}:{acct}"
+
+
+def _used_key(sms: str) -> str:
+    return f"{_PREFIX}used:{sms}"
+
+
+def _copies_key(sms: str) -> str:
+    return f"{_PREFIX}copies:{sms}"
 
 
 def _redis_safe(default):
@@ -231,6 +258,227 @@ async def clear_timeouts(job_id: Optional[str]) -> None:
     await r.delete(_strikes_key(job_id))
 
 
+# ── which number was just clicked ────────────────────────────────────────
+#
+# The forwarder app puts a number on every code, and on a dual-SIM phone that
+# number can be the other SIM's (issue #37). Run 44 had three codes for slot
+# 2's number arrive labelled with slot 1's, each four to seven seconds after
+# the scraper clicked «اطلاعات تماس» on slot 2 — slot 1 had not been clicked
+# at all. The label sent them to slot 1: typed into a prompt they did not
+# belong to, or held for slot 1's next challenge to type.
+#
+# The scraper knows what the phone does not: which number it just asked Divar
+# to text. So every click that makes Divar send an SMS is noted here the moment
+# before it happens, and otp_inbound weighs the label against it.
+#
+# clicks:{kind} holds each account's latest such click — the contact button, a
+# resend, the number typed into the challenge, a login's confirm — for routing
+# a code that has just arrived. asked:{kind}:{acct} holds only the click that
+# OPENED the account's current challenge, and guards the claim below: a code
+# that arrived before that click cannot be the answer to it.
+#
+# Contact and login clicks are kept apart because the SMS text already says
+# which kind a code is, and a login in the panel must not pull a contact code.
+
+# A code reaches the server two to seven seconds after its click (measured,
+# 1405/07). Forty-five is generous without reaching back to the listing before.
+CLICK_WINDOW = 45
+# Two numbers clicked closer together than this cannot be told apart by time.
+CLICK_TIE = 5
+_CLICKS_TTL = 600
+# An SMS is remembered as used for longer than any copy of it can be held.
+_USED_TTL = 600
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+@_redis_safe(None)
+async def note_click(account: Optional[str], kind: str = "contact", *,
+                     opens: bool = False, at_ms: Optional[int] = None) -> None:
+    """A click that makes Divar text `account`, noted just before it happens.
+
+    `opens` marks the click that starts a challenge (the contact button, a
+    login's confirm), as opposed to one inside it (a resend, the number typed
+    into the challenge's own form). Never raises: losing a click costs the
+    routing its evidence, not the scrape its listing.
+    """
+    acct = _digits(account)
+    if not acct:
+        return
+    t = int(at_ms) if at_ms is not None else _now_ms()
+    r = await _redis()
+    key = _clicks_key(kind)
+    await r.zadd(key, {acct: t}, gt=True)
+    await r.zremrangebyscore(key, "-inf", _now_ms() - _CLICKS_TTL * 1000)
+    await r.expire(key, _CLICKS_TTL)
+    if opens:
+        await r.set(_asked_key(kind, acct), t, ex=_CLICKS_TTL)
+
+
+@_redis_safe(dict)
+async def recent_clicks(kind: str = "contact", now_ms: Optional[int] = None) -> Dict[str, int]:
+    """{account: ms of its latest click} for clicks inside the window."""
+    now = int(now_ms) if now_ms is not None else _now_ms()
+    r = await _redis()
+    rows = await r.zrangebyscore(_clicks_key(kind), now - CLICK_WINDOW * 1000, now, withscores=True)
+    return {a: int(s) for a, s in rows}
+
+
+def pick_account(label: Optional[str], clicks: Dict[str, int], allowed: Iterable[str],
+                 now_ms: Optional[int] = None) -> Tuple[str, str]:
+    """Whose code this is: (account, how).
+
+    The label stands («label») unless its own number was not clicked at all
+    inside the window while one of `allowed` — the phone owner's own numbers,
+    worked out by the caller — was. Then the latest of those takes it
+    («click»), unless a second one was clicked within CLICK_TIE of it: two
+    clicks that close cannot be told apart, and the label stands («tie»).
+
+    A label whose number WAS clicked is never overruled, even by a later click
+    elsewhere (the product decision of 1405/07/07): a correctly labelled code that
+    arrives slowly is worth more than catching a wrong label while two runs
+    work the same phone — and a wrong one held under its label is still kept
+    from the next challenge by the claim guard in request().
+    """
+    lab = _digits(label)
+    now = int(now_ms) if now_ms is not None else _now_ms()
+    lo = now - CLICK_WINDOW * 1000
+    recent = {a: t for a, t in clicks.items() if lo <= t <= now}
+    if lab in recent:
+        return lab, "label"
+    ok = {_digits(a) for a in allowed}
+    ranked = sorted(((t, a) for a, t in recent.items() if a in ok), reverse=True)
+    if not ranked:
+        return lab, "label"
+    if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < CLICK_TIE * 1000:
+        return lab, "tie"
+    return ranked[0][1], "click"
+
+
+# ── one SMS, one answer ───────────────────────────────────────────────────
+#
+# The app has posted one SMS twice, 27 ms apart; 3.2.0 posts it once per label
+# when the phone does not say which slot it came in on. Every copy used to be
+# its own code: a second copy parked under the other label outlived the first
+# and was typed into that number's next challenge.
+#
+# An SMS is identified by the phone, Divar's send stamp and the code. The first
+# copy to answer something marks it used and takes its held copies with it; a
+# later copy is discarded.
+
+
+def sms_id(device: Optional[str], sent_stamp: Optional[int], code: str) -> str:
+    """The SMS behind a POST, however many times the phone posts it.
+
+    Keyed on SECRET_KEY: it ends up in Redis key names, and a plain hash of a
+    six-digit code and a known stamp is a million guesses from the code.
+    """
+    from app.config import get_settings
+    secret = (getattr(get_settings(), "secret_key", "") or "").encode("utf-8")
+    msg = f"{device or '-'}|{sent_stamp or '-'}|{code}".encode("utf-8")
+    return hmac.new(secret, msg, hashlib.sha256).hexdigest()[:32]
+
+
+def _meta(raw: Optional[str]) -> dict:
+    try:
+        v = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
+async def _drop_copy(r, watch: str, sms: str, *also: str) -> None:
+    """Delete `watch` (and `also`) only if it still holds a copy of `sms`.
+
+    WATCHed, so a newer code parked in the same slot between the read and the
+    delete survives."""
+    async with r.pipeline(transaction=True) as p:
+        await p.watch(watch)
+        if _meta(await p.get(watch)).get("sms") != sms:
+            return
+        p.multi()
+        p.delete(watch, *also)
+        try:
+            await p.execute()
+        except WatchError:
+            pass
+
+
+async def _use(r, sms: str) -> bool:
+    """Mark one SMS used. False if a copy of it already answered something.
+    Its other held copies go with it."""
+    if not await r.set(_used_key(sms), "1", nx=True, ex=_USED_TTL):
+        return False
+    for acct in await r.smembers(_copies_key(sms)):
+        await _drop_copy(r, _early_key(acct), sms)
+        await _drop_copy(r, _login_meta_key(acct), sms, _login_key(acct))
+    await r.delete(_copies_key(sms))
+    return True
+
+
+@_redis_safe(True)
+async def use_sms(sms: Optional[str]) -> bool:
+    """Claim this SMS for the prompt it is about to answer. False: a copy of it
+    already answered one. True on a Redis blip — the code is not held back for
+    a check that could not be made."""
+    if not sms:
+        return True
+    return await _use(await _redis(), sms)
+
+
+@_redis_safe(None)
+async def release_sms(sms: Optional[str]) -> None:
+    """use_sms() taken back: the prompt it was meant for had already moved on."""
+    if sms:
+        r = await _redis()
+        await r.delete(_used_key(sms))
+
+
+@_redis_safe(None)
+async def copy_of(sms: Optional[str], account: Optional[str], kind: str = "contact") -> Optional[str]:
+    """«used» if this SMS already answered something, «held» if a copy of it
+    already waits for this account, else None."""
+    if not sms:
+        return None
+    r = await _redis()
+    if await r.exists(_used_key(sms)):
+        return "used"
+    acct = _digits(account)
+    slot = _early_key(acct) if kind == "contact" else _login_meta_key(acct)
+    if acct and _meta(await r.get(slot)).get("sms") == sms:
+        return "held"
+    return None
+
+
+async def _asked_after(r, kind: str, acct: str, at_ms) -> bool:
+    """Whether this account's current challenge was opened AFTER a held code
+    arrived — so the code cannot be its answer. No click on record (a worker
+    that does not note them yet) is not evidence either way."""
+    if at_ms is None:
+        return False
+    asked = await r.get(_asked_key(kind, acct))
+    return bool(asked) and int(asked) > int(at_ms)
+
+
+async def _note_held_code_refused(acct: str, kind: str, meta: dict) -> None:
+    """On the phone's record, because a code refused here is the visible end
+    of a phone labelling SIMs wrongly. Never raises."""
+    logger.warning(f"[otp_store] a {kind} code held for {acct} arrived before this "
+                   "account's own click — somebody else's number's code; not used")
+    try:
+        from app.services import sms_log
+        await sms_log.record(
+            sms_log.INBOUND,
+            f"کد {kind} که برای {acct} نگه داشته شده بود به کار نرفت — پیش از کلیک خود "
+            "این شماره رسیده بود، پس کد شمارهٔ دیگری بود",
+            level="warning", route="forwarder", account=acct, kind=kind,
+            device=meta.get("device"), reason="arrived_before_click")
+    except Exception as e:
+        logger.warning(f"[otp_store] could not record a refused code: {e}")
+
+
 # A code that arrived before anything was waiting for it.
 #
 # Divar sends the SMS the moment the contact button is clicked. The scraper
@@ -248,26 +496,48 @@ async def clear_timeouts(job_id: Optional[str]) -> None:
 
 @_redis_safe(False)
 async def park_early_code(account: Optional[str], code: str,
-                          sent_stamp_ms: Optional[int] = None) -> bool:
-    """Hold a code nothing is waiting for yet. True if it was parked."""
+                          sent_stamp_ms: Optional[int] = None, *,
+                          sms: Optional[str] = None, at_ms: Optional[int] = None,
+                          device: Optional[str] = None) -> bool:
+    """Hold a code nothing is waiting for yet. True if it was parked.
+
+    `at_ms` is when it reached the server (now, by default) — the claim guard
+    in request() compares it with the account's own click."""
     acct = _digits(account)
     if not acct or not code:
         return False
     r = await _redis()
-    await r.set(_early_key(acct), json.dumps({"code": code, "sent": sent_stamp_ms}), ex=EARLY_TTL)
+    await r.set(_early_key(acct), json.dumps({
+        "code": code, "sent": sent_stamp_ms, "sms": sms,
+        "at": int(at_ms) if at_ms is not None else _now_ms(), "device": device,
+    }), ex=EARLY_TTL)
+    if sms:
+        await r.sadd(_copies_key(sms), acct)
+        await r.expire(_copies_key(sms), _USED_TTL)
     return True
 
 
 async def _claim_early(phone_hint: Optional[str], r) -> Optional[Tuple[str, Optional[int]]]:
-    """Take a parked code for this account if one is still fresh. GETDEL, so
-    two requests opening for the same account cannot both claim it."""
+    """Take a parked code for this account if one is still fresh and is this
+    account's to take. GETDEL, so two requests opening for the same account
+    cannot both claim it.
+
+    Refused when it arrived before this account's own challenge was opened —
+    a code cannot answer a click that had not happened yet, so it is another
+    number's code under this one's label — and when a copy of the same SMS has
+    already answered something."""
     acct = _digits(phone_hint)
     if not acct:
         return None
     raw = await r.getdel(_early_key(acct))
     if not raw:
         return None
-    data = json.loads(raw)
+    data = _meta(raw)
+    if await _asked_after(r, "contact", acct, data.get("at")):
+        await _note_held_code_refused(acct, "contact", data)
+        return None
+    if data.get("sms") and not await _use(r, data["sms"]):
+        return None
     return data.get("code"), data.get("sent")
 
 
@@ -461,22 +731,53 @@ async def find_pending_for_account(account: Optional[str]) -> Optional[Tuple[str
 # needed a manual pop for.
 
 
+# The code stays a bare string under login:{acct}, as it always was, and what
+# the routing needs to know about it sits beside it in loginmeta:{acct}: a
+# pod still running the previous release reads login:{acct} as the code
+# itself, and during a rolling deploy it must still get a code, not JSON.
+
+
 @_redis_safe(None)
-async def put_login_code(account: Optional[str], code: str) -> None:
+async def put_login_code(account: Optional[str], code: str, *,
+                         sms: Optional[str] = None, at_ms: Optional[int] = None,
+                         device: Optional[str] = None) -> None:
     acct = _digits(account)
     if not acct or not code:
         return
     r = await _redis()
-    await r.set(_login_key(acct), code, ex=LOGIN_CODE_TTL)
+    meta = json.dumps({"sms": sms, "at": int(at_ms) if at_ms is not None else _now_ms(),
+                       "device": device})
+    async with r.pipeline(transaction=True) as p:
+        p.set(_login_key(acct), code, ex=LOGIN_CODE_TTL)
+        p.set(_login_meta_key(acct), meta, ex=LOGIN_CODE_TTL)
+        await p.execute()
+    if sms:
+        await r.sadd(_copies_key(sms), acct)
+        await r.expire(_copies_key(sms), _USED_TTL)
 
 
 @_redis_safe(None)
 async def take_login_code(account: Optional[str]) -> Optional[str]:
+    """The parked login code for this number, once — unless it arrived before
+    this number's login was started (another number's code under this one's
+    label) or a copy of the same SMS was already taken."""
     acct = _digits(account)
     if not acct:
         return None
     r = await _redis()
-    return await r.getdel(_login_key(acct))
+    async with r.pipeline(transaction=True) as p:
+        p.getdel(_login_key(acct))
+        p.getdel(_login_meta_key(acct))
+        code, raw = await p.execute()
+    if not code:
+        return None
+    meta = _meta(raw)
+    if await _asked_after(r, "login", acct, meta.get("at")):
+        await _note_held_code_refused(acct, "login", meta)
+        return None
+    if meta.get("sms") and not await _use(r, meta["sms"]):
+        return None
+    return code
 
 
 @_redis_safe(list)
