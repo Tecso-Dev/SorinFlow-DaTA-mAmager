@@ -7,8 +7,9 @@
 
 import { CONCEPTS, type ConceptKey, type LockupProps, type MarkProps } from "./logos";
 
-/** الف = "house", ب = "ribbon", ج = "towers". The owner picks; "house" for now. */
-export const CURRENT_CONCEPT: ConceptKey = "house";
+/** The owner's pick: «ی», the tapered infinity ribbon. The gallery at
+ *  /brand-preview lists every concept and the letter each one goes by. */
+export const CURRENT_CONCEPT: ConceptKey = "infRibbon";
 
 export function LogoMark(props: MarkProps) {
   const { Mark } = CONCEPTS[CURRENT_CONCEPT];
