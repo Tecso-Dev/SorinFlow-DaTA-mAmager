@@ -527,7 +527,11 @@ function SimorghBand() {
   return (
     <div id="simorgh" className="relative mx-auto flex max-w-7xl scroll-mt-20 justify-center px-4 py-[18vh] sm:px-[6vw]">
       <Reveal>
-        <SimorghLines className="h-[min(46vw,320px)] w-[min(46vw,320px)]" opacity={0.28} />
+        {/* a deeper line on the light page, where indigo-400 all but vanishes */}
+        <SimorghLines
+          className="h-[min(46vw,320px)] w-[min(46vw,320px)] [--simorgh-glow:#0891b2] [--simorgh-line:#4f46e5] dark:[--simorgh-glow:#22d3ee] dark:[--simorgh-line:#818cf8]"
+          opacity={0.3}
+        />
       </Reveal>
     </div>
   );
