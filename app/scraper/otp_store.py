@@ -406,26 +406,44 @@ async def _drop_copy(r, watch: str, sms: str, *also: str) -> None:
             pass
 
 
-async def _use(r, sms: str) -> bool:
-    """Mark one SMS used. False if a copy of it already answered something.
-    Its other held copies go with it."""
-    if not await r.set(_used_key(sms), "1", nx=True, ex=_USED_TTL):
-        return False
+async def _purge(r, sms: str) -> None:
+    """Drop every held copy of this SMS: it has answered something."""
     for acct in await r.smembers(_copies_key(sms)):
         await _drop_copy(r, _early_key(acct), sms)
         await _drop_copy(r, _login_meta_key(acct), sms, _login_key(acct))
     await r.delete(_copies_key(sms))
+
+
+async def _use(r, sms: str, *, purge: bool = True) -> bool:
+    """Mark one SMS used. False if a copy of it already answered something.
+    Its other held copies go with it, unless the caller has yet to find out
+    whether its own answer lands (see use_sms)."""
+    if not await r.set(_used_key(sms), "1", nx=True, ex=_USED_TTL):
+        return False
+    if purge:
+        await _purge(r, sms)
     return True
 
 
 @_redis_safe(True)
-async def use_sms(sms: Optional[str]) -> bool:
+async def use_sms(sms: Optional[str], *, purge: bool = True) -> bool:
     """Claim this SMS for the prompt it is about to answer. False: a copy of it
     already answered one. True on a Redis blip — the code is not held back for
-    a check that could not be made."""
+    a check that could not be made.
+
+    purge=False for an answer that can still fail (submit() into a prompt that
+    may have closed a moment ago): the held copies are dropped by drop_copies()
+    once it has landed, and survive a release_sms() if it did not."""
     if not sms:
         return True
-    return await _use(await _redis(), sms)
+    return await _use(await _redis(), sms, purge=purge)
+
+
+@_redis_safe(None)
+async def drop_copies(sms: Optional[str]) -> None:
+    """The answer use_sms(purge=False) was reserved for has landed."""
+    if sms:
+        await _purge(await _redis(), sms)
 
 
 @_redis_safe(None)
@@ -463,18 +481,30 @@ async def _asked_after(r, kind: str, acct: str, at_ms) -> bool:
 
 
 async def _note_held_code_refused(acct: str, kind: str, meta: dict) -> None:
-    """On the phone's record, because a code refused here is the visible end
-    of a phone labelling SIMs wrongly. Never raises."""
+    """On the record. Never raises.
+
+    Two different stories end here, and only one is the phone's fault. A code
+    held for a number that had not been clicked when it arrived is another
+    number's code under this one's label — the visible end of a phone
+    labelling its SIMs wrongly, so it goes on the phone's card. A code held
+    for a number that HAD just been clicked is that number's own, only late:
+    its prompt closed before it came, and a new challenge wants a new code.
+    Calling that a wrong label would flag a phone that is set up correctly.
+    """
+    own = bool(meta.get("seen"))
+    reason = "stale_held" if own else "arrived_before_click"
     logger.warning(f"[otp_store] a {kind} code held for {acct} arrived before this "
-                   "account's own click — somebody else's number's code; not used")
+                   f"account's current challenge — not used ({reason})")
     try:
         from app.services import sms_log
         await sms_log.record(
             sms_log.INBOUND,
-            f"کد {kind} که برای {acct} نگه داشته شده بود به کار نرفت — پیش از کلیک خود "
-            "این شماره رسیده بود، پس کد شمارهٔ دیگری بود",
-            level="warning", route="forwarder", account=acct, kind=kind,
-            device=meta.get("device"), reason="arrived_before_click")
+            (f"کد {kind} که برای {acct} نگه داشته شده بود به کار نرفت — کد چالش قبلی همین "
+             "شماره بود و دیر رسید؛ چالش تازه کد تازه می‌خواهد" if own else
+             f"کد {kind} که برای {acct} نگه داشته شده بود به کار نرفت — پیش از کلیک خود "
+             "این شماره رسیده بود، پس کد شمارهٔ دیگری بود"),
+            level="info" if own else "warning", route="forwarder", account=acct, kind=kind,
+            device=meta.get("device"), reason=reason)
     except Exception as e:
         logger.warning(f"[otp_store] could not record a refused code: {e}")
 
@@ -498,11 +528,13 @@ async def _note_held_code_refused(acct: str, kind: str, meta: dict) -> None:
 async def park_early_code(account: Optional[str], code: str,
                           sent_stamp_ms: Optional[int] = None, *,
                           sms: Optional[str] = None, at_ms: Optional[int] = None,
-                          device: Optional[str] = None) -> bool:
+                          device: Optional[str] = None, seen: Optional[bool] = None) -> bool:
     """Hold a code nothing is waiting for yet. True if it was parked.
 
     `at_ms` is when it reached the server (now, by default) — the claim guard
-    in request() compares it with the account's own click."""
+    in request() compares it with the account's own click. `seen`: whether
+    this account had just been clicked when it arrived, which tells a late own
+    code from another number's if the guard ever refuses it."""
     acct = _digits(account)
     if not acct or not code:
         return False
@@ -510,6 +542,7 @@ async def park_early_code(account: Optional[str], code: str,
     await r.set(_early_key(acct), json.dumps({
         "code": code, "sent": sent_stamp_ms, "sms": sms,
         "at": int(at_ms) if at_ms is not None else _now_ms(), "device": device,
+        "seen": seen,
     }), ex=EARLY_TTL)
     if sms:
         await r.sadd(_copies_key(sms), acct)
@@ -740,13 +773,16 @@ async def find_pending_for_account(account: Optional[str]) -> Optional[Tuple[str
 @_redis_safe(None)
 async def put_login_code(account: Optional[str], code: str, *,
                          sms: Optional[str] = None, at_ms: Optional[int] = None,
-                         device: Optional[str] = None) -> None:
+                         device: Optional[str] = None, seen: Optional[bool] = None) -> None:
     acct = _digits(account)
     if not acct or not code:
         return
     r = await _redis()
-    meta = json.dumps({"sms": sms, "at": int(at_ms) if at_ms is not None else _now_ms(),
-                       "device": device})
+    # The code rides in the metadata too, so a bare code written beside an
+    # older metadata entry — by a pod on the previous release — is not judged
+    # by somebody else's arrival time.
+    meta = json.dumps({"code": code, "sms": sms, "seen": seen, "device": device,
+                       "at": int(at_ms) if at_ms is not None else _now_ms()})
     async with r.pipeline(transaction=True) as p:
         p.set(_login_key(acct), code, ex=LOGIN_CODE_TTL)
         p.set(_login_meta_key(acct), meta, ex=LOGIN_CODE_TTL)
@@ -772,6 +808,8 @@ async def take_login_code(account: Optional[str]) -> Optional[str]:
     if not code:
         return None
     meta = _meta(raw)
+    if meta.get("code") != code:
+        meta = {}
     if await _asked_after(r, "login", acct, meta.get("at")):
         await _note_held_code_refused(acct, "login", meta)
         return None

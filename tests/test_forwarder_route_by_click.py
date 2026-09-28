@@ -115,7 +115,9 @@ class _Req:
 
 @pytest.fixture(autouse=True)
 def wired(monkeypatch):
-    patch_redis(monkeypatch, otp_store)
+    from app.api.routes import auth as auth_routes
+    # one fake Redis for the OTP store and the panel's login registry
+    patch_redis(monkeypatch, otp_store, auth_routes)
     monkeypatch.setattr(R.settings, "otp_inbound_secret", LEGACY_SECRET, raising=False)
 
     async def _no_rl(request, limit=20):
@@ -192,13 +194,14 @@ class TestTheWrongLabel:
         assert await otp_store.request("job:b1", B) is True, "B lost its code"
         assert await otp_store.pop_code("job:b1") == "523969"
 
-    async def test_a_code_held_under_the_wrong_label_cannot_answer_a_later_click(self, db):
+    async def test_a_code_held_under_the_wrong_label_cannot_answer_a_later_click(self, db, wired):
         """When nothing could say where it belonged — a worker that does not
         note clicks yet — the code is held under its label as before. A code
         cannot answer a click that had not happened when it arrived, so A's
         next challenge still leaves it alone."""
         await otp_store.park_early_code(A, "523969", at_ms=now_ms() - 5000)
         assert await _challenge(A, "job:a1") is False, "a code from before the click was typed"
+        assert wired[-1][1]["reason"] == "arrived_before_click"
 
     async def test_a_code_that_arrived_after_the_click_is_still_taken(self, db):
         """The normal order: click, SMS, code parked, then the prompt opens."""
@@ -207,6 +210,18 @@ class TestTheWrongLabel:
         assert out["reason"] == "parked_early"
         assert await otp_store.request("job:a1", A) is True
         assert await otp_store.pop_code("job:a1") == "523969"
+
+
+class TestALateCodeOfItsOwn:
+
+    async def test_is_not_reported_as_the_wrong_number(self, db, wired):
+        """A's prompt closed before its code came; A's next challenge wants a
+        new one. That is not the phone labelling SIMs wrongly."""
+        await otp_store.note_click(A, "contact", opens=True, at_ms=now_ms() - 10000)
+        out = await _from_phone(db, _contact(A))
+        assert out["reason"] == "parked_early"
+        assert await _challenge(A, "job:a2") is False
+        assert wired[-1][1]["reason"] == "stale_held" and wired[-1][1]["level"] == "info"
 
 
 class TestOneSmsTwoCopies:
@@ -245,6 +260,19 @@ class TestOneSmsTwoCopies:
         assert (await _from_phone(db, _contact(A, stamp=stamp)))["matched"] is True
         assert (await _from_phone(db, _contact(A, stamp=stamp)))["reason"] == "duplicate"
 
+    async def test_a_copy_held_elsewhere_survives_a_prompt_that_had_just_closed(self, db, monkeypatch):
+        """B's prompt was answered between being found and being written to.
+        The copy held for A is still A's to take."""
+        stamp = now_ms()
+        assert (await _from_phone(db, _contact(A, stamp=stamp)))["reason"] == "parked_early"
+        assert await otp_store.request("job:b1", B) is False
+
+        async def _closed(*a, **k):
+            return False
+        monkeypatch.setattr(otp_store, "submit", _closed)
+        assert (await _from_phone(db, _contact(B, stamp=stamp)))["reason"] == "already_answered"
+        assert await otp_store.request("job:a1", A) is True
+
     async def test_a_different_sms_is_not_a_copy(self, db):
         """A resend is a new SMS with its own stamp, even if the code repeats."""
         await otp_store.request("job:a1", A)
@@ -256,19 +284,61 @@ class TestOneSmsTwoCopies:
 
 class TestWhichClickWins:
 
-    async def test_two_clicks_close_together_leave_it_to_the_label(self, db):
-        await otp_store.note_click(B, "contact", opens=True, at_ms=now_ms() - 4000)
-        await otp_store.note_click(C, "contact", opens=True, at_ms=now_ms() - 2000)
-        out = await _from_phone(db, _contact(A))
+    # C is the owner's own number but not in this phone, so a code labelled C
+    # has both of the phone's SIMs to be weighed against.
+
+    async def test_two_clicks_close_together_leave_it_to_the_label(self, db, wired):
+        await otp_store.note_click(A, "contact", opens=True, at_ms=now_ms() - 4000)
+        await otp_store.note_click(B, "contact", opens=True, at_ms=now_ms() - 2000)
+        out = await _from_phone(db, _contact(C))
         assert out["reason"] == "parked_early"
-        await otp_store.note_click(A, "contact", opens=True, at_ms=now_ms() - 60000)
-        assert await otp_store.request("job:a1", A) is True, "held under its label"
+        assert wired[-1][1]["account"] == d10(C) and wired[-1][1]["routed_by"] == "tie"
 
     async def test_the_later_of_two_clicks_far_apart_wins(self, db, wired):
-        await otp_store.note_click(B, "contact", opens=True, at_ms=now_ms() - 20000)
+        await otp_store.note_click(A, "contact", opens=True, at_ms=now_ms() - 20000)
+        await otp_store.note_click(B, "contact", opens=True, at_ms=now_ms() - 3000)
+        await _from_phone(db, _contact(C))
+        assert wired[-1][1]["account"] == d10(B) and wired[-1][1]["labeled"] == d10(C)
+
+    async def test_a_number_waiting_for_its_code_keeps_it_however_slow_it_was(self, db, wired):
+        """A's prompt is open; A was clicked a minute ago and the SMS is slow.
+        B being clicked meanwhile does not make a code that says A B's."""
+        assert await _challenge(A, "job:a1", clicked_ms_ago=60000) is False
+        assert await _challenge(B, "job:b1", clicked_ms_ago=3000) is False
+        out = await _from_phone(db, _contact(A))
+        assert out["matched"] is True
+        assert await otp_store.wait_code("job:a1", 1) is True
+        assert await otp_store.wait_code("job:b1", 1) is False, "B's prompt got A's code"
+
+    async def test_a_login_in_flight_keeps_its_code_too(self, db):
+        from app.api.routes import auth as auth_routes
+        await auth_routes._note_login_started(A, OWNER)
+        await otp_store.note_click(B, "login", opens=True, at_ms=now_ms() - 3000)
+        await _from_phone(db, _contact(A, code="445566", kind="login"))
+        assert await otp_store.take_login_code(A) == "445566"
+
+    async def test_the_owners_number_in_another_phone_never_takes_it(self, db, wired):
+        """The SMS came in on THIS phone: a number that is in a different one
+        cannot be where it was going."""
         await otp_store.note_click(C, "contact", opens=True, at_ms=now_ms() - 3000)
         await _from_phone(db, _contact(A))
-        assert wired[-1][1]["account"] == d10(C)
+        assert wired[-1][1]["account"] == d10(A)
+
+    async def test_a_phone_with_no_sim_listed_can_route_to_the_owners_sessions(self, wired):
+        dev = _device()
+        dev.sim_phone = dev.sim_phone2 = None
+        db = _DB(dev, [_Cookie(A, OWNER), _Cookie(C, OWNER), _Cookie(X, COLLEAGUE), _Cookie(U, None)])
+        await otp_store.note_click(X, "contact", opens=True, at_ms=now_ms() - 2000)
+        await otp_store.note_click(U, "contact", opens=True, at_ms=now_ms() - 2500)
+        await otp_store.note_click(C, "contact", opens=True, at_ms=now_ms() - 9000)
+        await _from_phone(db, _contact(A))
+        assert wired[-1][1]["account"] == d10(C), "only the owner's own session is a target"
+
+    async def test_a_code_with_no_label_is_not_guessed_for(self, db, wired):
+        await otp_store.note_click(B, "contact", opens=True, at_ms=now_ms() - 3000)
+        out = await _from_phone(db, _contact(""))
+        assert out["reason"] == "no_pending_for_account"
+        assert await otp_store.request("job:b1", B) is False
 
     async def test_the_label_stands_when_its_own_number_was_clicked_too(self, db, wired):
         """A correct label is never second-guessed: A was clicked, so a code
@@ -337,6 +407,15 @@ class TestLoginCodes:
         await otp_store.put_login_code(A, "445566", at_ms=now_ms() - 5000)
         await otp_store.note_click(A, "login", opens=True)
         assert await otp_store.take_login_code(A) is None
+
+    async def test_a_bare_code_from_the_previous_release_is_not_judged_by_old_metadata(self, db):
+        """During a rolling deploy an old pod writes the bare code beside a
+        newer pod's metadata for an earlier one."""
+        await otp_store.put_login_code(A, "111111", at_ms=now_ms() - 60000)
+        await otp_store.note_click(A, "login", opens=True, at_ms=now_ms() - 30000)
+        r = await otp_store.get_redis()
+        await r.set(otp_store._login_key(d10(A)), "222222", ex=otp_store.LOGIN_CODE_TTL)
+        assert await otp_store.take_login_code(A) == "222222"
 
     async def test_one_login_sms_is_used_once(self, db):
         stamp = now_ms()

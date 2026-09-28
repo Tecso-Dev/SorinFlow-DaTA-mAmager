@@ -126,16 +126,23 @@ async def reroute_targets(db, user_id: int, accounts, device: ForwarderDevice) -
     nobody else's. A session with no owner answers to whoever labels a code
     with it, as before, but is never where somebody's code is redirected to.
     Somebody else's number never is, whatever this phone's SIM list says.
+
+    And when the phone lists its SIMs, only those: the SMS came in on this
+    handset, so it cannot be the code of a number that is in another one. Left
+    open, a number the same person is scraping on a different phone took the
+    slow code of this one's.
     """
     from app.models.cookie import Cookie
 
-    wanted = [a for a in accounts if _digits(a)]
+    sims = device.sims() if device is not None else []
+    wanted = [a for a in accounts if _digits(a)
+              and (not sims or any(same_phone(p, a) for p in sims))]
     if not wanted or device is None:
         return set()
     rows = (await db.execute(select(Cookie))).scalars().all()
     out = set()
     for account in wanted:
-        in_phone = any(same_phone(p, account) for p in device.sims())
+        in_phone = any(same_phone(p, account) for p in sims)
         row = next((r for r in rows if same_phone(r.phone_number, account)), None)
         owner = getattr(row, "owner_user_id", None) if row is not None else None
         if (row is not None and owner == user_id) or (owner is None and in_phone):

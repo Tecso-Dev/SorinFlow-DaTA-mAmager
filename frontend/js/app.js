@@ -6566,6 +6566,7 @@ const FW_REASON = {
     already_answered: { cls: 'text-muted', fa: 'قبلاً جواب داده' },
     duplicate:    { cls: 'text-muted',   fa: 'نسخهٔ تکراری' },
     arrived_before_click: { cls: 'text-warning', fa: 'مال شمارهٔ دیگر' },
+    stale_held:   { cls: 'text-muted',   fa: 'کد دیررس' },
     parked_for_login: { cls: 'text-info', fa: 'کد ورود' },
     test:         { cls: 'text-muted',   fa: 'آزمایشی' },
 };
