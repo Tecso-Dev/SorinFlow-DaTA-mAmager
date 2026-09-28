@@ -632,19 +632,32 @@ async def open_browser(playwright, *, headless: bool, proxy=None,
             **opts,
         )
 
+    # BaseException, not Exception: a launch cancelled halfway (a drain, a
+    # timeout around it) is a CancelledError, and it left the lock behind for
+    # the refresher to keep alive as long as the worker lived.
     try:
         context = await _launch_per_sandbox_mode(_launch)
-    except Exception:
+    except BaseException:
         await _release_profile_lock(fs_key, rkey, token, fallback)
         raise
 
-    # A persistent context opens with one page already.
-    page = context.pages[0] if context.pages else await context.new_page()
-    await apply_device(page, device)
-
     # So close_context() can release the guard without re-deriving any of it.
+    # Set before the steps below, which can fail too: a page or a device
+    # override that raised used to leave this Chromium running and the lock
+    # held, and every later run on the number failed with «already open»
+    # until the worker restarted.
     context._sorinflow_profile_key = fs_key
     context._sorinflow_lock = (rkey, token, fallback)
+    try:
+        # A persistent context opens with one page already.
+        page = context.pages[0] if context.pages else await context.new_page()
+        await apply_device(page, device)
+    except BaseException:
+        try:
+            await close_context(context)      # releases the lock even if close() raises
+        except Exception as e:
+            logger.warning(f"[stealth] could not close a browser that failed to get ready: {e}")
+        raise
     return context.browser, context, page, device
 
 

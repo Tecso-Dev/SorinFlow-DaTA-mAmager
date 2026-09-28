@@ -219,3 +219,98 @@ class TestDivarAuthAlwaysReleases:
         assert rkey not in st._profile_locks
         rkey2, token2, _ = await st._acquire_profile_lock("09120005555")   # must not raise
         await st._release_profile_lock(str(st.profile_dir("09120005555")), rkey2, token2, False)
+
+
+class _FakeContext:
+    """What launch_persistent_context hands back, with the step after the
+    launch made to fail on demand."""
+
+    def __init__(self, *, page_fails=False, device_fails=False, close_fails=False):
+        self.pages = []
+        self.browser = None
+        self.closed = 0
+        self._page_fails, self._device_fails, self._close_fails = page_fails, device_fails, close_fails
+
+    async def new_page(self):
+        if self._page_fails:
+            raise RuntimeError("Target page, context or browser has been closed")
+        page = type("_Page", (), {})()
+        page.context = self
+        return page
+
+    async def new_cdp_session(self, _page):
+        if self._device_fails:
+            raise RuntimeError("Protocol error (Target.attachToTarget): Target closed")
+        raise AssertionError("not reached in these tests")
+
+    async def close(self):
+        self.closed += 1
+        if self._close_fails:
+            raise RuntimeError("Browser has been closed")
+
+
+class _FakePlaywright:
+    def __init__(self, context=None, *, hang=None):
+        self.chromium = self
+        self._context, self._hang = context, hang
+
+    async def launch_persistent_context(self, *_a, **_k):
+        if self._hang is not None:
+            await self._hang.wait()
+        return self._context
+
+
+class TestAFailedOpenLeavesNothingBehind:
+    """open_browser takes the number's lock, launches Chromium, then opens a
+    page and presents the device. Only a failed LAUNCH gave the lock back: a
+    page or device step that raised after it left a live Chromium and a lock
+    the refresher kept alive for the life of the worker — that number could
+    not be opened again until a restart, and every run on it failed with
+    «already open»."""
+
+    @pytest.fixture(autouse=True)
+    def _profiles(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("SCRAPER_PROFILE_DIR", str(tmp_path))
+
+    @pytest.mark.parametrize("step", ["page", "device"])
+    async def test_the_context_is_closed_and_the_lock_released(self, _redis, step):
+        ctx = _FakeContext(page_fails=step == "page", device_fails=step == "device")
+        with pytest.raises(RuntimeError):
+            await st.open_browser(_FakePlaywright(ctx), headless=True, account="09120001212")
+        assert ctx.closed == 1, "the Chromium that did launch was left running"
+        assert await st.profile_in_use("09120001212") is False, "the number's lock leaked"
+        assert st._profile_locks == {}, "the refresher would keep the lock alive for ever"
+        rkey, token, fb = await st._acquire_profile_lock("09120001212")   # the next run can open it
+        await st._release_profile_lock(str(st.profile_dir("09120001212")), rkey, token, fb)
+
+    async def test_the_first_error_is_the_one_raised_even_when_close_fails_too(self, _redis):
+        ctx = _FakeContext(page_fails=True, close_fails=True)
+        with pytest.raises(RuntimeError, match="Target page"):
+            await st.open_browser(_FakePlaywright(ctx), headless=True, account="09120001313")
+        assert await st.profile_in_use("09120001313") is False
+
+    async def test_a_launch_cancelled_midway_releases_the_lock(self, _redis):
+        """A drain or a timeout cancelling the launch: CancelledError is not an
+        Exception, so `except Exception` let the lock go on living."""
+        hang = asyncio.Event()
+        opening = asyncio.create_task(st.open_browser(
+            _FakePlaywright(_FakeContext(), hang=hang), headless=True, account="09120001414"))
+        for _ in range(50):
+            if await st.profile_in_use("09120001414"):
+                break
+            await asyncio.sleep(0.01)
+        assert await st.profile_in_use("09120001414"), "the lock was never taken"
+        opening.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await opening
+        assert await st.profile_in_use("09120001414") is False
+        assert st._profile_locks == {}
+
+    async def test_the_in_process_fallback_is_released_the_same_way(self, monkeypatch):
+        async def _boom():
+            raise ConnectionError("redis unreachable")
+        monkeypatch.setattr(st, "get_redis", _boom, raising=True)
+        with pytest.raises(RuntimeError):
+            await st.open_browser(_FakePlaywright(_FakeContext(page_fails=True)),
+                                  headless=True, account="09120001515")
+        assert str(st.profile_dir("09120001515")) not in st._PROFILES_IN_USE
