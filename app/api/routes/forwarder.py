@@ -125,6 +125,72 @@ async def _mine(db: AsyncSession, user: User, device_id: int) -> ForwarderDevice
     return row
 
 
+# How far back the phone card looks for codes that arrived under the wrong
+# number. A week: long enough to still be on screen the day after a run,
+# short enough that a phone set up properly since then stops being flagged.
+MISLABEL_DAYS = 7
+
+
+async def _mislabelled(db: AsyncSession, devices) -> dict:
+    """{device_id: summary} of this phone's codes that carried the wrong
+    number over the last MISLABEL_DAYS (issue #37).
+
+    Two kinds, both recorded by the inbound path: a code labelled A that went
+    to B because B was the number just clicked, and a code held under A that
+    A's next challenge refused because it had arrived when A had not been
+    clicked at all. Either means the app is labelling this phone's SIMs
+    wrongly — which only the phone's owner can fix, so it goes on their card.
+    A late code of A's own, refused the same way, is not counted.
+
+    Narrowed to the caller's own device ids in the query itself, so nobody
+    else's traffic can crowd them out of the row limit.
+    """
+    import json as _json
+    from datetime import timedelta
+
+    from sqlalchemy import or_
+
+    from app.models.sms_log import SmsEvent
+
+    ids = {d.device_id for d in devices}
+    if not ids:
+        return {}
+    since = datetime.now(timezone.utc) - timedelta(days=MISLABEL_DAYS)
+    try:
+        rows = (await db.execute(
+            select(SmsEvent)
+            .where(SmsEvent.stage == "inbound", SmsEvent.created_at >= since,
+                   # device ids are hex, so nothing in them needs escaping
+                   or_(*[SmsEvent.details.like(f'%"device": "{i}"%') for i in sorted(ids)]),
+                   or_(SmsEvent.details.like('%"rerouted": true%'),
+                       SmsEvent.details.like('%"arrived_before_click"%')))
+            .order_by(SmsEvent.created_at.desc(), SmsEvent.id.desc())
+            .limit(1000)
+        )).scalars().all()
+    except Exception as e:
+        logger.warning(f"[forwarder] could not read mislabelled codes: {e}")
+        return {}
+    out: dict = {}
+    for ev in rows:
+        try:
+            d = _json.loads(str(ev.details)) if ev.details else {}
+        except Exception:
+            continue
+        dev = d.get("device")
+        rerouted = d.get("rerouted") is True
+        if dev not in ids or not (rerouted or d.get("reason") == "arrived_before_click"):
+            continue
+        m = out.setdefault(dev, {"count": 0, "rerouted": 0, "refused": 0})
+        m["count"] += 1
+        m["rerouted" if rerouted else "refused"] += 1
+        if m["count"] == 1:      # newest first
+            m.update(last_at=ev.created_at.isoformat() if ev.created_at else None,
+                     last_labeled=d.get("labeled") or d.get("account"),
+                     last_account=d.get("account") if d.get("rerouted") else None,
+                     last_kind=d.get("kind"))
+    return out
+
+
 @router.get("/devices")
 async def list_devices(db: AsyncSession = Depends(get_db),
                        user: User = Depends(get_current_user)):
@@ -134,8 +200,10 @@ async def list_devices(db: AsyncSession = Depends(get_db),
         .where(ForwarderDevice.user_id == user.id)
         .order_by(ForwarderDevice.id.asc())
     )).scalars().all()
-    return {"devices": [{**d.to_dict(), "health": fw.health(d)} for d in rows],
-            "count": len(rows)}
+    wrong = await _mislabelled(db, rows)
+    return {"devices": [{**d.to_dict(), "health": fw.health(d),
+                         "mislabelled": wrong.get(d.device_id)} for d in rows],
+            "count": len(rows), "mislabelled_days": MISLABEL_DAYS}
 
 
 @router.post("/devices", dependencies=[Depends(require_verified_phone)])
@@ -332,10 +400,11 @@ async def device_events(device_id: int, limit: int = 50,
             d = _json.loads(e.details) if e.details else {}
         except Exception:
             d = {}
-        # this phone's SIMs — or a refusal naming this device, which may
-        # carry no account at all (a body that did not parse)
-        if row.sims() and not any(fw.same_phone(d.get("account"), p) for p in row.sims()) \
-                and d.get("device") != row.device_id:
+        # this phone's own events, and anything about its SIMs' numbers —
+        # which are its owner's. A phone with no SIM listed used to skip this
+        # test altogether and see every user's codes and numbers.
+        if d.get("device") != row.device_id \
+                and not any(fw.same_phone(d.get("account"), p) for p in row.sims()):
             continue
         out.append({
             "at": e.created_at.isoformat() if e.created_at else None,
@@ -345,6 +414,11 @@ async def device_events(device_id: int, limit: int = 50,
             "reason": d.get("reason"),
             "code": d.get("code"),
             "latency_ms": d.get("latency_ms"),
+            # where it went, and the number the phone put on it when that
+            # was a different one (issue #37)
+            "account": d.get("account"),
+            "labeled": d.get("labeled"),
+            "rerouted": bool(d.get("rerouted")),
         })
         if len(out) >= max(1, min(limit, 200)):
             break
