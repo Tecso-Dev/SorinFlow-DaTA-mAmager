@@ -5011,24 +5011,22 @@ class DivarScraper:
                 # The same filters in the shape the search API takes, for the
                 # collection that no longer needs a browser.
                 self._search_form = _plan.form
-                if urls:
-                    pass       # an explicit list: nothing is searched, nothing to say
-                else:
-                    if self._search_query:
-                        logger.info(f"[collect] Divar-side filters: {self._search_query}")
-                        await job_log.record(
-                            job.job_id, job_log.PAGE,
-                            f"فیلترها به خود دیوار داده شد: {self._search_query}",
-                            query=self._search_query)
-                    if _plan.recent_ads and posted_date:
-                        await job_log.record(
-                            job.job_id, job_log.PAGE,
-                            f"تاریخ انتشار به دیوار به‌صورت «آگهی‌های اخیر: {_plan.recent_ads}» "
-                            "داده شد تا فهرست کوتاه‌تر شود؛ روز دقیق را اسکرپر خودش بررسی می‌کند",
-                            recent_ads=_plan.recent_ads)
-                    for _note in _plan.notes:
-                        logger.info(f"[collect] filter not sent: {_note}")
-                        await job_log.record(job.job_id, job_log.PAGE, _note, level="warning")
+                # An explicit list searches nothing, so there is nothing to say.
+                if not urls and self._search_query:
+                    logger.info(f"[collect] Divar-side filters: {self._search_query}")
+                    await job_log.record(
+                        job.job_id, job_log.PAGE,
+                        f"فیلترها به خود دیوار داده شد: {self._search_query}",
+                        query=self._search_query)
+                if not urls and _plan.recent_ads and posted_date:
+                    await job_log.record(
+                        job.job_id, job_log.PAGE,
+                        f"تاریخ انتشار به دیوار به‌صورت «آگهی‌های اخیر: {_plan.recent_ads}» "
+                        "داده شد تا فهرست کوتاه‌تر شود؛ روز دقیق را اسکرپر خودش بررسی می‌کند",
+                        recent_ads=_plan.recent_ads)
+                for _note in ([] if urls else _plan.notes):
+                    logger.info(f"[collect] filter not sent: {_note}")
+                    await job_log.record(job.job_id, job_log.PAGE, _note, level="warning")
             except Exception as e:
                 # A filter we cannot express is not a reason to abandon the run;
                 # it just means the local pass does more work, as before.
