@@ -516,13 +516,19 @@ async def _attach_reasons(kind: str, source_id: int, results: List[Dict[str, Any
             if reasons.get(row["id"]):
                 row["ai_reason"] = reasons[row["id"]]
         return False
-    if await _gateway_paused():
-        return False          # nothing will be written, so nobody is told to wait for it
     lock_key = f"match:reason:lock:{kind}:{source_id}:{fp}"
     try:
         got_lock = await r.set(lock_key, "1", nx=True, ex=LOCK_TTL)
     except Exception:
         got_lock = False
+    if got_lock and await _gateway_paused():
+        # nothing will be written, so nobody is told to wait for it. Asked only
+        # by the caller that holds the lock: a burst pays one settings read, not one each
+        try:
+            await r.delete(lock_key)
+        except Exception:
+            pass
+        return False
     if got_lock:
         prompt_items = [{"id": row["id"], "title": row["title"], "area": row["area"], "rooms": row["rooms"],
                          "price": row["price"], "district": row["district"], "city": row["city_name"],
@@ -574,13 +580,18 @@ async def _cached_semantic_candidates(need: str, city: Optional[str],
             return {int(pid): score for pid, score in json.loads(cached)}
         except Exception:
             return {}
-    if await _gateway_paused():
-        return {}             # the embedder cannot be asked: no background call to fill a cache it would not fill
     lock_key = f"match:semantic:lock:{fp}"
     try:
         got_lock = await r.set(lock_key, "1", nx=True, ex=LOCK_TTL)
     except Exception:
         got_lock = False
+    if got_lock and await _gateway_paused():
+        # the embedder cannot be asked: no background call to fill a cache it would not fill
+        try:
+            await r.delete(lock_key)
+        except Exception:
+            pass
+        return {}
     if got_lock:
         _spawn(_compute_and_cache_semantic(key, lock_key, need, city, listing_type))
     return {}
