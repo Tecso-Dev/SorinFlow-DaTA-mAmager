@@ -211,6 +211,14 @@ class TestTheScraperGoesToItFirst:
         assert "بدون پیمایش مرورگر" in self.SRC
 
     def test_the_form_is_built_from_the_run_s_own_filters(self):
+        """One plan per run (#27): the search form, the link query and the
+        count all come from the run's filters, checked end to end in
+        test_divar_filter_run.py."""
         src = inspect.getsource(DivarScraper.start_scraping_job)
-        assert "self._search_form = _bfd(" in src
-        assert "advertiser_type=advertiser_type" in src[src.index("self._search_form"):][:400]
+        assert "self._search_form = _plan.form" in src
+        assert "_plan = _dc.plan_filters(category, **_filter_kw)" in src
+        kw = src[src.index("_filter_kw: Dict[str, Any] = dict("):][:1200]
+        for name in ("advertiser_type=advertiser_type", "min_rooms=min_rooms",
+                     "has_balcony=has_balcony", "posted_date=posted_date",
+                     "divar_filters=divar_filters"):
+            assert name in kw, name
