@@ -8,9 +8,12 @@ hand on Divar has already done the work.
 
 The mapping is short because the vocabulary already lines up: our city keys
 ARE Divar's city slugs, and our category keys ARE the slugs in its URL path.
-Only the query string needs translating, and build_search_query() in
-divar_count writes exactly the same six parameters in the other direction —
-the two are inverses and should move together.
+Only the query string needs translating, and it is read against the
+category's own filters (app/services/divar_filters.py, #27): every key the
+category has comes into the form — the form's own fields where it has one
+(price, deposit, rooms, the amenity switches…), the rest as `divar_filters`
+under Divar's own name. build_search_query() in divar_count writes the same
+parameters in the other direction; the two are inverses.
 
 What it deliberately does NOT do is guess. A filter Divar can express and the
 scraper cannot — a polygon drawn on the map, a district list — is reported as
@@ -22,15 +25,20 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from app.config import CATEGORIES, CITIES
 
-# Divar's query names → ours. The other direction lives in
-# divar_count.build_search_query(); if one moves, move both.
+# Divar's query names → the form's own fields. The other direction lives in
+# divar_count.plan_filters(); if one moves, move both.
 _RANGES = {
     "price":  ("min_price", "max_price"),
     "credit": ("min_deposit", "max_deposit"),      # ودیعه
     "rent":   ("min_rent", "max_rent"),
     "size":   ("min_area", "max_area"),            # متراژ
-    "rooms":  ("min_rooms", "max_rooms"),
+    "price_per_square": ("min_price_per_meter", "max_price_per_meter"),
+    "rooms":  ("min_rooms", "max_rooms"),          # an older numeric «2-3»
 }
+_SWITCHES = {"has-photo": "has_images", "elevator": "has_elevator",
+             "parking": "has_parking", "warehouse": "has_storage",
+             "balcony": "has_balcony"}
+_ROOMS = {"بدون اتاق": 0, "یک": 1, "دو": 2, "سه": 3, "چهار": 4, "بیشتر": 5}
 
 _BUSINESS = {"personal": "personal", "real-estate-business": "agency"}
 
@@ -124,19 +132,51 @@ def parse_search_url(url: str) -> Dict[str, Any]:
 
     query = parse_qs(parsed.query or "", keep_blank_values=False)
     filters: Dict[str, Any] = {}
+    extra: Dict[str, Any] = {}
     ignored: List[str] = list(out["ignored"])
+
+    from app.services import divar_filters as df
+    schema = df.snapshot()
+    known = df.definitions(schema)
+    # A link with no category: whatever any category has is taken, and the
+    # run's plan drops what the category picked in the form does not have.
+    own = df.filters_for(out["category"], schema) if out["category"] else known
+    cat_fa = out["category_name"] or ""
 
     for key, values in query.items():
         # Divar writes list-valued filters comma-separated WITH a trailing
         # comma: «business-type=personal,». Read literally, «personal,» is
         # not «personal», and the one filter that most changes the count —
         # 702 ads for everyone against 185 for personal, on the same search —
-        # silently fell off the link. Split, drop the empties, keep the first.
+        # silently fell off the link. Split and drop the empties.
         parts = [p.strip() for p in (values[-1] or "").split(",") if p.strip()]
         value = parts[0] if parts else ""
         if not value or key in _NOISE:
             continue
-        if key in _RANGES:
+        if key in _IGNORED_FA:
+            ignored.append(_IGNORED_FA[key])
+            continue
+        f = own.get(key)
+        if f is None:
+            # A filter Divar has, but not for this category: said in the
+            # person's words, never carried into a run it would break (#27).
+            if key in known:
+                ignored.append(f"{df.title_of(key, schema)} (دستهٔ «{cat_fa}» این فیلتر را ندارد)")
+            else:
+                ignored.append(key)
+            continue
+        ftype = f.get("type")
+        if key == "rooms" and not value[:1].isdigit() and not value.startswith("-"):
+            rooms = sorted(_ROOMS[p] for p in parts if p in _ROOMS)
+            if not rooms:
+                ignored.append(df.title_of(key, schema))
+                continue
+            filters["min_rooms"] = rooms[0]
+            if rooms[-1] < 5:
+                filters["max_rooms"] = rooms[-1]
+            if rooms != list(range(rooms[0], rooms[-1] + 1)):
+                ignored.append("تعداد اتاق به بازهٔ پیوسته تبدیل شد")
+        elif key in _RANGES:
             lo_name, hi_name = _RANGES[key]
             lo, hi = _range(value)
             if lo is not None:
@@ -146,17 +186,40 @@ def parse_search_url(url: str) -> Dict[str, Any]:
             if lo is None and hi is None:
                 ignored.append(key)
         elif key == "business-type":
-            kind = _BUSINESS.get(value)
-            if kind:
-                filters["advertiser_type"] = kind
-            else:
+            kinds = {_BUSINESS[p] for p in parts if p in _BUSINESS}
+            if len(kinds) == 1:
+                filters["advertiser_type"] = kinds.pop()
+            elif not kinds:
                 ignored.append(_IGNORED_FA.get("user_type", key))
-        elif key == "has-photo":
+        elif key in _SWITCHES:
             if value.lower() in ("true", "1", "yes"):
-                filters["has_images"] = True
+                filters[_SWITCHES[key]] = True
+        elif ftype == "number_range":
+            lo, hi = _range(value)
+            if lo is None and hi is None:
+                ignored.append(df.title_of(key, schema))
+            else:
+                extra[key] = {k: v for k, v in (("min", lo), ("max", hi)) if v is not None}
+        elif ftype == "boolean":
+            if value.lower() in ("true", "1", "yes"):
+                extra[key] = True
+        elif ftype == "repeated_string":
+            allowed = df.option_values(f) if df.options_known(f) else None
+            chosen = [p for p in parts if allowed is None or p in allowed]
+            if chosen:
+                extra[key] = chosen
+            if len(chosen) < len(parts):
+                ignored.append(f"بعضی گزینه‌های «{df.title_of(key, schema)}»")
+        elif ftype == "str":
+            if not df.options_known(f) or value in df.option_values(f):
+                extra[key] = value
+            else:
+                ignored.append(df.title_of(key, schema))
         else:
-            ignored.append(_IGNORED_FA.get(key, key))
+            ignored.append(key)
 
+    if extra:
+        filters["divar_filters"] = extra
     out["filters"] = filters
     # Stable order, no repeats — this is read by a person.
     out["ignored"] = sorted(set(ignored))

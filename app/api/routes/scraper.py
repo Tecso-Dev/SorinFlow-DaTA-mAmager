@@ -1377,8 +1377,10 @@ async def parse_divar_link(body: DivarLinkRequest):
     can be seen and corrected before anything runs. A link that quietly became
     a running scrape would hide whichever half of it did not carry over.
     """
+    from app.services import divar_filters as df
     from app.services.divar_link import parse_search_url
 
+    await df.current()          # the category's filters, live if Divar was read today
     got = parse_search_url(body.url)
     if got.get("error"):
         raise HTTPException(status_code=422, detail=got["error"])
