@@ -71,11 +71,19 @@ class TestItCannotLie:
         src = inspect.getsource(ScrapingJob.progress.fget)
         assert "min(100.0" in src
 
-    def test_completion_still_fills_a_run_that_fell_short(self):
+    async def test_completion_still_fills_a_run_that_fell_short(self, monkeypatch):
         """The rule from the earlier fix survives: a finished run is finished
-        whatever Divar said it held."""
-        i = SCRAPER.index("# Complete job")
-        assert "job.scraped_items = job.total_items" in SCRAPER[i:i + 700]
+        whatever Divar said it held. A partial one is not finished in that
+        sense (#28): its bar stays where the walk got to — run 47 read
+        «105 / 105» over the 24 candidates Divar let it have."""
+        from _scripted_run import page, refused, scripted_run, tokens
+        run = scripted_run(monkeypatch)
+        done, _, _ = await run([page(1, tokens("pa", 40), next_page=False, count=120)],
+                               category="rent-apartment")
+        assert done.status == "completed" and (done.scraped_items, done.total_items) == (120, 120)
+        cut, _, _ = await run([page(1, tokens("pb", 24), count=105), refused(429)],
+                              category="rent-apartment")
+        assert cut.status == "partial" and (cut.scraped_items, cut.total_items) == (24, 105)
 
     def test_an_empty_total_does_not_divide_by_zero(self):
         assert job(0, 0).progress == 0

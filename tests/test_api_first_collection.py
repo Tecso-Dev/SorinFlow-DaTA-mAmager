@@ -188,10 +188,20 @@ class TestTheScraperGoesToItFirst:
     def test_the_api_is_strategy_zero(self):
         assert self.SRC.index("_dc.fetch_listings(") < self.SRC.index("_collect_from_browser_dom(")
 
-    def test_a_full_answer_skips_the_browser_walk(self):
-        i = self.SRC.index("if listings:")
-        block = self.SRC[i:self.SRC.index("logger.warning", i)]
-        assert "return all_listings" in block
+    async def test_a_full_answer_skips_the_browser_walk(self, divar):
+        divar([page(["gaA1b2c3", "gaD4e5f6"], next_page=False)])
+        s = DivarScraper.__new__(DivarScraper)
+        s._search_form, s._job_id_str = {}, None
+        walked = []
+
+        async def dom(*args, **_kw):
+            walked.append(args)
+            return []
+        s._collect_from_browser_dom = dom
+        rows = await s._collect_listings_robust("urmia", "rent-apartment", 10)
+        assert [r["divar_id"] for r in rows] == ["gaA1b2c3", "gaD4e5f6"]
+        assert walked == [], "a full answer from the API must not open the browser walk"
+        assert s._collect_stop == ("exhausted", None), "Divar said there was no next page"
 
     def test_an_empty_answer_falls_through_with_the_reason(self):
         assert "falling back to the browser walk" in self.SRC

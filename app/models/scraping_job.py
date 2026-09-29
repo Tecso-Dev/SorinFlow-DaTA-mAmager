@@ -4,23 +4,36 @@ SorinFlow Divar Scraper - Scraping Job Model
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 import uuid
 from typing import Any, Optional
 from app.database import Base
+
+# Every status a run can end in: it can be deleted, and not cancelled.
+#
+# «partial» (ناقص) is a run whose collection stopped short — Divar refused a
+# later page of the search, it stopped answering, the walk hit a cap — while
+# the run neither reached the end of Divar's list nor its own target. It
+# used to read «completed», 105 / 105, with 24 candidates behind it.
+FINISHED_STATUSES = ("completed", "partial", "failed", "cancelled")
+# A run that stopped short and can be continued. Not «completed»: that run
+# walked its whole pool, so «ادامه» would be a rerun wearing the wrong label.
+RESUMABLE_STATUSES = ("partial", "failed", "cancelled")
+FINISH_REASON_MAX = 300
 
 
 class ScrapingJob(Base):
     """Scraping job model for tracking scraping tasks"""
     __tablename__ = "scraping_jobs"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(UUID(as_uuid=True), default=uuid.uuid4, unique=True, nullable=False, index=True)
     city_id = Column(Integer, ForeignKey("cities.id"))
     category_id = Column(Integer, ForeignKey("categories.id"))
-    
-    # Status
-    status = Column(String(50), default="pending")  # pending, running, paused, completed, failed, cancelled
+
+    # Status: pending, running, paused (waiting for a code), then one of
+    # FINISHED_STATUSES — completed, partial, failed, cancelled.
+    status = Column(String(50), default="pending")
     
     # Progress
     total_pages = Column(Integer, default=0)
@@ -44,7 +57,7 @@ class ScrapingJob(Base):
     # Finishing at 42% and saying only «completed» is indistinguishable from a
     # fault, so a run that ran out of listings has to say that it did. Not an
     # error — a completed job with nothing wrong still fills this in.
-    finish_reason = Column(String(300))
+    finish_reason = Column(String(FINISH_REASON_MAX))
     # How the run was started, in full, so it can be continued. The START
     # line in the log only says that it began.
     config = Column(JSON)
@@ -65,7 +78,26 @@ class ScrapingJob(Base):
     
     def __repr__(self):
         return f"<ScrapingJob(id={self.id}, job_id={self.job_id}, status={self.status})>"
-    
+
+    @validates("finish_reason")
+    def _fit_finish_reason(self, _key, value):
+        """Shortened to the column, never refused by it.
+
+        A partial run's reason quotes Divar, and the filter tally and the
+        code-prompt note are appended after it. Past 300 characters Postgres
+        rejects the UPDATE, and the failed commit takes the run's session —
+        and the finish line the person was meant to read — down with it.
+        """
+        if isinstance(value, str) and len(value) > FINISH_REASON_MAX:
+            return value[:FINISH_REASON_MAX - 1] + "…"
+        return value
+
+    @property
+    def can_resume(self) -> bool:
+        """«ادامه» is offered: the run's settings were stored, and it stopped
+        short. One rule for the model, the jobs list and the single job."""
+        return bool(self.config) and self.status in RESUMABLE_STATUSES
+
     def to_dict(self):
         """Convert job to dictionary"""
         return {
@@ -93,9 +125,10 @@ class ScrapingJob(Base):
             "accounts_used": self.accounts_used or [],
             "owner_user_id": (self.config or {}).get("owner_user_id"),
             # A completed run is not offered: it already walked its whole pool,
-            # so «continue» would be a rerun wearing the wrong label. Failed
-            # and cancelled runs stopped short, and those are what it is for.
-            "can_resume": bool(self.config) and self.status in ("failed", "cancelled")
+            # so «continue» would be a rerun wearing the wrong label. Failed,
+            # cancelled and partial runs stopped short, and those are what it
+            # is for.
+            "can_resume": self.can_resume
         }
     
     @property

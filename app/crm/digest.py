@@ -68,6 +68,9 @@ async def build(db, *, now: Optional[datetime] = None) -> Dict:
     jobs = select(ScrapingJob.id).where(ScrapingJob.created_at >= since)
     n_done = await count(jobs.where(ScrapingJob.status == "completed"))
     n_failed = await count(jobs.where(ScrapingJob.status == "failed"))
+    # cut short by Divar: neither done nor failed, and a night of them
+    # would otherwise read «0 کامل · 0 ناموفق»
+    n_partial = await count(jobs.where(ScrapingJob.status == "partial"))
     n_running = await count(select(ScrapingJob.id).where(ScrapingJob.status == "running"))
 
     n_matches = await count(select(CustomerMatch.id).where(CustomerMatch.created_at >= since))
@@ -95,6 +98,8 @@ async def build(db, *, now: Optional[datetime] = None) -> Dict:
     sale = n_props - n_rent
     lines.append(f"🏠 آگهی تازه: {n_props}" + (f" (فروش {sale} · اجاره {n_rent})" if n_props else ""))
     scrape = f"🕷 اسکرپ: {n_done} کامل · {n_failed} ناموفق"
+    if n_partial:
+        scrape += f" · {n_partial} ناقص"
     if n_running:
         scrape += f" · {n_running} در حال اجرا"
     lines.append(scrape)
@@ -109,7 +114,7 @@ async def build(db, *, now: Optional[datetime] = None) -> Dict:
     lines += ["", f"https://{domain}/dashboard/#crm"]
     return {"text": "\n".join(lines), "since": since.isoformat(),
             "counts": {"properties": n_props, "rent": n_rent, "jobs_done": n_done, "jobs_failed": n_failed,
-                       "jobs_running": n_running, "matches": n_matches, "waiting": n_waiting,
+                       "jobs_partial": n_partial, "jobs_running": n_running, "matches": n_matches, "waiting": n_waiting,
                        "drops": n_drops, "calls_due": n_due, "callbacks": n_callbacks}}
 
 

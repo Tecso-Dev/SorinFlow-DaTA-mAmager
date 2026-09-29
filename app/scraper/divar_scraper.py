@@ -215,6 +215,9 @@ class DivarScraper:
     # How many listings the browser-scroll phase may gather before the
     # cheaper API pagination takes over.
     DOM_COLLECT_CAP = 200
+    # The most candidates one run walks — the ceiling collect_target has
+    # always had, and the one a pool topped up mid-run stops at too (#30).
+    POOL_CEILING = 1500
 
     # Maps our category slug → substrings expected in the Divar detail-page URL.
     # Divar builds URLs from the listing *title*, not the category name, so we
@@ -1211,6 +1214,11 @@ class DivarScraper:
         """
         listings: List[Dict[str, Any]] = []
         next_last_post_date: Optional[int] = None
+        # What Divar answered this page, for the collector: an empty page it
+        # refused and an empty page it simply did not have are not the same
+        # end, and only this call saw which one it was. None: never asked.
+        self._replay_status = None
+        self._replay_more = None
 
         template = self._search_req_template
         if not (template and template.get('post_data') and self.page and not self.page.is_closed()):
@@ -1254,9 +1262,16 @@ class DivarScraper:
                 {"url": template['url'], "body": body},
             )
             status = int(result.get("status") or 0)
+            self._replay_status = status or None
             logger.info(f"[api] in-page replay POST {template['url']} → {status}")
             if status == 200 and result.get("data") is not None:
-                parsed, lpd = self._parse_api_response(result["data"])
+                data = result["data"]
+                pagination = (data.get("pagination") or {}) if isinstance(data, dict) else {}
+                if "has_next_page" in pagination:
+                    # Divar's own word on whether the list goes on: the only
+                    # thing that tells its end from a cursor that is stuck.
+                    self._replay_more = bool(pagination.get("has_next_page"))
+                parsed, lpd = self._parse_api_response(data)
                 if parsed:
                     logger.info(f"Got {len(parsed)} listings via replayed postlist/w/search")
                     return parsed, lpd
@@ -1728,18 +1743,19 @@ class DivarScraper:
 
     @staticmethod
     def _cursor_to_datetime(lpd: Optional[int]) -> Optional[datetime]:
-        """Convert the API's last_post_date cursor (epoch in s/ms/µs/ns) to a datetime."""
-        if not lpd:
+        """The API's last_post_date cursor (epoch in s/ms/µs/ns, or RFC 3339
+        text) as a moment in Tehran time — so its .date() is the day the
+        person picked, not the server's.
+
+        It was datetime.fromtimestamp(ts): the server's own clock, which is
+        UTC in the container, so a cursor at 01:30 Tehran time read as the
+        day before and the date walk stopped short of its day.
+        """
+        from app.services.divar_count import cursor_moment
+        try:
+            return cursor_moment(lpd)
+        except (OverflowError, OSError, ValueError):
             return None
-        v = float(lpd)
-        for div in (1, 1e3, 1e6, 1e9):
-            ts = v / div
-            if 1e9 <= ts < 4e9:  # plausible epoch-seconds range (2001..2096)
-                try:
-                    return datetime.fromtimestamp(ts)
-                except (OverflowError, OSError, ValueError):
-                    return None
-        return None
 
     async def _collect_listings_robust(
         self, city: str, category: str, target_count: int,
@@ -1754,9 +1770,16 @@ class DivarScraper:
         With until_day set (exact-date scraping), target_count is ignored as a
         stop condition: pagination continues until the feed cursor moves past
         that day, so the pool covers every post of the day (safety cap 1500).
+
+        Leaves self._collect_stop saying why the pool ends where it does —
+        and only «target» or «exhausted» mean it is everything the run could
+        ask for. A later page Divar refused used to be thrown away here and
+        the pool declared «exhausted» (#28).
         """
         all_listings: List[Dict[str, Any]] = []
         seen_ids: set = set()
+        self._collect_stop = None
+        self._feed_more = None
 
         # Strategy 0: the search API over plain HTTP, no browser.
         #
@@ -1776,28 +1799,43 @@ class DivarScraper:
             async def _progress(page, fresh, total):
                 logger.info(f"[api] page {page}: +{fresh} → {total}")
 
+            report = _dc.FeedReport()
             listings, err = await _dc.fetch_listings(
                 city, form, target=target_count, until_day=until_day,
-                on_page=_progress)
+                on_page=_progress, report=report)
             if listings:
                 for lst in listings:
                     if lst['divar_id'] not in seen_ids:
                         seen_ids.add(lst['divar_id'])
                         all_listings.append(lst)
-                self._collect_stop = ("exhausted", None) if (
-                    until_day is not None or len(all_listings) < target_count) else ("target", None)
-                logger.info(f"[robust] API-first: {len(all_listings)} listings, no browser walk")
+                # How the walk ended, with the listings it did get. A refusal
+                # on page 2 is not the end of Divar's list.
+                self._collect_stop = self._stop_from_feed(report, len(all_listings))
+                if err:
+                    logger.warning(f"[robust] API-first stopped short: {err}")
+                # The way back into the feed, for a pool that runs dry before
+                # the run's target (#30): where the next page starts, and the
+                # rows the last page carried past the target. Not after a
+                # refusal — the run says it is short instead of asking again.
+                if until_day is None and report.stop in (_dc.STOP_TARGET, _dc.STOP_END) \
+                        and (report.cursor or report.leftover):
+                    self._feed_more = {"city": city, "form": form, "cursor": report.cursor,
+                                       "page": report.last_page, "leftover": list(report.leftover)}
+                logger.info(f"[robust] API-first: {len(all_listings)} listings "
+                            f"(stop={report.stop}, pages={report.last_page}), no browser walk")
                 if job_id:
                     await _jl.record(job_id, _jl.PAGE,
                                      f"{len(all_listings)} آگهی از API دیوار جمع شد — بدون پیمایش مرورگر",
-                                     collected=len(all_listings), via="api")
+                                     collected=len(all_listings), via="api",
+                                     pages=report.last_page, stop=report.stop)
                 return all_listings if until_day is not None else all_listings[:target_count]
             logger.warning(f"[robust] API-first returned nothing ({err or 'empty'}) — "
                            "falling back to the browser walk")
             if job_id:
                 await _jl.record(job_id, _jl.PAGE,
                                  f"API دیوار آگهی نداد ({err or 'خالی'}) — به پیمایش مرورگر برمی‌گردیم",
-                                 level="warning")
+                                 level="warning", page=report.page, status=report.status,
+                                 divar_message=report.divar_message)
 
         # Strategy 1: live DOM extraction (independent of API response format).
         # Bounded on purpose: this phase scrolls a real browser and its cost
@@ -1814,9 +1852,22 @@ class DivarScraper:
             logger.info(f"[robust] DOM strategy: {len(all_listings)}/{dom_target} (pool target {target_count})")
         except Exception as e:
             logger.error(f"[robust] DOM strategy failed: {e}")
+            if self._collect_stop is None:
+                self._collect_stop = ("error", f"{type(e).__name__}: {e}")
 
         if until_day is None and len(all_listings) >= target_count:
+            self._collect_stop = ("target", None)
             return all_listings[:target_count]
+
+        # What the browser walk said, before the replay below has its say.
+        dom_stop = self._collect_stop or ("unknown", None)
+        walked = len(all_listings)
+        # Why the replay stopped: "target", "day", "end" (Divar said there is
+        # no next page), "cap", "refused", "error", or — two pages with
+        # nothing new — "stale" when it could replay and "no-replay" when no
+        # search request was ever captured to replay.
+        replay_stop: str = "cap"
+        replay_detail: Dict[str, Any] = {}
 
         # Strategy 2: direct API with cursor pagination
         remaining = max(target_count - len(all_listings), 0)
@@ -1845,6 +1896,7 @@ class DivarScraper:
                 if until_day:
                     if len(all_listings) >= 1500:
                         logger.info("[robust] date-mode safety cap (1500) reached")
+                        replay_stop, replay_detail = "cap", {"page": page_num, "listings": 1500}
                         break
                     cursor_dt = self._cursor_to_datetime(last_post_date)
                     if cursor_dt and cursor_dt.date() < until_day:
@@ -1852,8 +1904,14 @@ class DivarScraper:
                             f"[robust] feed cursor {cursor_dt} moved past "
                             f"{until_day} — day fully covered"
                         )
+                        replay_stop = "day"
                         break
                 elif len(all_listings) >= target_count:
+                    replay_stop = "target"
+                    break
+                if getattr(self, "_replay_more", None) is False:
+                    logger.info("[robust] Divar says there is no next page — the list ended")
+                    replay_stop = "end"
                     break
                 # Count pages that added NOTHING NEW, not pages that came back
                 # empty. While the replay was dead every batch was empty and
@@ -1861,20 +1919,259 @@ class DivarScraper:
                 # the same non-empty page forever, new_count stays 0, and the
                 # loop would burn all 75 pages re-fetching one page of results.
                 if new_count == 0:
+                    refused = getattr(self, "_replay_status", None)
+                    if refused and refused != 200:
+                        # Divar said no. Asking again at once is the pace
+                        # that was just refused; the pool ends here, and says so.
+                        replay_stop, replay_detail = "refused", {"page": page_num, "status": refused}
+                        break
                     consecutive_empty += 1
                     if consecutive_empty >= 2:
                         logger.info(
                             f"[robust] two pages with nothing new (cursor "
                             f"{last_post_date}) — stopping")
+                        replay_stop = ("stale" if getattr(self, "_search_req_template", None)
+                                       else "no-replay")
+                        replay_detail = {"page": page_num}
                         break
                 else:
                     consecutive_empty = 0
                 await asyncio.sleep(random.uniform(0.8, 1.5))
             except Exception as e:
                 logger.error(f"[robust] API page={page_num} failed: {e}")
+                replay_stop, replay_detail = "error", {"page": page_num,
+                                                       "error": f"{type(e).__name__}: {e}"}
                 break
+        else:
+            replay_stop, replay_detail = "cap", {"page": max_pages}
 
+        self._collect_stop = self._settle_stop(dom_stop, replay_stop, replay_detail,
+                                               grew=len(all_listings) > walked)
         return all_listings if until_day else all_listings[:target_count]
+
+    @staticmethod
+    def _stop_from_feed(report, collected: int) -> tuple:
+        """The search API's own account of how its walk ended, as _collect_stop.
+
+        «target» and «exhausted» (Divar said there is no next page, or the
+        cursor moved past the day) are a complete pool. A refused page is
+        «partly-refused», no answer at all «error», and a stuck cursor or the
+        page cap «cut-short» — each with the page, the status and Divar's
+        own words, for the run's log and its finish line.
+        """
+        from app.services import divar_count as _dc
+        if report.stop == _dc.STOP_TARGET:
+            return ("target", None)
+        if report.stop in (_dc.STOP_END, _dc.STOP_DAY):
+            return ("exhausted", None)
+        detail = {"via": "api", "why": report.stop, "page": report.page,
+                  "status": report.status, "divar_message": report.divar_message,
+                  "sentence": report.sentence, "collected": collected}
+        if report.stop == _dc.STOP_ERROR:
+            return ("partly-refused" if report.status else "error", detail)
+        return ("cut-short", detail)
+
+    @staticmethod
+    def _settle_stop(dom_stop: tuple, replay_stop: str, replay_detail: dict, *,
+                     grew: bool) -> tuple:
+        """One verdict from the browser walk and the replay that follows it.
+
+        The replay reaching the target or moving past the day settles it. A
+        walk Divar refused or that crashed keeps its own verdict, and so does
+        one that saw the end of the list when the replay found nothing past
+        it. Otherwise the walk stopped at its own cap and the replay could not
+        page on to the end — whatever it ran into is why the pool is short.
+        """
+        if replay_stop == "target":
+            return ("target", None)
+        if replay_stop in ("day", "end"):
+            return ("exhausted", None)
+        kind = dom_stop[0]
+        if kind in ("refused", "partly-refused", "error"):
+            return dom_stop
+        if kind == "exhausted" and not grew:
+            return dom_stop
+        detail = {"via": "replay", "why": replay_stop, **replay_detail}
+        page, status = replay_detail.get("page"), replay_detail.get("status")
+        if replay_stop == "refused":
+            detail["sentence"] = (f"دیوار صفحهٔ {page} جست‌وجو (پس از پیمایش مرورگر) "
+                                  f"را رد کرد (HTTP {status})")
+            return ("partly-refused", detail)
+        if replay_stop == "error":
+            detail["sentence"] = (f"خواندن صفحهٔ {page} جست‌وجو (پس از پیمایش مرورگر) "
+                                  f"با خطا متوقف شد ({replay_detail.get('error')})")
+            return ("error", detail)
+        return ("cut-short", detail)
+
+    # A collection that ended on one of these did not reach the end of
+    # Divar's list: the run walks what it has and ends «ناقص» (#28) — unless
+    # it met its target anyway. "refused" is not here: a walk Divar stopped
+    # dead fails the run, as it always has.
+    _CUT_SHORT = ("partly-refused", "error", "cut-short", "loop-end", "unknown")
+
+    @staticmethod
+    def _what_cut_collection(stop: str, detail: Any, pool: int) -> str:
+        """The first sentence of a partial run's reason: what stopped the
+        collection, with the page, Divar's status and its own words."""
+        d = detail if isinstance(detail, dict) else {}
+        if d.get("sentence"):
+            return d["sentence"]
+        if stop == "partly-refused":    # the browser walk's tally of refusals
+            counts = ", ".join(f"HTTP {k}×{v}" for k, v in sorted(d.items()))
+            return f"دیوار در حین پیمایش فهرست بخشی از درخواست‌ها را رد کرد ({counts})"
+        if stop == "error":
+            return f"جمع‌آوری فهرست با خطا متوقف شد ({detail})"
+        why, page = d.get("why"), d.get("page")
+        if why == "stuck":
+            return (f"دیوار صفحهٔ {page} جست‌وجو را بدون آگهی تازه برگرداند، "
+                    "با این‌که گفت صفحهٔ بعدی هست")
+        if why == "cap" and d.get("listings"):
+            return (f"جمع‌آوری به سقف {d['listings']} نامزدِ هر اجرا رسید و آن روز "
+                    "هنوز تمام نشده بود")
+        if why == "cap":
+            return f"جمع‌آوری به سقف {page} صفحهٔ جست‌وجو رسید و فهرست دیوار هنوز ادامه داشت"
+        if why == "no-replay":
+            return ("پیمایش مرورگر به سقف خودش رسید و راهی برای خواندن صفحه‌های "
+                    "بعدی فهرست نبود")
+        if why == "stale":
+            return "صفحه‌های بعدی فهرست چیز تازه‌ای نیاوردند و جمع‌آوری پیش از ته فهرست ماند"
+        if stop == "target":
+            return (f"ظرفیت جست‌وجوی این اجرا ({pool} نامزد) پر شد و فهرست دیوار "
+                    "هنوز ادامه داشت")
+        return "جمع‌آوری فهرست پیش از رسیدن به ته فهرست دیوار ماند"
+
+    def _collection_shortfall(self, category: str, *, collected: int,
+                              divar_total: Optional[int], pool: int,
+                              saved: int = 0, asked: Optional[int] = None) -> Optional[str]:
+        """Why this run's candidate pool is not everything it could have
+        walked, in the user's words and with what to do — or None when it is:
+        the end of Divar's list, the day covered, an explicit list.
+
+        «target» is here too: a pool that filled its capacity without the run
+        meeting its target stopped short of Divar's list for our own reason.
+        """
+        from app.services import divar_count as _dc
+        stop, detail = self._collect_stop or ("unknown", None)
+        if stop not in self._CUT_SHORT and stop != "target":
+            return None
+        what = self._what_cut_collection(stop, detail, pool).rstrip(".")
+        got = (f"{collected} نامزد" + (f" از {divar_total} آگهیِ دیوار" if divar_total else "")
+               + " جمع شد"
+               + (f" و {saved} آگهی تازه از {asked} درخواستی ذخیره شد." if asked else "."))
+        d = detail if isinstance(detail, dict) else {}
+        status = d.get("status")
+        if stop == "partly-refused" and not status and d:
+            # the browser walk's tally: advise on what Divar said most
+            top = max(d.items(), key=lambda kv: kv[1])[0]
+            status = int(top) if str(top).isdigit() else None
+        if status or stop == "error":
+            name = CATEGORIES.get(category, {}).get("name")
+            advice = _dc.refusal_advice(status, d.get("divar_message"), name)
+        else:
+            advice = "«ادامه» را بزنید تا بقیهٔ فهرست خوانده شود."
+        return f"{what}. {got} {advice}"
+
+    async def _record_cut_short(self, job_id, stop: str, detail: Any, *, collected: int,
+                                pool: int, asked: Optional[int],
+                                opening: str = "جمع‌آوری ناقص ماند") -> None:
+        """One line in the run's log for a collection that stopped short with
+        listings in hand: what stopped it — the page, Divar's status, its own
+        words — and that the run walks what it has and ends «ناقص» (#28)."""
+        from app.services import job_log
+        d = detail if isinstance(detail, dict) else {}
+        what = self._what_cut_collection(stop, detail, pool).rstrip(".")
+        msg = (f"{opening}: {what}. {collected} نامزد تا آن‌جا جمع شد و همین‌ها بررسی "
+               "می‌شوند؛ " + ("اگر به تعداد درخواستی نرسد، " if asked else "")
+               + "اسکرپ «ناقص» تمام می‌شود.")
+        # The browser walk's tally ({"429": 3}) has no "via": those are
+        # refusals by definition. Divar pushing back on us is a CHALLENGE; a
+        # search it rejected or never answered, an ERROR.
+        tally = stop == "partly-refused" and not d.get("via")
+        level = "error" if stop in ("partly-refused", "error") else "warning"
+        logger.log(level.upper(), f"[collect] {msg}")
+        await job_log.record(
+            job_id,
+            job_log.CHALLENGE if (tally or d.get("status") in (401, 403, 429)) else (
+                job_log.ERROR if level == "error" else job_log.PAGE),
+            msg, level=level, collected=collected, target=pool, stop=stop,
+            page=d.get("page"), status=d.get("status"), divar_message=d.get("divar_message"),
+            refusals=detail if tally else None)
+
+    async def _top_up_pool(self, pool: List[Dict[str, Any]], seen: set, want: int,
+                           asked: Optional[int] = None) -> int:
+        """Page on into Divar's search from where the collection stopped, for
+        up to `want` more candidates onto the end of `pool` (#30).
+
+        The pool starts at twice the target plus a page. In a big city whose
+        filters Divar cannot apply itself — rooms, the amenity boxes, price
+        per metre, the advertiser check that drops «unknown» — or whose first
+        pages earlier runs already saved, that runs dry long before the
+        target, and the run ended «آگهی بیشتری پیدا نشد» («Ran out of
+        candidates») with Divar holding thousands more. Topped up here it
+        goes on until the target is met, Divar's list really ends, or
+        POOL_CEILING. Never raises; returns how many it added.
+        """
+        more = getattr(self, "_feed_more", None)
+        room = self.POOL_CEILING - len(pool)
+        if not more or want <= 0 or room <= 0:
+            return 0
+        want = min(want, room)
+        added = 0
+        # First the rows the last page carried past the target: fetched, never walked.
+        leftover, more["leftover"] = list(more.get("leftover") or []), []
+        for n, row in enumerate(leftover):
+            if added >= want:
+                more["leftover"] = leftover[n:]
+                break
+            if row["divar_id"] not in seen:
+                seen.add(row["divar_id"])
+                pool.append(row)
+                added += 1
+        if added >= want or not more.get("cursor"):
+            if not more.get("cursor") and not more["leftover"]:
+                self._feed_more = None
+            return added
+
+        from app.services import divar_count as _dc
+        report = _dc.FeedReport()
+        first = int(more.get("page") or 0) + 1
+        try:
+            rows, _err = await _dc.fetch_listings(
+                more["city"], more["form"], target=want - added, after=more["cursor"],
+                first_page=first, exclude=seen, report=report)
+        except Exception as e:           # it never raises; a top-up must never cost the run
+            logger.warning(f"[collect] could not top the pool up: {type(e).__name__}: {e}")
+            return added
+        for row in rows:
+            if row["divar_id"] not in seen:
+                seen.add(row["divar_id"])
+                pool.append(row)
+                added += 1
+        if report.stop == _dc.STOP_TARGET:
+            more.update(cursor=report.cursor, page=report.last_page,
+                        leftover=list(report.leftover))
+        else:
+            # The list ended, or the walk stopped short: nothing more to page
+            # on from here, and what stopped it is now why the pool ends.
+            self._feed_more = ({**more, "cursor": None, "leftover": list(report.leftover)}
+                               if report.leftover else None)
+        self._collect_stop = self._stop_from_feed(report, len(pool))
+        logger.info(f"[collect] topped the pool up by {added} (pages {first}–{report.last_page}, "
+                    f"stop={report.stop}) → {len(pool)}")
+        job_id = getattr(self, "_job_id_str", None)
+        if job_id:
+            from app.services import job_log
+            if added:
+                await job_log.record(
+                    job_id, job_log.PAGE,
+                    f"{added} نامزد دیگر از دیوار گرفته شد تا به تعداد درخواستی برسیم "
+                    f"(صفحهٔ {first} تا {max(report.last_page, first)}) — روی هم {len(pool)} نامزد",
+                    collected=len(pool), added=added, via="api", stop=report.stop)
+            if self._collect_stop[0] in self._CUT_SHORT:
+                await self._record_cut_short(job_id, self._collect_stop[0], self._collect_stop[1],
+                                             collected=len(pool), pool=len(pool), asked=asked,
+                                             opening="ادامهٔ جمع‌آوری ناقص ماند")
+        return added
 
     def _parse_api_response(self, data: dict) -> tuple:
         """Parse Divar API JSON response (handles multiple known response shapes).
@@ -4653,31 +4950,28 @@ class DivarScraper:
             _stop, _detail = (self._collect_stop or ("unknown", None))
             _short = len(all_listings) < collect_target
 
-            if _stop in ("refused", "partly-refused"):
-                counts = ", ".join(f"HTTP {k}×{v}" for k, v in sorted((_detail or {}).items()))
-                msg = (f"دیوار در حین جمع‌آوری آگهی‌ها دسترسی را رد کرد ({counts}). "
-                       f"فقط {len(all_listings)} آگهی از فهرست خوانده شد — "
-                       "این اسکرپ کامل نیست.")
-                logger.error(f"[collect] {msg}")
-                await job_log.record(job.job_id, job_log.CHALLENGE, msg,
-                                     level="error", collected=len(all_listings),
-                                     target=collect_target, refusals=_detail)
-                # A refusal that stopped us dead is a failed run, not a short one.
-                # Saying otherwise is the bug being fixed here.
+            if _stop == "refused" or (_stop in self._CUT_SHORT and not all_listings):
+                # Nothing to walk: Divar stopped the walk dead, or it broke
+                # before a single listing came back. A failed run, not a short
+                # one — saying otherwise was the bug a refusal used to be.
                 if _stop == "refused":
-                    job.status = "failed"
-                    job.error_message = msg
-                    job.finish_reason = msg
-                    job.completed_at = datetime.now()
-                    await self.db_session.commit()
-                    return job
-
-            elif _stop == "error":
-                msg = (f"جمع‌آوری فهرست آگهی‌ها با خطا متوقف شد ({_detail}). "
-                       f"{len(all_listings)} آگهی تا آن لحظه خوانده شده بود.")
+                    counts = ", ".join(f"HTTP {k}×{v}" for k, v in sorted((_detail or {}).items()))
+                    msg = (f"دیوار در حین جمع‌آوری آگهی‌ها دسترسی را رد کرد ({counts}). "
+                           f"فقط {len(all_listings)} آگهی از فهرست خوانده شد — "
+                           "این اسکرپ کامل نیست.")
+                elif _stop == "error" and not isinstance(_detail, dict):
+                    msg = (f"جمع‌آوری فهرست آگهی‌ها با خطا متوقف شد ({_detail}). "
+                           f"{len(all_listings)} آگهی تا آن لحظه خوانده شده بود.")
+                else:
+                    msg = (f"جمع‌آوری فهرست آگهی‌ها متوقف شد: "
+                           f"{self._what_cut_collection(_stop, _detail, collect_target)}. "
+                           "هیچ آگهی‌ای از فهرست خوانده نشد.")
                 logger.error(f"[collect] {msg}")
-                await job_log.record(job.job_id, job_log.ERROR, msg, level="error",
-                                     collected=len(all_listings), target=collect_target)
+                await job_log.record(job.job_id,
+                                     job_log.CHALLENGE if "refused" in _stop else job_log.ERROR,
+                                     msg, level="error", collected=len(all_listings),
+                                     target=collect_target,
+                                     refusals=_detail if _stop == "refused" else None)
                 job.status = "failed"
                 job.error_message = msg
                 job.finish_reason = msg
@@ -4685,7 +4979,14 @@ class DivarScraper:
                 await self.db_session.commit()
                 return job
 
-            elif _short:
+            if _stop in self._CUT_SHORT:
+                # Short, with listings in hand. They are walked all the same,
+                # and the run ends «ناقص» unless it meets its target on them —
+                # never «تکمیل شده» with «بیشتر از این در دیوار نبود» (#28).
+                await self._record_cut_short(job.job_id, _stop, _detail,
+                                             collected=len(all_listings), pool=collect_target,
+                                             asked=max_items)
+            elif _short and _stop == "exhausted":
                 # Not refused and not an error: the feed really did run out.
                 # Still worth saying, because «۴۲ از ۲۵۰» with no explanation is
                 # what made this look broken.
@@ -4835,6 +5136,17 @@ class DivarScraper:
                     # dropped. The two are different answers to «where did they
                     # go?».
                     examined += 1
+
+                    # The last candidate, and the target still unmet: page on
+                    # into Divar's search now, so the walk carries on into
+                    # what comes next instead of ending «آگهی بیشتری پیدا نشد»
+                    # with the rest of the city unread (#30).
+                    if max_items and i == len(all_listings) - 1:
+                        _left = max_items - int(getattr(job, "new_items", 0) or 0)
+                        if await self._top_up_pool(all_listings, seen_ids, 2 * _left + 24,
+                                                   max_items) \
+                                and not (getattr(job, "divar_count", None) or 0):
+                            job.total_items = len(all_listings)  # type: ignore[assignment]
 
                     # Check if already scraped. Not for an explicit list: a
                     # listing named by hand is one somebody wants opened,
@@ -5256,13 +5568,30 @@ class DivarScraper:
                     except Exception:
                         pass
             
-            # Complete job — unless a cancel or the sweep got there first
-            await self._finish_status("completed")
+            # Complete job — or «ناقص»: a collection that stopped short of
+            # Divar's list, on a run that did not meet its target on what it
+            # had, is not complete, and the row must not say it is (#28).
+            # Unless a cancel or the sweep got there first — then that stays.
+            _saved = int(getattr(job, "new_items", 0) or 0)
+            _cut_reason = self._collection_shortfall(
+                category, collected=len(all_listings),
+                divar_total=getattr(job, "divar_count", None),
+                pool=len(all_listings), saved=_saved, asked=max_items)
+            final_status = ("partial" if _cut_reason and not (max_items and _saved >= max_items)
+                            else "completed")
+            if not await self._finish_status(final_status):
+                final_status = str(job.status)   # a cancel or the sweep's «failed» stands
             job.completed_at = datetime.now()
             # A run that met its target stops with candidates left over. The
             # work is over, so the bar reads full rather than freezing at the
-            # candidate it happened to stop on.
-            job.scraped_items = job.total_items
+            # candidate it happened to stop on. Not a partial run: its bar
+            # stays where the walk really got — «105 / 105» over 24 candidates
+            # was the other half of run 47 saying «تکمیل شده».
+            if final_status == "completed":
+                job.scraped_items = job.total_items
+            else:
+                _walked = max(int(getattr(job, "scraped_items", 0) or 0), examined)
+                job.scraped_items = _walked  # type: ignore[assignment]  # as above
             await self.db_session.commit()
             # The FINISH event is recorded further down, AFTER finish_reason has
             # been composed. Written here it always said «تمام شد» with no
@@ -5274,7 +5603,7 @@ class DivarScraper:
             # losing it would make the next job start from a stale snapshot.
             await self._persist_active_session()
 
-            logger.info(f"Scraping job completed. New: {job.new_items}, Updated: {job.updated_items}, Failed: {job.failed_items}")
+            logger.info(f"Scraping job {final_status}. New: {job.new_items}, Updated: {job.updated_items}, Failed: {job.failed_items}")
             # Say so when the feed ran dry before the target was met, rather
             # than completing at «۴۰ / ۲۰۰» with no explanation.
             #
@@ -5282,7 +5611,18 @@ class DivarScraper:
             # most needs saying: a single day holds however many ads it holds,
             # so a run capped at 126 finishing at 42 is the day being smaller
             # than the cap, not a fault. Unexplained, it reads as a fault.
-            if max_items and job.new_items < max_items:
+            #
+            # And only when the list really did run dry. «یا دیوار آگهی دیگری
+            # ندارد یا فیلترها خیلی تنگ‌اند» on a run whose page 2 Divar refused
+            # sent the reader after the filters for a problem that was Divar's.
+            if final_status == "partial":
+                logger.warning(f"Collection cut short: {_cut_reason}")
+                finish_reason = (_cut_reason or "").rstrip(".")  # the tally may follow
+            elif max_items and job.new_items < max_items and urls:
+                # An explicit list has no feed to run dry.
+                finish_reason = (f"{job.new_items} از {max_items} آگهی فهرست تازه ذخیره شد. "
+                                 f"{job.updated_items} آگهی از قبل در پایگاه داده بود")
+            elif max_items and job.new_items < max_items:
                 if date_mode:
                     logger.info(
                         f"Day exhausted: {job.new_items}/{max_items} new for {target_day}. "
@@ -5352,21 +5692,24 @@ class DivarScraper:
                     level="info" if (not _ch or _rv // _ch >= _goal) else "warning",
                     reveals=_rv, challenges=_ch,
                     reveals_per_challenge=(_rv // _ch if _ch else None), goal=_goal)
-            _summary = (f"اسکرپ تمام شد — {job.new_items} تازه، "
+            _summary = (("اسکرپ ناقص تمام شد" if final_status == "partial" else "اسکرپ تمام شد")
+                        + f" — {job.new_items} تازه، "
                         f"{job.updated_items} از قبل ذخیره شده بود، "
                         f"{job.failed_items} ناموفق")
             if finish_reason:
                 _summary += f"\n{finish_reason}"
             # A run that asked for N and saved fewer is worth flagging even when
-            # the reason is benign, so it does not read as an unqualified success.
-            _short_of_target = bool(max_items and job.new_items < max_items)
+            # the reason is benign, so it does not read as an unqualified success
+            # — and so is a partial one, which may have no N at all (a day).
+            _short_of_target = (final_status == "partial"
+                                or bool(max_items and job.new_items < max_items))
             await job_log.record(
                 job.job_id, job_log.FINISH, _summary,
                 level="warning" if _short_of_target else "info",
                 new=job.new_items, updated=job.updated_items,
                 failed=job.failed_items, pages=job.scraped_pages,
                 requested=max_items, candidates=len(all_listings),
-                skipped=(sum(skip_tally.values()) or None))
+                skipped=(sum(skip_tally.values()) or None), status=final_status)
             # Where the candidates went, per reason. This tally has always been
             # computed and only ever written to a log file nobody reads per-job,
             # so «۴۲ نامزد، ۳ ذخیره» looked like a fault when it was usually the

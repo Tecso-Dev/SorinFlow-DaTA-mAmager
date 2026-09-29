@@ -7,7 +7,7 @@ import time
 from fastapi import Request, APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, false, delete, update
-from typing import Optional, List
+from typing import Optional, List, cast
 from datetime import datetime
 import sys
 import os
@@ -15,7 +15,7 @@ import uuid
 from loguru import logger
 
 from app.database import get_db, get_redis
-from app.models.scraping_job import ScrapingJob
+from app.models.scraping_job import FINISHED_STATUSES, ScrapingJob
 from app.scraper.divar_scraper import DivarScraper, crash_reason, start_failure_reason
 from app.config import get_settings, CITIES, CATEGORIES
 from pydantic import BaseModel, Field
@@ -304,7 +304,8 @@ async def resume_scraping_job(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Continue a run that stopped — a restart, a cancel, a failure.
+    """Continue a run that stopped — a restart, a cancel, a failure, or a
+    collection Divar cut short («ناقص»).
 
     A new run with the old run's exact settings, linked back to it. New rather
     than revived on purpose: the old row's counters and log are the record of
@@ -715,11 +716,15 @@ async def get_scraping_jobs(
             updated_items=j.updated_items,
             failed_items=j.failed_items,
             error_message=j.error_message,
+            # Why it stopped where it did. The schema has always had the
+            # field and the row has always rendered it; nothing passed it,
+            # so no row ever showed one.
+            finish_reason=cast(Optional[str], j.finish_reason),
             progress=j.progress,
             divar_count=j.divar_count,
             max_items=j.max_items,
             resumed_from=str(j.resumed_from) if j.resumed_from else None,
-            can_resume=bool(j.config) and j.status in ("failed", "cancelled"),
+            can_resume=j.can_resume,
             divar_phone=j.divar_phone,
             accounts_used=j.accounts_used or [],
             owner_user_id=(j.config or {}).get("owner_user_id"),
@@ -875,11 +880,12 @@ async def get_scraping_job(
         updated_items=job.updated_items,
         failed_items=job.failed_items,
         error_message=job.error_message,
+        finish_reason=cast(Optional[str], job.finish_reason),
         progress=job.progress,
         divar_count=job.divar_count,
         max_items=job.max_items,
         resumed_from=str(job.resumed_from) if job.resumed_from else None,
-        can_resume=bool(job.config) and job.status in ("failed", "cancelled"),
+        can_resume=job.can_resume,
         started_at=job.started_at,
         completed_at=job.completed_at,
         created_at=job.created_at
@@ -891,8 +897,9 @@ async def get_scraping_job(
 # must be cancellable: that state can last minutes and the dashboard offers the
 # stop button for it, so refusing anything but "running" left the user pressing
 # a button that answered "Job is not running".
-_FINISHED_JOB_STATUSES = {"completed", "cancelled", "failed"}
-_STATUS_FA = {"completed": "تکمیل شده", "cancelled": "لغو شده", "failed": "ناموفق"}
+_FINISHED_JOB_STATUSES = set(FINISHED_STATUSES)
+_STATUS_FA = {"completed": "تکمیل شده", "partial": "ناقص",
+              "cancelled": "لغو شده", "failed": "ناموفق"}
 
 
 @router.post("/jobs/{job_id}/cancel")

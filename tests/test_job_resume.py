@@ -120,12 +120,18 @@ class TestTheResponseSaysWhetherItCan:
         assert "resumed_from" in ScrapingJobResponse.model_fields
 
     def test_can_resume_needs_a_config_and_a_stopped_status(self):
-        src = inspect.getsource(sr)
-        assert 'can_resume=bool(j.config) and j.status in ("failed", "cancelled")' in src
+        """One rule, on the model; the jobs list and the single job read it
+        (through the app: tests/test_partial_status.py)."""
+        cfg = {"city": "urmia", "category": "rent-apartment"}
+        assert ScrapingJob(status="failed", config=cfg).can_resume is True
+        assert ScrapingJob(status="failed", config=None).can_resume is False
+        assert ScrapingJob(status="running", config=cfg).can_resume is False
 
     def test_the_model_agrees(self):
-        assert '"can_resume": bool(self.config) and self.status in' in \
-            inspect.getsource(ScrapingJob.to_dict)
+        cfg = {"city": "urmia", "category": "rent-apartment"}
+        for status in ("pending", "running", "paused", "completed", "partial", "failed", "cancelled"):
+            job = ScrapingJob(status=status, config=cfg)
+            assert job.to_dict()["can_resume"] is job.can_resume, status
 
 
 class TestThePanel:
@@ -157,19 +163,21 @@ class TestACompletedRunIsNotOfferedResume:
     run walked its whole pool; «continue» would be a rerun wearing the wrong
     label. Failed and cancelled stopped short, and those are what it is for."""
 
+    CFG = {"city": "urmia", "category": "rent-apartment"}
+
     def test_completed_is_not_in_the_set(self):
-        src = inspect.getsource(sr)
-        assert '"completed"' not in src[src.index("can_resume=bool(j.config)"):][:120]
+        job = ScrapingJob(status="completed", config=dict(self.CFG))
+        assert job.can_resume is False
 
     def test_the_model_agrees(self):
-        src = inspect.getsource(ScrapingJob.to_dict)
-        i = src.index('"can_resume"')
-        assert '"completed"' not in src[i:i + 200]
+        job = ScrapingJob(status="completed", config=dict(self.CFG))
+        assert job.to_dict()["can_resume"] is False
 
     def test_failed_and_cancelled_still_are(self):
-        src = inspect.getsource(ScrapingJob.to_dict)
-        i = src.index('"can_resume"')
-        assert '"failed", "cancelled"' in src[i:i + 200]
+        """…and a partial run (#28): its collection stopped short too."""
+        for status in ("failed", "cancelled", "partial"):
+            job = ScrapingJob(status=status, config=dict(self.CFG))
+            assert job.can_resume is True and job.to_dict()["can_resume"] is True, status
 
 
 class TestTheCountsHaveTheirOwnColumn:
