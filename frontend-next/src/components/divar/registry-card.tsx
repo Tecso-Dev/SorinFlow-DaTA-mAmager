@@ -111,7 +111,7 @@ export function RegistryCard() {
       {registry.isLoading ? (
         <ListSkeleton rows={3} />
       ) : registry.isError ? (
-        <ErrorNote error={registry.error} />
+        <ErrorNote error={registry.error} illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />} />
       ) : !rows.length ? (
         <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[110px]" />}>هنوز شمارهٔ دیواری ثبت نشده است.</Empty>
       ) : (

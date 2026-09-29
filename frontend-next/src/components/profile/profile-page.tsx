@@ -3,7 +3,9 @@
 import { UserCircle } from "lucide-react";
 import { ErrorNote, ListSkeleton, PageHeader } from "@/components/panel/kit";
 import { IsoIDCard } from "@/components/panel/motion3d";
+import { Lottie } from "@/components/ui/lottie";
 import { Reveal } from "@/components/viz";
+import shieldLottie from "@/lotties/shield.json";
 import { useSession } from "@/lib/session";
 import { HeroCard } from "./hero-card";
 import { DetailsForm } from "./details-form";
@@ -26,7 +28,7 @@ export function ProfilePage() {
       {session.isPending ? (
         <ListSkeleton rows={4} />
       ) : session.isError ? (
-        <ErrorNote error={session.error} />
+        <ErrorNote error={session.error} illustration={<Lottie animationData={shieldLottie} className="max-w-[100px]" />} />
       ) : (
         <>
           <HeroCard me={session.data.user} />

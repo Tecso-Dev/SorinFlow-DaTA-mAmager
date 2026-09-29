@@ -139,7 +139,7 @@ export function AdminPortalRequestsView() {
         {query.isPending ? (
           <ListSkeleton rows={6} />
         ) : query.isError ? (
-          <ErrorNote error={query.error} />
+          <ErrorNote error={query.error} illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />} />
         ) : query.data.items.length === 0 ? (
           <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[110px]" />}>درخواستی یافت نشد.</Empty>
         ) : (

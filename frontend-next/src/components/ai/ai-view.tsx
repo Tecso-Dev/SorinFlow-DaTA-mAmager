@@ -218,7 +218,7 @@ function LogCard({ agentFilter, onAgentFilter }: { agentFilter: { agent: string;
       {q.isPending ? (
         <ListSkeleton rows={5} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />} />
       ) : q.data.items.length === 0 ? (
         <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />}>فراخوانی‌ای ثبت نشده است.</Empty>
       ) : (

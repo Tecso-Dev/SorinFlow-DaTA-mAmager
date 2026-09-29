@@ -100,7 +100,7 @@ function AuditTable() {
         {q.isPending ? (
           <ListSkeleton />
         ) : q.isError ? (
-          <ErrorNote error={q.error} />
+          <ErrorNote error={q.error} illustration={<Lottie animationData={shieldLottie} className="max-w-[100px]" />} />
         ) : q.data.items.length === 0 ? (
           <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />}>رویدادی با این فیلتر پیدا نشد.</Empty>
         ) : (

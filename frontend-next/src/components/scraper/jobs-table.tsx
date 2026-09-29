@@ -24,6 +24,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
 import scanLottie from "@/lotties/scan.json";
 import { useSession } from "@/lib/session";
 import { useMyCookies } from "./account-picker";
@@ -144,7 +145,7 @@ export function JobsTable({ categories }: { categories: Category[] }) {
       {jobs.isLoading ? (
         <div className="p-5"><ListSkeleton rows={6} /></div>
       ) : jobs.isError ? (
-        <div className="p-5"><ErrorNote error={jobs.error} /></div>
+        <div className="p-5"><ErrorNote error={jobs.error} illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />} /></div>
       ) : items.length === 0 ? (
         <div className="p-5">
           <Empty illustration={<Lottie animationData={scanLottie} className="max-w-[130px]" label="در انتظار اولین اسکرپ" />}>

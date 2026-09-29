@@ -518,7 +518,7 @@ function HistoryCard() {
       {q.isPending ? (
         <ListSkeleton rows={6} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />} />
       ) : q.data.items.length === 0 ? (
         <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />}>پیامی یافت نشد.</Empty>
       ) : (
