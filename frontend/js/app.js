@@ -5516,14 +5516,20 @@ function _renderJobsTable(items) {
         tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">هیچ تسکی وجود ندارد</td></tr>`;
         return;
     }
+    // «ناقص»: the collection stopped short because of Divar, the run walked
+    // what it had — finished, and continuable (finish_reason says why).
     const JOB_STATUS_FA = {
         pending: 'در صف', running: 'در حال اجرا', paused: '⏸ متوقف — منتظر کد',
-        completed: 'تکمیل شده', failed: 'ناموفق', cancelled: 'لغو شده',
+        completed: 'تکمیل شده', failed: 'ناموفق', cancelled: 'لغو شده', partial: 'ناقص',
     };
     items.forEach(job => {
         const row = document.createElement('tr');
         const statusClass = `status-${esc(job.status)}`;
         const statusLabel = JOB_STATUS_FA[job.status] || esc(job.status);
+        // A run names its owner even after that user is deleted; «—» is for a
+        // run nobody started.
+        const owner = job.owner_name ? esc(job.owner_name)
+            : job.owner_deleted ? '<span class="job-owner-gone">کاربر حذف‌شده</span>' : '—';
         row.innerHTML = `
             <td><code class="job-id" title="${esc(job.job_id)}">${job.job_id.substring(0, 6)}</code></td>
             <td>${job.category_name ? `<span class="badge bg-primary">${esc(job.category_name)}</span>` : '—'}</td>
@@ -5531,7 +5537,7 @@ function _renderJobsTable(items) {
             <!-- who started it, and the Divar account the run is on; a rotated
                  run names every account it went through in the tooltip -->
             <td class="job-who">
-                <div>${esc(job.owner_name || '—')}</div>
+                <div>${owner}</div>
                 ${job.divar_phone ? `<div class="job-acct" dir="ltr" title="${esc((job.accounts_used || []).length > 1 ? 'حساب‌ها به ترتیب: ' + job.accounts_used.join('، ') : 'حساب دیوار این اجرا')}">${esc(job.divar_phone)}${(job.accounts_used || []).length > 1 ? ` <span class="job-acct-more">+${formatNumber(job.accounts_used.length - 1)}</span>` : ''}</div>`
                                  : `<div class="job-acct text-muted">${job.status === 'pending' ? 'خودکار' : '—'}</div>`}
             </td>
@@ -5555,22 +5561,30 @@ function _renderJobsTable(items) {
             </td>
             <!-- The two counts under the percent were unreadable crammed into
                  the bar's cell; they get a column. Same <bdi> reasoning as
-                 «جدید / بروز»: isolated so the pair keeps the header's order. -->
-            <td style="text-align:center;white-space:nowrap"
-                title="${job.divar_count ? 'کل = تعدادی که دیوار برای این فیلترها اعلام کرد' : 'کل = نامزدهای جمع‌شده'}">
+                 «جدید / بروز»: isolated so the pair keeps the header's order.
+                 Both are this run's own: what it examined, out of the pool it
+                 collected. Divar's count ignores the day and read «251 / 251»
+                 over a pool of 24 (#29), so it has its own line, as Divar's. -->
+            <td class="job-counts"
+                title="بررسی = آگهی‌هایی که همین اجرا واقعاً دید؛ کل = نامزدهایی که همین اجرا جمع کرد">
                 ${job.total_items
                     ? `<bdi title="بررسی‌شده">${job.scraped_items}</bdi> <span class="text-muted">/</span> <bdi title="کل">${job.total_items}</bdi>`
                     : '<span class="text-muted">---</span>'}
+                ${job.divar_count != null ? `<div class="job-divar" title="تعدادی که خود دیوار برای این فیلترها اعلام کرد — دیوار روز را فیلتر نمی‌کند">دیوار می‌گوید: ${esc(job.divar_count)}</div>` : ''}
             </td>
             <!-- «جدید / بروز» reads right-to-left, so «جدید» is the RIGHT
                  column. dir="ltr" here put the new count on the LEFT, under
                  «بروز» — the two numbers were swapped against their own
                  header. <bdi> isolates each one so the digits stay readable
-                 while the pair follows the header's direction. -->
-            <td style="text-align:center">
-                <bdi class="text-success" title="ردیف تازه — قبلاً در پایگاه داده نبود">${job.new_items}</bdi>
+                 while the pair follows the header's direction. The words are
+                 the run log's: «بروز» is a stored listing this run opened
+                 again and saved over, «تکراری» one it skipped as complete
+                 (#32). Under them, where the rest went when «تازه» fell short. -->
+            <td class="job-new">
+                <bdi class="text-success" title="تازه — ردیف تازه، قبلاً در پایگاه داده نبود">${job.new_items}</bdi>
                 <span class="text-muted">/</span>
-                <bdi class="text-muted" title="از قبل موجود بود — یا همان بود و رد شد، یا با اطلاعات تازه به‌روز شد">${job.updated_items}</bdi>
+                <bdi class="text-muted" title="بروز — از قبل ذخیره شده بود و این اجرا دوباره بازش کرد و به‌روزش کرد">${job.updated_items}</bdi>
+                ${job.reason_line ? `<div class="job-new-why" title="${esc(job.reason_line)}">${esc(job.reason_line)}</div>` : ''}
             </td>
             <!-- Tehran time, like the schedules card: a run its 08:00 schedule
                  started read «۰۶:۳۰» on a European laptop. -->
@@ -5603,7 +5617,7 @@ function _renderJobsTable(items) {
                         <i class="bi bi-play-fill"></i>
                     </button>
                 ` : ''}
-                ${['completed', 'failed', 'cancelled'].includes(job.status) ? `
+                ${['completed', 'failed', 'cancelled', 'partial'].includes(job.status) ? `
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteJob('${job.job_id}')"
                             title="حذف این تسک از فهرست — آگهی‌ها دست‌نخورده می‌مانند">
                         <i class="bi bi-trash"></i>
