@@ -6498,7 +6498,8 @@ async function loadForwarders() {
                 <td>${esc(dv.label || '—')}<div class="small text-muted" dir="ltr">${esc(dv.device_id)}</div></td>
                 <td>${_fwSimsCell(dv)}</td>
                 <td><span class="badge ${st.cls}">${st.fa}</span>
-                    <div class="small text-muted">${esc(h.message_fa || '')}</div></td>
+                    <div class="small text-muted">${esc(h.message_fa || '')}</div>
+                    ${_fwMislabelNote(dv.mislabelled, d.mislabelled_days)}</td>
                 <td class="small">${_fwAgo(h.seconds_since_code)}</td>
                 <td class="small">${formatNumber(dv.codes_forwarded || 0)}</td>
                 <td class="text-nowrap">
@@ -6525,6 +6526,29 @@ async function loadForwarders() {
     }
 }
 
+/** A phone number inside Persian text, kept whole and left-to-right. */
+function _fwNum(p) {
+    // the server keys numbers on their last ten digits; a person writes the 0
+    const n = /^9\d{9}$/.test(p || '') ? '0' + p : (p || '—');
+    return `<span class="fw-num">${esc(n)}</span>`;
+}
+
+// Codes this phone sent under the wrong number (issue #37). The server moved
+// them to the number that had just been clicked, or refused them when they
+// could not be anyone's answer — either way the app is labelling this phone's
+// SIMs wrongly, and only its owner can fix that on the phone.
+function _fwMislabelNote(m, days) {
+    if (!m || !m.count) return '';
+    const last = m.last_account
+        ? `آخرین: برچسب ${_fwNum(m.last_labeled)} داشت و به ${_fwNum(m.last_account)} داده شد`
+        : `آخرین: زیر برچسب ${_fwNum(m.last_labeled)} رسید و چون پیش از کلیک همان شماره بود کنار گذاشته شد`;
+    const ago = m.last_at ? ` (${_fwAgo((Date.now() - new Date(m.last_at).getTime()) / 1000)})` : '';
+    return `<div class="fw-mislabel" role="note">
+        <i class="bi bi-exclamation-triangle"></i><b>${formatNumber(m.count)} کد با شمارهٔ اشتباه</b>
+        در ${formatNumber(days || 7)} روز گذشته. ${last}${ago}.
+        در برنامهٔ گوشی بررسی کنید هر سیم‌کارت به شمارهٔ خودش وصل باشد.</div>`;
+}
+
 /** Both numbers with their slot, so a dual-SIM phone reads as one phone. */
 function _fwSimsCell(dv) {
     const sim = (n, p) => p
@@ -6540,6 +6564,10 @@ const FW_REASON = {
     no_code_in_text: { cls: 'text-warning', fa: 'کدی در متن نبود' },
     no_pending_for_account: { cls: 'text-muted', fa: 'درخواستی نبود' },
     already_answered: { cls: 'text-muted', fa: 'قبلاً جواب داده' },
+    duplicate:    { cls: 'text-muted',   fa: 'نسخهٔ تکراری' },
+    arrived_before_click: { cls: 'text-warning', fa: 'مال شمارهٔ دیگر' },
+    stale_held:   { cls: 'text-muted',   fa: 'کد دیررس' },
+    parked_for_login: { cls: 'text-info', fa: 'کد ورود' },
     test:         { cls: 'text-muted',   fa: 'آزمایشی' },
 };
 
@@ -6570,7 +6598,9 @@ async function loadForwarderLog() {
         const d = await apiCall('/sms/events?limit=100&stage=inbound');
         let rows = d.events || [];
         // «مشکل‌دار» is anything that did not end with the code in the browser
-        if (f === 'problem') rows = rows.filter(e => !['matched', 'parked_early', 'test'].includes(e.details?.reason));
+        if (f === 'problem') rows = rows.filter(e => !['matched', 'parked_early', 'test', 'duplicate', 'parked_for_login'].includes(e.details?.reason)
+                                                 || e.details?.rerouted);
+        else if (f === 'rerouted') rows = rows.filter(e => e.details?.rerouted || e.details?.reason === 'arrived_before_click');
         else if (f) rows = rows.filter(e => e.details?.reason === f);
         if (!rows.length) {
             tb.innerHTML = '<tr><td colspan="4" class="text-muted small p-3">چیزی ثبت نشده است</td></tr>';
@@ -6586,7 +6616,10 @@ async function loadForwarderLog() {
                 <td class="small text-muted" dir="ltr">${esc(when)}</td>
                 <td class="small ${m.cls}">${esc(m.fa)}</td>
                 <td class="small" dir="ltr" style="font-family:var(--bs-font-monospace)">${esc(d.code || '—')}</td>
-                <td class="small">${esc(e.message)}</td>
+                <td class="small">${esc(e.message)}${d.rerouted
+                    ? `<div><span class="fw-route" title="برچسب گوشی شمارهٔ دیگری بود؛ کد به شماره‌ای رفت که همان لحظه کلیک شده بود">
+                         <i class="bi bi-signpost-split"></i> برچسب ${_fwNum(d.labeled)} ← داده شد به ${_fwNum(d.account)}</span></div>`
+                    : ''}</td>
                 <td class="small" dir="ltr">${_fwLatency(d.latency_ms)}</td>
             </tr>`;
         }).join('');

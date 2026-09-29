@@ -1382,9 +1382,68 @@ async def _note_refused(request: Request, db, body: Optional["OtpInbound"], stat
         logger.warning(f"[otp-inbound] could not record a refusal: {e}")
 
 
+def _as_phone(d10: Optional[str]) -> str:
+    """9120000001 -> 09120000001: the last ten digits the store keys on, read
+    back the way a person writes a mobile number."""
+    d = d10 or ""
+    return ("0" + d) if len(d) == 10 and d.startswith("9") else (d or "؟")
+
+
 def _mask_code(code: Optional[str]) -> str:
     c = code or ""
     return ("*" * max(len(c) - 2, 0)) + c[-2:] if c else ""
+
+
+async def _waiting(kind: str, account: str) -> bool:
+    """Whether this number is waiting for a code of this kind right now: an
+    open contact prompt, or a login somebody started in the panel."""
+    from app.scraper import otp_store
+    if not account:
+        return False
+    if kind == "contact":
+        return bool(await otp_store.find_pending_for_account(account))
+    try:
+        from app.api.routes.auth import _login_started_by
+        return bool(await _login_started_by(account))
+    except Exception:
+        return False
+
+
+async def _route_by_click(db, device, label: Optional[str], kind: str, now_ms: int):
+    """Which number a code from this phone belongs to: (account, how, seen).
+
+    The label is what the phone says; the scraper's clicks are what we know.
+    See otp_store.pick_account for the rule. Only ever the label or one of the
+    phone owner's own numbers in this phone (forwarder.reroute_targets) — and
+    the old path without a device id keeps the label, as it always has.
+
+    A label whose number is waiting for this kind of code stands too, however
+    long ago it was clicked: a prompt that is open is asking for exactly this,
+    and an SMS slower than the click window is still its SMS. A post with no
+    label is not routed at all — that is a phone to set up, not to guess for.
+
+    `seen` is whether the number it goes to had just been clicked or was
+    waiting, kept with a held code so a later refusal can tell a late code of
+    its own from another number's.
+    """
+    from app.scraper import otp_store
+    from app.services import forwarder as _fw
+
+    label10 = otp_store._digits(label)
+    clicks = await otp_store.recent_clicks(kind, now_ms)
+    if label10 in clicks:
+        return label10, "label", True
+    waiting = await _waiting(kind, label10)
+    others = [a for a in clicks if a != label10]
+    if device is None or not label10 or waiting or not others:
+        return label10, "label", waiting
+    try:
+        allowed = await _fw.reroute_targets(db, device.user_id, others, device)
+    except Exception as e:
+        logger.warning(f"[otp-inbound] could not read the owner's numbers — keeping the label: {e}")
+        return label10, "label", False
+    account, how = otp_store.pick_account(label10, clicks, allowed, now_ms)
+    return account, how, how == "click"
 
 
 @machine_router.post("/otp-inbound")
@@ -1433,15 +1492,34 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     matched_key = "no_pending"
     reason = None
 
+    # Whose code it is (issue #37). The label names a number; on a dual-SIM
+    # phone it can name the wrong one, and the scraper's own clicks say which
+    # number Divar was just asked to text. `account` is where the code goes
+    # from here on — the label, or another of this phone owner's numbers.
+    label = otp_store._digits(body.account)
+    account, how, seen = label, "label", None
+    sms = None
+    if code and kind in ("contact", "login"):
+        account, how, seen = await _route_by_click(db, device, body.account, kind, now_ms)
+        # One SMS answers one prompt, however many times the phone posts it.
+        sms = otp_store.sms_id(device.device_id if device is not None else None,
+                               body.sentStamp, code)
+    rerouted = bool(account) and account != label
+    dev_id = device.device_id if device is not None else None
+
     if kind == "test":
         reason = "test"
     elif not code:
         reason = "no_code_in_text"
+    elif await otp_store.copy_of(sms, account, kind):
+        # the same SMS again: already used, or already held for this number
+        reason = "duplicate"
     elif kind == "login":
-        await otp_store.put_login_code(body.account, code)
+        await otp_store.put_login_code(account, code, sms=sms, at_ms=now_ms, device=dev_id,
+                                       seen=seen)
         reason = "parked_for_login"
     elif kind == "contact":
-        hit = await otp_store.find_pending_for_account(body.account)
+        hit = await otp_store.find_pending_for_account(account)
         if not hit:
             # Not a miss — an arrival ahead of the request. Park it; the
             # scraper claims it the moment it opens one for this account.
@@ -1453,7 +1531,9 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
             # sentStamp is the SMS centre's clock, not the phone's.
             if latency_ms is not None and latency_ms > otp_store.EARLY_TTL * 1000:
                 reason = "stale_code"
-            elif await otp_store.park_early_code(body.account, code, body.sentStamp):
+            elif await otp_store.park_early_code(account, code, body.sentStamp,
+                                                 sms=sms, at_ms=now_ms, device=dev_id,
+                                                 seen=seen):
                 reason = "parked_early"
             else:
                 reason = "no_pending_for_account"
@@ -1486,9 +1566,14 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
                     sent_ms = None
             if sent_ms is not None and (sent_ms / 1000.0) < (entry["ts"] - 10):
                 reason = "stale_code"
+            elif not await otp_store.use_sms(sms, purge=False):
+                reason = "duplicate"          # a copy got there first, a few ms ago
             elif await otp_store.submit(key, code, sent_stamp_ms=body.sentStamp, source="forwarder"):
                 matched, matched_key, reason = True, key, "matched"
+                await otp_store.drop_copies(sms)
             else:
+                # the prompt moved on first; any copy held elsewhere keeps its chance
+                await otp_store.release_sms(sms)
                 reason = "already_answered"
     else:
         reason = "unknown_kind"
@@ -1500,21 +1585,32 @@ async def otp_inbound(request: Request, db: AsyncSession = Depends(get_db)):
         # filter does exactly. Recorded separately from «last seen».
         await _fw.note_seen(db, device, delivered_code=bool(code))
 
+    # «با برچسب A رسید — به B داده شد» is on the record, because it is the
+    # visible sign of a phone that labels its SIMs wrongly (issue #37).
+    head = (f"کد {kind or '?'} با برچسب {_as_phone(label)} رسید — به {_as_phone(account)} "
+            "داده شد، چون همین شماره الان کلیک شده بود — " if rerouted
+            else f"کد {kind or '?'} از {_as_phone(label)} — ")
     await sms_log.record(
         sms_log.INBOUND,
-        (f"کد {kind or '?'} از {otp_store._digits(body.account) or '؟'} — "
+        (head
          + ("به اسکرپر داده شد" if matched
             else "زودتر از درخواست رسید — نگه داشته شد" if reason == "parked_early"
+            else "برای فرم ورود نگه داشته شد" if reason == "parked_for_login"
+            else "همین پیامک قبلاً رسیده بود — نسخهٔ دوم کنار گذاشته شد" if reason == "duplicate"
             else f"استفاده نشد ({reason})")),
-        level="info" if matched or reason == "parked_early" or kind in ("login", "test") else "warning",
+        level=("warning" if rerouted
+               else "info" if matched or reason in ("parked_early", "duplicate")
+               or kind in ("login", "test") else "warning"),
         route="forwarder", actor=f"forwarder@{ip}",
-        account=otp_store._digits(body.account) or None, kind=kind,
+        account=account or None, kind=kind,
+        labeled=label if rerouted else None, rerouted=True if rerouted else None,
+        routed_by=how if how != "label" else None, device=dev_id,
         code=_mask_code(code), sent_stamp=body.sentStamp, received_stamp=body.receivedStamp,
         server_ms=now_ms, matched_key=matched_key, reason=reason, latency_ms=latency_ms,
         clock_skew_ms=clock_skew_ms,
         sim=body.sim, battery=body.battery, network=body.network,
     )
-    logger.info(f"[otp-inbound] kind={kind} account={otp_store._digits(body.account)} "
+    logger.info(f"[otp-inbound] kind={kind} account={account} label={label} how={how} "
                 f"{reason} latency_ms={latency_ms} clock_skew_ms={clock_skew_ms}")
     return {"matched": matched, "kind": kind, "reason": reason, "latency_ms": latency_ms}
 
