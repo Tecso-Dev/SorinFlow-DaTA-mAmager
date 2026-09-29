@@ -60,6 +60,50 @@ jobs:
           if [ -n "${{ github.base_ref }}" ]; then BASE="origin/${{ github.base_ref }}"; fi
           python scripts/lint_new_code.py --base "$BASE"
 
+  # The new panel (frontend-next) is not covered by the lint gate above at
+  # all: scripts/lint_new_code.py looks at .py and plain .js, so every .ts and
+  # .tsx file in it went unchecked. It is also new code with no backlog, so
+  # unlike the Python side and frontend/ it can be judged whole rather than
+  # line by line.
+  #
+  # The e2e job does build it — scripts/e2e_next_up.sh runs `next build` — but
+  # that is fifteen minutes in, behind the old suite, and it never runs
+  # eslint. The React-compiler rules in particular have already caught real
+  # bugs here (a setState inside an effect, a variable reassigned during
+  # render); nothing was enforcing them.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend-next/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend-next
+        run: npm ci
+
+      - name: Types
+        working-directory: frontend-next
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: frontend-next
+        run: npm run lint
+
+      - name: Production build
+        # No BACKEND_INTERNAL_URL on purpose: that is what the image is built
+        # without, so this is the build the cluster actually runs. The site
+        # config it fetches at build time falls back to the env defaults when
+        # nothing answers (frontend-next/src/lib/site.ts).
+        working-directory: frontend-next
+        run: npm run build
+
   # Nothing reaches the registry until the suite is green. Without this gate a
   # parser regression or a broken auth dependency shipped straight to the
   # scraper fleet on every push to main.
