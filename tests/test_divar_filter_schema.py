@@ -355,3 +355,15 @@ class TestUnsupportedFilters:
 
     def test_nothing_when_none_are_set(self):
         assert dc.unsupported_filters("buy-residential", min_rooms=None, has_parking=False) == []
+
+
+class TestARefusalNamesAnyFilter:
+    """A 400 now can name any filter Divar has, not only the six sent before."""
+
+    def test_rooms(self):
+        advice = dc.refusal_advice(400, "invalid filter for shop-rent: rooms", "اجاره مغازه")
+        assert "«تعداد اتاق»" in advice and "اجاره مغازه" in advice
+
+    def test_a_category_token_is_still_not_mistaken_for_a_filter(self):
+        advice = dc.refusal_advice(400, "invalid filter for shop-rent: price")
+        assert "«قیمت»" in advice

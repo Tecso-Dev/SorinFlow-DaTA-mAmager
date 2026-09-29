@@ -816,6 +816,11 @@ def _filter_named_in(message: Optional[str]) -> Optional[str]:
     """
     if not message:
         return None
-    words = "|".join(map(re.escape, _FILTER_FA))
+    # Every filter any category has can be the one named now (#27), each
+    # under the title the form shows it by.
+    from app.services import divar_filters as df
+    names = {k: f.get("title") or k for k, f in df.definitions().items()}
+    names.update(_FILTER_FA)
+    words = "|".join(map(re.escape, sorted(names, key=len, reverse=True)))
     found = re.findall(rf"(?<![\w-])({words})(?![\w-])", message)
-    return _FILTER_FA[found[-1]] if found else None
+    return names[found[-1]] if found else None
