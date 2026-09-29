@@ -29,6 +29,7 @@ import { qs } from "@/lib/crm";
 import { faDate, faNum, faPercent } from "@/lib/format";
 import { can, type User } from "@/lib/session";
 import emptyLottie from "@/lotties/empty.json";
+import scanLottie from "@/lotties/scan.json";
 import shieldLottie from "@/lotties/shield.json";
 import successLottie from "@/lotties/success.json";
 import { IsoServerRack } from "./rack";
@@ -217,6 +218,12 @@ function UptimeTable({ ov }: { ov: Overview }) {
           <dd><ToneBadge tone={divar?.up ? "success" : "danger"}>{divar?.up ? "برقرار" : "قطع"}</ToneBadge></dd>
         </div>
       </dl>
+      {testing && (
+        <div role="status" className="mt-3 flex items-center gap-3 rounded-xl border border-primary/25 bg-primary/8 px-3 py-2">
+          <Lottie animationData={scanLottie} className="size-12 shrink-0" />
+          <span className="text-sm">در حال آزمودن اتصال به دیوار…</span>
+        </div>
+      )}
     </Section>
   );
 }

@@ -12,6 +12,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ErrorNote, ListSkeleton, RingDialog, ToneBadge } from "@/components/panel/kit";
+import { IsoAlert } from "@/components/panel/motion3d";
 import { toast } from "@/components/toaster";
 import { Button } from "@/components/ui/button";
 import { Tilt } from "@/components/viz";
@@ -77,7 +78,7 @@ export function GuideDialog({ id, onOpenChange }: { id: number | null; onOpenCha
       {cfg.isLoading ? (
         <ListSkeleton rows={4} />
       ) : cfg.isError ? (
-        <ErrorNote error={cfg.error} />
+        <ErrorNote error={cfg.error} illustration={<IsoAlert className="max-w-[80px]" />} />
       ) : cfg.data ? (
         <GuideBody cfg={cfg.data} health={health} onTest={() => test.mutate()} testing={test.isPending} />
       ) : null}

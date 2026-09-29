@@ -25,6 +25,7 @@ import { Lottie } from "@/components/ui/lottie";
 import { Reveal } from "@/components/viz";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
+import shieldLottie from "@/lotties/shield.json";
 import smsLottie from "@/lotties/sms.json";
 import { can, useSession } from "@/lib/session";
 import { AddDeviceDialog } from "./add-device-dialog";
@@ -257,7 +258,7 @@ export function ForwarderView() {
         <CodesLog />
       ) : (
         <Section title="کدهای رسیده از گوشی">
-          <Empty>این بخش نیاز به دسترسی «پیامک» دارد که حساب شما ندارد.</Empty>
+          <Empty illustration={<Lottie animationData={shieldLottie} className="max-w-[100px]" />}>این بخش نیاز به دسترسی «پیامک» دارد که حساب شما ندارد.</Empty>
         </Section>
       )}
 
