@@ -346,3 +346,235 @@ export function CardDeck3D({ className }: { className?: string }) {
     </div>
   );
 }
+
+/* ───────────────────────── isometric warning sign (error states) ───────────────────────── */
+
+/** A floating extruded warning triangle: the picture every «could not load»
+ *  card in the second design pass carries, so a failure looks like a
+ *  deliberate state and not an empty box. */
+export function IsoAlert({ className }: { className?: string }) {
+  const gid = useSvgIds(["alert_face"] as const);
+  const reduce = useReducedMotion();
+  const tri = "M70 12 L126 108 Q132 120 118 120 H22 Q8 120 14 108 Z";
+  return (
+    <motion.svg
+      viewBox="0 0 140 150"
+      className={cn("mx-auto w-full max-w-[96px] overflow-visible", className)}
+      aria-hidden
+      animate={reduce ? undefined : { y: [0, -5, 0] }}
+      transition={FLOAT}
+    >
+      <defs>
+        <linearGradient id={gid.alert_face} x1="14" y1="12" x2="126" y2="120" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#fbbf24" />
+          <stop offset="1" stopColor="#e11d48" />
+        </linearGradient>
+      </defs>
+      <ellipse cx="70" cy="140" rx="40" ry="6" fill="#e11d48" opacity={0.25} />
+      {[8, 6, 4, 2].map((k) => (
+        <path key={k} d={tri} transform={`translate(${k * 0.6} ${k})`} fill="#4c0519" opacity={0.3 + (8 - k) * 0.06} />
+      ))}
+      <path d={tri} fill={`url(#${gid.alert_face})`} stroke="#ffffff" strokeOpacity={0.5} strokeWidth={1.5} />
+      <rect x="64" y="46" width="12" height="40" rx="6" fill="#ffffff" />
+      <motion.circle
+        cx="70" cy="100" r="7" fill="#ffffff"
+        animate={reduce ? undefined : { scale: [1, 1.25, 1] }}
+        transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+      />
+    </motion.svg>
+  );
+}
+
+/* ───────────────────────── relay antenna (monitoring) ───────────────────────── */
+
+/** A lattice mast on a rack-sized base, its beacon sending rings outward:
+ *  «something is watching, and listening». The rings are circles scaled and
+ *  faded by transform (never `r`), staggered so one is always on its way. */
+export function IsoAntenna({ className }: { className?: string }) {
+  const gid = useSvgIds(["ant_base", "ant_mast"] as const);
+  const reduce = useReducedMotion();
+  // the mast's legs meet at the beacon (90,34) and spread 24 px each side by y=152
+  const leg = (y: number) => ((y - 34) * 24) / 118;
+  const braces = [72, 98, 124];
+  return (
+    <motion.svg
+      viewBox="0 0 180 200"
+      className={cn("mx-auto w-full max-w-[150px] overflow-visible", className)}
+      aria-hidden
+      animate={reduce ? undefined : { y: [0, -4, 0] }}
+      transition={FLOAT}
+    >
+      <defs>
+        <linearGradient id={gid.ant_base} x1="40" y1="152" x2="140" y2="178" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#818cf8" />
+          <stop offset="1" stopColor="#4f46e5" />
+        </linearGradient>
+        <linearGradient id={gid.ant_mast} x1="90" y1="34" x2="90" y2="152" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#e0e7ff" />
+          <stop offset="1" stopColor="#6366f1" />
+        </linearGradient>
+      </defs>
+      <ellipse cx="90" cy="190" rx="60" ry="7" fill="#6366f1" opacity={0.25} />
+      {[8, 6, 4, 2].map((k) => (
+        <rect key={k} x={40 + k * 0.5} y={152 + k} width="100" height="26" rx="10" fill="#2e1065" opacity={0.28 + (8 - k) * 0.06} />
+      ))}
+      <rect x="40" y="152" width="100" height="26" rx="10" fill={`url(#${gid.ant_base})`} stroke="#c7d2fe" strokeOpacity={0.5} />
+      <rect x="54" y="162" width="26" height="5" rx="2.5" fill="#ffffff" opacity={0.45} />
+      <rect x="86" y="162" width="14" height="5" rx="2.5" fill="#ffffff" opacity={0.25} />
+      <motion.circle
+        cx="122" cy="165" r="4" fill="#22d3ee"
+        animate={reduce ? undefined : { opacity: [1, 0.35, 1] }}
+        transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+      />
+      {/* the mast, once dark behind and once lit in front, for the extrusion */}
+      <path d="M93 36 L69 154 H117 Z" fill="none" stroke="#2e1065" strokeOpacity={0.5} strokeWidth={5} strokeLinejoin="round" />
+      <path d="M90 34 L66 152 H114 Z" fill="none" stroke={`url(#${gid.ant_mast})`} strokeWidth={5} strokeLinejoin="round" />
+      {braces.map((y, i) => {
+        const next = braces[i + 1];
+        return (
+          <g key={y} stroke="#c7d2fe" strokeWidth={2.5} strokeLinecap="round" opacity={0.85}>
+            <line x1={90 - leg(y)} y1={y} x2={90 + leg(y)} y2={y} />
+            {next && <line x1={i % 2 ? 90 + leg(y) : 90 - leg(y)} y1={y} x2={i % 2 ? 90 - leg(next) : 90 + leg(next)} y2={next} />}
+          </g>
+        );
+      })}
+      {[0, 1, 2].map((i) => (
+        <motion.circle
+          key={i}
+          cx="90" cy="30" r="12" fill="none" stroke="#22d3ee" strokeWidth={2} opacity={0.45}
+          vectorEffect="non-scaling-stroke"
+          animate={reduce ? undefined : { scale: [0.6, 2.7], opacity: [0.75, 0] }}
+          transition={{ duration: 2.6, repeat: Infinity, ease: "easeOut", delay: i * 0.87 }}
+        />
+      ))}
+      <circle cx="90" cy="30" r="10" fill="#0e1030" stroke="#c7d2fe" strokeOpacity={0.7} />
+      <motion.circle
+        cx="90" cy="30" r="5" fill="#22d3ee"
+        animate={reduce ? undefined : { opacity: [0.65, 1, 0.65], scale: [0.9, 1.2, 0.9] }}
+        transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+      />
+    </motion.svg>
+  );
+}
+
+/* ───────────────────────── router hops (proxies) ───────────────────────── */
+
+/** Three router slabs climbing like steps, a dashed route between them and a
+ *  packet hopping up the stairs: what a proxy chain is. The packet moves by
+ *  `x`/`y` (transforms), never `cx`/`cy`. */
+export function IsoHopStack({ className }: { className?: string }) {
+  const gid = useSvgIds(["hop_face"] as const);
+  const reduce = useReducedMotion();
+  const slabs = [{ x: 14, y: 118 }, { x: 68, y: 76 }, { x: 122, y: 34 }];
+  return (
+    <motion.svg
+      viewBox="0 0 200 170"
+      className={cn("mx-auto w-full max-w-[170px] overflow-visible", className)}
+      aria-hidden
+      animate={reduce ? undefined : { y: [0, -4, 0] }}
+      transition={FLOAT}
+    >
+      <defs>
+        <linearGradient id={gid.hop_face} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#a5b4fc" />
+          <stop offset="1" stopColor="#6d28d9" />
+        </linearGradient>
+      </defs>
+      <ellipse cx="100" cy="160" rx="70" ry="7" fill="#6366f1" opacity={0.22} />
+      {slabs.slice(0, 2).map((s, i) => (
+        <line
+          key={i}
+          x1={s.x + 32} y1={s.y - 4} x2={slabs[i + 1].x + 32} y2={slabs[i + 1].y - 4}
+          stroke="#a5b4fc" strokeWidth={2} strokeDasharray="4 4" strokeLinecap="round"
+        />
+      ))}
+      {slabs.map((s, i) => (
+        <g key={i}>
+          {[6, 4, 2].map((k) => (
+            <rect key={k} x={s.x + k * 0.6} y={s.y + k} width="64" height="24" rx="8" fill="#2e1065" opacity={0.3 + (6 - k) * 0.08} />
+          ))}
+          <rect x={s.x} y={s.y} width="64" height="24" rx="8" fill={`url(#${gid.hop_face})`} stroke="#e0e7ff" strokeOpacity={0.5} />
+          <rect x={s.x + 10} y={s.y + 10} width="26" height="4" rx="2" fill="#ffffff" opacity={0.45} />
+          {[0, 1, 2].map((d) => (
+            <circle key={d} cx={s.x + 46 + d * 6} cy={s.y + 12} r="2" fill={d === i ? "#22d3ee" : "#c7d2fe"} opacity={d === i ? 1 : 0.55} />
+          ))}
+        </g>
+      ))}
+      <motion.circle
+        cx={slabs[0].x + 32} cy={slabs[0].y - 4} r="5" fill="#22d3ee" opacity={0}
+        animate={reduce ? undefined : { x: [0, 5, 54, 103, 108], y: [0, -4, -42, -80, -84], opacity: [0, 1, 1, 1, 0] }}
+        transition={{ duration: 3.2, repeat: Infinity, ease: "linear", times: [0, 0.08, 0.5, 0.92, 1] }}
+      />
+    </motion.svg>
+  );
+}
+
+/* ───────────────────────── key + sliders (settings) ───────────────────────── */
+
+/** A settings panel with three sliders that keep moving, and a key resting on
+ *  its corner. Each fill grows and shrinks by `scaleX` from its own left
+ *  edge, and its knob travels the same distance by `x`, so they stay joined
+ *  without animating a width. */
+export function IsoKeyPanel({ className }: { className?: string }) {
+  const gid = useSvgIds(["kp_face", "kp_key"] as const);
+  const reduce = useReducedMotion();
+  const tracks = [
+    { y: 46, w: 62, d: 14, dur: 3.4 },
+    { y: 68, w: 38, d: 12, dur: 4.1 },
+    { y: 90, w: 74, d: 16, dur: 3.8 },
+  ];
+  return (
+    <motion.svg
+      viewBox="0 0 190 170"
+      className={cn("mx-auto w-full max-w-[160px] overflow-visible", className)}
+      aria-hidden
+      animate={reduce ? undefined : { y: [0, -5, 0] }}
+      transition={FLOAT}
+    >
+      <defs>
+        <linearGradient id={gid.kp_face} x1="14" y1="14" x2="146" y2="118" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#818cf8" />
+          <stop offset="1" stopColor="#6d28d9" />
+        </linearGradient>
+        <linearGradient id={gid.kp_key} x1="0" y1="-14" x2="60" y2="14" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#fde68a" />
+          <stop offset="1" stopColor="#f59e0b" />
+        </linearGradient>
+      </defs>
+      <ellipse cx="90" cy="160" rx="66" ry="7" fill="#6366f1" opacity={0.22} />
+      {[8, 6, 4, 2].map((k) => (
+        <rect key={k} x={14 + k * 0.7} y={14 + k} width="132" height="104" rx="16" fill="#2e1065" opacity={0.28 + (8 - k) * 0.06} />
+      ))}
+      <rect x="14" y="14" width="132" height="104" rx="16" fill={`url(#${gid.kp_face})`} stroke="#e0e7ff" strokeOpacity={0.5} />
+      <rect x="26" y="26" width="108" height="80" rx="10" fill="#1e1b4b" opacity={0.85} />
+      {tracks.map((t, i) => (
+        <g key={i}>
+          <rect x="38" y={t.y} width="84" height="6" rx="3" fill="#ffffff" opacity={0.22} />
+          <motion.rect
+            x="38" y={t.y} width={t.w} height="6" rx="3" fill="#22d3ee"
+            style={{ originX: 0, originY: 0.5 }}
+            animate={reduce ? undefined : { scaleX: [1, (t.w - t.d) / t.w, 1] }}
+            transition={{ duration: t.dur, repeat: Infinity, ease: "easeInOut", delay: i * 0.4 }}
+          />
+          <motion.circle
+            cx={38 + t.w} cy={t.y + 3} r="7" fill="#ffffff" stroke="#6d28d9" strokeWidth={2}
+            animate={reduce ? undefined : { x: [0, -t.d, 0] }}
+            transition={{ duration: t.dur, repeat: Infinity, ease: "easeInOut", delay: i * 0.4 }}
+          />
+        </g>
+      ))}
+      <g transform="translate(112 112) rotate(-32)">
+        <motion.g animate={reduce ? undefined : { y: [0, -4, 0] }} transition={{ duration: 4.4, repeat: Infinity, ease: "easeInOut" }}>
+          <g transform="translate(2 3)" opacity={0.35}>
+            <circle cx="0" cy="0" r="12" fill="none" stroke="#2e1065" strokeWidth={6} />
+            <rect x="12" y="-3" width="46" height="6" rx="3" fill="#2e1065" />
+          </g>
+          <circle cx="0" cy="0" r="12" fill="none" stroke={`url(#${gid.kp_key})`} strokeWidth={6} />
+          <rect x="12" y="-3" width="46" height="6" rx="3" fill={`url(#${gid.kp_key})`} />
+          <rect x="40" y="3" width="5" height="10" rx="2" fill={`url(#${gid.kp_key})`} />
+          <rect x="50" y="3" width="5" height="7" rx="2" fill={`url(#${gid.kp_key})`} />
+        </motion.g>
+      </g>
+    </motion.svg>
+  );
+}
