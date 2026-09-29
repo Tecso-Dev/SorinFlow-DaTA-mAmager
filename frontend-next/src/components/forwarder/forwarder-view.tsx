@@ -15,13 +15,17 @@ import { cn } from "cn";
 import {
   Empty, ErrorNote, ListSkeleton, PageHeader, Section, ToneBadge, useConfirm,
 } from "@/components/panel/kit";
+import { IsoAlert, IsoPhone } from "@/components/panel/motion3d";
 import { toast } from "@/components/toaster";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Lottie } from "@/components/ui/lottie";
+import { Reveal } from "@/components/viz";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
+import smsLottie from "@/lotties/sms.json";
 import { can, useSession } from "@/lib/session";
 import { AddDeviceDialog } from "./add-device-dialog";
 import { CodesLog } from "./codes-log";
@@ -146,29 +150,37 @@ export function ForwarderView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader
-        icon={Smartphone}
-        title="فرستندهٔ پیامک"
-        hint="گوشی‌هایی که کد پیامکی دیوار را برای شما می‌فرستند"
-        actions={
-          <>
-            <Button variant="ghost" size="icon" aria-label="بارگیری دوباره" onClick={() => list.refetch()} disabled={list.isFetching}>
-              <RefreshCw className={cn(list.isFetching && "animate-spin")} />
-            </Button>
-            <Button onClick={() => setAdding(true)} className="shadow-[0_8px_24px_-8px_rgb(99_102_241/0.8)]">
-              <Plus /> افزودن گوشی
-            </Button>
-          </>
-        }
-      />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_130px]">
+        <PageHeader
+          icon={Smartphone}
+          title="فرستندهٔ پیامک"
+          hint="گوشی‌هایی که کد پیامکی دیوار را برای شما می‌فرستند"
+          actions={
+            <>
+              <Button variant="ghost" size="icon" aria-label="بارگیری دوباره" onClick={() => list.refetch()} disabled={list.isFetching}>
+                <RefreshCw className={cn(list.isFetching && "animate-spin")} />
+              </Button>
+              <Button onClick={() => setAdding(true)} className="shadow-[0_8px_24px_-8px_rgb(99_102_241/0.8)]">
+                <Plus /> افزودن گوشی
+              </Button>
+            </>
+          }
+        />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <IsoPhone className="max-w-[104px]" />
+        </Reveal>
+      </div>
 
       <Section title="گوشی‌های من" hint={devices.length ? `${faNum(devices.length)} دستگاه` : undefined}>
         {list.isLoading ? (
           <ListSkeleton rows={3} />
         ) : list.isError ? (
-          <ErrorNote error={list.error} />
+          <ErrorNote error={list.error} illustration={<IsoAlert />} />
         ) : !devices.length ? (
-          <Empty icon={Smartphone} action={<Button size="sm" onClick={() => setAdding(true)}><Plus /> افزودن گوشی</Button>}>
+          <Empty
+            illustration={<Lottie animationData={smsLottie} className="max-w-[120px]" />}
+            action={<Button size="sm" onClick={() => setAdding(true)}><Plus /> افزودن گوشی</Button>}
+          >
             هنوز گوشی‌ای ثبت نکرده‌اید. یک گوشی اضافه کنید تا کدهای دیوار خودکار برسند.
           </Empty>
         ) : (
@@ -187,8 +199,14 @@ export function ForwarderView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {devices.map((d) => (
-                    <tr key={d.id} className="border-b transition-colors hover:bg-muted/30">
+                  {devices.map((d, i) => (
+                    <motion.tr
+                      key={d.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.45, delay: Math.min(i, 8) * 0.05, ease: [0.22, 1, 0.36, 1] }}
+                      className="border-b transition-colors hover:bg-muted/30"
+                    >
                       <td className="px-3 py-2.5 font-semibold">{d.label || d.device_id}</td>
                       <td className="px-3 py-2.5"><SimList d={d} /></td>
                       <td className="px-3 py-2.5">
@@ -202,7 +220,7 @@ export function ForwarderView() {
                       </td>
                       <td className="px-3 py-2.5 tabular">{faNum(d.codes_forwarded)}</td>
                       <td className="px-3 py-2.5">{actionsFor(d)}</td>
-                    </tr>
+                    </motion.tr>
                   ))}
                 </tbody>
               </table>
@@ -210,22 +228,24 @@ export function ForwarderView() {
 
             {/* phone: cards */}
             <ul className="grid gap-2 md:hidden">
-              {devices.map((d) => (
-                <li key={d.id} className="rounded-xl border bg-background/50 p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-bold">{d.label || d.device_id}</div>
-                      <SimList d={d} />
+              {devices.map((d, i) => (
+                <li key={d.id}>
+                  <Reveal delay={Math.min(i, 6) * 0.05} className="rounded-xl border bg-background/50 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-bold">{d.label || d.device_id}</div>
+                        <SimList d={d} />
+                      </div>
+                      {actionsFor(d)}
                     </div>
-                    {actionsFor(d)}
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-xs">
-                      <HealthDot state={d.health.state} />
-                      <ToneBadge tone={HEALTH_TONE[d.health.state]}>{d.health.message_fa}</ToneBadge>
-                    </span>
-                    <span className="text-[11px] text-muted-foreground tabular">{faNum(d.codes_forwarded)} کد</span>
-                  </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs">
+                        <HealthDot state={d.health.state} />
+                        <ToneBadge tone={HEALTH_TONE[d.health.state]}>{d.health.message_fa}</ToneBadge>
+                      </span>
+                      <span className="text-[11px] text-muted-foreground tabular">{faNum(d.codes_forwarded)} کد</span>
+                    </div>
+                  </Reveal>
                 </li>
               ))}
             </ul>
