@@ -8,14 +8,18 @@
 
 import { HardDriveDownload, Loader2, Radar } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Lottie } from "@/components/ui/lottie";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Section, ToneBadge } from "@/components/panel/kit";
+import { ErrorNote, ListSkeleton, Section, ToneBadge } from "@/components/panel/kit";
+import { IsoAlert } from "@/components/panel/motion3d";
 import { Reveal } from "@/components/viz";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
+import scanLottie from "@/lotties/scan.json";
 
 // last_run/history come from app/services/dr_backup.py's ship(): the outcome
 // sits under `sent`, not at the top level.
@@ -33,6 +37,45 @@ type DiagRow = { route: string; target: string; ok: boolean; http: number | null
 const QKEY = ["users", "dr-status"] as const;
 const POLL_MS = 4000;
 const MAX_POLLS = 30;
+
+/** The last runs, oldest to newest, one bar each: green when it shipped, red when
+ *  it did not. Only what `history` carries; a run with no outcome is left out
+ *  rather than guessed at. Bars grow from the baseline as the strip enters. */
+function RunStrip({ history }: { history: DrRun[] }) {
+  const runs = useMemo(() => {
+    const dated = history.flatMap((r) => (r.sent?.at ? [{ at: Date.parse(r.sent.at), ok: !!r.sent.ok }] : []));
+    return dated.filter((r) => Number.isFinite(r.at)).sort((a, b) => a.at - b.at).slice(-14);
+  }, [history]);
+  if (runs.length < 2) return null;
+  const okCount = runs.filter((r) => r.ok).length;
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>سابقهٔ {faNum(runs.length)} اجرای اخیر</span>
+        <span className="tabular">{faNum(okCount)} موفق{runs.length - okCount ? `، ${faNum(runs.length - okCount)} ناموفق` : ""}</span>
+      </div>
+      <motion.div
+        role="img"
+        aria-label={`سابقهٔ ${faNum(runs.length)} اجرای اخیر: ${faNum(okCount)} موفق`}
+        className="flex h-7 items-end gap-1"
+        initial="out"
+        whileInView="in"
+        viewport={{ once: true }}
+        variants={{ out: {}, in: { transition: { staggerChildren: 0.04 } } }}
+      >
+        {runs.map((r) => (
+          <motion.span
+            key={r.at}
+            title={`${faDate(new Date(r.at), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} — ${r.ok ? "موفق" : "ناموفق"}`}
+            className={`h-full flex-1 rounded-sm ${r.ok ? "bg-success" : "bg-destructive"}`}
+            style={{ originY: 1 }}
+            variants={{ out: { scaleY: 0 }, in: { scaleY: r.ok ? 1 : 0.6, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } } }}
+          />
+        ))}
+      </motion.div>
+    </div>
+  );
+}
 
 export function DrCard() {
   const qc = useQueryClient();
@@ -85,7 +128,9 @@ export function DrCard() {
     <Reveal delay={0.15}>
       <Section title="بکاپ کامل (DR)" hint={q.data?.schedule_fa}>
         {q.isPending ? (
-          <div className="h-20 animate-pulse rounded-lg bg-muted/40" />
+          <ListSkeleton rows={2} />
+        ) : q.isError ? (
+          <ErrorNote error={q.error} illustration={<IsoAlert className="max-w-[80px]" />} />
         ) : (
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -101,10 +146,11 @@ export function DrCard() {
               ) : <span>—</span>}
             </div>
             {busy && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" /> در انتظار سرور — چند دقیقه طول می‌کشد
+              <div role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Lottie animationData={scanLottie} className="size-12 shrink-0" /> در انتظار سرور — چند دقیقه طول می‌کشد
               </div>
             )}
+            {q.data?.history && <RunStrip history={q.data.history} />}
             {q.data?.undelivered && q.data.undelivered.length > 0 && (
               <p className="text-xs text-warning">{faNum(q.data.undelivered.length)} بستهٔ ارسال‌نشده روی سرور مانده است.</p>
             )}

@@ -9,6 +9,7 @@ import {
   Ban, CheckCircle2, KeyRound, Loader2, MoreHorizontal, Plus, ShieldOff, Trash2, UserCog, UserRoundCheck,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -16,15 +17,18 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Lottie } from "@/components/ui/lottie";
 import { Switch } from "@/components/ui/switch";
 import {
   Empty, ErrorNote, Field, ListSkeleton, NativeSelect, RingDialog, Section, ToneBadge, Toolbar, useConfirm,
 } from "@/components/panel/kit";
+import { IsoAlert } from "@/components/panel/motion3d";
 import { Reveal } from "@/components/viz";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
 import { displayName, ROLE_LABEL, type User } from "@/lib/session";
+import emptyLottie from "@/lotties/empty.json";
 import { NewUserDialog } from "./new-user-dialog";
 import { PermsEditorDialog } from "./perms-editor-dialog";
 
@@ -217,9 +221,9 @@ export function TeamTable({ me }: { me: User }) {
         {q.isPending ? (
           <ListSkeleton rows={5} />
         ) : q.isError ? (
-          <ErrorNote error={q.error} />
+          <ErrorNote error={q.error} illustration={<IsoAlert />} />
         ) : rows.length === 0 ? (
-          <Empty icon={UserCog}>کاربری با این فیلتر پیدا نشد.</Empty>
+          <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />}>کاربری با این فیلتر پیدا نشد.</Empty>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] border-collapse text-sm">
@@ -234,12 +238,20 @@ export function TeamTable({ me }: { me: User }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((u) => {
+                {rows.map((u, i) => {
                   const canTouch = me.role === "root" || u.role !== "root";
                   const isSelf = u.id === me.id;
                   const rootToggle = me.role === "root";
                   return (
-                    <tr key={u.id} className="border-b last:border-0 align-top">
+                    <motion.tr
+                      key={u.id}
+                      // plays once when the row first mounts: typing in the search box keeps
+                      // the rows that still match and only brings back the ones that return
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.4, delay: Math.min(i, 10) * 0.035, ease: [0.22, 1, 0.36, 1] }}
+                      className="border-b last:border-0 align-top"
+                    >
                       <td className="p-2">
                         <div className="flex items-center gap-2">
                           <Avatar size="sm">
@@ -314,7 +326,7 @@ export function TeamTable({ me }: { me: User }) {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>
-                    </tr>
+                    </motion.tr>
                   );
                 })}
               </tbody>

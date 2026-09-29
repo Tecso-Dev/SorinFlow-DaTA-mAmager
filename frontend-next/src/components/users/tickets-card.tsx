@@ -4,15 +4,18 @@
 // picks the permission set (defaults to DEFAULT_ADMIN_PERMISSIONS if none
 // ticked); rejecting clears it. super_admin only.
 
-import { Check, Inbox, Loader2, X } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Empty, ErrorNote, ListSkeleton, Section } from "@/components/panel/kit";
+import { IsoAlert } from "@/components/panel/motion3d";
+import { Lottie } from "@/components/ui/lottie";
 import { Reveal } from "@/components/viz";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
+import envelopeLottie from "@/lotties/envelope.json";
 import { usePermCatalog } from "./permissions";
 
 type Ticket = {
@@ -101,12 +104,14 @@ export function TicketsCard() {
         {q.isPending ? (
           <ListSkeleton />
         ) : q.isError ? (
-          <ErrorNote error={q.error} />
+          <ErrorNote error={q.error} illustration={<IsoAlert />} />
         ) : q.data.items.length === 0 ? (
-          <Empty icon={Inbox}>درخواست در انتظاری نیست.</Empty>
+          <Empty illustration={<Lottie animationData={envelopeLottie} className="max-w-[110px]" />}>درخواست در انتظاری نیست.</Empty>
         ) : (
           <div className="flex flex-col gap-3">
-            {q.data.items.map((t) => <TicketRow key={t.id} ticket={t} />)}
+            {q.data.items.map((t, i) => (
+              <Reveal key={t.id} delay={Math.min(i, 6) * 0.05}><TicketRow ticket={t} /></Reveal>
+            ))}
           </div>
         )}
       </Section>

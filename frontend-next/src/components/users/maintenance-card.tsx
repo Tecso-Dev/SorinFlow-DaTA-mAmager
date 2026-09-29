@@ -11,7 +11,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Field, NativeSelect, Section, useConfirm } from "@/components/panel/kit";
+import { ErrorNote, Field, ListSkeleton, NativeSelect, Section, useConfirm } from "@/components/panel/kit";
+import { IsoAlert } from "@/components/panel/motion3d";
 import { Reveal } from "@/components/viz";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
@@ -117,7 +118,9 @@ export function MaintenanceCard() {
         action={q.data?.enabled ? <span className="text-xs font-bold text-destructive">بسته است</span> : <span className="text-xs font-bold text-success">باز است</span>}
       >
         {q.isPending ? (
-          <div className="h-24 animate-pulse rounded-lg bg-muted/40" />
+          <ListSkeleton rows={3} />
+        ) : q.isError ? (
+          <ErrorNote error={q.error} illustration={<IsoAlert />} />
         ) : (
           <div className="flex flex-col gap-3">
             {q.data?.enabled && q.data.seconds_left != null && (

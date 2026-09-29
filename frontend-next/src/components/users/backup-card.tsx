@@ -9,10 +9,13 @@ import {
   Copy, Database, Loader2, Play, Radar, Search, Send, X,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
-import { Field, NativeSelect, RingDialog, Section, ToneBadge } from "@/components/panel/kit";
+import { ErrorNote, Field, ListSkeleton, NativeSelect, RingDialog, Section, ToneBadge } from "@/components/panel/kit";
+import { IsoAlert } from "@/components/panel/motion3d";
 import { Reveal } from "@/components/viz";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
@@ -33,6 +36,40 @@ function fmtSize(kb: number) {
   if (kb >= 1024 * 1024) return `${faNum(kb / (1024 * 1024), { maximumFractionDigits: 1 })} گیگابایت`;
   if (kb >= 1024) return `${faNum(kb / 1024, { maximumFractionDigits: 1 })} مگابایت`;
   return `${faNum(kb, { maximumFractionDigits: 0 })} کیلوبایت`;
+}
+
+const sizeConfig = { mb: { label: "حجم نسخه", color: "var(--chart-2)" } } satisfies ChartConfig;
+
+/** How big each local snapshot is, oldest to newest: a database that is quietly
+ *  growing (or a snapshot that suddenly halved) shows here before it shows
+ *  anywhere else. It draws the files the server listed, nothing more, and
+ *  stays out of the way until there are two of them to compare. */
+function SnapshotSizes({ snapshots }: { snapshots: Status["snapshots"] }) {
+  const rows = useMemo(
+    () => snapshots.flatMap((s) => {
+      const t = Date.parse(s.at);
+      return Number.isFinite(t) ? [{ t, file: s.file, mb: s.size_kb / 1024 }] : [];
+    }).sort((a, b) => a.t - b.t),
+    [snapshots],
+  );
+  if (rows.length < 2) return null;
+  return (
+    <div className="border-t pt-3">
+      <div className="mb-1 text-xs text-muted-foreground">حجم نسخه‌های محلی، از قدیمی به تازه</div>
+      <ChartContainer config={sizeConfig} className="aspect-auto h-[110px] w-full">
+        <BarChart data={rows} margin={{ top: 4, left: 0, right: 0, bottom: 0 }} barCategoryGap="20%">
+          <CartesianGrid vertical={false} strokeDasharray="3 3" />
+          <XAxis dataKey="t" reversed tickLine={false} axisLine={false} tickMargin={6} minTickGap={28} tickFormatter={(t: number) => faDate(new Date(t), { month: "short", day: "numeric" })} />
+          <YAxis orientation="right" tickLine={false} axisLine={false} width={32} tickFormatter={(v: number) => faNum(v, { maximumFractionDigits: 0 })} />
+          <ChartTooltip
+            cursor={{ fill: "var(--muted)", opacity: 0.5 }}
+            content={<ChartTooltipContent indicator="dot" labelFormatter={(_, p) => (p?.[0] ? String(p[0].payload.file) : "")} formatter={(v) => `${faNum(Number(v), { maximumFractionDigits: 1 })} مگابایت`} />}
+          />
+          <Bar dataKey="mb" fill="var(--color-mb)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+        </BarChart>
+      </ChartContainer>
+    </div>
+  );
 }
 
 export function BackupCard() {
@@ -180,7 +217,9 @@ export function BackupCard() {
         action={q.data && <ToneBadge tone={q.data.configured ? "success" : "neutral"}>{q.data.configured ? "تنظیم‌شده" : "تنظیم‌نشده"}</ToneBadge>}
       >
         {q.isPending ? (
-          <div className="h-32 animate-pulse rounded-lg bg-muted/40" />
+          <ListSkeleton rows={3} />
+        ) : q.isError ? (
+          <ErrorNote error={q.error} illustration={<IsoAlert className="max-w-[80px]" />} />
         ) : (
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -290,6 +329,8 @@ export function BackupCard() {
                 </div>
               )}
             </div>
+
+            {q.data && <SnapshotSizes snapshots={q.data.snapshots} />}
 
             <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
               <div>
