@@ -95,6 +95,16 @@ async def _existing(db, model, **filters):
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+# The account's own verified phone (User.phone/phone_verified — the portal
+# sign-up field app/auth/dependencies.py:phone_gate_reason checks before
+# letting anyone touch a Divar number, log in to Divar, register a forwarder
+# or save a scrape schedule) — never divar_phone above, a different column
+# for a different phone. AUTH_SMS_PROVIDER=console (e2e_up.sh) makes that
+# gate real instead of failing open, so every account these e2e specs sign
+# in as needs one, distinct from the divar_phone numbers already in STAFF.
+STAFF_OWN_PHONE = {"manager1": "09190000001", "agent1": "09190000002", "agent2": "09190000003"}
+
+
 async def seed_staff(db):
     """manager1/agent1/agent2 — role=admin like every real employee account;
     the difference between "manager" and "agent" is the permission set, not
@@ -109,10 +119,15 @@ async def seed_staff(db):
                 username=username, full_name=full_name, role=role,
                 hashed_password=get_password_hash(PASSWORD),
                 is_active=True, permissions=list(perms), divar_phone=divar_phone,
+                phone=STAFF_OWN_PHONE.get(username), phone_verified=username in STAFF_OWN_PHONE,
             )
             db.add(user)
             await db.flush()
             created.append(username)
+        elif not user.phone_verified and username in STAFF_OWN_PHONE:
+            # a row from before this field existed — bring it up to date so a
+            # database seeded on an older checkout still passes the gate
+            user.phone, user.phone_verified = STAFF_OWN_PHONE[username], True
         users[username] = user
     if created:
         print(f"users: created {', '.join(created)}")
@@ -588,6 +603,14 @@ async def main():
     async with async_session_maker() as db:
         super_admins = (await db.execute(
             select(User).where(User.role.in_([ROLE_ROOT, ROLE_SUPER_ADMIN])))).scalars().all()
+        # root is exempt from phone_gate_reason (it verifies everyone else by
+        # hand); super_admin ("owner") is not, and app/database.py's own
+        # boot seed never gives it a phone, so it needs the same fix-up as
+        # STAFF_OWN_PHONE above, keyed by role since there is only ever one.
+        for u in super_admins:
+            if u.role == ROLE_SUPER_ADMIN and not u.phone_verified:
+                u.phone, u.phone_verified = "09190000000", True
+        await db.commit()
 
     print("\n── seeded logins (throwaway, local only) ──")
     for u in super_admins:

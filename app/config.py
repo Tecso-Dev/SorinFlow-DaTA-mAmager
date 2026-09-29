@@ -274,6 +274,12 @@ class Settings(BaseSettings):
     auth_sms_provider: str = Field(default="kavenegar", validation_alias=AliasChoices("AUTH_SMS_PROVIDER", "auth_sms_provider"))
     # Verification code: length, lifetime, resend cooldown, and how many wrong
     # guesses a single code tolerates before it is burned.
+    # Signups per client IP per hour (app/services/verification.py's
+    # IP_SIGNUP_LIMIT) before "too many requests from this device". A real
+    # visitor never hits this; local/e2e testing does, since every browser
+    # project in the same suite run registers through the same loopback
+    # address (see AUTH_IP_SIGNUP_LIMIT in scripts/e2e_up.sh).
+    auth_ip_signup_limit: int = Field(default=5, validation_alias=AliasChoices("AUTH_IP_SIGNUP_LIMIT", "auth_ip_signup_limit"))
     auth_code_length: int = Field(default=5, validation_alias=AliasChoices("AUTH_CODE_LENGTH", "auth_code_length"))
     auth_code_ttl_seconds: int = Field(default=180, validation_alias=AliasChoices("AUTH_CODE_TTL_SECONDS", "auth_code_ttl_seconds"))
     auth_code_resend_cooldown: int = Field(default=90, validation_alias=AliasChoices("AUTH_CODE_RESEND_COOLDOWN", "auth_code_resend_cooldown"))

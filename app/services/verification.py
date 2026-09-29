@@ -385,7 +385,7 @@ async def verify_code(purpose: str, identifier: str, code: str) -> str:
 # guesses per IP per hour. The third is looser: a guess sends nothing and the
 # per-identifier attempt cap inside verify_code is the real lock; this only
 # stops one host from walking many identifiers at the cap each.
-IP_SIGNUP_LIMIT = 5
+IP_SIGNUP_LIMIT = settings.auth_ip_signup_limit  # e2e needs this raised, see app/config.py
 IP_CODE_LIMIT = 10
 IP_VERIFY_LIMIT = 30
 IP_WINDOW = 3600
