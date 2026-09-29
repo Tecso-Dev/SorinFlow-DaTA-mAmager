@@ -15,20 +15,24 @@
 // again in this session, exactly as the data says.
 
 import {
-  Globe2, Loader2, Plus, RefreshCw, ShieldCheck, ShieldPlus, Trash2, Upload,
+  Loader2, Plus, RefreshCw, ShieldCheck, ShieldPlus, Trash2, Upload,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import { cn } from "cn";
-import { ErrorNote, ListSkeleton, PageHeader, Section, Toolbar, useConfirm } from "@/components/panel/kit";
+import { Empty, ErrorNote, ListSkeleton, PageHeader, Section, Toolbar, useConfirm } from "@/components/panel/kit";
+import { IsoAlert, IsoHopStack } from "@/components/panel/motion3d";
 import { toast } from "@/components/toaster";
 import { Button } from "@/components/ui/button";
+import { Lottie } from "@/components/ui/lottie";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CountUp, Reveal } from "@/components/viz";
 import { api, ApiError } from "@/lib/api";
-import { faNum } from "@/lib/format";
+import { faNum, faPercent } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
+import scanLottie from "@/lotties/scan.json";
 import { AddProxyDialog } from "./add-proxy-dialog";
 import { ExitBadge } from "./exit-badge";
 import { ImportProxiesDialog } from "./import-dialog";
@@ -52,6 +56,8 @@ export function ProxiesView() {
   const total = list.data?.total ?? items.length;
   const activeCount = items.filter((p) => p.is_active).length;
   const workingCount = items.filter((p) => p.is_working).length;
+  // only proxies that have actually been timed: an untested one has no bar, not a zero one
+  const timed = items.filter((p) => p.avg_response_time != null);
 
   function patchRow(id: number, patch: Partial<Proxy>) {
     qc.setQueryData<ProxyList>(QK, (cur) => {
@@ -163,28 +169,36 @@ export function ProxiesView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader
-        icon={ShieldCheck}
-        title="پراکسی‌ها"
-        hint={list.data ? <><CountUp value={total} /> پراکسی، {faNum(activeCount)} روشن، {faNum(workingCount)} پاسخ‌گو</> : "پراکسی‌های اسکرپر، مشترک بین همه"}
-        actions={
-          <>
-            <Button variant="outline" onClick={() => setImporting(true)}>
-              <Upload /> وارد کردن دسته‌ای
-            </Button>
-            <Button onClick={() => setAdding(true)} className="shadow-[0_8px_24px_-8px_rgb(99_102_241/0.8)]">
-              <Plus /> افزودن پراکسی
-            </Button>
-          </>
-        }
-      />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_150px]">
+        <PageHeader
+          icon={ShieldCheck}
+          title="پراکسی‌ها"
+          hint={list.data ? <><CountUp value={total} /> پراکسی، {faNum(activeCount)} روشن، {faNum(workingCount)} پاسخ‌گو</> : "پراکسی‌های اسکرپر، مشترک بین همه"}
+          actions={
+            <>
+              <Button variant="outline" onClick={() => setImporting(true)}>
+                <Upload /> وارد کردن دسته‌ای
+              </Button>
+              <Button onClick={() => setAdding(true)} className="shadow-[0_8px_24px_-8px_rgb(99_102_241/0.8)]">
+                <Plus /> افزودن پراکسی
+              </Button>
+            </>
+          }
+        />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <IsoHopStack className="max-w-[136px]" />
+        </Reveal>
+      </div>
 
       {!!items.length && (
         <Reveal>
-          <div className="grid grid-cols-3 gap-2 sm:gap-3">
-            <StatTile label="کل پراکسی‌ها" value={total} />
-            <StatTile label="روشن" value={activeCount} />
-            <StatTile label="پاسخ‌گو" value={workingCount} />
+          <div className={cn("grid gap-3", timed.length >= 2 && "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]")}>
+            <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:content-start">
+              <StatTile label="کل پراکسی‌ها" value={total} />
+              <StatTile label="روشن" value={activeCount} />
+              <StatTile label="پاسخ‌گو" value={workingCount} />
+            </div>
+            {timed.length >= 2 && <ResponseBars items={timed} />}
           </div>
         </Reveal>
       )}
@@ -215,13 +229,33 @@ export function ProxiesView() {
         {list.isLoading ? (
           <div className="p-5"><ListSkeleton rows={5} /></div>
         ) : list.isError ? (
-          <div className="p-5"><ErrorNote error={list.error} /></div>
+          <div className="p-5"><ErrorNote error={list.error} illustration={<IsoAlert />} /></div>
         ) : !items.length ? (
           <div className="p-5">
-            <ProxiesEmpty onAdd={() => setAdding(true)} onImport={() => setImporting(true)} />
+            <Empty
+              illustration={<Lottie animationData={emptyLottie} className="max-w-[110px]" />}
+              action={
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setImporting(true)}><Upload /> وارد کردن دسته‌ای</Button>
+                  <Button size="sm" onClick={() => setAdding(true)}><Plus /> افزودن پراکسی</Button>
+                </div>
+              }
+            >
+              <p className="font-semibold text-foreground">هنوز پراکسی‌ای ثبت نشده</p>
+              <p className="mt-1">یک پراکسی اضافه کنید یا لیستی را دسته‌ای وارد کنید.</p>
+            </Empty>
           </div>
         ) : (
           <>
+            {testAll.isPending && (
+              <div role="status" className="mx-3 mt-3 flex items-center gap-3 rounded-xl border border-primary/25 bg-primary/8 px-3 py-2 md:mx-5">
+                <Lottie animationData={scanLottie} className="size-14 shrink-0" />
+                <div className="min-w-0 text-sm">
+                  <div className="font-semibold">در حال آزمایش {faNum(activeCount)} پراکسی روشن</div>
+                  <div className="text-xs text-muted-foreground">هر پراکسی تا ۲۵ ثانیه وقت می‌گیرد؛ نتیجه‌ها همین‌جا ردیف‌به‌ردیف به‌روز می‌شوند.</div>
+                </div>
+              </div>
+            )}
             {/* desktop: the table */}
             <div className="hidden md:block">
               <Table className="text-[13px]">
@@ -359,53 +393,46 @@ function RowActions({
   );
 }
 
-/** Nothing imported yet: an isometric server-rack, layered the same way the
- *  header's IsoBadge is, but drawn for this empty state specifically. */
-function ProxiesEmpty({ onAdd, onImport }: { onAdd: () => void; onImport: () => void }) {
+/** Average response time per proxy that has been timed, fastest first. The bar
+ *  is the time itself against the slowest one shown; nothing here is computed
+ *  from anything the list did not return. */
+function ResponseBars({ items }: { items: Proxy[] }) {
+  const rows = [...items].sort((a, b) => (a.avg_response_time ?? 0) - (b.avg_response_time ?? 0)).slice(0, 8);
+  const max = Math.max(0.001, ...rows.map((p) => p.avg_response_time ?? 0));
   return (
-    <div className="flex min-h-52 flex-col items-center justify-center gap-4 rounded-xl border border-dashed px-4 py-10 text-center">
-      <ServerRackIllustration />
-      <div>
-        <p className="font-semibold">هنوز پراکسی‌ای ثبت نشده</p>
-        <p className="mt-1 text-sm text-muted-foreground">یک پراکسی اضافه کنید یا لیستی را دسته‌ای وارد کنید.</p>
+    <div className="min-w-0 rounded-2xl border bg-card p-3 dark:bg-linear-to-b dark:from-white/[0.035] dark:to-white/[0.008]">
+      <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+        <span>زمان پاسخ میانگین، ثانیه</span>
+        <span className="hidden items-center gap-3 sm:flex">
+          <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm bg-primary" />پاسخ‌گو</span>
+          <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm bg-destructive" />ناپاسخ‌گو</span>
+          <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm bg-muted-foreground/50" />خاموش</span>
+        </span>
       </div>
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        <Button variant="outline" size="sm" onClick={onImport}><Upload /> وارد کردن دسته‌ای</Button>
-        <Button size="sm" onClick={onAdd}><Plus /> افزودن پراکسی</Button>
-      </div>
-    </div>
-  );
-}
-
-/** A tiny isometric server rack with a slowly-orbiting globe (the exit
- *  location a proxy is judged on). CSS/SVG only, static under reduced
- *  motion. */
-function ServerRackIllustration() {
-  const reduce = useReducedMotion();
-  return (
-    <div className="relative size-20" aria-hidden>
-      {[4, 3, 2, 1].map((k) => (
-        <div
-          key={k}
-          className="absolute inset-x-3 top-2 h-14 rounded-lg bg-violet-900/60 dark:bg-violet-950"
-          style={{ transform: `translate(${k * 1.4}px, ${k * 1.4}px)`, opacity: 0.3 + (4 - k) * 0.12 }}
-        />
-      ))}
-      <div className="absolute inset-x-3 top-2 flex h-14 flex-col justify-center gap-1.5 rounded-lg bg-linear-to-br from-indigo-400 via-indigo-500 to-violet-600 px-2.5 shadow-[0_12px_28px_-8px_rgb(99_102_241/0.8)]">
-        {[0, 1, 2].map((r) => (
-          <div key={r} className="flex items-center gap-1">
-            <span className="size-1.5 rounded-full bg-white/70" />
-            <span className="h-1 flex-1 rounded-full bg-white/25" />
-          </div>
-        ))}
-      </div>
-      <motion.div
-        className="absolute -end-1 -top-1 grid size-7 place-items-center rounded-full bg-card shadow-md ring-2 ring-background"
-        animate={reduce ? undefined : { rotate: 360 }}
-        transition={reduce ? undefined : { duration: 9, repeat: Infinity, ease: "linear" }}
-      >
-        <Globe2 className="size-4 text-primary" />
-      </motion.div>
+      <ul className="grid gap-1.5">
+        {rows.map((p) => {
+          const t = p.avg_response_time ?? 0;
+          const tried = p.success_count + p.fail_count;
+          const tone = !p.is_active ? "bg-muted-foreground/50" : p.is_working ? "bg-primary" : "bg-destructive";
+          return (
+            <li key={p.id} className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_3.25rem] items-center gap-2 text-xs sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)_3.25rem_2.5rem]">
+              <span dir="ltr" className="truncate text-start font-medium tabular">{p.address}</span>
+              {/* the track is watched for entering the screen; a scaleX(0) fill has no area to observe */}
+              <motion.div className="h-2 overflow-hidden rounded-full bg-muted" initial="out" whileInView="in" viewport={{ once: true }}>
+                <motion.div
+                  className={cn("h-full rounded-full", tone)}
+                  style={{ width: `${Math.max(3, (t / max) * 100)}%`, originX: 1 }}
+                  variants={{ out: { scaleX: 0 }, in: { scaleX: 1, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } } }}
+                />
+              </motion.div>
+              <span className="text-end font-semibold tabular">{faNum(t, { maximumFractionDigits: 2 })}</span>
+              <span className="hidden text-end text-muted-foreground tabular sm:block" title="سهم تست‌های موفق">
+                {tried ? faPercent((p.success_count / tried) * 100, 0) : "—"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
