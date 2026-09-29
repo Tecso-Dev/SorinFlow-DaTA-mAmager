@@ -16,7 +16,7 @@ from loguru import logger
 
 from app.database import get_db, get_redis
 from app.models.scraping_job import ScrapingJob
-from app.scraper.divar_scraper import DivarScraper
+from app.scraper.divar_scraper import DivarScraper, crash_reason, start_failure_reason
 from app.config import get_settings, CITIES, CATEGORIES
 from pydantic import BaseModel, Field
 from app.schemas import ScrapingJobCreate, ScrapingJobResponse, ScrapingJobList
@@ -43,6 +43,33 @@ machine_router = APIRouter()
 # itself. Any signed-in staff member may read them.
 lookup_router = APIRouter()
 settings = get_settings()
+
+
+async def _fail_run(session, job_id: str, error: str, *, reason: Optional[str] = None,
+                    keep_reason: bool = False) -> bool:
+    """Mark a run failed, with `reason` as its finish line — only while it is
+    still pending, running or paused, so a cancel (or the sweep) that got
+    there first stands. keep_reason: leave a finish line the run already
+    wrote. True when the row was changed."""
+    from sqlalchemy import func
+    try:
+        await session.rollback()        # whatever failed may have left the transaction dead
+    except Exception:
+        pass
+    values: dict = {"status": "failed", "error_message": (error or "")[:500],
+                    "completed_at": datetime.now()}
+    if reason:
+        values["finish_reason"] = (func.coalesce(ScrapingJob.finish_reason, reason[:300])
+                                   if keep_reason else reason[:300])
+    changed = (await session.execute(
+        update(ScrapingJob)
+        .where(ScrapingJob.job_id == uuid.UUID(str(job_id)),
+               ScrapingJob.status.in_(("pending", "running", "paused")))
+        .values(**values)
+        .returning(ScrapingJob.id)
+        .execution_options(synchronize_session=False))).scalar_one_or_none()
+    await session.commit()
+    return changed is not None
 
 
 async def run_scraping_job(
@@ -115,10 +142,20 @@ async def run_scraping_job(
         
         # Create session
         session = async_session_maker()
-        
+
         try:
             logger.info(f"[{job_id}] Database session created")
-            
+
+            # Cancelled while it waited in the queue, or in the moment a worker
+            # took it: asking Divar about every session and opening a browser
+            # would be for a run nobody wants any more.
+            _now = (await session.execute(select(ScrapingJob.status).where(
+                ScrapingJob.job_id == uuid.UUID(str(job_id))))).scalar_one_or_none()
+            await session.rollback()
+            if _now != "pending":
+                logger.info(f"[{job_id}] is {_now or 'gone'} — not starting it")
+                return
+
             # Create scraper with the session
             scraper = DivarScraper(
                 db_session=session,
@@ -141,7 +178,8 @@ async def run_scraping_job(
                 from app.services import job_log as _jl
                 await _jl.record(job_id, _jl.SESSION,
                                  f"بررسی نشست‌ها پیش از شروع: {_sw['alive']} فعال، "
-                                 f"{_sw['dead']} باطل، {_sw['unknown']} نامشخص",
+                                 f"{_sw['dead']} باطل، {_sw['unknown']} بی‌جواب "
+                                 "(دیوار پاسخ روشنی نداد)",
                                  **_sw)
             except Exception as _e:
                 logger.warning(f"[session] pre-run sweep skipped: {_e}")
@@ -150,27 +188,20 @@ async def run_scraping_job(
             if not initialized:
                 # «continuing anyway» meant continuing with no page: the run
                 # went on to «'NoneType' object has no attribute 'goto'» on
-                # every listing. The usual cause is not a fault — the account's
-                # browser profile is open in another running job — so the run
-                # is failed with THAT in its finish line, where the panel and
-                # the ▶ button can act on it.
-                why = getattr(scraper, "_init_error", "") or ""
-                if "already open" in why:
-                    msg = ("این شمارهٔ دیوار در یک اسکرپ دیگر در حال اجراست و دو اسکرپ "
-                           "نمی‌توانند یک شماره را همزمان باز کنند — بعد از پایان آن، «ادامه» را بزنید")
-                else:
-                    msg = f"مرورگر اسکرپر بالا نیامد: {why[:200] or 'نامشخص'}"
+                # every listing. The run is failed instead, with the cause and
+                # what to do in its finish line, where the panel and the ▶
+                # button can act on it. It used to read «مرورگر اسکرپر بالا
+                # نیامد: نامشخص» whenever initialize() had returned rather
+                # than raised — the only number's session refused, every
+                # number open in other runs — which were most of the cases.
+                msg = start_failure_reason(scraper)
                 from app.services import job_log as _jl
-                await _jl.record(job_id, _jl.ERROR, msg, level="error")
-                try:
-                    _row = (await session.execute(
-                        select(ScrapingJob).where(ScrapingJob.job_id == job_id))).scalar_one_or_none()
-                    if _row:
-                        _row.finish_reason = msg[:300]
-                        await session.commit()
-                except Exception:
-                    pass
-                raise RuntimeError(msg)
+                if not getattr(scraper, "_init_logged", False):
+                    await _jl.record(job_id, _jl.ERROR, msg, level="error")
+                if not await _fail_run(session, job_id, msg, reason=msg):
+                    logger.info(f"[{job_id}] stopped from outside while starting — left as it is")
+                logger.warning(f"[{job_id}] not started: {msg}")
+                return
             
             logger.info(f"[{job_id}] Starting main scraping task")
             
@@ -209,18 +240,12 @@ async def run_scraping_job(
             
         except Exception as e:
             logger.exception(f"[{job_id}] Error during scraping: {e}")
-            
-            # Attempt to mark job as failed in database
+
+            # Attempt to mark job as failed in database — with a finish line
+            # the panel can show, unless the run left one of its own, and
+            # never over a cancel.
             try:
-                result = await session.execute(
-                    select(ScrapingJob).where(ScrapingJob.job_id == job_id)
-                )
-                job = result.scalar_one_or_none()
-                if job:
-                    job.status = "failed"
-                    job.error_message = str(e)[:500]
-                    job.completed_at = datetime.now()
-                    await session.commit()
+                if await _fail_run(session, job_id, str(e), reason=crash_reason(e), keep_reason=True):
                     logger.info(f"[{job_id}] Updated job status to failed in database")
             except Exception as db_e:
                 logger.error(f"[{job_id}] Could not update job in database: {db_e}")
