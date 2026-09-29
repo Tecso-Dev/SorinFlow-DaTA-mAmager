@@ -74,10 +74,22 @@ class TestAllThreeRoutesAreCovered:
         # of «failed» because nothing failed and a retry finds it just as gone.
         assert SCRAPER.count("skipped_listings.record(") == 9
 
-    def test_a_duplicate_is_not_recorded_as_unsaved(self):
-        """It was saved — on an earlier run."""
-        assert "skipped_listings.record(" not in \
-            between("job.updated_items += 1", "Close the read transaction")
+    async def test_a_duplicate_is_not_recorded_as_unsaved(self, monkeypatch):
+        """It was saved — on an earlier run. Read off a real run
+        (tests/_scrape_harness.py): the stored listing leaves no row, the one
+        the run failed to open does."""
+        import _scrape_harness as h
+        h.quiet(monkeypatch)
+        eng, maker = await h.open_db()
+        try:
+            held, broken = h.token(), h.token()
+            await h.stored(maker, held, phone=h.PHONE.format(980))
+            job_id = await h.new_job(maker, max_items=5)
+            await h.run(maker, job_id, {"feed": [held, broken], "pages": {broken: h.BROKEN}})
+            rows = await h.skipped_rows(maker, job_id=job_id)
+        finally:
+            await eng.dispose()
+        assert [(r.divar_id, r.reason) for r in rows] == [(broken, "failed")]
 
 
 class TestTheRowCanBeRetried:

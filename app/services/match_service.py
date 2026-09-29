@@ -421,6 +421,11 @@ async def _llm_rerank(prompt_items: List[Dict[str, Any]], context: str) -> Dict[
                               max_tokens=60 * max(1, len(prompt_items)), timeout=25)
         data = out.get("data") or {}
         return {int(r["id"]): str(r.get("reason", ""))[:120] for r in data.get("results", []) if r.get("id")}
+    except _llm.QuotaExhausted as e:
+        # the gateway has no credit: llm.py logged that once, where the refusal
+        # came; a line for every page that asks would only repeat it
+        logger.debug(f"[match] LLM re-rank skipped: {e}")
+        return {}
     except Exception as e:
         logger.warning(f"[match] LLM re-rank skipped: {e}")
         return {}
@@ -449,6 +454,18 @@ def _spawn(coro) -> None:
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+
+
+async def _gateway_paused() -> bool:
+    """True while the AI gateway has no credit (llm.pause_state, which every
+    pod reads): a call scheduled now would be refused at the door, and the
+    page that asked would be told to check back for reasons that will not
+    come. Never raises — an unreadable settings table is not a pause."""
+    try:
+        from app.services import llm as _llm
+        return await _llm.pause_state() is not None
+    except Exception:
+        return False
 
 
 def _fingerprint(*parts: Any) -> str:
@@ -504,6 +521,14 @@ async def _attach_reasons(kind: str, source_id: int, results: List[Dict[str, Any
         got_lock = await r.set(lock_key, "1", nx=True, ex=LOCK_TTL)
     except Exception:
         got_lock = False
+    if got_lock and await _gateway_paused():
+        # nothing will be written, so nobody is told to wait for it. Asked only
+        # by the caller that holds the lock: a burst pays one settings read, not one each
+        try:
+            await r.delete(lock_key)
+        except Exception:
+            pass
+        return False
     if got_lock:
         prompt_items = [{"id": row["id"], "title": row["title"], "area": row["area"], "rooms": row["rooms"],
                          "price": row["price"], "district": row["district"], "city": row["city_name"],
@@ -560,6 +585,13 @@ async def _cached_semantic_candidates(need: str, city: Optional[str],
         got_lock = await r.set(lock_key, "1", nx=True, ex=LOCK_TTL)
     except Exception:
         got_lock = False
+    if got_lock and await _gateway_paused():
+        # the embedder cannot be asked: no background call to fill a cache it would not fill
+        try:
+            await r.delete(lock_key)
+        except Exception:
+            pass
+        return {}
     if got_lock:
         _spawn(_compute_and_cache_semantic(key, lock_key, need, city, listing_type))
     return {}

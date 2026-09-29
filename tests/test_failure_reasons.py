@@ -83,7 +83,9 @@ class TestTheRunTalliesThem:
         # exception, saved-without-a-number, and Divar demanding identity
         # verification — which is ours and temporary, unlike a poster who
         # only takes chat.
-        assert SCRAPER.count("job.failed_items += 1") == 5
+        # the exception path counts through _set_counts after its rollback (#29)
+        assert (SCRAPER.count("job.failed_items += 1")
+                + SCRAPER.count("failed_items=(job.failed_items or 0) + 1")) == 5
         assert SCRAPER.count("fail_tally[") == 5, \
             "a failure site was added without a reason, or one lost its tally"
 

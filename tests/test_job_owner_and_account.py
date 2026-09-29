@@ -59,7 +59,8 @@ class TestTheShape:
 
     def test_the_scraper_notes_at_start_and_after_rotation(self):
         src = (ROOT / "app/scraper/divar_scraper.py").read_text(encoding="utf-8")
-        start = src[src.index('job.status = "running"\n            job.started_at'):][:400]
+        # the run's start: «running» (only over «pending»), then the account
+        start = src[src.index('await self._move_status("running", only_from=("pending",))'):][:500]
         assert "self._note_account(job)" in start
         # both places a run may rotate: the skipped-listing path and the main loop
         assert src.count("await self.maybe_rotate_account()\n") == 2

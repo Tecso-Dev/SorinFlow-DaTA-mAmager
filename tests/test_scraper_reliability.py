@@ -90,23 +90,44 @@ class TestARefusalIsNoticed:
 
 
 class TestABlockedRunFails:
-    """The heart of the complaint: a run Divar cut off reported «تکمیل شده»."""
+    """The heart of the complaint: a run Divar cut off reported «تکمیل شده».
 
-    def test_a_refused_collection_fails_the_job(self):
-        src = _run_src()
-        i = src.index('if _stop in ("refused", "partly-refused")')
-        block = src[i:i + 1600]
-        assert 'job.status = "failed"' in block, \
-            "a run Divar refused still completes successfully"
-        assert "job.finish_reason" in block
-        assert "job_log.CHALLENGE" in block
+    Run through start_scraping_job with a scripted browser walk
+    (tests/_scripted_run.py): the search API answers with nothing, so the
+    run falls back to the walk and ends however the walk ended."""
 
-    def test_a_collection_error_fails_the_job(self):
-        src = _run_src()
-        i = src.index('elif _stop == "error"')
-        block = src[i:i + 1200]
-        assert 'job.status = "failed"' in block
-        assert "job_log.ERROR" in block
+    @pytest.fixture
+    def run(self, monkeypatch):
+        from _scripted_run import scripted_run
+        return scripted_run(monkeypatch)
+
+    async def test_a_refused_collection_fails_the_job(self, run):
+        from _scripted_run import listings, page, walk
+        from app.services import job_log
+        job, log, _ = await run([page(1, [], next_page=False)], category="rent-apartment",
+                                browser=walk(listings("rf", 5), ("refused", {"403": 3}), calls=[]))
+        assert job.status == "failed", "a run Divar refused still completes successfully"
+        assert "HTTP 403×3" in job.finish_reason and job.error_message == job.finish_reason
+        assert [e for e in log.stage(job_log.CHALLENGE) if e["level"] == "error"]
+
+    async def test_a_collection_error_with_nothing_collected_fails_the_job(self, run):
+        from _scripted_run import page, walk
+        from app.services import job_log
+        job, log, _ = await run([page(1, [], next_page=False)], category="rent-apartment",
+                                browser=walk([], ("error", "TimeoutError: page crashed"), calls=[]))
+        assert job.status == "failed" and "TimeoutError" in job.finish_reason
+        assert log.stage(job_log.ERROR)
+
+    async def test_a_collection_error_with_listings_in_hand_walks_them_and_ends_partial(self, run):
+        """What was gathered before the error is walked — and the run says
+        it is «ناقص», not «تکمیل شده» and not a failure that threw them away (#28)."""
+        from _scripted_run import listings, page, walk
+        job, _, _ = await run([page(1, [], next_page=False)], category="rent-apartment",
+                              browser=walk(listings("re", 7), ("error", "TimeoutError: page crashed"),
+                                           calls=[]))
+        # the seven were already held, so «تکراری» — walked, not opened (#32)
+        assert job.status == "partial" and job.config["outcome"]["duplicate"] == 7
+        assert "TimeoutError" in job.finish_reason
 
     def test_the_refusal_message_names_the_status_codes(self):
         """«یک خطایی رخ داد» is not a diagnosis. The message has to carry what
@@ -156,10 +177,24 @@ class TestTheUserIsToldWhereTheListingsWent:
     duplicate check doing exactly what they were told — but that was only ever
     written to a log file nobody reads per-job."""
 
-    def test_duplicates_are_reported(self):
-        src = _run_src()
-        assert "از قبل در پایگاه داده بود" in src
-        assert "duplicates=" in src
+    async def test_duplicates_are_reported(self, monkeypatch):
+        """In a real run (tests/_scrape_harness.py): the run log says how many
+        were already held — and only those, not the ones it saved over (#32)."""
+        import _scrape_harness as h
+        h.quiet(monkeypatch)
+        eng, maker = await h.open_db()
+        try:
+            held, gap = h.token(), h.token()
+            await h.stored(maker, held, phone=h.PHONE.format(950))
+            await h.stored(maker, gap)
+            job_id = await h.new_job(maker, max_items=5)
+            await h.run(maker, job_id, {"feed": [held, gap],
+                                        "pages": {gap: h.page(gap, phone=h.PHONE.format(951))}})
+            lines = await h.log_lines(maker, job_id)
+        finally:
+            await eng.dispose()
+        said = [m for m in lines if "از قبل با شماره در پایگاه داده بود" in m]
+        assert said == ["1 آگهی تکراری بود — از قبل با شماره در پایگاه داده بود و دوباره باز نشد"]
 
     def test_the_filter_breakdown_is_reported(self):
         """There are two skip_tally blocks: one composes finish_reason, the
@@ -350,14 +385,14 @@ class TestTheJobRowReadsCorrectly:
     def test_the_two_numbers_are_distinguishable(self):
         """Identical styling on both is what let the swap go unnoticed.
 
-        The wording is asserted loosely because it was sharpened once the
-        counters were corrected: «بروز» covers both a row skipped as already
-        complete and one refreshed with new data, and the tooltip now says
-        so."""
+        The wording is asserted loosely because it was sharpened as the
+        counters were corrected. «بروز» used to cover both a row skipped as
+        already complete and one refreshed with new data; since #32 it is
+        only the second, and the tooltip says so — the first is «تکراری»."""
         cell = self._cell()
         assert "text-success" in cell and "text-muted" in cell
         assert "title=" in cell
-        assert "تازه" in cell and "از قبل موجود بود" in cell
+        assert "تازه" in cell and "بروز —" in cell and "دوباره بازش کرد" in cell
 
 
 class TestThePaginationDeadlock:
@@ -950,21 +985,50 @@ class TestProgressReflectsWork:
     candidate 100 and scraped on for another nineteen. The numerator was right
     and the denominator was not."""
 
-    def test_progress_counts_processed_listings(self):
-        src = _code_only(_run_src())
-        assert "min(job.new_items, max_items)" not in src, \
-            "progress is measured in new rows again"
-        assert src.count("job.scraped_items = i + 1") >= 2, \
-            "both the skip path and the save path must advance the bar"
+    async def test_progress_counts_processed_listings(self, monkeypatch):
+        """Read off a real run: a stored listing, a filtered one and a saved
+        one each move «بررسی» by one, as the run goes."""
+        import _scrape_harness as h
+        from datetime import datetime, timedelta
+        h.quiet(monkeypatch)
+        eng, maker = await h.open_db()
+        try:
+            held, old, fresh, last = (h.token() for _ in range(4))
+            await h.stored(maker, held, phone=h.PHONE.format(960))
+            job_id = await h.new_job(maker, max_items=10)
+            seen = {}
 
-    def test_it_is_divided_by_what_divar_said_or_the_pool(self):
-        """Divar's count when it answered, the pool when it did not. What
-        must never come back is the target of SAVED rows as the denominator —
-        that is the mismatch that filled the bar early."""
-        src = _code_only(_run_src())
-        assert "job.total_items = (job.divar_count" in src
-        assert "else len(all_listings)" in src
-        assert "min(i + 1, max_items)" not in src, \
+            async def watch(tok):
+                seen[tok] = (await h.job_row(maker, job_id)).scraped_items
+            job, _ = await h.run(maker, job_id, {
+                "feed": [held, old, fresh, last], "on_open": watch, "pages": {
+                    old: h.page(old, posted=datetime.utcnow() - timedelta(days=3)),
+                    fresh: h.page(fresh, phone=h.PHONE.format(961)),
+                    last: h.page(last, phone=h.PHONE.format(962))}}, max_age_hours=24)
+        finally:
+            await eng.dispose()
+        assert "min(job.new_items, max_items)" not in _code_only(_run_src()), \
+            "progress is measured in new rows again"
+        assert seen == {old: 1, fresh: 2, last: 3}
+        assert (job.scraped_items, job.new_items) == (4, 2)
+
+    async def test_it_is_divided_by_the_run_s_own_pool(self, monkeypatch):
+        """The pool — what the loop walks. Divar's count was the denominator
+        for a while and read «251 / 251» over a pool of 24 (#29); what must
+        never come back either is the target of SAVED rows, the mismatch
+        that filled the bar early."""
+        import _scrape_harness as h
+        h.quiet(monkeypatch, divar_says=251)
+        eng, maker = await h.open_db()
+        try:
+            feed = [h.token() for _ in range(3)]
+            job_id = await h.new_job(maker, max_items=1)
+            job, _ = await h.run(maker, job_id, {"feed": feed, "pages": {
+                t: h.page(t, phone=h.PHONE.format(970 + i)) for i, t in enumerate(feed)}})
+        finally:
+            await eng.dispose()
+        assert (job.scraped_items, job.total_items, job.divar_count) == (1, 3, 251)
+        assert "min(i + 1, max_items)" not in _code_only(_run_src()), \
             "capping the numerator at the target is what filled the bar early"
 
 

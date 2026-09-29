@@ -6,8 +6,8 @@ import json
 import time
 from fastapi import Request, APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, false, delete
-from typing import Optional, List
+from sqlalchemy import select, false, delete, update
+from typing import Optional, List, cast
 from datetime import datetime
 import sys
 import os
@@ -15,10 +15,10 @@ import uuid
 from loguru import logger
 
 from app.database import get_db, get_redis
-from app.models.scraping_job import ScrapingJob
-from app.scraper.divar_scraper import DivarScraper
+from app.models.scraping_job import FINISHED_STATUSES, RESUMABLE_STATUSES, ScrapingJob
+from app.scraper.divar_scraper import DivarScraper, crash_reason, start_failure_reason
 from app.config import get_settings, CITIES, CATEGORIES
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from app.schemas import ScrapingJobCreate, ScrapingJobResponse, ScrapingJobList
 from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.auth.dependencies import require_verified_phone
@@ -43,6 +43,33 @@ machine_router = APIRouter()
 # itself. Any signed-in staff member may read them.
 lookup_router = APIRouter()
 settings = get_settings()
+
+
+async def _fail_run(session, job_id: str, error: str, *, reason: Optional[str] = None,
+                    keep_reason: bool = False) -> bool:
+    """Mark a run failed, with `reason` as its finish line — only while it is
+    still pending, running or paused, so a cancel (or the sweep) that got
+    there first stands. keep_reason: leave a finish line the run already
+    wrote. True when the row was changed."""
+    from sqlalchemy import func
+    try:
+        await session.rollback()        # whatever failed may have left the transaction dead
+    except Exception:
+        pass
+    values: dict = {"status": "failed", "error_message": (error or "")[:500],
+                    "completed_at": datetime.now()}
+    if reason:
+        values["finish_reason"] = (func.coalesce(ScrapingJob.finish_reason, reason[:300])
+                                   if keep_reason else reason[:300])
+    changed = (await session.execute(
+        update(ScrapingJob)
+        .where(ScrapingJob.job_id == uuid.UUID(str(job_id)),
+               ScrapingJob.status.in_(("pending", "running", "paused")))
+        .values(**values)
+        .returning(ScrapingJob.id)
+        .execution_options(synchronize_session=False))).scalar_one_or_none()
+    await session.commit()
+    return changed is not None
 
 
 async def run_scraping_job(
@@ -115,10 +142,20 @@ async def run_scraping_job(
         
         # Create session
         session = async_session_maker()
-        
+
         try:
             logger.info(f"[{job_id}] Database session created")
-            
+
+            # Cancelled while it waited in the queue, or in the moment a worker
+            # took it: asking Divar about every session and opening a browser
+            # would be for a run nobody wants any more.
+            _now = (await session.execute(select(ScrapingJob.status).where(
+                ScrapingJob.job_id == uuid.UUID(str(job_id))))).scalar_one_or_none()
+            await session.rollback()
+            if _now != "pending":
+                logger.info(f"[{job_id}] is {_now or 'gone'} — not starting it")
+                return
+
             # Create scraper with the session
             scraper = DivarScraper(
                 db_session=session,
@@ -141,7 +178,8 @@ async def run_scraping_job(
                 from app.services import job_log as _jl
                 await _jl.record(job_id, _jl.SESSION,
                                  f"بررسی نشست‌ها پیش از شروع: {_sw['alive']} فعال، "
-                                 f"{_sw['dead']} باطل، {_sw['unknown']} نامشخص",
+                                 f"{_sw['dead']} باطل، {_sw['unknown']} بی‌جواب "
+                                 "(دیوار پاسخ روشنی نداد)",
                                  **_sw)
             except Exception as _e:
                 logger.warning(f"[session] pre-run sweep skipped: {_e}")
@@ -150,27 +188,20 @@ async def run_scraping_job(
             if not initialized:
                 # «continuing anyway» meant continuing with no page: the run
                 # went on to «'NoneType' object has no attribute 'goto'» on
-                # every listing. The usual cause is not a fault — the account's
-                # browser profile is open in another running job — so the run
-                # is failed with THAT in its finish line, where the panel and
-                # the ▶ button can act on it.
-                why = getattr(scraper, "_init_error", "") or ""
-                if "already open" in why:
-                    msg = ("این شمارهٔ دیوار در یک اسکرپ دیگر در حال اجراست و دو اسکرپ "
-                           "نمی‌توانند یک شماره را همزمان باز کنند — بعد از پایان آن، «ادامه» را بزنید")
-                else:
-                    msg = f"مرورگر اسکرپر بالا نیامد: {why[:200] or 'نامشخص'}"
+                # every listing. The run is failed instead, with the cause and
+                # what to do in its finish line, where the panel and the ▶
+                # button can act on it. It used to read «مرورگر اسکرپر بالا
+                # نیامد: نامشخص» whenever initialize() had returned rather
+                # than raised — the only number's session refused, every
+                # number open in other runs — which were most of the cases.
+                msg = start_failure_reason(scraper)
                 from app.services import job_log as _jl
-                await _jl.record(job_id, _jl.ERROR, msg, level="error")
-                try:
-                    _row = (await session.execute(
-                        select(ScrapingJob).where(ScrapingJob.job_id == job_id))).scalar_one_or_none()
-                    if _row:
-                        _row.finish_reason = msg[:300]
-                        await session.commit()
-                except Exception:
-                    pass
-                raise RuntimeError(msg)
+                if not getattr(scraper, "_init_logged", False):
+                    await _jl.record(job_id, _jl.ERROR, msg, level="error")
+                if not await _fail_run(session, job_id, msg, reason=msg):
+                    logger.info(f"[{job_id}] stopped from outside while starting — left as it is")
+                logger.warning(f"[{job_id}] not started: {msg}")
+                return
             
             logger.info(f"[{job_id}] Starting main scraping task")
             
@@ -209,18 +240,12 @@ async def run_scraping_job(
             
         except Exception as e:
             logger.exception(f"[{job_id}] Error during scraping: {e}")
-            
-            # Attempt to mark job as failed in database
+
+            # Attempt to mark job as failed in database — with a finish line
+            # the panel can show, unless the run left one of its own, and
+            # never over a cancel.
             try:
-                result = await session.execute(
-                    select(ScrapingJob).where(ScrapingJob.job_id == job_id)
-                )
-                job = result.scalar_one_or_none()
-                if job:
-                    job.status = "failed"
-                    job.error_message = str(e)[:500]
-                    job.completed_at = datetime.now()
-                    await session.commit()
+                if await _fail_run(session, job_id, str(e), reason=crash_reason(e), keep_reason=True):
                     logger.info(f"[{job_id}] Updated job status to failed in database")
             except Exception as db_e:
                 logger.error(f"[{job_id}] Could not update job in database: {db_e}")
@@ -279,7 +304,8 @@ async def resume_scraping_job(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Continue a run that stopped — a restart, a cancel, a failure.
+    """Continue a run that stopped — a restart, a cancel, a failure, or a
+    collection Divar cut short («ناقص»).
 
     A new run with the old run's exact settings, linked back to it. New rather
     than revived on purpose: the old row's counters and log are the record of
@@ -326,8 +352,15 @@ async def resume_scraping_job(
             raise HTTPException(status_code=409,
                                 detail=f"شمارهٔ موبایل صاحب این اسکرپ تأیید نشده است — {why}")
 
-    config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
-                                  if k in ScrapingJobCreate.model_fields})
+    try:
+        config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
+                                      if k in ScrapingJobCreate.model_fields})
+    except ValidationError:
+        # A config that no longer builds a run (the queue fails such a row
+        # with the same words): a 409 that says so, not a 500.
+        raise HTTPException(status_code=409,
+                            detail="تنظیمات ذخیره‌شدهٔ این اسکرپ دیگر خوانا نیست و «ادامه» ممکن نیست؛ "
+                                   "با فیلترهای درست یک اسکرپ تازه شروع کنید") from None
     resp = await _launch_job(config, db, run_as,
                              resumed_from=job.job_id, interactive=False)
     await job_log.record(
@@ -487,6 +520,9 @@ class ScheduleEdit(BaseModel):
     hour: Optional[int] = Field(None, ge=0, le=23)
     minute: Optional[int] = Field(None, ge=0, le=59)
     enabled: Optional[bool] = None
+    # The publish date, relative: 0 = امروز, 1 = دیروز, N = N روز پیش. Left out,
+    # it stays as it is; an explicit null takes the date off (the last day again).
+    posted_days_ago: Optional[int] = Field(None, strict=True)
 
 
 def _sees_every_schedule(user) -> bool:
@@ -509,19 +545,29 @@ async def _audit_schedule(action: str, row, user, request, summary: str, **detai
     to appear and vanish with no trace: on 1405/07/04 two were deleted and
     nothing — not the log, not «رویدادها» — could say who or when."""
     from app.services import audit
+    from app.services.scrape_scheduler import relative_posted_days
     cfg = row.config or {}
     await audit.record(
         action, actor=user, target_type="scrape_schedule", target_id=row.id,
         summary=summary, request=request,
         detail={"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}",
                 "city": cfg.get("city"), "category": cfg.get("category"),
+                "posted_days_ago": relative_posted_days(cfg, getattr(row, "created_at", None)),
                 "owner_user_id": row.owner_user_id, **detail})
 
 
 def _schedule_view(row, owners: dict) -> dict:
+    """What the panel gets. The publish date is always in its relative form,
+    even for a schedule still stored with a fixed one (converted here, at read
+    time), and that schedule carries a one-line note saying so."""
+    from app.services.scrape_scheduler import describe_date
     d = row.to_dict()
     d["owner_name"] = owners.get(row.owner_user_id)
-    cfg = d["config"] or {}
+    date = describe_date(d["config"], row.created_at)
+    cfg = d["config"] = date["config"]
+    d["posted_days_ago"] = date["days_ago"]
+    d["posted_label"] = date["label"]
+    d["date_note"] = date["note"]
     d["city_name"] = (CITIES.get(cfg.get("city")) or {}).get("name", cfg.get("city"))
     d["category_name"] = (CATEGORIES.get(cfg.get("category")) or {}).get("name", cfg.get("category"))
     return d
@@ -548,11 +594,15 @@ async def list_schedules(db: AsyncSession = Depends(get_db),
 async def create_schedule(data: ScheduleIn, request: Request, db: AsyncSession = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
     """Save the form as a daily run. Validated the way a run is: the config
-    has to be one the scraper would accept today, not at 08:00 tomorrow."""
+    has to be one the scraper would accept today, not at 08:00 tomorrow. The
+    publish date is stored relative (`posted_days_ago`), so every firing works
+    out its own day; an older client's fixed `posted_date` is converted."""
     from app.models.scrape_schedule import ScrapeSchedule
-    from app.services.scrape_scheduler import config_for_run, next_occurrence
+    from app.services.scrape_scheduler import ScheduleDateError, next_occurrence, stored_config
     try:
-        cfg = ScrapingJobCreate(**config_for_run(data.config)).model_dump(exclude_none=True)
+        cfg = stored_config(data.config)
+    except ScheduleDateError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"تنظیمات اسکرپ معتبر نیست: {e}")
     if cfg.get("city") not in CITIES or cfg.get("category") not in CATEGORIES:
@@ -575,9 +625,17 @@ async def create_schedule(data: ScheduleIn, request: Request, db: AsyncSession =
 async def edit_schedule(schedule_id: int, data: ScheduleEdit, request: Request,
                         db: AsyncSession = Depends(get_db),
                         current_user: User = Depends(get_current_user)):
-    from app.services.scrape_scheduler import next_occurrence
+    from app.services.scrape_scheduler import (
+        ScheduleDateError, as_relative, check_days_ago, days_ago_label, next_occurrence,
+        relative_posted_days, with_posted_days_ago)
     row = await _my_schedule(db, current_user, schedule_id)
-    before = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled}
+    date_set = "posted_days_ago" in data.model_fields_set
+    try:
+        new_days = None if not date_set or data.posted_days_ago is None else check_days_ago(data.posted_days_ago)
+    except ScheduleDateError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    before = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled,
+              "date": relative_posted_days(row.config, row.created_at)}
     if data.name is not None:
         row.name = data.name.strip() or row.name
     if data.hour is not None:
@@ -586,16 +644,23 @@ async def edit_schedule(schedule_id: int, data: ScheduleEdit, request: Request,
         row.minute = data.minute
     if data.enabled is not None:
         row.enabled = data.enabled
+    # The date is only ever saved in its relative form: one asked for is
+    # stored as asked, and any other edit of a schedule still holding a fixed
+    # date stores what that date was read as (measured from its creation day).
+    row.config = with_posted_days_ago(row.config, new_days) if date_set else as_relative(row.config, row.created_at)
     # Any change re-arms the clock, so a time edited to «in five minutes»
     # fires in five minutes and not at yesterday's hour tomorrow.
     row.next_run_at = next_occurrence(row.hour, row.minute)
     await db.commit()
     await db.refresh(row)
-    after = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled}
+    after = {"name": row.name, "at": f"{row.hour:02d}:{row.minute:02d}", "enabled": row.enabled,
+             "date": relative_posted_days(row.config, row.created_at)}
     changed = {k: [before[k], after[k]] for k in before if before[k] != after[k]}
     if changed:
         words = {"enabled": "روشن" if row.enabled else "خاموش", "at": f"ساعت {after['at']}",
-                 "name": f"اسم «{row.name}»"}
+                 "name": f"اسم «{row.name}»",
+                 "date": "تاریخ انتشار " + ("«" + days_ago_label(after["date"]) + "»"
+                                            if after["date"] is not None else "برداشته شد")}
         await _audit_schedule("scrape_schedule_update", row, current_user, request,
                               f"زمان‌بندی «{before['name']}»: " + "، ".join(words[k] for k in changed),
                               changed=changed)
@@ -609,7 +674,8 @@ async def delete_schedule(schedule_id: int, request: Request, db: AsyncSession =
     row = await _my_schedule(db, current_user, schedule_id)
     # what it was, read before the row is gone, recorded once it really is
     gone = SimpleNamespace(id=row.id, name=row.name, hour=row.hour, minute=row.minute,
-                           config=row.config, owner_user_id=row.owner_user_id)
+                           config=row.config, created_at=row.created_at,
+                           owner_user_id=row.owner_user_id)
     await db.delete(row)
     await db.commit()
     await _audit_schedule("scrape_schedule_delete", gone, current_user, request,
@@ -662,48 +728,122 @@ async def get_scraping_jobs(
     result = await db.execute(query)
     jobs = result.scalars().all()
 
-    # id → name lookups so the UI can show/filter by city & category
-    city_map = {c.id: c.name for c in (await db.execute(select(City))).scalars().all()}
-    cat_map = {c.id: c.name for c in (await db.execute(select(Category))).scalars().all()}
+    names = await _job_names(db, jobs)
+    return ScrapingJobList(items=[_job_response(j, *names) for j in jobs], total=len(jobs))
+
+
+def _job_config(j) -> dict:
+    return j.config if isinstance(j.config, dict) else {}
+
+
+# A finished run that stopped short can be continued: failed, cancelled, and
+# «partial» — the collection cut short by Divar. A completed run already
+# walked its whole pool, so «continue» would be a rerun wearing the wrong label.
+# One list, the model's, so the row and the resume route cannot disagree.
+_RESUMABLE = RESUMABLE_STATUSES
+
+
+async def _job_names(db: AsyncSession, jobs) -> tuple:
+    """(cities, categories, owners): id → name, for just these runs."""
+    from app.models.property import City, Category
+    city_ids = {j.city_id for j in jobs} - {None}
+    cat_ids = {j.category_id for j in jobs} - {None}
     # who started each run — the launch puts the owner on the config
-    owner_ids = {(j.config or {}).get("owner_user_id") for j in jobs} - {None}
+    owner_ids = {o for o in (_job_config(j).get("owner_user_id") for j in jobs)
+                 if isinstance(o, int)}
+    cities = {c.id: c.name for c in (await db.execute(
+        select(City).where(City.id.in_(city_ids)))).scalars().all()} if city_ids else {}
+    categories = {c.id: c.name for c in (await db.execute(
+        select(Category).where(Category.id.in_(cat_ids)))).scalars().all()} if cat_ids else {}
     owners = {u.id: (u.full_name or u.username) for u in (await db.execute(
         select(User).where(User.id.in_(owner_ids)))).scalars().all()} if owner_ids else {}
+    return cities, categories, owners
 
-    return ScrapingJobList(
-        items=[ScrapingJobResponse(
-            id=j.id,
-            job_id=str(j.job_id),
-            city_id=j.city_id,
-            category_id=j.category_id,
-            city_name=city_map.get(j.city_id),
-            # An explicit-list run has no category row; its label is the
-            # kind of run it was («اسکرپ تکی», «بازاسکرپ»).
-            category_name=cat_map.get(j.category_id)
-                or ((j.config or {}).get("category") if (j.config or {}).get("urls") else None),
-            status=j.status,
-            total_pages=j.total_pages,
-            scraped_pages=j.scraped_pages,
-            total_items=j.total_items,
-            scraped_items=j.scraped_items,
-            new_items=j.new_items,
-            updated_items=j.updated_items,
-            failed_items=j.failed_items,
-            error_message=j.error_message,
-            progress=j.progress,
-            divar_count=j.divar_count,
-            max_items=j.max_items,
-            resumed_from=str(j.resumed_from) if j.resumed_from else None,
-            can_resume=bool(j.config) and j.status in ("failed", "cancelled"),
-            divar_phone=j.divar_phone,
-            accounts_used=j.accounts_used or [],
-            owner_user_id=(j.config or {}).get("owner_user_id"),
-            owner_name=owners.get((j.config or {}).get("owner_user_id")),
-            started_at=j.started_at,
-            completed_at=j.completed_at,
-            created_at=j.created_at
-        ) for j in jobs],
-        total=len(jobs)
+
+def _reason_line(j) -> Optional[str]:
+    """Where the rest of the candidates went, for the table's «تازه» cell (#29).
+
+    Job 43 read «0 / 3» with nothing beside it; «۲۱ آگهی مال روز دیگری بود،
+    ۳ تکراری» was only in its log. The three biggest buckets of the run's own
+    final account (config.outcome, written by the scraper as the run ends),
+    in the words the run log uses. None while there is nothing to explain:
+    a run still going, one that got what it was asked for, and runs from
+    before the account was kept — their finish_reason is still shown.
+    """
+    outcome = _job_config(j).get("outcome")
+    if not isinstance(outcome, dict):
+        return None
+    new = j.new_items or 0
+    if new >= (j.max_items or outcome.get("examined") or 0):
+        return None
+    # The class itself, as get_job_skipped reads it — not this module's
+    # DivarScraper name, which is only the worker's way in.
+    from app.scraper.divar_scraper import DivarScraper as _Scraper
+    labels = _Scraper._FILTER_LABELS_FA
+    parts = []
+    if outcome.get("duplicate"):
+        parts.append((outcome["duplicate"], "تکراری"))
+    if j.updated_items:
+        parts.append((j.updated_items, "بروز"))
+    for bucket, n in (outcome.get("skipped") or {}).items():
+        parts.append((n, labels.get(bucket, bucket)))
+    failed = dict(outcome.get("failed") or {})
+    for named in ("بدون شماره", "نیاز به تأیید هویت"):
+        if failed.get(named):
+            parts.append((failed.pop(named), named))
+    if sum(failed.values()):
+        parts.append((sum(failed.values()), "ناموفق"))
+    if outcome.get("gone"):
+        parts.append((outcome["gone"], _Scraper.GONE_FROM_DIVAR))
+    if outcome.get("unreached"):
+        parts.append((outcome["unreached"], "بررسی‌نشده"))
+    top = sorted((p for p in parts if p[0]), key=lambda p: -p[0])[:3]
+    return "، ".join(f"{n} {label}" for n, label in top) or None
+
+
+def _job_response(j, cities: dict, categories: dict, owners: dict) -> ScrapingJobResponse:
+    """One run as the jobs table reads it — the list and the single view alike."""
+    cfg = _job_config(j)
+    owner = cfg.get("owner_user_id")
+    return ScrapingJobResponse(
+        id=j.id,
+        job_id=str(j.job_id),
+        city_id=j.city_id,
+        category_id=j.category_id,
+        city_name=cities.get(j.city_id),
+        # An explicit-list run has no category row; its label is the
+        # kind of run it was («اسکرپ تکی», «بازاسکرپ»).
+        category_name=categories.get(j.category_id)
+            or (cfg.get("category") if cfg.get("urls") else None),
+        status=j.status,
+        # A row a hand-written INSERT left NULL must not take the list down.
+        total_pages=j.total_pages or 0,
+        scraped_pages=j.scraped_pages or 0,
+        total_items=j.total_items or 0,
+        scraped_items=j.scraped_items or 0,
+        new_items=j.new_items or 0,
+        updated_items=j.updated_items or 0,
+        failed_items=j.failed_items or 0,
+        error_message=j.error_message,
+        # Written on every run that stopped short; never sent until now, so
+        # the panel's reason line under the status had nothing to show.
+        finish_reason=cast(Optional[str], j.finish_reason),
+        reason_line=_reason_line(j),
+        progress=j.progress,
+        divar_count=j.divar_count,
+        max_items=j.max_items,
+        resumed_from=str(j.resumed_from) if j.resumed_from else None,
+        can_resume=bool(cfg) and j.status in _RESUMABLE,
+        divar_phone=j.divar_phone,
+        accounts_used=j.accounts_used or [],
+        owner_user_id=owner,
+        owner_name=owners.get(owner),
+        # The run names an owner who is no longer a user: «کاربر حذف‌شده»,
+        # not the «—» of a run nobody started.
+        owner_deleted=owner is not None and owner not in owners,
+        started_at=j.started_at,
+        completed_at=j.completed_at,
+        created_at=j.created_at
     )
 
 
@@ -832,33 +972,13 @@ async def get_scraping_job(
             raise HTTPException(status_code=400, detail="Invalid job identifier")
     
     job = result.scalar_one_or_none()
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    return ScrapingJobResponse(
-        id=job.id,
-        job_id=str(job.job_id),
-        city_id=job.city_id,
-        category_id=job.category_id,
-        status=job.status,
-        total_pages=job.total_pages,
-        scraped_pages=job.scraped_pages,
-        total_items=job.total_items,
-        scraped_items=job.scraped_items,
-        new_items=job.new_items,
-        updated_items=job.updated_items,
-        failed_items=job.failed_items,
-        error_message=job.error_message,
-        progress=job.progress,
-        divar_count=job.divar_count,
-        max_items=job.max_items,
-        resumed_from=str(job.resumed_from) if job.resumed_from else None,
-        can_resume=bool(job.config) and job.status in ("failed", "cancelled"),
-        started_at=job.started_at,
-        completed_at=job.completed_at,
-        created_at=job.created_at
-    )
+
+    # The same fields as the list — this one used to leave out the names,
+    # the owner and finish_reason, so the two views of one run disagreed.
+    return _job_response(job, *await _job_names(db, [job]))
 
 
 # A job that has already stopped has nothing left to cancel. Everything else —
@@ -866,8 +986,9 @@ async def get_scraping_job(
 # must be cancellable: that state can last minutes and the dashboard offers the
 # stop button for it, so refusing anything but "running" left the user pressing
 # a button that answered "Job is not running".
-_FINISHED_JOB_STATUSES = {"completed", "cancelled", "failed"}
-_STATUS_FA = {"completed": "تکمیل شده", "cancelled": "لغو شده", "failed": "ناموفق"}
+_FINISHED_JOB_STATUSES = set(FINISHED_STATUSES)
+_STATUS_FA = {"completed": "تکمیل شده", "partial": "ناقص",
+              "cancelled": "لغو شده", "failed": "ناموفق"}
 
 
 @router.post("/jobs/{job_id}/cancel")
@@ -898,10 +1019,23 @@ async def cancel_scraping_job(
             status_code=400,
             detail=f"این تسک قبلاً تمام شده است ({_STATUS_FA.get(job.status, job.status)})")
 
-    was = job.status
-    job.status = "cancelled"
-    job.completed_at = datetime.now()
+    # Only over a status the run can still be in, in one statement: the row
+    # was read above, and a run that finished in between had its ending
+    # written over with «cancelled».
+    was, pk = job.status, job.id
+    cancelled = (await db.execute(
+        update(ScrapingJob)
+        .where(ScrapingJob.id == pk, ScrapingJob.status.in_(("pending", "running", "paused")))
+        .values(status="cancelled", completed_at=datetime.now())
+        .returning(ScrapingJob.id)
+        .execution_options(synchronize_session=False))).scalar_one_or_none()
     await db.commit()
+    if cancelled is None:
+        now = (await db.execute(
+            select(ScrapingJob.status).where(ScrapingJob.id == pk))).scalar_one_or_none() or "—"
+        raise HTTPException(
+            status_code=400,
+            detail=f"این تسک قبلاً تمام شده است ({_STATUS_FA.get(now, now)})")
 
     # If it was blocked on an SMS-OTP code, drop the request: the scraper wakes
     # out of its wait on the cancelled status, and the prompt in the dashboard

@@ -26,6 +26,18 @@ os.environ.setdefault("SUPER_ADMIN_PASSWORD", "test-suite-only-not-a-real-passwo
 # to exercise real pooling deliberately.
 os.environ.setdefault("DB_POOL_SIZE", "0")
 
+# The scraper's other on-disk places default to the container's volume
+# (/app/data/...). A test that builds a real DivarScraper creates them, which
+# works as root and is refused to CI's unprivileged runner (PermissionError:
+# '/app'). CI sets LOGS_PATH and IMAGES_PATH; these three get a throwaway
+# directory of the suite's own unless the caller set them.
+import tempfile  # noqa: E402
+
+_SCRATCH = tempfile.mkdtemp(prefix="sorinflow-tests-")
+os.environ.setdefault("COOKIES_PATH", os.path.join(_SCRATCH, "cookies"))
+os.environ.setdefault("DOWNLOADS_PATH", os.path.join(_SCRATCH, "downloads"))
+os.environ.setdefault("SCRAPER_PROFILE_DIR", os.path.join(_SCRATCH, "profiles"))
+
 
 @pytest.fixture(autouse=True)
 async def _dispose_db_pool_after_test():

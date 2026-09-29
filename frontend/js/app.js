@@ -4073,13 +4073,62 @@ function _scrapeFormConfig() {
 }
 
 // ═══ Scheduled scrapes ═════════════════════════════════════════
+
+// How far back «N روز پیش» may reach — the server's MAX_POSTED_DAYS_AGO
+// (app/services/scrape_scheduler.py), which is what actually enforces it.
+const SCHEDULE_MAX_DAYS_AGO = 30;
+
+/** «امروز», «دیروز», «۳ روز پیش» — a schedule's publish date in words. */
+function _postedDaysWords(n) {
+    return n === 0 ? 'امروز' : n === 1 ? 'دیروز' : `${formatNumber(n)} روز پیش`;
+}
+
+/** Which day's listings a schedule goes for, asked in the words people use.
+ *  The answer is days before the day it runs (Tehran): 0 is «امروز», 1 is
+ *  «دیروز». It is stored like that and worked out again at every firing —
+ *  a fixed date would search the same old day every morning.
+ *  Resolves undefined if they cancel, null for «no date», else the number. */
+async function askPostedDaysAgo(current = null) {
+    const preset = current === null || current === undefined ? 'none' : current <= 1 ? String(current) : 'n';
+    const pick = await askText({
+        icon: 'bi-calendar-event', title: 'تاریخ انتشار آگهی‌ها',
+        body: 'هر بار که این زمان‌بندی اجرا می‌شود، روز را از نو حساب می‌کند: «دیروز» یعنی دیروزِ همان روز اجرا (به وقت تهران)، نه یک تاریخ ثابت.',
+        field: {
+            label: 'آگهی‌های کدام روز؟', value: preset,
+            options: [['none', 'بدون تاریخ — آگهی‌های ۲۴ ساعت اخیر'], ['0', 'امروز'], ['1', 'دیروز'], ['n', 'چند روز پیش…']],
+            hint: 'با انتخاب یک روز، «تعداد آگهی» خالی یعنی همهٔ آگهی‌های آن روز.',
+        },
+    });
+    if (pick === null) return undefined;
+    if (pick === 'none') return null;
+    if (pick !== 'n') return Number(pick);
+    const n = await askText({
+        icon: 'bi-calendar-event', title: 'چند روز پیش؟',
+        body: 'آگهی‌های منتشرشده در روزی که این‌قدر روز پیش از روز اجراست.',
+        field: { label: 'تعداد روز', value: current > 1 ? String(current) : '2', placeholder: '3', dir: 'ltr', inputmode: 'numeric',
+                 validate: v => { const d = parseInt(_digitsOnly(v), 10);
+                                  return d >= 2 && d <= SCHEDULE_MAX_DAYS_AGO ? '' : `عددی از ۲ تا ${formatNumber(SCHEDULE_MAX_DAYS_AGO)} بنویسید`; } },
+    });
+    return n === null ? undefined : parseInt(_digitsOnly(n), 10);
+}
+
 async function saveAsSchedule() {
     const cfg = _scrapeFormConfig();
     if (!cfg.city || !cfg.category) { showToast('توجه', 'اول شهر و دسته‌بندی را انتخاب کنید', 'warning'); return; }
+    const daysAgo = await askPostedDaysAgo(null);
+    if (daysAgo === undefined) return;
+    if (daysAgo !== null) {
+        cfg.posted_days_ago = daysAgo;
+        // As on the manual form, an empty count is the whole day. The 50 that
+        // _scrapeFormConfig falls back to would cut a busy day short.
+        if (!(parseInt(document.getElementById('scraper-pages')?.value, 10) > 0)) delete cfg.max_items;
+    }
+    const day = daysAgo === null ? '' : _postedDaysWords(daysAgo);
     const when = await askText({
         icon: 'bi-alarm', title: 'اجرای روزانه',
         body: `هر روز <b>${esc(cityName(cfg.city))} / ${esc(categoryName(cfg.category))}</b>${cfg.max_items ? ` تا ${formatNumber(cfg.max_items)} آگهی` : ''} با همین فیلترها اجرا می‌شود — با حساب‌های دیوار خودتان.`,
-        note: cfg.max_age_hours ? '' : 'چون «حداکثر سن آگهی» خالی است، فقط آگهی‌های ۲۴ ساعت اخیر گرفته می‌شود.',
+        note: day ? `آگهی‌های «${esc(day)}»: روز هر بار از نو، به وقت تهران، حساب می‌شود.`
+                  : 'بدون تاریخ انتشار، فقط آگهی‌های ۲۴ ساعت اخیر گرفته می‌شود.',
         field: { label: 'ساعت اجرا (به وقت تهران)', value: '08:00', placeholder: '08:00', dir: 'ltr',
                  validate: v => /^([01]?\d|2[0-3]):[0-5]\d$/.test(v.trim()) ? '' : 'ساعت را مثل 08:00 بنویسید' },
     });
@@ -4092,7 +4141,7 @@ async function saveAsSchedule() {
     if (name === null) return;
     try {
         await apiCall('/scraper/schedules', { method: 'POST', body: JSON.stringify({ name: name.trim(), config: cfg, hour: h, minute: m, enabled: true }) });
-        showToast('ذخیره شد', `هر روز ساعت ${when.trim()} اجرا می‌شود`, 'success');
+        showToast('ذخیره شد', `هر روز ساعت ${when.trim()} اجرا می‌شود${day ? ` — آگهی‌های ${day}` : ''}`, 'success');
         loadSchedules();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
@@ -4123,9 +4172,14 @@ async function loadSchedules() {
         const fa = iso => iso ? `${new Date(iso).toLocaleDateString('fa-IR', tz)} ${new Date(iso).toLocaleTimeString('fa-IR', { ...tz, hour: '2-digit', minute: '2-digit' })}` : '—';
         tb.innerHTML = rows.map(s => {
             const c = s.config || {};
+            // The publish date is «دیروز» and the like, never a fixed day —
+            // and a schedule that was saved with a fixed one says it was converted.
             const what = `${esc(s.city_name || c.city)} / ${esc(s.category_name || c.category)}` +
                 (c.max_items ? ` · ${formatNumber(c.max_items)} آگهی` : '') +
-                (c.max_age_hours ? ` · ${formatNumber(c.max_age_hours)} ساعت اخیر` : '');
+                (s.posted_label ? ` · انتشار: ${esc(s.posted_label)}`
+                    : c.max_age_hours ? ` · ${formatNumber(c.max_age_hours)} ساعت اخیر` : '') +
+                (s.date_note ? `<div class="small text-info">${esc(s.date_note)}</div>` : '');
+            const ago = Number.isInteger(s.posted_days_ago) ? s.posted_days_ago : 'null';
             const lr = s.last_result || {};
             const cls = { started: 'text-success', failed: 'text-danger', skipped: 'text-warning' }[lr.status] || 'text-muted';
             const last = s.last_run_at ? `<div class="small ${cls}">${esc(lr.detail || lr.status || '')}</div><div class="small text-muted">${fa(s.last_run_at)}</div>` : '<span class="text-muted small">هنوز اجرا نشده</span>';
@@ -4139,6 +4193,7 @@ async function loadSchedules() {
                 <td class="text-nowrap">
                     <button class="btn btn-sm btn-outline-primary" onclick="runScheduleNow(${s.id})" title="همین حالا اجرا کن"><i class="bi bi-play-fill"></i></button>
                     <button class="btn btn-sm btn-outline-secondary" onclick="editScheduleTime(${s.id}, '${hh}:${mm}')" title="تغییر ساعت"><i class="bi bi-clock"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="editScheduleDate(${s.id}, ${ago})" title="تغییر تاریخ انتشار"><i class="bi bi-calendar-event"></i></button>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteSchedule(${s.id})" title="حذف"><i class="bi bi-trash"></i></button>
                 </td></tr>`;
         }).join('');
@@ -4163,6 +4218,17 @@ async function editScheduleTime(id, current) {
     const [h, m] = when.trim().split(':').map(Number);
     try {
         await apiCall(`/scraper/schedules/${id}`, { method: 'PATCH', body: JSON.stringify({ hour: h, minute: m }) });
+        loadSchedules();
+    } catch (e) { showToast('خطا', e.message, 'danger'); }
+}
+
+// eslint-disable-next-line no-unused-vars -- called from the card's own onclick
+async function editScheduleDate(id, current) {
+    const days = await askPostedDaysAgo(current);
+    if (days === undefined) return;
+    try {
+        await apiCall(`/scraper/schedules/${id}`, { method: 'PATCH', body: JSON.stringify({ posted_days_ago: days }) });
+        showToast('ذخیره شد', days === null ? 'بدون تاریخ — آگهی‌های ۲۴ ساعت اخیر' : `آگهی‌های ${_postedDaysWords(days)}`, 'success');
         loadSchedules();
     } catch (e) { showToast('خطا', e.message, 'danger'); }
 }
@@ -4353,6 +4419,61 @@ function _aiBreakerText(brk) {
     return brk.until ? `مکث تا ${_aiUntil(brk.until)}` : 'در حال تلاش دوباره…';
 }
 
+// The gateway itself said the credit is gone (a 402, or a 403/429 that says the
+// credit, quota or balance is used up): every agent waits until the next Tehran
+// midnight, or until «تست اتصال» is answered — whichever comes first. The
+// server sends `pause` = {since, until, status, message, agent} or null, and
+// `message` is the gateway's own sentence, so the admin reads the cause here
+// instead of hunting for it in a log.
+function _aiPauseUntil(iso) {
+    const d = iso ? new Date(iso) : null;
+    if (!d || isNaN(d)) return '';
+    const tehran = { timeZone: 'Asia/Tehran' };
+    return `${d.toLocaleDateString('fa-IR', { ...tehran, weekday: 'long', day: 'numeric', month: 'long' })} ساعت ${d.toLocaleTimeString('fa-IR', { ...tehran, hour: '2-digit', minute: '2-digit' })}`;
+}
+
+/** The sentence in a ledger error: «HTTP 400: {"error":{"message":"…"}}» reads
+ *  «HTTP 400 — …». The column keeps 300 characters, so the JSON may be cut
+ *  short — the sentence is found with a pattern, not a parser. Anything that is
+ *  not that shape is shown as it is. */
+function _aiErrText(err) {
+    const s = String(err || '').trim();
+    const head = s.match(/^HTTP (\d+):\s*/);
+    if (!head) return s;
+    const body = s.slice(head[0].length);
+    const m = body.match(/"(?:message|detail|error)":"((?:[^"\\]|\\.)*)/);
+    return `HTTP ${head[1]} — ${m ? m[1].replace(/\\"/g, '"').replace(/\\n/g, ' ') : body}`;
+}
+
+/** The banner at the top of the AI page — one element, whichever of the two
+ *  loaders (the screen, the settings card) ran last draws it. */
+function _aiRenderPause(p) {
+    const section = document.getElementById('section-ai');
+    if (!section) return;
+    let box = document.getElementById('ai-pause-banner');
+    if (!p) { if (box) box.remove(); return; }
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'ai-pause-banner';
+        box.className = 'alert alert-warning';
+        box.setAttribute('role', 'status');
+        section.prepend(box);
+    }
+    const began = p.since ? new Date(p.since) : null;
+    const facts = [
+        p.status ? `HTTP ${p.status}` : '',
+        p.agent ? `اولین بار در ایجنت «${p.agent}»` : '',
+        began && !isNaN(began) ? `از ${began.toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit' })}` : '',
+    ].filter(Boolean).join(' · ');
+    box.innerHTML = html`
+        <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle"></i> اعتبار یا سهمیهٔ سرویس هوش مصنوعی تمام شده — ایجنت‌ها متوقف‌اند</div>
+        <div class="small mb-1">پیام سرویس: <span dir="ltr" class="d-inline-block">${p.message || '—'}</span></div>
+        <div class="small">ایجنت‌های پس‌زمینه (برچسب‌زن عکس، خوانندهٔ آگهی، جستجوی معنایی، توضیح‌دهنده) درخواستی نمی‌فرستند و تا
+            <b>${_aiPauseUntil(p.until)}</b> (به وقت تهران) صبر می‌کنند. اگر اعتبار را شارژ کرده‌اید، «تست اتصال» را بزنید:
+            با اولین پاسخ موفق همه همین حالا ادامه می‌دهند.</div>
+        ${facts ? raw(`<div class="small text-muted mt-1">${esc(facts)}</div>`) : ''}`;
+}
+
 async function loadAi() {
     const badge = document.getElementById('ai-badge');
     if (!badge) return;
@@ -4360,7 +4481,8 @@ async function loadAi() {
         const s = await apiCall('/ai/status');
         _aiStatus = s;
         const ok = s.configured && s.enabled;
-        const paused = _aiBreakerText(s.breaker);
+        const paused = s.pause ? 'متوقف — اعتبار تمام شده' : _aiBreakerText(s.breaker);
+        _aiRenderPause(s.pause);
         badge.textContent = !s.configured ? 'تنظیم نشده' : (!s.enabled ? 'خاموش' : (paused || (s.cap_reached ? 'سقف امروز پر شد' : 'فعال')));
         badge.className = 'badge ' + (!s.configured ? 'bg-secondary' : (!s.enabled ? 'bg-secondary' : (paused || s.cap_reached ? 'bg-warning text-dark' : 'bg-success')));
 
@@ -4437,10 +4559,18 @@ async function aiTest() {
     btn.disabled = true; out.textContent = 'در حال تست…'; out.className = 'small text-muted';
     try {
         const r = await apiCall('/ai/test', { method: 'POST' });
-        out.innerHTML = `✓ ${esc(r.model)} در ${formatNumber(r.ms)} میلی‌ثانیه پاسخ داد — «${esc(r.reply)}»`;
+        out.innerHTML = `✓ ${esc(r.model)} در ${formatNumber(r.ms)} میلی‌ثانیه پاسخ داد — «${esc(r.reply)}»`
+            + (r.pause_cleared ? ' — ایجنت‌ها دوباره ادامه می‌دهند' : '');
         out.className = 'small text-success';
         loadAi();
-    } catch (e) { out.textContent = e.message; out.className = 'small text-danger'; }
+        if (document.getElementById('ai-agents-grid')) loadAiScreen();
+    } catch (e) {
+        // a refusal for credit is what sets the pause: the message says why, and
+        // the banner (drawn by the reload) says until when
+        out.textContent = e.message; out.className = 'small text-danger';
+        loadAi();
+        if (document.getElementById('ai-agents-grid')) loadAiScreen();
+    }
     btn.disabled = false;
 }
 
@@ -4484,9 +4614,12 @@ function _aiAgentState(a) {
     return bits.join(' · ');
 }
 
-function _aiAgentCard(a) {
+function _aiAgentCard(a, pause) {
     const st = a.state || {};
     const runnable = a.kind === 'loop';
+    // while the gateway has no credit every agent is waiting, whatever its own numbers say
+    const waiting = pause && a.enabled
+        ? `<span class="text-warning">متوقف تا ${esc(_aiPauseUntil(pause.until))} — اعتبار سرویس تمام شده</span> · ` : '';
     const err = (a.today.failed || 0);
     const spent = a.today.cost_usd || 0;
     const capPct = a.cap_usd ? Math.min(100, Math.round(spent / a.cap_usd * 100)) : 0;
@@ -4506,7 +4639,7 @@ function _aiAgentCard(a) {
         </div>
         <div class="ai-card-desc">${esc(a.desc)}</div>
         <div class="ai-card-where">${(a.where || []).map(w => `<span class="pill">${esc(w)}</span>`).join('')}</div>
-        <div class="ai-card-state">${_aiAgentState(a)}</div>
+        <div class="ai-card-state">${waiting}${_aiAgentState(a)}</div>
         <div class="ai-card-budget">
             <span>بودجهٔ امروز: $${spent >= 0.01 ? spent.toFixed(2) : spent.toFixed(4)} از $${(a.cap_usd || 0).toFixed(2)}</span>
             <div class="ai-cap-bar"><span style="width:${capPct}%" class="${capPct >= 100 ? 'is-full' : ''}"></span></div>
@@ -4517,7 +4650,7 @@ function _aiAgentCard(a) {
             <span>امروز: ${formatNumber(a.today.calls || 0)} فراخوانی · ${formatNumber(a.today.cost_toman || 0)} تومان</span>
             ${err ? `<button class="ai-err ${(a.today.ok_since_error || 0) >= 5 ? 'is-stale' : ''}"
                 onclick="aiShowErrors(${jsArg(a.key)})"
-                title="${esc(a.today.last_error || '')}">
+                title="${esc(_aiErrText(a.today.last_error))}">
                 ${formatNumber(err)} خطا${(a.today.ok_since_error || 0) >= 5
                     ? ` · از آن به بعد ${formatNumber(a.today.ok_since_error)} موفق`
                     : ''}${a.today.last_error_at ? ` · آخری ${esc(a.today.last_error_at.slice(11, 16))}` : ''}
@@ -4536,11 +4669,13 @@ async function loadAiScreen() {
         const s = await apiCall('/ai/overview');
         const u = s.usage || { today: {}, month: {} };
         const paused = _aiBreakerText(s.breaker);
+        _aiRenderPause(s.pause);
         const conn = document.getElementById('ai-t-conn');
-        conn.textContent = paused ? 'موقتاً متوقف' : (s.configured ? (s.enabled ? 'وصل است' : 'خاموش') : 'تنظیم نشده');
-        conn.className = 'stat-value ' + (paused ? 'text-warning' : (s.configured && s.enabled ? 'text-success' : 'text-warning'));
+        conn.textContent = s.pause ? 'متوقف — اعتبار تمام شده' : (paused ? 'موقتاً متوقف' : (s.configured ? (s.enabled ? 'وصل است' : 'خاموش') : 'تنظیم نشده'));
+        conn.className = 'stat-value ' + (s.pause || paused ? 'text-warning' : (s.configured && s.enabled ? 'text-success' : 'text-warning'));
         conn.style.fontSize = '1rem';
-        document.getElementById('ai-t-conn-sub').textContent = paused || (s.workspace ? `پروژهٔ ${s.workspace}` : 'کلید در GitHub تنظیم نشده');
+        document.getElementById('ai-t-conn-sub').textContent = s.pause ? `تا ${_aiPauseUntil(s.pause.until)}`
+            : (paused || (s.workspace ? `پروژهٔ ${s.workspace}` : 'کلید در GitHub تنظیم نشده'));
         document.getElementById('ai-t-today').textContent = `${formatNumber(u.today.cost_toman || 0)} تومان`;
         const capPct = s.cap_usd ? Math.min(100, Math.round((u.today.cost_usd || 0) / s.cap_usd * 100)) : 0;
         document.getElementById('ai-t-cap').innerHTML =
@@ -4557,7 +4692,7 @@ async function loadAiScreen() {
             ? `${_aiTokens(q.remainingCompletionFreeTokens)} خروجی باقی مانده${s.quota.plan ? ` · پلن ${s.quota.plan}` : ''}`
             : '';
 
-        grid.innerHTML = (s.agents || []).map(_aiAgentCard).join('');
+        grid.innerHTML = (s.agents || []).map(a => _aiAgentCard(a, s.pause)).join('');
         const sel = document.getElementById('ai-log-agent');
         if (sel && sel.options.length <= 1) {
             sel.innerHTML = '<option value="">همهٔ ایجنت‌ها</option>' +
@@ -4604,7 +4739,8 @@ async function aiRunAgent(key, btn) {
     try {
         const r = await apiCall(url, { method: 'POST' });
         const done = r.read ?? r.embedded ?? r.tagged ?? 0;
-        showToast('اجرا شد', `${formatNumber(r.scanned || 0)} بررسی، ${formatNumber(done)} انجام${r.failed ? `، ${formatNumber(r.failed)} خطا` : ''}${r.stopped ? ` — متوقف: ${r.stopped}` : ''}`, r.failed ? 'warning' : 'success');
+        const stopped = r.stopped === 'QuotaExhausted' ? 'اعتبار سرویس تمام شده' : r.stopped;
+        showToast('اجرا شد', `${formatNumber(r.scanned || 0)} بررسی، ${formatNumber(done)} انجام${r.failed ? `، ${formatNumber(r.failed)} خطا` : ''}${stopped ? ` — متوقف: ${stopped}` : ''}`, r.failed || r.stopped === 'QuotaExhausted' ? 'warning' : 'success');
         loadAiScreen(); loadAiLog();
     } catch (e) { showToast('اجرا نشد', e.message, 'danger'); }
     if (btn) btn.disabled = false;
@@ -4638,7 +4774,7 @@ async function loadAiLog() {
                 <td>${formatNumber((i.prompt_tokens || 0) + (i.completion_tokens || 0))}</td>
                 <td>${formatNumber(Math.round(i.cost_toman || 0))}</td>
                 <td>${formatNumber(i.ms || 0)}</td>
-                <td>${i.ok ? '<span class="text-success">✓</span>' : `<span class="text-danger" title="${esc(i.error || '')}">✗ ${esc((i.error || '').slice(0, 40))}</span>`}</td>
+                <td>${i.ok ? '<span class="text-success">✓</span>' : `<span class="text-danger" title="${esc(i.error || '')}">✗ ${esc(_aiErrText(i.error).slice(0, 90))}</span>`}</td>
             </tr>`).join('') : '<tr><td colspan="8" class="text-center text-muted py-3">چیزی ثبت نشده</td></tr>';
     } catch (e) {
         body.innerHTML = `<tr><td colspan="8" class="text-danger text-center py-3">${esc(e.message)}</td></tr>`;
@@ -5516,14 +5652,20 @@ function _renderJobsTable(items) {
         tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">هیچ تسکی وجود ندارد</td></tr>`;
         return;
     }
+    // «ناقص»: the collection stopped short because of Divar, the run walked
+    // what it had — finished, and continuable (finish_reason says why).
     const JOB_STATUS_FA = {
         pending: 'در صف', running: 'در حال اجرا', paused: '⏸ متوقف — منتظر کد',
-        completed: 'تکمیل شده', failed: 'ناموفق', cancelled: 'لغو شده',
+        completed: 'تکمیل شده', failed: 'ناموفق', cancelled: 'لغو شده', partial: 'ناقص',
     };
     items.forEach(job => {
         const row = document.createElement('tr');
         const statusClass = `status-${esc(job.status)}`;
         const statusLabel = JOB_STATUS_FA[job.status] || esc(job.status);
+        // A run names its owner even after that user is deleted; «—» is for a
+        // run nobody started.
+        const owner = job.owner_name ? esc(job.owner_name)
+            : job.owner_deleted ? '<span class="job-owner-gone">کاربر حذف‌شده</span>' : '—';
         row.innerHTML = `
             <td><code class="job-id" title="${esc(job.job_id)}">${job.job_id.substring(0, 6)}</code></td>
             <td>${job.category_name ? `<span class="badge bg-primary">${esc(job.category_name)}</span>` : '—'}</td>
@@ -5531,7 +5673,7 @@ function _renderJobsTable(items) {
             <!-- who started it, and the Divar account the run is on; a rotated
                  run names every account it went through in the tooltip -->
             <td class="job-who">
-                <div>${esc(job.owner_name || '—')}</div>
+                <div>${owner}</div>
                 ${job.divar_phone ? `<div class="job-acct" dir="ltr" title="${esc((job.accounts_used || []).length > 1 ? 'حساب‌ها به ترتیب: ' + job.accounts_used.join('، ') : 'حساب دیوار این اجرا')}">${esc(job.divar_phone)}${(job.accounts_used || []).length > 1 ? ` <span class="job-acct-more">+${formatNumber(job.accounts_used.length - 1)}</span>` : ''}</div>`
                                  : `<div class="job-acct text-muted">${job.status === 'pending' ? 'خودکار' : '—'}</div>`}
             </td>
@@ -5555,22 +5697,30 @@ function _renderJobsTable(items) {
             </td>
             <!-- The two counts under the percent were unreadable crammed into
                  the bar's cell; they get a column. Same <bdi> reasoning as
-                 «جدید / بروز»: isolated so the pair keeps the header's order. -->
-            <td style="text-align:center;white-space:nowrap"
-                title="${job.divar_count ? 'کل = تعدادی که دیوار برای این فیلترها اعلام کرد' : 'کل = نامزدهای جمع‌شده'}">
+                 «جدید / بروز»: isolated so the pair keeps the header's order.
+                 Both are this run's own: what it examined, out of the pool it
+                 collected. Divar's count ignores the day and read «251 / 251»
+                 over a pool of 24 (#29), so it has its own line, as Divar's. -->
+            <td class="job-counts"
+                title="بررسی = آگهی‌هایی که همین اجرا واقعاً دید؛ کل = نامزدهایی که همین اجرا جمع کرد">
                 ${job.total_items
                     ? `<bdi title="بررسی‌شده">${job.scraped_items}</bdi> <span class="text-muted">/</span> <bdi title="کل">${job.total_items}</bdi>`
                     : '<span class="text-muted">---</span>'}
+                ${job.divar_count != null ? `<div class="job-divar" title="تعدادی که خود دیوار برای این فیلترها اعلام کرد — دیوار روز را فیلتر نمی‌کند">دیوار می‌گوید: ${esc(job.divar_count)}</div>` : ''}
             </td>
             <!-- «جدید / بروز» reads right-to-left, so «جدید» is the RIGHT
                  column. dir="ltr" here put the new count on the LEFT, under
                  «بروز» — the two numbers were swapped against their own
                  header. <bdi> isolates each one so the digits stay readable
-                 while the pair follows the header's direction. -->
-            <td style="text-align:center">
-                <bdi class="text-success" title="ردیف تازه — قبلاً در پایگاه داده نبود">${job.new_items}</bdi>
+                 while the pair follows the header's direction. The words are
+                 the run log's: «بروز» is a stored listing this run opened
+                 again and saved over, «تکراری» one it skipped as complete
+                 (#32). Under them, where the rest went when «تازه» fell short. -->
+            <td class="job-new">
+                <bdi class="text-success" title="تازه — ردیف تازه، قبلاً در پایگاه داده نبود">${job.new_items}</bdi>
                 <span class="text-muted">/</span>
-                <bdi class="text-muted" title="از قبل موجود بود — یا همان بود و رد شد، یا با اطلاعات تازه به‌روز شد">${job.updated_items}</bdi>
+                <bdi class="text-muted" title="بروز — از قبل ذخیره شده بود و این اجرا دوباره بازش کرد و به‌روزش کرد">${job.updated_items}</bdi>
+                ${job.reason_line ? `<div class="job-new-why" title="${esc(job.reason_line)}">${esc(job.reason_line)}</div>` : ''}
             </td>
             <!-- Tehran time, like the schedules card: a run its 08:00 schedule
                  started read «۰۶:۳۰» on a European laptop. -->
@@ -5603,7 +5753,7 @@ function _renderJobsTable(items) {
                         <i class="bi bi-play-fill"></i>
                     </button>
                 ` : ''}
-                ${['completed', 'failed', 'cancelled'].includes(job.status) ? `
+                ${['completed', 'failed', 'cancelled', 'partial'].includes(job.status) ? `
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteJob('${job.job_id}')"
                             title="حذف این تسک از فهرست — آگهی‌ها دست‌نخورده می‌مانند">
                         <i class="bi bi-trash"></i>

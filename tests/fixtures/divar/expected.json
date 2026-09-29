@@ -1,0 +1,595 @@
+{
+ "buy-agricultural-garden-agency.html": {
+  "category": "buy-industrial-agricultural-property",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 5000,
+   "land_area": 5000,
+   "price_per_meter": 5000000,
+   "rooms": null,
+   "seller_name": "املاک آزمون",
+   "total_price": 25000000000
+  },
+  "kind": "buy",
+  "leaf": "فروش باغ، مزرعه و زمین کشاورزی",
+  "token": "fxBuyInd02"
+ },
+ "buy-apartment-agency-arabic-digits.html": {
+  "category": "buy-apartment",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 100,
+   "floor": 2,
+   "has_balcony": false,
+   "has_elevator": true,
+   "has_parking": true,
+   "has_storage": true,
+   "price_per_meter": 51000000,
+   "rooms": 3,
+   "seller_name": "املاک آزمون",
+   "total_floors": 5,
+   "total_price": 5100000000,
+   "year_built": 1399
+  },
+  "kind": "buy",
+  "leaf": "فروش آپارتمان",
+  "token": "fxBuyApt02"
+ },
+ "buy-apartment-owner-keeps-agents-away.html": {
+  "category": "buy-apartment",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 60,
+   "has_storage": true,
+   "rooms": 1,
+   "total_price": 2700000000
+  },
+  "kind": "buy",
+  "leaf": "فروش آپارتمان",
+  "token": "fxBuyApt04"
+ },
+ "buy-apartment-owner.html": {
+  "category": "buy-apartment",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 85,
+   "city_name": "ارومیه",
+   "district": "مافی",
+   "floor": 3,
+   "has_balcony": null,
+   "has_elevator": false,
+   "has_parking": true,
+   "has_storage": true,
+   "price_per_meter": 45000000,
+   "rooms": 2,
+   "total_floors": 4,
+   "total_price": 3825000000,
+   "year_built": 1400
+  },
+  "kind": "buy",
+  "leaf": "فروش آپارتمان",
+  "token": "fxBuyApt01"
+ },
+ "buy-apartment-personal-but-agency-words.html": {
+  "category": "buy-apartment",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_evidence": "املاک هستم",
+   "agency_suspected": true,
+   "area": 70,
+   "has_balcony": true,
+   "has_parking": true,
+   "rooms": 1,
+   "total_price": 2500000000
+  },
+  "kind": "buy",
+  "leaf": "فروش آپارتمان",
+  "token": "fxBuyApt03"
+ },
+ "buy-commercial-office-agency.html": {
+  "category": "buy-commercial-property",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 60,
+   "floor": 4,
+   "has_elevator": true,
+   "has_parking": true,
+   "rooms": 3,
+   "seller_name": "آژانس نمونه",
+   "total_floors": 7,
+   "total_price": 6000000000,
+   "year_built": 1399
+  },
+  "kind": "buy",
+  "leaf": "فروش دفتر کار، اتاق اداری و مطب",
+  "token": "fxBuyCom02"
+ },
+ "buy-commercial-shop-owner.html": {
+  "category": "buy-commercial-property",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 25,
+   "price_per_meter": 100000000,
+   "rooms": null,
+   "total_price": 2500000000
+  },
+  "kind": "buy",
+  "leaf": "فروش مغازه و غرفه",
+  "token": "fxBuyCom01"
+ },
+ "buy-industrial-workshop-owner.html": {
+  "category": "buy-industrial-agricultural-property",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": null,
+   "built_area": 600,
+   "land_area": 1200,
+   "price_per_meter": 12500000,
+   "rooms": null,
+   "total_price": 15000000000
+  },
+  "kind": "buy",
+  "leaf": "فروش کارگاه، کارخانه و سوله",
+  "token": "fxBuyInd01"
+ },
+ "buy-office-clinic-agency.html": {
+  "category": "buy-office",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 80,
+   "floor": 2,
+   "has_elevator": true,
+   "has_parking": true,
+   "has_storage": true,
+   "price_per_meter": 105000000,
+   "rooms": 4,
+   "seller_name": "املاک آزمون",
+   "total_floors": 5,
+   "total_price": 8400000000,
+   "year_built": 1400
+  },
+  "kind": "buy",
+  "leaf": "فروش دفتر کار، اتاق اداری و مطب",
+  "token": "fxBuyOff02"
+ },
+ "buy-office-owner.html": {
+  "category": "buy-office",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 45,
+   "has_elevator": true,
+   "has_parking": false,
+   "price_per_meter": 60000000,
+   "rooms": 2,
+   "total_price": 2700000000,
+   "year_built": 1402
+  },
+  "kind": "buy",
+  "leaf": "فروش دفتر کار، اتاق اداری و مطب",
+  "token": "fxBuyOff01"
+ },
+ "buy-old-house-owner.html": {
+  "category": "buy-old-house",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 180,
+   "land_area": 180,
+   "price_per_meter": 50000000,
+   "rooms": null,
+   "total_price": 9000000000
+  },
+  "kind": "buy",
+  "leaf": "فروش زمین و کلنگی",
+  "token": "fxBuyOld01"
+ },
+ "buy-old-house-plot-agency.html": {
+  "category": "buy-old-house",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 200,
+   "land_area": 200,
+   "price_per_meter": 25000000,
+   "rooms": null,
+   "seller_name": "املاک آزمون",
+   "total_price": 5000000000
+  },
+  "kind": "buy",
+  "leaf": "فروش زمین و کلنگی",
+  "token": "fxBuyOld02"
+ },
+ "buy-residential-apartment-owner.html": {
+  "category": "buy-residential",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 92,
+   "city_name": "ارومیه",
+   "district": "مافی",
+   "floor": 3,
+   "has_balcony": true,
+   "has_elevator": true,
+   "has_parking": true,
+   "has_storage": false,
+   "price": 4600000000,
+   "price_per_meter": 50000000,
+   "rooms": 2,
+   "total_floors": 5,
+   "total_price": 4600000000,
+   "year_built": 1402
+  },
+  "kind": "buy",
+  "leaf": "فروش آپارتمان",
+  "token": "fxBuyRes01"
+ },
+ "buy-residential-house-agency.html": {
+  "category": "buy-residential",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": null,
+   "built_area": 180,
+   "city_name": "ارومیه",
+   "district": "شهرک نمونه",
+   "has_elevator": false,
+   "has_parking": true,
+   "has_storage": true,
+   "land_area": 250,
+   "price_per_meter": null,
+   "rooms": 3,
+   "seller_name": "آژانس نمونه",
+   "total_price": 7200000000,
+   "year_built": 1398
+  },
+  "kind": "buy",
+  "leaf": "فروش خانه و ویلا",
+  "token": "fxBuyRes02"
+ },
+ "buy-store-agency.html": {
+  "category": "buy-store",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 35,
+   "price_per_meter": 120000000,
+   "rooms": null,
+   "seller_name": "آژانس نمونه",
+   "total_price": 4200000000
+  },
+  "kind": "buy",
+  "leaf": "فروش مغازه و غرفه",
+  "token": "fxBuyStr02"
+ },
+ "buy-store-owner.html": {
+  "category": "buy-store",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 18,
+   "price_per_meter": 100000000,
+   "rooms": null,
+   "total_price": 1800000000
+  },
+  "kind": "buy",
+  "leaf": "فروش مغازه و غرفه",
+  "token": "fxBuyStr01"
+ },
+ "buy-villa-garden-agency.html": {
+  "category": "buy-villa",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": null,
+   "built_area": 300,
+   "has_balcony": true,
+   "has_parking": true,
+   "has_storage": true,
+   "land_area": 1200,
+   "rooms": 5,
+   "seller_name": "آژانس نمونه",
+   "total_price": 18000000000,
+   "year_built": 1390
+  },
+  "kind": "buy",
+  "leaf": "فروش خانه و ویلا",
+  "token": "fxBuyVil02"
+ },
+ "buy-villa-owner.html": {
+  "category": "buy-villa",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": null,
+   "built_area": 220,
+   "has_parking": true,
+   "has_storage": true,
+   "land_area": 500,
+   "rooms": 4,
+   "total_price": 12000000000,
+   "year_built": 1396
+  },
+  "kind": "buy",
+  "leaf": "فروش خانه و ویلا",
+  "token": "fxBuyVil01"
+ },
+ "rent-agricultural-land-agency.html": {
+  "category": "rent-industrial-agricultural-property",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 3000,
+   "deposit": 200000000,
+   "rent_price": 10000000,
+   "rooms": null,
+   "seller_name": "املاک آزمون"
+  },
+  "kind": "rent",
+  "leaf": "اجاره باغ، مزرعه و زمین کشاورزی",
+  "token": "fxRntInd02"
+ },
+ "rent-apartment-agency-arabic-digits.html": {
+  "category": "rent-apartment",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 65,
+   "deposit": 100000000,
+   "has_elevator": false,
+   "has_parking": false,
+   "has_storage": true,
+   "rent_price": 5500000,
+   "rooms": 1,
+   "seller_name": "آژانس نمونه",
+   "year_built": 1398
+  },
+  "kind": "rent",
+  "leaf": "اجاره آپارتمان",
+  "token": "fxRntApt02"
+ },
+ "rent-apartment-owner.html": {
+  "category": "rent-apartment",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 95,
+   "deposit": 300000000,
+   "floor": 2,
+   "has_elevator": true,
+   "has_parking": true,
+   "has_storage": false,
+   "rent_price": 12000000,
+   "rooms": 2,
+   "total_floors": 6,
+   "year_built": 1401
+  },
+  "kind": "rent",
+  "leaf": "اجاره آپارتمان",
+  "token": "fxRntApt01"
+ },
+ "rent-commercial-office-agency.html": {
+  "category": "rent-commercial-property",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 70,
+   "deposit": 250000000,
+   "has_elevator": true,
+   "has_parking": true,
+   "rent_price": 20000000,
+   "rooms": 3,
+   "seller_name": "آژانس نمونه",
+   "year_built": 1398
+  },
+  "kind": "rent",
+  "leaf": "اجاره دفتر کار، اتاق اداری و مطب",
+  "token": "fxRntCom02"
+ },
+ "rent-commercial-shop-owner.html": {
+  "category": "rent-commercial-property",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 30,
+   "deposit": 200000000,
+   "rent_price": 15000000,
+   "rooms": null
+  },
+  "kind": "rent",
+  "leaf": "اجاره مغازه و غرفه",
+  "token": "fxRntCom01"
+ },
+ "rent-industrial-workshop-owner.html": {
+  "category": "rent-industrial-agricultural-property",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 500,
+   "deposit": 300000000,
+   "rent_price": 25000000,
+   "rooms": null
+  },
+  "kind": "rent",
+  "leaf": "اجاره کارگاه، کارخانه و سوله",
+  "token": "fxRntInd01"
+ },
+ "rent-office-agency.html": {
+  "category": "rent-office",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 40,
+   "deposit": 150000000,
+   "rent_price": 12500000,
+   "rooms": 1,
+   "seller_name": "املاک آزمون",
+   "year_built": 1400
+  },
+  "kind": "rent",
+  "leaf": "اجاره دفتر کار، اتاق اداری و مطب",
+  "token": "fxRntOff02"
+ },
+ "rent-office-owner.html": {
+  "category": "rent-office",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 55,
+   "deposit": 100000000,
+   "has_elevator": true,
+   "rent_price": 9000000,
+   "rooms": 2,
+   "year_built": 1401
+  },
+  "kind": "rent",
+  "leaf": "اجاره دفتر کار، اتاق اداری و مطب",
+  "token": "fxRntOff01"
+ },
+ "rent-residential-apartment-owner.html": {
+  "category": "rent-residential",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 85,
+   "deposit": 200000000,
+   "floor": 2,
+   "has_elevator": true,
+   "has_parking": true,
+   "has_storage": false,
+   "price": 8000000,
+   "rent_price": 8000000,
+   "rooms": 2,
+   "total_floors": 4,
+   "total_price": null,
+   "year_built": 1400
+  },
+  "kind": "rent",
+  "leaf": "اجاره آپارتمان",
+  "token": "fxRntRes01"
+ },
+ "rent-residential-house-full-mortgage.html": {
+  "category": "rent-residential",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 120,
+   "deposit": 1500000000,
+   "has_parking": true,
+   "rent_price": 0,
+   "rooms": 3,
+   "seller_name": "املاک آزمون",
+   "year_built": 1395
+  },
+  "kind": "rent",
+  "leaf": "اجاره خانه و ویلا",
+  "token": "fxRntRes02"
+ },
+ "rent-store-agency.html": {
+  "category": "rent-store",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 40,
+   "deposit": 300000000,
+   "rent_price": 25000000,
+   "rooms": null,
+   "seller_name": "آژانس نمونه"
+  },
+  "kind": "rent",
+  "leaf": "اجاره مغازه و غرفه",
+  "token": "fxRntStr02"
+ },
+ "rent-store-owner.html": {
+  "category": "rent-store",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 20,
+   "deposit": 150000000,
+   "rent_price": 12500000,
+   "rooms": null
+  },
+  "kind": "rent",
+  "leaf": "اجاره مغازه و غرفه",
+  "token": "fxRntStr01"
+ },
+ "rent-temporary-suite-owner.html": {
+  "category": "rent-temporary",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": 45,
+   "deposit": null,
+   "has_parking": true,
+   "price": 1200000,
+   "rooms": 1
+  },
+  "kind": "rent",
+  "leaf": "اجاره کوتاه‌مدت",
+  "token": "fxRntTmp01"
+ },
+ "rent-temporary-villa-agency.html": {
+  "category": "rent-temporary",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": 300,
+   "deposit": null,
+   "has_balcony": true,
+   "has_parking": true,
+   "price": 6500000,
+   "rooms": 4,
+   "seller_name": "آژانس نمونه"
+  },
+  "kind": "rent",
+  "leaf": "اجاره کوتاه مدت",
+  "token": "fxRntTmp02"
+ },
+ "rent-villa-garden-agency.html": {
+  "category": "rent-villa",
+  "expect": {
+   "advertiser_type": "agency",
+   "agency_suspected": false,
+   "area": null,
+   "built_area": 200,
+   "deposit": 1000000000,
+   "has_parking": true,
+   "has_storage": true,
+   "land_area": 800,
+   "rent_price": 40000000,
+   "rooms": 4,
+   "seller_name": "املاک آزمون",
+   "year_built": 1388
+  },
+  "kind": "rent",
+  "leaf": "اجاره خانه و ویلا",
+  "token": "fxRntVil02"
+ },
+ "rent-villa-owner.html": {
+  "category": "rent-villa",
+  "expect": {
+   "advertiser_type": "personal",
+   "agency_suspected": false,
+   "area": null,
+   "built_area": 150,
+   "deposit": 500000000,
+   "has_parking": true,
+   "land_area": 300,
+   "rent_price": 20000000,
+   "rooms": 3,
+   "year_built": 1392
+  },
+  "kind": "rent",
+  "leaf": "اجاره خانه و ویلا",
+  "token": "fxRntVil01"
+ }
+}

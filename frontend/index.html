@@ -74,7 +74,7 @@
     </script>
     <link href="vendor/bootstrap.rtl.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/style.css?v=20260929a">
+    <link rel="stylesheet" href="css/style.css?v=20260929b">
     <link rel="stylesheet" href="vendor/persian-datepicker.min.css">
 </head>
 <body>
@@ -835,14 +835,14 @@
                                         <input type="hidden" id="scraper-city" required>
                                     </div>
                                     <div class="mb-3">
-                                        <label class="form-label">دسته‌بندی</label>
+                                        <label class="form-label" for="scraper-category">دسته‌بندی</label>
                                         <select id="scraper-category" class="form-select" required onchange="onScraperCategoryChange()"></select>
                                     </div>
                                     <!-- «خودکار» = کم‌مصرف‌ترین شمارهٔ خودتان.
                                          انتخاب دستی وقتی لازم است که بخواهید
                                          یک شمارهٔ مشخص را نگه دارید. -->
                                     <div class="mb-3">
-                                        <label class="form-label">شمارهٔ دیوار</label>
+                                        <label class="form-label" for="scraper-account">شمارهٔ دیوار</label>
                                         <select id="scraper-account" class="form-select form-select-sm"
                                                 onchange="onScraperAccountChange()">
                                             <option value="">خودکار — کم‌مصرف‌ترین</option>
@@ -930,7 +930,7 @@
                                                 </div>
                                             </div>
                                             <div class="mb-2">
-                                                <label class="form-label small text-muted">آگهی‌دهنده</label>
+                                                <label class="form-label small text-muted" for="scraper-advertiser-type">آگهی‌دهنده</label>
                                                 <select id="scraper-advertiser-type" class="form-select form-select-sm">
                                                     <option value="">همه</option>
                                                     <option value="personal">شخصی</option>
@@ -974,26 +974,33 @@
                                             <div class="input-group">
                                                 <span class="input-group-text"><i class="bi bi-calendar-event"></i></span>
                                                 <input type="text" id="scraper-posted-date" class="form-control"
-                                                       placeholder="انتخاب تاریخ..." autocomplete="off" readonly>
-                                                <button type="button" class="btn btn-outline-danger" onclick="clearScraperDate()">
+                                                       placeholder="انتخاب تاریخ..." autocomplete="off" readonly
+                                                       aria-label="تاریخ انتشار آگهی" aria-describedby="scraper-date-help">
+                                                <button type="button" class="btn btn-outline-danger" onclick="clearScraperDate()"
+                                                        aria-label="پاک کردن تاریخ" title="پاک کردن تاریخ">
                                                     <i class="bi bi-x"></i>
                                                 </button>
                                             </div>
-                                            <small class="text-muted d-block mt-1">
-                                                با انتخاب تاریخ، فقط آگهی‌های منتشرشده در همان روز اسکرپ می‌شوند
+                                            <!-- «اسکرپ تمام شد ولی چیزی نیاورد» on date runs (#34):
+                                                 the day is walked to its end, and the count only
+                                                 caps what is saved — a small day saves little. -->
+                                            <small class="text-muted d-block mt-1" id="scraper-date-help">
+                                                با انتخاب تاریخ، فقط آگهی‌های منتشرشده در همان روز اسکرپ می‌شوند.
+                                                جمع‌آوری تا آخر همان روز پیش می‌رود و «تعداد» فقط سقف آگهی‌های
+                                                ذخیره‌شده است؛ اگر آن روز آگهی کمتری داشت، کمتر ذخیره می‌شود.
                                             </small>
                                         </div>
                                         </div>
                                     </details>
                                     <div class="mb-3" id="scraper-pages-wrap">
-                                        <label class="form-label">تعداد آگهی برای اسکرپ</label>
+                                        <label class="form-label" for="scraper-pages">تعداد آگهی برای اسکرپ</label>
                                         <input type="number" id="scraper-pages" class="form-control" min="1" max="500">
                                         <small class="text-muted d-block mt-1 d-none" id="scraper-pages-hint">
                                             خالی بگذارید تا <b>همه</b> آگهی‌های آن تاریخ اسکرپ شوند؛ برای محدود کردن، عدد وارد کنید
                                         </small>
                                     </div>
                                     <div class="mb-3">
-                                        <label class="form-label">چرخش شماره دیوار (هر چند آگهی)</label>
+                                        <label class="form-label" for="scraper-rotate-every">چرخش شماره دیوار (هر چند آگهی)</label>
                                         <input type="number" id="scraper-rotate-every" class="form-control"
                                                min="0" max="200" placeholder="۱۰۰" oninput="renderRotationHint()">
                                         <!-- The number is «how many ads before switching», so a bigger
@@ -1067,7 +1074,8 @@
                                 </div>
                                 <div class="fw-note p-2 px-3">
                                     هر زمان‌بندی با حساب‌های دیوار <b>صاحبش</b> اجرا می‌شود — همان قانونی که اسکرپ دستی دارد.
-                                    اگر «حداکثر سن آگهی» را خالی گذاشته باشید، فقط آگهی‌های ۲۴ ساعت اخیر گرفته می‌شود.
+                                    تاریخ انتشار نسبی است («امروز»، «دیروز»، «N روز پیش») و هر بار اجرا، روز را به وقت تهران
+                                    حساب می‌کند؛ اگر تاریخی نگذاشته باشید، فقط آگهی‌های ۲۴ ساعت اخیر گرفته می‌شود.
                                 </div>
                             </div>
                         </div>
@@ -1100,8 +1108,8 @@
                                             <th title="چه کسی اسکرپ را شروع کرد، و با کدام حساب دیوار">کاربر / حساب</th>
                                             <th>وضعیت</th>
                                             <th>پیشرفت</th>
-                                            <th title="بررسی‌شده / کل — کل یعنی تعدادی که دیوار برای این فیلترها اعلام کرد، یا نامزدهای جمع‌شده وقتی دیوار جواب نداد">بررسی / کل</th>
-                                            <th>جدید / بروز</th>
+                                            <th title="بررسی‌شده / کل — هر دو مال همین اجراست: آگهی‌هایی که واقعاً دید، از نامزدهایی که جمع کرد. عددی که خود دیوار اعلام کرد جدا زیرش می‌آید">بررسی / کل</th>
+                                            <th title="جدید = ردیف تازه؛ بروز = از قبل ذخیره شده بود و این اجرا دوباره بازش کرد و به‌روزش کرد. تکراری‌ها (از قبل کامل بودند و باز نشدند) در خط زیر عدد می‌آیند">جدید / بروز</th>
                                             <th>شروع</th>
                                             <th>عملیات</th>
                                         </tr>
@@ -5330,7 +5338,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260929a"></script>
+<script src="js/app.js?v=20260929b"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
 <script src="js/ai/reader.js?v=20260924b"></script>
 <script src="js/ai/embed.js?v=20260924b"></script>

@@ -20,4 +20,4 @@ def test_the_jobs_table_is_on_tehran_time_and_names_its_target():
     result = subprocess.run([node, str(SCRIPT)], cwd=ROOT, capture_output=True, text=True,
                             timeout=30, env={**os.environ, "TZ": "Europe/Berlin"})
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    assert "3 checks passed" in result.stdout, result.stdout
+    assert "9 checks passed" in result.stdout, result.stdout

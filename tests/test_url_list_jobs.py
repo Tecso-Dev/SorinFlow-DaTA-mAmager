@@ -115,8 +115,19 @@ class TestTheApi:
         assert "_launch_job(cfg, db, current_user)" in src
 
     def test_the_jobs_list_labels_a_list_run(self):
-        src = inspect.getsource(sr)
-        assert '(j.config or {}).get("category") if (j.config or {}).get("urls")' in src
+        """An explicit list has no category row; its label is the kind of run
+        it was. The table's own builder, on a row like the one _launch_job
+        writes for «اسکرپ تکی»."""
+        import uuid
+        from app.models.scraping_job import ScrapingJob
+        single = ScrapingJob(id=1, job_id=uuid.uuid4(), status="pending",
+                             config={"city": "—", "category": "اسکرپ تکی",
+                                     "urls": ["https://divar.ir/v/fk00000001"]})
+        assert sr._job_response(single, {}, {}, {}).category_name == "اسکرپ تکی"
+        search = ScrapingJob(id=2, job_id=uuid.uuid4(), status="pending",
+                             config={"city": "urmia", "category": "rent-apartment"})
+        assert sr._job_response(search, {}, {}, {}).category_name is None, \
+            "a search run is named by its category row, not by its config"
 
     def test_the_urls_reach_the_background_task(self):
         src = inspect.getsource(sr.run_scraping_job)

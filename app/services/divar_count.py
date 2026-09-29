@@ -9,6 +9,9 @@ every ad in the city.
 Everything here except fetch_post_count() is pure and testable: the slug and
 filter mapping is the part that can silently go wrong.
 """
+import re
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -258,52 +261,191 @@ def _row_from_widget(w: dict) -> Optional[dict]:
     }
 
 
-def _cursor_day(pagination: dict):
-    """The date of the last post on this page, from the cursor, or None."""
-    from datetime import datetime
-    raw = ((pagination or {}).get("data") or {}).get("last_post_date")
-    if not raw:
+# The day a person picks in the panel is a Tehran day. A fixed offset, not
+# ZoneInfo: the container has no tz database (and Iran has kept +03:30 all
+# year since 2022).
+TEHRAN = timezone(timedelta(hours=3, minutes=30), "Asia/Tehran")
+
+_ISO_MOMENT = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?"
+    r"(Z|[+-]\d{2}:?\d{2})?$")
+
+
+def cursor_moment(raw: Any) -> Optional[datetime]:
+    """Divar's last_post_date cursor as a moment in Tehran time, or None.
+
+    The cursor comes in two shapes: RFC 3339 text from the search API this
+    module talks to (UTC, «Z», with anything from no fraction to
+    nanoseconds), and an epoch number from the older shapes the browser path
+    still reads (seconds, milliseconds, microseconds or nanoseconds).
+
+    Parsed by hand rather than with datetime.fromisoformat: on the image's
+    Python 3.10 that refuses a nanosecond fraction outright, and a cursor
+    that does not parse is a date run that never stops on its date.
+    """
+    if raw is None or isinstance(raw, bool) or raw == "":
         return None
+    text = str(raw).strip()
+    if isinstance(raw, (int, float)) or re.fullmatch(r"-?\d+(?:\.\d+)?", text):
+        value = float(text)
+        for div in (1, 1e3, 1e6, 1e9):
+            ts = value / div
+            if 1e9 <= ts < 4e9:        # a plausible epoch in seconds: 2001..2096
+                return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(TEHRAN)
+        return None
+    m = _ISO_MOMENT.match(text)
+    if not m:
+        return None
+    y, mo, d, h, mi, sec, frac, zone = m.groups()
     try:
-        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).date()
-    except Exception:
+        moment = datetime(int(y), int(mo), int(d), int(h), int(mi), int(sec),
+                          int((frac or "0")[:6].ljust(6, "0")), tzinfo=timezone.utc)
+    except ValueError:
         return None
+    if zone and zone != "Z":           # an explicit offset: undo it to reach UTC
+        sign = 1 if zone[0] == "+" else -1
+        moment -= sign * timedelta(hours=int(zone[1:3]), minutes=int(zone[-2:]))
+    return moment.astimezone(TEHRAN)
+
+
+def _cursor_day(pagination: Optional[dict]) -> Optional[date]:
+    """The Tehran date of the last post on this page, from the cursor, or None.
+
+    It was the UTC date. Divar's stamps are UTC, and a Tehran day starts at
+    20:30 UTC the evening before — so a date run for the 14th read a cursor
+    at 01:30 on the 14th as «the 13th», decided the feed had moved past its
+    day, and never saw anything posted between midnight and 03:30.
+    """
+    raw = ((pagination or {}).get("data") or {}).get("last_post_date")
+    moment = cursor_moment(raw)
+    return moment.date() if moment else None
+
+
+# How a walk of the search API ended. Only STOP_END and STOP_DAY mean the
+# list for these filters was read to its bottom (or past the day); STOP_TARGET
+# is the caller holding what it asked for. The other three stopped short, and
+# a pool that ends on one of them is not «everything Divar had».
+STOP_TARGET = "target"
+STOP_END = "end"        # Divar said there is no next page
+STOP_DAY = "day"        # the cursor moved past until_day
+STOP_STUCK = "stuck"    # a page with nothing new, though Divar promised more
+STOP_CAP = "cap"        # _MAX_PAGES read and the list still going
+STOP_ERROR = "error"    # a page was refused, unreadable, or never answered
+
+
+@dataclass
+class FeedReport:
+    """What fetch_listings saw, filled in when the caller passes one.
+
+    The (listings, error) pair it returns cannot say why a walk with no error
+    stopped, and its error is a sentence: the collector needs the facts
+    behind it — which page, what status, Divar's own words — to tell the
+    person what happened and what to do about it.
+    """
+    stop: str = ""
+    # the last page Divar answered with a 200, numbered from the first page
+    # of the whole feed, so a continuation keeps counting
+    last_page: int = 0
+    # the page that ended the walk, when it ended on a problem
+    page: Optional[int] = None
+    status: Optional[int] = None           # its HTTP status, if it had one
+    divar_message: Optional[str] = None    # what Divar wrote about it, verbatim
+    sentence: Optional[str] = None         # the error, as fetch_listings returned it
+    # where the next page starts, while there is one — the way back in
+    cursor: Optional[dict] = None
+    # rows the last page carried past `target`: fetched, but not returned
+    leftover: List[dict] = field(default_factory=list)
+
+
+def _divar_says(resp: Any) -> Optional[str]:
+    """What Divar wrote in a refusal, in its own words, or None.
+
+    Its API errors are JSON — {"message": ...}, or the gRPC-gateway
+    {"code": 3, "message": ...}, or {"error": {"message": ...}}. A proxy's
+    HTML error page says nothing a person can act on, so it is not quoted.
+    """
+    body: Any = None
+    try:
+        body = resp.json()
+    except Exception:
+        body = None
+    said: Any = None
+    if isinstance(body, dict):
+        for key in ("message", "detail", "error_message", "error", "title", "description"):
+            value = body.get(key)
+            if isinstance(value, dict):
+                value = value.get("message") or value.get("detail") or value.get("title")
+            if isinstance(value, str) and value.strip():
+                said = value
+                break
+    if said is None and body is None:
+        text = getattr(resp, "text", "") or ""
+        if isinstance(text, str) and text.strip() and not text.lstrip().startswith("<"):
+            said = text
+    return " ".join(str(said).split())[:200] if said else None
 
 
 async def fetch_listings(city: str, form_data: Dict[str, Any], *,
                          target: int, until_day=None,
-                         on_page=None) -> Tuple[List[dict], Optional[str]]:
+                         on_page=None,
+                         report: Optional[FeedReport] = None,
+                         after: Optional[dict] = None,
+                         first_page: int = 1,
+                         exclude: Optional[set] = None) -> Tuple[List[dict], Optional[str]]:
     """(listings, error). Page Divar's search until `target` listings are in
     hand, or — with `until_day` — until the feed's cursor moves past that day.
 
     Never raises. An error is returned as a sentence so the caller can fall
-    back to the browser and say why.
+    back to the browser and say why — and it comes back WITH the listings
+    already gathered: a refusal on page 2 does not unmake page 1.
+
+    `report`, when given, is filled in with how the walk ended. `after` is a
+    cursor from an earlier walk's report (its pages numbered on from
+    `first_page`), and `exclude` the tokens the caller already holds, so a
+    pool can be topped up where it left off.
     """
     import asyncio
 
+    rep = report if report is not None else FeedReport()
     out: List[dict] = []
-    seen = set()
+    seen = set(exclude or ())
+
+    def _stopped(why: str, page: Optional[int] = None, *, status: Optional[int] = None,
+                 said: Optional[str] = None, sentence: Optional[str] = None):
+        rep.stop, rep.page, rep.status = why, page, status
+        rep.divar_message, rep.sentence = said, sentence
+        return sentence
+
     async with httpx.AsyncClient(timeout=25.0) as client:
         city_id = await resolve_city_id(city, client)
         if not city_id:
-            return out, f"شهر «{city}» در دیوار پیدا نشد"
+            return out, _stopped(STOP_ERROR, sentence=f"شهر «{city}» در دیوار پیدا نشد")
         body: Dict[str, Any] = {
             "city_ids": [str(city_id)],
             "search_data": {"form_data": {"data": form_data}},
         }
+        if after:
+            body["pagination_data"] = after
         headers = {"User-Agent": _UA, "Content-Type": "application/json",
                    "Accept": "application/json"}
-        for page in range(1, _MAX_PAGES + 1):
+        for page in range(max(first_page, 1), _MAX_PAGES + 1):
             try:
                 resp = await client.post(SEARCH_URL, json=body, headers=headers)
             except Exception as e:
-                return out, f"دیوار پاسخ نداد: {e}"
+                return out, _stopped(STOP_ERROR, page, sentence=(
+                    f"دیوار به صفحهٔ {page} جست‌وجو پاسخ نداد ({type(e).__name__}: {e})"))
             if resp.status_code != 200:
-                return out, f"دیوار خطا داد ({resp.status_code})"
+                said = _divar_says(resp)
+                return out, _stopped(
+                    STOP_ERROR, page, status=resp.status_code, said=said, sentence=(
+                        f"دیوار صفحهٔ {page} جست‌وجو را رد کرد "
+                        f"(HTTP {resp.status_code}" + (f": {said}" if said else "") + ")"))
             try:
                 payload = resp.json()
             except Exception:
-                return out, "پاسخ دیوار قابل خواندن نبود"
+                return out, _stopped(STOP_ERROR, page, status=resp.status_code, sentence=(
+                    f"پاسخ دیوار به صفحهٔ {page} جست‌وجو قابل خواندن نبود"))
+            rep.last_page = page
 
             fresh = 0
             for w in payload.get("list_widgets") or []:
@@ -319,16 +461,72 @@ async def fetch_listings(city: str, form_data: Dict[str, Any], *,
                     pass
 
             pagination = payload.get("pagination") or {}
+            more = bool(pagination.get("has_next_page") and pagination.get("data"))
+            rep.cursor = pagination.get("data") if more else None
             if until_day is not None:
                 day = _cursor_day(pagination)
                 if day is not None and day < until_day:
-                    break                       # the feed has moved past the day
+                    _stopped(STOP_DAY, page)        # the feed has moved past the day
+                    break
             elif len(out) >= target:
+                _stopped(STOP_TARGET if more else STOP_END, page)
                 break
-            if not pagination.get("has_next_page") or not pagination.get("data"):
+            if not more:
+                _stopped(STOP_END, page)
                 break
             if fresh == 0:
-                break                           # a stuck cursor; do not spin
+                _stopped(STOP_STUCK, page)          # a stuck cursor; do not spin
+                break
             body["pagination_data"] = pagination["data"]
             await asyncio.sleep(_PAGE_PAUSE)
-    return (out if until_day is not None else out[:target]), None
+        else:
+            _stopped(STOP_CAP, _MAX_PAGES)
+    if until_day is not None:
+        return out, None
+    rep.leftover = out[target:]
+    return out[:target], None
+
+
+def refusal_advice(status: Optional[int], divar_message: Optional[str] = None,
+                   category_name: Optional[str] = None) -> str:
+    """What a person can do about a search page Divar refused, in Persian.
+
+    A 400 is Divar rejecting the search itself — almost always a filter the
+    category does not take, which Divar names («invalid filter for
+    shop-sell: credit»). Running it again unchanged gets the same answer, so
+    the advice is to change the form, not to press «ادامه».
+    """
+    if status == 400:
+        named = _filter_named_in(divar_message)
+        where = f" برای دستهٔ «{category_name}»" if category_name else ""
+        if named:
+            return f"فیلتر «{named}»{where} معتبر نیست؛ آن را خالی کنید و دوباره اجرا کنید."
+        return ("دیوار یکی از فیلترهای این جست‌وجو را نپذیرفت؛ فیلترها را بررسی کنید "
+                "و دوباره اجرا کنید.")
+    if status == 429:
+        return "دیوار گفت درخواست‌ها زیاد است؛ چند دقیقه صبر کنید و «ادامه» را بزنید."
+    if status in (401, 403):
+        return "دیوار این درخواست را نپذیرفت؛ کمی بعد «ادامه» را بزنید."
+    if status and status >= 500:
+        return "سرور دیوار خطا داد؛ کمی بعد «ادامه» را بزنید."
+    return "کمی بعد «ادامه» را بزنید."
+
+
+# Divar's names for the filters it takes, as the form labels them.
+_FILTER_FA = {
+    "credit": "ودیعه", "rent": "اجاره", "price": "قیمت", "size": "متراژ",
+    "business-type": "نوع آگهی‌دهنده", "has-photo": "عکس‌دار",
+}
+
+
+def _filter_named_in(message: Optional[str]) -> Optional[str]:
+    """The form's name for the filter Divar's message complains about.
+
+    Only a whole word counts: «shop-rent» in «invalid filter for shop-rent:
+    price» is the category, not the rent filter.
+    """
+    if not message:
+        return None
+    words = "|".join(map(re.escape, _FILTER_FA))
+    found = re.findall(rf"(?<![\w-])({words})(?![\w-])", message)
+    return _FILTER_FA[found[-1]] if found else None

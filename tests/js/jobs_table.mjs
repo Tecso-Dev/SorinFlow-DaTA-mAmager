@@ -63,4 +63,60 @@ let passed = 0;
     passed++;
 }
 
+// #29 — job 44 read «251 / 251»: «کل» was Divar's count. Now the pair is this
+// run's own (examined / its pool) and Divar's number sits under it.
+const job44 = {
+    ...base, status: 'completed', progress: 100, max_items: null, started_at: null,
+    total_items: 24, scraped_items: 24, new_items: 8, updated_items: 0, divar_count: 251,
+    finish_reason: 'آن روز بیش از این آگهی نداشت', reason_line: '16 تاریخ انتشار',
+};
+{   // the pair is the run's own, and Divar's number is labelled as Divar's
+    const out = render(job44);
+    assert.ok(out.includes('<bdi title="بررسی‌شده">24</bdi>') && out.includes('<bdi title="کل">24</bdi>'),
+        'the pair is not examined / pool');
+    assert.ok(out.includes('دیوار می‌گوید: 251'), 'Divar\'s own number is not shown beside the pool');
+    assert.ok(!out.includes('<bdi title="کل">251</bdi>'), '«کل» is Divar\'s count again');
+    const noCount = render({ ...job44, divar_count: null });
+    assert.ok(!noCount.includes('دیوار می‌گوید'), 'an explicit list has no Divar count to show');
+    const zero = render({ ...job44, divar_count: 0, total_items: 0, scraped_items: 0 });
+    assert.ok(zero.includes('دیوار می‌گوید: 0'), 'Divar answering «none» is an answer too');
+    passed++;
+}
+{   // a finished run's bar is full, and says so in its percent
+    const out = render(job44);
+    assert.ok(out.includes('width:100%') && out.includes('>100%<'), 'the finished bar is not full');
+    passed++;
+}
+{   // under «تازه», the line that says where the rest went — escaped
+    const out = render(job44);
+    const cell = out.slice(out.indexOf('title="تازه'), out.indexOf('job-when'));
+    assert.ok(cell.includes('16 تاریخ انتشار'), 'the reason line is not under «تازه»');
+    const hostile = render({ ...job44, reason_line: '<img src=x onerror=alert(1)>' });
+    assert.ok(!hostile.includes('<img src=x'), 'the reason line is not escaped');
+    assert.ok(!render({ ...job44, reason_line: null }).includes('job-new-why'), 'an empty reason line leaves a box');
+    passed++;
+}
+{   // the finish reason reaches the status cell, escaped
+    const out = render({ ...job44, finish_reason: '<b>x</b> آن روز' });
+    assert.ok(out.includes('&lt;b&gt;x&lt;/b&gt; آن روز') && !out.includes('<b>x</b>'));
+    passed++;
+}
+{   // a run whose owner was deleted says so; a run nobody started keeps «—»
+    const gone = render({ ...job44, owner_user_id: 7, owner_name: null, owner_deleted: true });
+    assert.ok(gone.includes('کاربر حذف‌شده'), 'a deleted owner still reads «—»');
+    const nobody = render({ ...job44, owner_user_id: null, owner_name: null, owner_deleted: false });
+    assert.ok(!nobody.includes('کاربر حذف‌شده'), 'a run nobody started claims a deleted owner');
+    const named = render({ ...job44, owner_name: 'کاربر آزمایشی', owner_deleted: false });
+    assert.ok(named.includes('کاربر آزمایشی'));
+    passed++;
+}
+{   // «ناقص»: the partial status has its label, its badge, delete and resume
+    const out = render({ ...job44, status: 'partial', can_resume: true });
+    assert.ok(out.includes('status-partial') && out.includes('>ناقص<'), 'partial has no label');
+    assert.ok(out.includes("deleteJob('5e1f')"), 'a partial run cannot be removed from the list');
+    assert.ok(out.includes("resumeJob('5e1f')"), 'a partial run cannot be continued');
+    assert.ok(!out.includes("cancelJob('5e1f')"), 'a finished run offers cancel');
+    passed++;
+}
+
 console.log(`${passed} checks passed`);
