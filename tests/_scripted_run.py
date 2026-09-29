@@ -5,8 +5,9 @@ Divar's search API answers over httpx.MockTransport (the real client, the
 real request bodies and cursors), and nothing opens a browser: by default
 every candidate is one the database already holds, so a run walks its pool
 in milliseconds and what is under test is how the collection ended and how
-the run reports it. `held=False` with a `detail` makes every candidate a new
-listing instead, for the cases where meeting the target matters.
+the run reports it. `held=False` with a `detail` (a dict, or a function of
+the listing's URL) makes every candidate a listing the run opens instead,
+for the cases where meeting the target matters.
 
 Not a conftest fixture: a test module takes it with
 
@@ -202,13 +203,14 @@ def scripted_run(monkeypatch):
         s._recycle_browser = _nothing
         opened = []
 
-        async def exists(_divar_id):
-            return held
+        async def exists(divar_id):
+            return held(divar_id) if callable(held) else held
         s.property_exists = exists
 
         async def open_page(url, **_kw):
             opened.append(url)
-            return dict(detail or {}, url=url)
+            page_says = detail(url) if callable(detail) else detail
+            return dict(page_says or {}, url=url)
         s.scrape_property_detail = open_page
 
         async def save(property_data):
