@@ -3198,6 +3198,29 @@ html[data-theme="light"] .table thead th {
 .fw-note b { color: var(--text-dim) }
 .fw-warn { color: #fca5a5 }
 
+/* A phone whose codes arrive under the other SIM's number (issue #37): on its
+   own card, where the one person who can fix the app's setup is looking. */
+.fw-mislabel {
+  margin-top: .4rem; padding: .4rem .6rem; border-radius: 11px;
+  background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.25);
+  color: var(--text-dim); font-size: .74rem; line-height: 1.8;
+  min-width: 15rem; max-width: 26rem;
+}
+.fw-mislabel > b { color: var(--warning); font-weight: 700 }
+.fw-mislabel .bi { color: var(--warning); margin-inline-end: .25rem }
+/* where a code went, when it was not where its label said */
+.fw-route {
+  display: inline-flex; align-items: center; gap: .3rem; margin-top: .2rem;
+  padding: .05rem .45rem; border-radius: 8px; font-size: .72rem;
+  background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.22);
+  color: var(--warning);
+}
+/* a phone number inside Persian text: kept left-to-right and whole */
+.fw-num {
+  direction: ltr; unicode-bidi: isolate; color: var(--text);
+  font-family: var(--bs-font-monospace); font-size: .95em;
+}
+
 .fw-fields {
   background: var(--surface);
   border: 1px solid var(--border);
