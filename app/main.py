@@ -563,11 +563,6 @@ async def api_key_middleware(request: Request, call_next):
                     # to /api/maintenance is still super_admin-only by its own
                     # dependency; it is only exempt from the API-key check.
                     "/api/maintenance", "/maintenance-access",
-                    # Fetched by the browser with no credentials of any kind,
-                    # and by Kavenegar's own connection check. Left out, it
-                    # 401s in production and works locally — the same way the
-                    # login endpoints did.
-                    "/kvn-push-sw.js",
                     # The phone-side SMS forwarder. Signs every POST with a
                     # shared secret (HMAC in X-Signature) and carries neither a
                     # bearer nor the API key — it is a phone, not the panel.
@@ -639,15 +634,15 @@ async def api_key_middleware(request: Request, call_next):
 
 # Content-Security-Policy-Report-Only: observe first, enforce later. Built
 # from what the pages actually load (frontend/index.html, portal.html,
-# landing.html, app.js, portal.js, sw.js, kvn-push-sw.js), not an aspirational
+# landing.html, app.js, portal.js, sw.js), not an aspirational
 # policy that would just flood /api/public/csp-report with expected noise:
 #   script-src/style-src 'unsafe-inline' — the panel is ~300 onclick=/onchange=
 #     attributes plus a handful of inline <script> blocks; a real nonce-based
 #     policy is a bigger rewrite than this phase does. 'unsafe-eval' — app.js's
 #     command-palette runs `eval(it.run)` for one built-in action.
-#   https://cdn.jsdelivr.net — landing.html's three.js. https://cdn.kavenegar.com
-#     — the push SDK <script> in landing.html/portal.html, and kvn-push-sw.js's
-#     own importScripts() of Kavenegar's service-worker script.
+#   https://cdn.jsdelivr.net — landing.html's three.js. (Kavenegar's web push
+#     is gone: its SDK <script>, its service worker and both of its CSP hosts
+#     were removed with the feature.)
 #   img-src data:/blob: — the QR codes drawn for TOTP/forwarder setup
 #     (vendor/qrcode.min.js) and CSV/JSON export links (URL.createObjectURL).
 #   https://*.divarcdn.com — property photos not yet downloaded to data-pvc
@@ -658,11 +653,11 @@ async def api_key_middleware(request: Request, call_next):
 # target="_blank">, never embedded, which CSP does not govern at all.
 _CSP_REPORT_ONLY = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.kavenegar.com; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob: https://*.divarcdn.com; "
     "font-src 'self'; "
-    "connect-src 'self' https://cdn.kavenegar.com; "
+    "connect-src 'self'; "
     "worker-src 'self'; "
     "frame-ancestors 'self'; "
     "base-uri 'self'; "
@@ -1347,33 +1342,6 @@ async def portal_page():
         return HTMLResponse(page.read_text(encoding="utf-8"),
                             headers={"Cache-Control": "no-cache, must-revalidate"})
     return HTMLResponse("portal not found", status_code=404)
-
-
-# GET and HEAD. FastAPI's @app.get registers GET alone, so a HEAD — which
-# is what a checker reaching for "does this file exist" often sends — came
-# back 405, on a file that serves perfectly over GET.
-@app.api_route("/kvn-push-sw.js", methods=["GET", "HEAD"], include_in_schema=False)
-async def kavenegar_push_service_worker():
-    """Kavenegar's web-push service worker, served from the ORIGIN ROOT.
-
-    A service worker can only control pages at or below its own path, so this
-    one has to answer at /kvn-push-sw.js — mounting it under /dashboard would
-    scope it to the panel and Kavenegar's «بررسی اتصال» would not find it.
-
-    Service-Worker-Allowed is sent explicitly: without it a browser refuses any
-    registration asking for a scope broader than the script's own directory,
-    which is the failure people hit when the file is served correctly and the
-    registration still will not take.
-    """
-    return FileResponse(
-        "frontend/kvn-push-sw.js",
-        media_type="application/javascript",
-        headers={"Service-Worker-Allowed": "/",
-                 # The SDK it imports is versioned upstream; caching this
-                 # one-line shim for a day is enough and keeps a stale worker
-                 # from outliving a change here.
-                 "Cache-Control": "public, max-age=86400"},
-    )
 
 
 @app.get("/favicon.svg", include_in_schema=False)

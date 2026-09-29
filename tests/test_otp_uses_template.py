@@ -106,52 +106,39 @@ class TestATemplateCannotBecomeASinglePointOfFailure:
         assert "success" in fn, "the fallback only triggers on an exception"
 
 
-class TestTheServiceWorkerIsReachable:
-    """A service worker only controls pages at or below its own path, so
-    Kavenegar's has to answer at the origin root. And it is fetched with no
-    credentials — left out of the API-key allowlist it 401s in production and
-    works locally, exactly as the login endpoints did."""
+class TestTheWebPushIsGone:
+    """Kavenegar's web push was dropped in phase 4. It put a third-party
+    <script> on the public landing page and on the customer portal — two
+    origins that also carry sign-in — and a service worker at the origin root
+    that imported more code from the same CDN. Whoever controls that CDN
+    controlled those pages, and the panel never used the feature.
 
-    def test_the_file_exists_and_is_what_kavenegar_generated(self):
+    These check the removal instead of the wiring, so it cannot drift back in
+    a copy-paste."""
+
+    def test_no_page_loads_the_push_sdk(self):
         from pathlib import Path
-        sw = Path("frontend/kvn-push-sw.js")
-        assert sw.exists(), "the service worker file is missing"
-        assert "cdn.kavenegar.com/sdk/sw.js" in sw.read_text(encoding="utf-8")
+        for page in ("frontend/landing.html", "frontend/portal.html", "frontend/index.html"):
+            assert "cdn.kavenegar.com" not in Path(page).read_text(encoding="utf-8"), \
+                f"{page} still loads a third-party script from Kavenegar's CDN"
 
-    def test_it_is_served_from_the_origin_root(self):
-        import re
-        src = open("app/main.py", encoding="utf-8").read()
-        assert re.search(r'@app\.(get|api_route)\(\s*["\']/kvn-push-sw\.js["\']', src), \
-            "no root route serves the service worker"
-
-    def test_head_is_allowed_too(self):
-        """A checker asking «does this file exist» often sends HEAD, and
-        @app.get registers GET alone — so HEAD answered 405 on a file that
-        served perfectly over GET."""
-        import re
-        src = open("app/main.py", encoding="utf-8").read()
-        m = re.search(r'@app\.api_route\(\s*["\']/kvn-push-sw\.js["\'][^)]*\)', src)
-        assert m and "HEAD" in m.group(0), "HEAD is not accepted for the service worker"
-
-    def test_it_is_in_the_api_key_allowlist(self):
-        src = open("app/main.py", encoding="utf-8").read()
-        pub = src.split("public_paths = {")[1].split("}")[0]
-        assert "/kvn-push-sw.js" in pub, \
-            "the service worker would 401 in production, where API_KEY is set"
-
-    def test_the_scope_header_is_sent(self):
-        src = open("app/main.py", encoding="utf-8").read()
-        fn = src.split("async def kavenegar_push_service_worker")[1][:900]
-        assert "Service-Worker-Allowed" in fn
-
-    def test_the_sdk_is_on_the_public_pages_and_not_the_admin_panel(self):
+    def test_the_service_worker_is_gone_from_the_tree_and_from_the_routes(self):
         from pathlib import Path
-        for page in ("frontend/landing.html", "frontend/portal.html"):
-            assert "cdn.kavenegar.com/sdk/page.js" in Path(page).read_text(encoding="utf-8"), \
-                f"{page} does not load the push SDK"
-        panel = Path("frontend/index.html").read_text(encoding="utf-8")
-        assert "cdn.kavenegar.com" not in panel, \
-            "the admin panel should not load a third-party script into an authenticated session"
+        assert not Path("frontend/kvn-push-sw.js").exists(), "the push service worker file is back"
+        src = Path("app/main.py").read_text(encoding="utf-8")
+        assert "kvn-push-sw" not in src, "app/main.py still serves the push service worker"
+
+    def test_the_csp_no_longer_allows_that_cdn(self):
+        """A leftover host in the policy is not harmless: it is standing
+        permission for the next script that points there."""
+        import app.main as m
+        assert "cdn.kavenegar.com" not in m._CSP_REPORT_ONLY
+
+    def test_kavenegar_is_still_available_as_an_sms_gateway(self):
+        """Only the web push went. Sending an SMS through Kavenegar is a
+        different thing and is still a provider people choose."""
+        from app.services import sms_service
+        assert "kavenegar" in open(sms_service.__file__, encoding="utf-8").read().lower()
 
 
 class TestTheTestButtonTestsTheConfiguredRoute:
