@@ -85,9 +85,15 @@ export function Tilt({ children, className, max = 7 }: { children: React.ReactNo
       className={cn("group/tilt relative will-change-transform", className)}
     >
       {children}
+      {/* `invisible`, not opacity alone: at opacity 0 this still covers the
+          card, and a contrast checker that meets an overlapping element whose
+          background is a gradient cannot work out what colour the text is
+          really on — axe called the filing tiles a colour-contrast violation
+          on that basis, on text that is actually at 6.4:1. Nothing that is
+          not being shown should be in that path. */}
       <motion.div
         aria-hidden
-        className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover/tilt:opacity-100"
+        className="pointer-events-none invisible absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover/tilt:visible group-hover/tilt:opacity-100"
         style={{ background: glare }}
       />
     </motion.div>
