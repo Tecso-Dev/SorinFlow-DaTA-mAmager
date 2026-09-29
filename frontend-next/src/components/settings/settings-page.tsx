@@ -8,15 +8,19 @@
 
 import { Loader2, Palette } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Lottie } from "@/components/ui/lottie";
 import { Textarea } from "@/components/ui/textarea";
-import { Empty, ErrorNote, Field, PageHeader, Section } from "@/components/panel/kit";
+import { Empty, ErrorNote, Field, ListSkeleton, PageHeader, Section } from "@/components/panel/kit";
+import { IsoAlert, IsoKeyPanel } from "@/components/panel/motion3d";
 import { Reveal, Tilt } from "@/components/viz";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
 import { can, useSession } from "@/lib/session";
+import shieldLottie from "@/lotties/shield.json";
+import successLottie from "@/lotties/success.json";
 
 type SiteConfig = {
   brandName: string; brandNameLatin: string; tagline: string; agencyName: string; domain: string;
@@ -74,6 +78,13 @@ function Form({ initial }: { initial: SiteConfig }) {
   // touched that field at all.
   const [baseline, setBaseline] = useState<SiteConfig>(initial);
   const [busy, setBusy] = useState(false);
+  // the check mark that plays once after the server has confirmed a save
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (savedAt === null) return;
+    const t = setTimeout(() => setSavedAt(null), 2600);
+    return () => clearTimeout(t);
+  }, [savedAt]);
 
   function set<K extends FieldKey>(key: K, value: SiteConfig[K]) {
     setSite((s) => ({ ...s, [key]: value }));
@@ -94,6 +105,7 @@ function Form({ initial }: { initial: SiteConfig }) {
       setSite(saved);
       setBaseline(saved);
       await qc.invalidateQueries({ queryKey: QKEY });
+      setSavedAt(Date.now());
       toast.success("ذخیره شد");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "ذخیره نشد");
@@ -127,11 +139,12 @@ function Form({ initial }: { initial: SiteConfig }) {
             <Field label="توضیح SEO" htmlFor="site-seo-desc" className="sm:col-span-2">
               <Textarea id="site-seo-desc" rows={3} maxLength={300} value={site.seoDescription} onChange={(e) => set("seoDescription", e.target.value)} />
             </Field>
-            <div className="sm:col-span-2">
+            <div className="flex items-center gap-2 sm:col-span-2">
               <Button type="submit" disabled={busy} className="gap-1.5">
                 {busy && <Loader2 className="size-4 animate-spin" />}
                 ذخیرهٔ تنظیمات
               </Button>
+              {savedAt !== null && <Lottie key={savedAt} animationData={successLottie} loop={false} className="size-10" label="تأیید ثبت" />}
             </div>
           </form>
         </Section>
@@ -160,17 +173,22 @@ export function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader icon={Palette} title="برند و سایت" hint="نام برند، دفتر، دامنه و اطلاعات تماس" />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_170px]">
+        <PageHeader icon={Palette} title="برند و سایت" hint="نام برند، دفتر، دامنه و اطلاعات تماس" />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <IsoKeyPanel className="max-w-[140px]" />
+        </Reveal>
+      </div>
       {session.isPending ? (
-        <div className="h-40 animate-pulse rounded-2xl bg-muted/40" />
+        <ListSkeleton rows={3} />
       ) : session.isError ? (
-        <ErrorNote error={session.error} />
+        <ErrorNote error={session.error} illustration={<IsoAlert />} />
       ) : !can(user, { roles: ["root"] }) ? (
-        <Empty>این بخش فقط برای root است.</Empty>
+        <Empty illustration={<Lottie animationData={shieldLottie} className="max-w-[100px]" />}>این بخش فقط برای root است.</Empty>
       ) : q.isPending ? (
-        <div className="h-64 animate-pulse rounded-2xl bg-muted/40" />
+        <ListSkeleton rows={6} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={<IsoAlert />} />
       ) : (
         <Form initial={q.data.site} />
       )}
