@@ -38,33 +38,78 @@ from app.scraper.divar_scraper import DivarScraper  # noqa: E402
 from app.scraper.contact_extractor import ContactExtractor  # noqa: E402
 
 
+# Fixtures and stand-ins only — no Test* names, so nothing is collected twice.
+from test_run_start_reasons import (  # noqa: E402,F401
+    _NotStarting, _pending, _run, _row_and_log, finish, world)
+
+
 class TestARunWhoseBrowserDidNotComeUpFailsInWords:
     """The single scrape is a job of one now, so this lives in the job path —
     which had the same bug: «Browser initialization incomplete, continuing
-    anyway...» continued with no page."""
-    SRC = inspect.getsource(sr.run_scraping_job)
+    anyway...» continued with no page. Every other way a run fails to start
+    is in test_run_start_reasons.py."""
 
-    def test_initialize_s_answer_stops_the_run(self):
-        # the old log line, not the comment that quotes it
-        assert 'Browser initialization incomplete, continuing anyway' not in self.SRC
-        i = self.SRC.index("if not initialized:")
-        assert "raise RuntimeError(msg)" in self.SRC[i:i + 1600]
+    async def test_initialize_s_answer_stops_the_run(self, world, finish, monkeypatch):  # noqa: F811
+        routes, _swept = finish
+        went_on = []
 
-    def test_a_busy_account_is_named_as_such(self):
-        assert "دو اسکرپ" in self.SRC and "«ادامه» را بزنید" in self.SRC
+        async def _went_on(self, **_kw):
+            went_on.append(True)
+        monkeypatch.setattr(_NotStarting, "start_scraping_job", _went_on)
+        monkeypatch.setattr(_NotStarting, "error", "Browser closed.")
+        eng, maker = world.engine()
+        try:
+            await world.tables(eng)
+            job_id = await _pending(world, maker)
+            await _run(routes, job_id)
+            assert went_on == [], "the run went on with no page"
+            row, _lines = await _row_and_log(maker, job_id)
+            assert row.status == "failed"
+        finally:
+            await world.cleanup(maker)
+            await eng.dispose()
+
+    async def test_a_busy_account_is_named_as_such(self):
+        s = DivarScraper.__new__(DivarScraper)
+        s.db_session = None                      # nobody to ask which run has it
+        said = await s._explain_open_failure(
+            RuntimeError("profile /app/data/profiles/09990000001 is already open in this process"),
+            "09990000001")
+        assert "09990000001" in said and "در اسکرپ دیگری" in said and "«ادامه» را بزنید" in said
+        assert "مرورگر اسکرپر بالا نیامد" not in said, "a busy number is not a broken browser"
 
     def test_any_other_boot_failure_carries_the_reason(self):
-        assert "مرورگر اسکرپر بالا نیامد" in self.SRC
+        for err in (RuntimeError("BrowserType.launch_persistent_context: Browser closed."),
+                    TimeoutError(), ""):
+            said = ds.browser_failure_reason(err)
+            assert said.startswith("مرورگر اسکرپر بالا نیامد") and "نامشخص" not in said
+        assert "Browser closed" in ds.browser_failure_reason(RuntimeError("Browser closed."))
 
-    def test_it_is_written_to_the_run_log_and_the_finish_line(self):
-        i = self.SRC.index("if not initialized:")
-        block = self.SRC[i:i + 1600]
-        assert "_jl.record(job_id, _jl.ERROR, msg" in block
-        assert "_row.finish_reason = msg[:300]" in block
+    async def test_it_is_written_to_the_run_log_and_the_finish_line(self, world, finish,  # noqa: F811
+                                                                      monkeypatch):
+        routes, _swept = finish
+        monkeypatch.setattr(_NotStarting, "error", "Browser closed.")
+        eng, maker = world.engine()
+        try:
+            await world.tables(eng)
+            job_id = await _pending(world, maker)
+            await _run(routes, job_id)
+            row, lines = await _row_and_log(maker, job_id)
+            assert row.finish_reason and row.finish_reason.startswith("مرورگر اسکرپر بالا نیامد")
+            assert ("error", "error", row.finish_reason) in lines
+        finally:
+            await world.cleanup(maker)
+            await eng.dispose()
 
-    def test_initialize_records_why_it_failed(self):
-        src = inspect.getsource(DivarScraper.initialize)
-        assert "self._init_error = str(e)" in src
+    async def test_initialize_records_why_it_failed(self, monkeypatch):
+        class _NoChromium:
+            async def start(self):
+                raise RuntimeError("Executable doesn't exist at /ms-playwright/chromium/chrome")
+        monkeypatch.setattr(ds, "async_playwright", lambda: _NoChromium())
+        s = DivarScraper(db_session=None, proxy_enabled=False, headless=True)
+        assert await s.initialize(phone_number=None) is False
+        assert "Executable doesn't exist" in s._init_error
+        assert "پیدا نشد" in s._init_reason
 
 
 class TestTheRateLimiterInItsFirstMinute:

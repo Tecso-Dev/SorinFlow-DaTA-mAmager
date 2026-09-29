@@ -81,6 +81,132 @@ def _is_dropped_connection(e: BaseException) -> bool:
 # is the shared anonymous profile a run with no number opens.
 _NO_BROWSER = object()
 
+# How long close() waits on one cleanup step before moving on to the next.
+_CLOSE_STEP_TIMEOUT = 60.0
+
+# The statuses a run moves its own row between. Anything else on the row was
+# written from outside — «لغو», the queue's sweep — and a run that reads it
+# stops, and never writes over it (DivarScraper._move_status).
+_LIVE_STATUSES = ("running", "paused")
+_STOPPED_STATUSES = ("cancelled", "failed", "completed")
+
+
+# ── why a run could not start, in words the person who started it can act on ──
+#
+# A run whose browser did not come up used to end «مرورگر اسکرپر بالا نیامد:
+# نامشخص» whenever nothing had set a technical error — which was every path
+# that returned instead of raising: the only number's session refused, every
+# number already open in other runs. Each reason below names the cause and
+# what to do, and fits the finish line (finish_reason, 300 characters) with
+# the «what to do» part always kept whole.
+
+_FINISH_LINE_MAX = 300
+
+
+def _say(cause: str, todo: str) -> str:
+    """«cause — todo», cut to the finish line from the cause's end."""
+    tail = f" — {todo}"
+    room = _FINISH_LINE_MAX - len(tail)
+    if len(cause) > room:
+        cause = cause[:room - 1].rstrip() + "…"
+    return cause + tail
+
+
+def _numbers_fa(phones, limit: int = 2) -> str:
+    phones = [p for p in phones if p]
+    more = len(phones) - limit
+    return "، ".join(phones[:limit]) + (f" و {more} شمارهٔ دیگر" if more > 0 else "")
+
+
+_TRY_AGAIN = "چند دقیقه بعد «ادامه» را بزنید؛ اگر تکرار شد به مدیر سامانه خبر دهید"
+_TELL_ADMIN = "به مدیر سامانه خبر دهید؛ «ادامه» تا رفع آن همین خطا را می‌دهد"
+
+# (substrings of the error, the cause in words, what to do), first match wins.
+# The sandbox markers come first: Chromium refusing its sandbox surfaces as a
+# browser that closed, with the reason in the browser's output below it.
+_BROWSER_FAILURES = (
+    (("No usable sandbox", "SUID sandbox", "Failed to move to new namespace",
+      "without --no-sandbox"),
+     "Chromium با تنظیمات امنیتی (sandbox) این سرور اجرا نشد",
+     "به مدیر سامانه خبر دهید (تنظیم CHROMIUM_SANDBOX)"),
+    (("Executable doesn't exist", "executable doesn't exist"),
+     "Chromium روی سرور پیدا نشد (نصب ناقص)", _TELL_ADMIN),
+    (("No space left", "ENOSPC"), "فضای دیسک سرور پر است", _TELL_ADMIN),
+    (("Permission denied", "EACCES"),
+     "مرورگر اجازهٔ نوشتن در پوشهٔ پروفایل‌های روی سرور را ندارد", _TELL_ADMIN),
+    (("Cannot allocate memory", "ENOMEM", "out of memory", "Out of memory"),
+     "حافظهٔ سرور برای یک مرورگر دیگر کافی نبود",
+     "وقتی اسکرپ‌های دیگر تمام شدند «ادامه» را بزنید"),
+    (("Browser closed", "browser has been closed", "Target closed",
+      "Target page, context or browser has been closed", "crashed", "SIGKILL", "SIGSEGV"),
+     "مرورگر بلافاصله بعد از باز شدن بسته شد؛ معمولاً از کمبود حافظهٔ سرور است", _TRY_AGAIN),
+    (("Timeout", "TimeoutError", "timed out"),
+     "Chromium در زمان مجاز آماده نشد؛ سرور زیر بار است", _TRY_AGAIN),
+)
+
+
+def browser_failure_reason(err) -> str:
+    """A browser that would not start — an exception or its text — in words:
+    the cause, what to do, and the technical text for whoever is told."""
+    if isinstance(err, BaseException):
+        text = str(err).strip()
+        tech = f"{type(err).__name__}: {text}" if text else type(err).__name__
+    else:
+        text = tech = str(err or "").strip()
+    probe = f"{tech} {text}"
+    first_line = tech.splitlines()[0][:90] if tech else ""
+    for markers, cause, todo in _BROWSER_FAILURES:
+        if any(m in probe for m in markers):
+            return _say(f"مرورگر اسکرپر بالا نیامد: {cause} (خطای فنی: {first_line})", todo)
+    if first_line:
+        return _say(f"مرورگر اسکرپر بالا نیامد (خطای فنی: {first_line})",
+                    "چند دقیقه بعد «ادامه» را بزنید؛ اگر تکرار شد همین متن را به مدیر سامانه بدهید")
+    return _say("مرورگر اسکرپر بالا نیامد و Playwright متنی برای خطا نداد",
+                "جزئیات در لاگ «scraper» در نمایشگر لاگ پنل است؛ " + _TRY_AGAIN)
+
+
+def start_failure_reason(scraper) -> str:
+    """Why `scraper` did not start, for its run's finish line. initialize()
+    leaves the reason on every path that returns False; the technical text is
+    only the fallback for one that forgets."""
+    return (getattr(scraper, "_init_reason", None)
+            or browser_failure_reason(getattr(scraper, "_init_error", "") or ""))
+
+
+def crash_reason(err: BaseException) -> str:
+    """A run that died of something nothing above expected, in words."""
+    text = str(err).strip()
+    tech = (f"{type(err).__name__}: {text}" if text else type(err).__name__).splitlines()[0][:120]
+    return _say(f"اسکرپ با خطای فنی متوقف شد ({tech})",
+                "آگهی‌های ذخیره‌شده سر جایشان هستند؛ «ادامه» را بزنید و اگر تکرار شد "
+                "همین متن را به مدیر سامانه بدهید")
+
+
+def _no_session_reason(rejected, closed, busy, broken) -> str:
+    """No number of the run's opened into a working session: which failed
+    how, and what to do about the one that matters most."""
+    parts = []
+    if rejected:
+        parts.append(f"نشست {_numbers_fa(rejected)} باز نشد (دیوار آن را نپذیرفت یا منقضی شده)")
+    if closed:
+        parts.append(f"مرورگر هنگام باز کردن نشست {_numbers_fa(closed)} بسته شد")
+    if busy:
+        parts.append(f"{_numbers_fa(busy)} همین حالا در اسکرپ دیگری باز است")
+    if broken:
+        parts.append(f"{_numbers_fa(broken)} با خطای فنی باز نشد")
+    one = len(rejected) + len(closed) + len(busy) + len(broken) == 1
+    head = ("اسکرپ شروع نشد: " if one else
+            "اسکرپ شروع نشد، چون هیچ‌کدام از شماره‌های دیوار شما باز نشد: ")
+    if one:
+        parts[-1] += " و شمارهٔ روشن دیگری به نام شما نیست"
+    if rejected:
+        todo = "در «احراز هویت دیوار» دوباره وارد شوید، سپس «ادامه» را بزنید"
+    elif busy and not (closed or broken):
+        todo = "بعد از پایان آن اسکرپ «ادامه» را بزنید"
+    else:
+        todo = _TRY_AGAIN
+    return _say(head + "؛ ".join(parts), todo)
+
 
 class DivarScraper:
     """Main scraper class for Divar.ir real estate listings"""
@@ -268,8 +394,14 @@ class DivarScraper:
             except Exception as e:
                 logger.warning(f"[browser] could not empty the anonymous profile: {e}")
 
-    async def initialize(self, restore_session: bool = True, phone_number: str = None) -> bool:
-        """Initialize scraper with browser and optional session restoration"""
+    async def initialize(self, restore_session: bool = True, phone_number: Optional[str] = None) -> bool:
+        """Initialize scraper with browser and optional session restoration.
+
+        False when the run cannot start, and then `_init_reason` says why and
+        what to do, in the words run_scraping_job puts on the finish line."""
+        self._init_reason: Optional[str] = None
+        self._init_logged = False
+        pool: List[str] = []
         try:
             self.playwright = await async_playwright().start()
 
@@ -306,11 +438,10 @@ class DivarScraper:
                 # Only an ownerless, internally started run may fall back to it.
                 if not phone_number and not owner:
                     phone_number = settings.divar_phone_number or None
-                # Otherwise the least-spent number the owner has switched on
+                # Otherwise the least-spent number the owner has switched on —
+                # and that no other run has open right now.
                 if not phone_number and self.db_session:
                     try:
-                        from app.models.cookie import Cookie as CookieModel
-                        from sqlalchemy import select as _select
                         # Least-spent first, oldest-used to break the tie.
                         #
                         # This used to take the most recently *updated* row, and
@@ -323,9 +454,11 @@ class DivarScraper:
                         # The same ordering and the same rest rule rotation
                         # uses, so the first account of a run is chosen the
                         # way every later one is.
-                        _pool = await self._load_rotation_pool()
-                        if _pool:
-                            phone_number = _pool[0]
+                        pool = await self._load_rotation_pool()
+                        if pool:
+                            phone_number = await self._pick_free_account(pool)
+                            if phone_number is None:
+                                return await self._init_failed(self._all_numbers_busy(pool))
                             logger.info(f"Auto-selected Divar session for {phone_number}")
                     except Exception as _e:
                         logger.warning(f"Could not auto-select session: {_e}")
@@ -337,9 +470,20 @@ class DivarScraper:
                     if proxy is None:
                         logger.warning("[proxy] PROXY_ENABLED but no proxy reaches Divar — going direct")
                 await self._wait_for_released_profile(phone_number)
-                await self._open_browser_for(phone_number, proxy)
+                try:
+                    await self._open_browser_for(phone_number, proxy)
+                except RuntimeError as e:
+                    # Picked as free, then opened by another run of the same
+                    # owner in the moment between the look and this open: the
+                    # next free number of the pool, not a failed run.
+                    if not (phone_number in pool and "already open" in str(e)):
+                        raise
+                    phone_number = await self._open_first_free(pool, skip={phone_number})
+                    if phone_number is None:
+                        return await self._init_failed(self._all_numbers_busy(pool))
 
                 if phone_number:
+                    from app.scraper.stealth import profile_in_use
                     restored = await self.auth.restore_session(phone_number)
                     if not restored:
                         logger.warning(f"Session not restored for {phone_number}. Trying other saved sessions...")
@@ -353,6 +497,14 @@ class DivarScraper:
                         # owner-scoped, switched-on pool as rotation.
                         failed = phone_number
                         phone_number = None
+                        # How each number failed, for the one sentence that
+                        # tells the owner what to do: refused by Divar, a
+                        # browser that closed under it, open in another run.
+                        rejected: List[str] = []
+                        closed: List[str] = []
+                        busy: List[str] = []
+                        broken: List[str] = []
+                        (rejected if context_alive(self.context) else closed).append(failed)
                         candidates = []
                         if self.db_session:
                             try:
@@ -361,6 +513,9 @@ class DivarScraper:
                             except Exception as _e:
                                 logger.warning(f"Could not load fallback sessions: {_e}")
                         for cand in candidates:
+                            if await profile_in_use(cand):
+                                busy.append(cand)          # another run has it open
+                                continue
                             logger.info(f"Falling back to session for {cand}")
                             try:
                                 # A different person, so a different laptop.
@@ -370,7 +525,9 @@ class DivarScraper:
                                 if await self.auth.restore_session(cand):
                                     phone_number = cand
                                     break
+                                (rejected if context_alive(self.context) else closed).append(cand)
                             except Exception as _e:
+                                (busy if "already open" in str(_e) else broken).append(cand)
                                 logger.warning(f"Fallback to {cand} failed: {_e}")
                         if phone_number:
                             await self._log_run(
@@ -380,22 +537,14 @@ class DivarScraper:
                         if phone_number:
                             self.active_phone = phone_number
                             logger.info(f"Session restored successfully using fallback: {phone_number}")
-                        elif candidates:
-                            logger.warning("Fallback sessions also failed. Phone numbers will not be extracted.")
-                            # Without this line the run's own log said nothing
-                            # and the panel showed «مرورگر اسکرپر بالا نیامد: نامشخص».
-                            await self._log_run(
-                                f"نشست {failed} کار نکرد و هیچ‌کدام از شماره‌های دیگر خودتان هم باز نشد — "
-                                "شمارهٔ تماس آگهی‌ها استخراج نمی‌شود. نشست‌ها را در «احراز هویت دیوار» تازه کنید.",
-                                level="error", phone=failed)
-                            return False
                         else:
-                            logger.warning("No valid session found. Phone numbers will not be extracted.")
-                            await self._log_run(
-                                "هیچ نشست معتبر دیواری از شماره‌های خودتان پیدا نشد — "
-                                "شمارهٔ تماس آگهی‌ها استخراج نمی‌شود",
-                                level="warning")
-                            return False
+                            # The run stops here, so the line says so and why.
+                            # It said «شمارهٔ تماس آگهی‌ها استخراج نمی‌شود» — as
+                            # though the run went on without numbers — and the
+                            # finish line said «مرورگر اسکرپر بالا نیامد: نامشخص».
+                            logger.warning(f"No session of the run's own opened (from {failed}) — not starting")
+                            return await self._init_failed(
+                                _no_session_reason(rejected, closed, busy, broken), phone=failed)
                     else:
                         self.active_phone = phone_number
                         logger.info("Session restored successfully")
@@ -419,14 +568,104 @@ class DivarScraper:
                 await self._open_browser_for(None, proxy)
 
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize scraper: {e}")
             # Kept for callers that want to say WHY to a person — «profile is
             # already open in this process» is a busy account, not a fault,
             # and deserves a different sentence than a crashed browser.
             self._init_error = str(e)
+            self._init_reason = await self._explain_open_failure(e, phone_number)
             return False
+
+    async def _init_failed(self, reason: str, **extra) -> bool:
+        """The run cannot start: say why in its own log, once, keep it for
+        run_scraping_job's finish line, and answer initialize's False."""
+        self._init_reason = reason
+        self._init_logged = True
+        await self._log_run(reason, level="error", **extra)
+        return False
+
+    async def _pick_free_account(self, pool: List[str]) -> Optional[str]:
+        """The first number of `pool` whose browser profile no run has open.
+        Failing that, the first held only by a run that has already ended —
+        its browser is closing, and _wait_for_released_profile waits for it.
+        None when a live run has every one of them open.
+
+        Two runs of one owner both took the least-spent number, and the second
+        failed with «already open» while the owner's other numbers sat free."""
+        from app.scraper.stealth import profile_in_use
+        closing = None
+        for phone in pool:
+            if not await profile_in_use(phone):
+                return phone
+            if closing is None and not await self._live_run_on(phone):
+                closing = phone
+        return closing
+
+    async def _open_first_free(self, pool: List[str], skip) -> Optional[str]:
+        """Open the first number of `pool` outside `skip` that no run has
+        open; its number, or None when every one is taken."""
+        from app.scraper.stealth import profile_in_use
+        for phone in pool:
+            if phone in skip or await profile_in_use(phone):
+                continue
+            proxy = await self._get_working_proxy(phone) if self.proxy_enabled else None
+            try:
+                await self._open_browser_for(phone, proxy)
+                return phone
+            except RuntimeError as e:
+                if "already open" not in str(e):
+                    raise
+                logger.info(f"[browser] {phone} was just taken by another run too — trying the next")
+        return None
+
+    def _all_numbers_busy(self, pool: List[str]) -> str:
+        return _say(f"همهٔ شماره‌های دیوار شما ({_numbers_fa(pool, limit=3)}) همین حالا در "
+                    "اسکرپ‌های دیگری باز است و هر شماره در یک زمان فقط در یک اسکرپ باز می‌شود",
+                    "بعد از پایان یکی از آن‌ها «ادامه» را بزنید، یا در «احراز هویت دیوار» "
+                    "شمارهٔ دیگری اضافه کنید")
+
+    async def _holder_of(self, account: str) -> Optional[str]:
+        """The short id of the live run that has `account` open, for a
+        message; None when there is none or it cannot be told."""
+        db = getattr(self, "db_session", None)
+        if not account or db is None:
+            return None
+        try:
+            q = select(ScrapingJob.job_id).where(
+                ScrapingJob.divar_phone == account, ScrapingJob.status.in_(_LIVE_STATUSES))
+            mine = getattr(self, "_job_id_str", None)
+            if mine:
+                q = q.where(ScrapingJob.job_id != uuid.UUID(str(mine)))
+            held_by = (await db.execute(q.limit(1))).scalar_one_or_none()
+            await db.commit()
+            return str(held_by)[:8] if held_by else None
+        except Exception as e:
+            logger.debug(f"[browser] could not tell who has {account} open: {e}")
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            return None
+
+    async def _explain_open_failure(self, err: Exception, account: Optional[str]) -> str:
+        """An exception out of initialize, in words. «already open» is a
+        number (or the shared no-number browser) another run has open, not a
+        fault; everything else is the browser itself."""
+        if "already open" not in str(err):
+            return browser_failure_reason(err)
+        if account:
+            holder = await self._holder_of(account)
+            return _say(f"شمارهٔ {account} همین حالا در اسکرپ دیگری"
+                        f"{f' ({holder})' if holder else ''} باز است و هر شماره در یک زمان "
+                        "فقط در یک اسکرپ باز می‌شود",
+                        "بعد از پایان آن «ادامه» را بزنید، یا اسکرپ را با «خودکار» شروع "
+                        "کنید تا شمارهٔ آزاد دیگری از شماره‌های خودتان برداشته شود")
+        return _say("اسکرپ دیگری که آن هم شمارهٔ دیوار ندارد همین حالا در حال اجراست و "
+                    "مرورگرِ بدون شماره در یک زمان فقط در یک اسکرپ باز می‌شود",
+                    "بعد از پایان آن «ادامه» را بزنید، یا در «احراز هویت دیوار» یک شمارهٔ "
+                    "دیوار به نام خودتان اضافه کنید")
     
     def _client(self) -> httpx.AsyncClient:
         """The shared HTTP client, created on first use and closed in close()."""
@@ -435,20 +674,39 @@ class DivarScraper:
         return self._http
 
     async def close(self):
-        """Close browser and cleanup resources"""
-        try:
-            if self._http is not None and not self._http.is_closed:
-                await self._http.aclose()
-            # The context owns the browser in a persistent profile, and
-            # context.browser is None — closing it releases both, and the
-            # profile guard with them.
-            if self.context:
-                await close_context(self.context)
-            if self.playwright:
-                await self.playwright.stop()
-            logger.info("Scraper closed successfully")
-        except Exception as e:
-            logger.error(f"Error closing scraper: {e}")
+        """Close browser and cleanup resources.
+
+        Each step on its own. They were one try block, so the first that
+        raised — an HTTP pool already closed, a browser that had crashed —
+        skipped the rest: a Playwright driver left running per run, and the
+        number's profile lock left for the refresher to keep alive. Each
+        handle is dropped before its close, so a second call does nothing.
+        A step that hangs is given up on after a minute: the driver's stop
+        takes whatever Chromium is left with it."""
+        http, self._http = getattr(self, "_http", None), None
+        if http is not None and not http.is_closed:
+            try:
+                await http.aclose()
+            except Exception as e:
+                logger.warning(f"[browser] closing the HTTP client failed: {e}")
+        # The context owns the browser in a persistent profile, and
+        # context.browser is None — closing it releases both, and the
+        # profile guard with them (close_context releases even when the
+        # close itself fails).
+        ctx = getattr(self, "context", None)
+        self.browser = self.context = self.page = None
+        if ctx is not None:
+            try:
+                await asyncio.wait_for(close_context(ctx), _CLOSE_STEP_TIMEOUT)
+            except Exception as e:
+                logger.warning(f"[browser] closing the browser failed: {type(e).__name__}: {e}")
+        driver, self.playwright = getattr(self, "playwright", None), None
+        if driver is not None:
+            try:
+                await asyncio.wait_for(driver.stop(), _CLOSE_STEP_TIMEOUT)
+            except Exception as e:
+                logger.warning(f"[browser] stopping Playwright failed: {type(e).__name__}: {e}")
+        logger.info("Scraper closed")
     
     async def _get_working_proxy(self, account: Optional[str] = None) -> Optional[str]:
         """The proxy for this account — sticky, so one account is always one
@@ -536,19 +794,114 @@ class DivarScraper:
             if await self._live_run_on(account):
                 return
 
+    def _job_pk(self):
+        """The run's row id, read without an attribute load: after a rollback
+        the ORM object is expired, and touching job.id then is a lazy load —
+        MissingGreenlet on this async session."""
+        job = getattr(self, "current_job", None)
+        if job is None:
+            return None
+        try:
+            from sqlalchemy import inspect as _sa_inspect
+            ident = _sa_inspect(job).identity
+        except Exception:
+            ident = None
+        return ident[0] if ident else job.__dict__.get("id")
+
+    async def _move_status(self, to: str, *, only_from: tuple = _LIVE_STATUSES) -> bool:
+        """Set this run's status to `to` only while its row still says one of
+        `only_from`. True when it moved. In the session's current transaction:
+        the caller commits.
+
+        The run wrote its status through the ORM object, which holds what the
+        row said when it was last read. A cancel committed since then was
+        written over: waiting for an SMS code wrote «paused» over it, the code
+        (or the timeout) «running», and the run went on to the end; the end
+        of the run wrote «completed» over a cancel, or over the sweep's
+        «failed», that landed during its last listing. As a conditional
+        UPDATE, whatever the button or the sweep wrote wins. The object is
+        told the row's real status either way, without marking it changed.
+        """
+        job = getattr(self, "current_job", None)
+        db = getattr(self, "db_session", None)
+        if job is None or db is None:
+            return False
+        from sqlalchemy import update as _update
+        from sqlalchemy.orm.attributes import set_committed_value
+        pk = self._job_pk()
+        moved = (await db.execute(
+            _update(ScrapingJob)
+            .where(ScrapingJob.id == pk, ScrapingJob.status.in_(only_from))
+            .values(status=to)
+            .returning(ScrapingJob.id)
+            .execution_options(synchronize_session=False))).scalar_one_or_none() is not None
+        if moved:
+            set_committed_value(job, "status", to)
+        else:
+            now = (await db.execute(
+                select(ScrapingJob.status).where(ScrapingJob.id == pk))).scalar_one_or_none()
+            if isinstance(now, str):
+                set_committed_value(job, "status", now)
+        return moved
+
+    async def _finish_status(self, status: str) -> bool:
+        """The run's last word on its own status — `status` is whatever the
+        run concluded — unless a cancel or the sweep got there first, in which
+        case that stays. The caller commits, with the rest of the finish."""
+        moved = await self._move_status(status)
+        if not moved:
+            logger.info(f"Job {getattr(self, '_job_id_str', None) or self._job_pk()} became "
+                        f"«{getattr(self.current_job, 'status', None)}» while it was finishing — "
+                        f"left so, not «{status}»")
+        return moved
+
+    async def _pause_for_code(self) -> None:
+        """ContactExtractor's on_pause: the row reads «paused» while the run
+        waits for an SMS code — unless the run was stopped meanwhile. Then it
+        stays stopped, and the wait's first check (_cancelled_now) ends it."""
+        job = getattr(self, "current_job", None)
+        if job is None:
+            return
+        moved = await self._move_status("paused")
+        await self.db_session.commit()
+        jid = getattr(self, "_job_id_str", None) or str(job.job_id)
+        if not moved:
+            logger.info(f"Job {jid} is «{job.status}» — not pausing it for a code")
+            return
+        logger.info(f"Job {jid} PAUSED — awaiting OTP code")
+        from app.services import job_log
+        await job_log.record(jid, job_log.PAUSE,
+                             "دیوار کد تأیید خواست — اسکرپ متوقف شد تا کد وارد شود",
+                             level="warning")
+
+    async def _resume_after_code(self) -> None:
+        """ContactExtractor's on_resume: «paused» back to «running» — and only
+        that. A cancel that came during the wait stays a cancel."""
+        job = getattr(self, "current_job", None)
+        if job is None:
+            return
+        moved = await self._move_status("running", only_from=("paused",))
+        await self.db_session.commit()
+        if moved:
+            jid = getattr(self, "_job_id_str", None) or str(job.job_id)
+            logger.info(f"Job {jid} RESUMED")
+            from app.services import job_log
+            await job_log.record(jid, job_log.RESUME, "کد وارد شد — اسکرپ ادامه پیدا کرد")
+
     async def _cancelled_now(self) -> bool:
-        """Whether the current run has been cancelled, asked without leaving
-        a transaction open: the caller is in the middle of a sleep, and
-        Postgres closes a connection idle in a transaction after 60 s."""
+        """Whether the current run has been stopped from outside — cancelled,
+        or failed by the queue's sweep — asked without leaving a transaction
+        open: the caller is in the middle of a sleep, and Postgres closes a
+        connection idle in a transaction after 60 s."""
         job = getattr(self, "current_job", None)
         if job is None or self.db_session is None:
             return False
         from sqlalchemy import select as _select
         try:
             status = (await self.db_session.execute(
-                _select(ScrapingJob.status).where(ScrapingJob.id == job.id))).scalar_one_or_none()
+                _select(ScrapingJob.status).where(ScrapingJob.id == self._job_pk()))).scalar_one_or_none()
             await self.db_session.commit()
-            return status == "cancelled"
+            return status in _STOPPED_STATUSES
         except Exception as e:
             logger.debug(f"[pace] cancel check failed: {e}")
             try:
@@ -2149,35 +2502,12 @@ class DivarScraper:
                 else f"single:{_divar_id}"
             )
             # Flip the job's status while the scraper is blocked on an OTP code,
-            # so the dashboard clearly shows it as paused → running.
-            async def _pause_job():
-                if self.current_job:
-                    self.current_job.status = "paused"
-                    await self.db_session.commit()
-                    logger.info(f"Job {self.current_job.job_id} PAUSED — awaiting OTP code")
-                    from app.services import job_log
-                    await job_log.record(
-                        self.current_job.job_id, job_log.PAUSE,
-                        "دیوار کد تأیید خواست — اسکرپ متوقف شد تا کد وارد شود",
-                        level="warning")
-
-            async def _resume_job():
-                if self.current_job:
-                    # don't override a cancellation that happened meanwhile
-                    await self.db_session.refresh(self.current_job)
-                    if self.current_job.status == "paused":
-                        self.current_job.status = "running"
-                        await self.db_session.commit()
-                        logger.info(f"Job {self.current_job.job_id} RESUMED")
-                        from app.services import job_log
-                        await job_log.record(self.current_job.job_id, job_log.RESUME,
-                                             "کد وارد شد — اسکرپ ادامه پیدا کرد")
-
-            async def _job_cancelled():
-                if not self.current_job:
-                    return False
-                await self.db_session.refresh(self.current_job)
-                return self.current_job.status == "cancelled"
+            # so the dashboard clearly shows it as paused → running — never
+            # over a cancel (see _move_status), and the wait checks for one
+            # every slice without holding a transaction open.
+            _pause_job = self._pause_for_code
+            _resume_job = self._resume_after_code
+            _job_cancelled = self._cancelled_now
 
             # Everything above came free with the page. Contact info does not:
             # it clicks «اطلاعات تماس», solves a captcha, and spends one of the
@@ -4155,11 +4485,15 @@ class DivarScraper:
                 raise ValueError(f"Job {job_id} not found")
             # A job can be cancelled while still «pending» — the background task
             # starts a moment later, and claiming "running" here would bring a
-            # job the user already stopped back to life.
-            if job.status == "cancelled":
-                logger.info(f"Job {job_id} was cancelled before it started — not running it")
+            # job the user already stopped back to life. One conditional write,
+            # not a read and then a write: a cancel committed in between was
+            # written over.
+            self.current_job = job
+            started = await self._move_status("running", only_from=("pending",))
+            await self.db_session.commit()
+            if not started:
+                logger.info(f"Job {job_id} was {job.status} before it started — not running it")
                 return job
-            job.status = "running"
             job.started_at = datetime.now()
             self._note_account(job)
             from app.services import job_log
@@ -4487,10 +4821,13 @@ class DivarScraper:
                         logger.info(f"Reached target of {max_items} saved listings — stopping")
                         break
 
-                    # Check if job was cancelled
+                    # Check if job was cancelled — or failed by the queue's
+                    # sweep: either way the row says the run is over, and a
+                    # run that carries on does work nobody sees, on a number a
+                    # «ادامه» of it is about to want.
                     await self.db_session.refresh(job)
-                    if job.status == "cancelled":
-                        logger.info(f"Job {job.job_id} was cancelled, stopping scraping")
+                    if job.status in _STOPPED_STATUSES:
+                        logger.info(f"Job {job.job_id} is {job.status}, stopping scraping")
                         return job
 
                     # Counted here rather than from `i`, so that candidates the
@@ -4542,7 +4879,15 @@ class DivarScraper:
                         wants_contact=lambda pd: self.pre_contact_skip(
                             pd, _listing_type, _pre_filters),
                     )
-                    
+                    # A cancel that landed while the ad was open — as often as
+                    # not while it sat on a code prompt — stops the run here,
+                    # before the photos and the save. Only a number already
+                    # revealed is kept: that reveal is spent either way.
+                    if not (detail and detail.get("phone_number")) and await self._cancelled_now():
+                        logger.info(f"Job {self._job_id_str} was stopped during a listing — "
+                                    "not finishing it")
+                        return job
+
                     if detail:
                         # Merge with listing data
                         property_data = {**listing, **detail}
@@ -4911,8 +5256,8 @@ class DivarScraper:
                     except Exception:
                         pass
             
-            # Complete job
-            job.status = "completed"
+            # Complete job — unless a cancel or the sweep got there first
+            await self._finish_status("completed")
             job.completed_at = datetime.now()
             # A run that met its target stops with candidates left over. The
             # work is over, so the bar reads full rather than freezing at the

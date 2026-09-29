@@ -247,3 +247,339 @@ class TestWhoIsOnTheNumber:
                 assert not session.in_transaction()
         finally:
             await eng.dispose()
+
+
+# ── a cancel always wins ──────────────────────────────────────────────────
+#
+# The run wrote its own status through the ORM object, which holds what the
+# row said when it was last read. Waiting for an SMS code wrote «paused» over
+# a cancel committed in the meantime, the code (or the timeout) then wrote
+# «running», and the run carried on to the end; the end of the run wrote
+# «completed» over a cancel — or the sweep's «failed» — that landed during the
+# last listing. These drive start_scraping_job on a real row, with the
+# browser and Divar replaced.
+
+from app.api.routes import scraper as routes          # noqa: E402
+from test_deleted_listing import FakePage, LIVE       # noqa: E402
+
+A, B, C = "https://divar.ir/v/aaaaAAAA", "https://divar.ir/v/bbbbBBBB", "https://divar.ir/v/ccccCCCC"
+
+
+async def _status_from_elsewhere(eng, job_id, status):
+    """What the cancel button, or the queue's sweep, commits on its own session."""
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.models.scraping_job import ScrapingJob
+    async with async_sessionmaker(eng)() as other:
+        await other.execute(update(ScrapingJob).where(ScrapingJob.job_id == job_id)
+                            .values(status=status))
+        await other.commit()
+
+
+async def _row_now(eng, job_id):
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.models.scraping_job import ScrapingJob
+    async with async_sessionmaker(eng)() as s:
+        return (await s.execute(select(ScrapingJob).where(ScrapingJob.job_id == job_id))).scalar_one()
+
+
+class _Run:
+    """start_scraping_job on a real row, the way the worker calls it, with
+    everything that would reach Divar or a browser replaced. Records what the
+    run did after the cancel."""
+
+    def __init__(self, session, job, *, delay=(0.01, 0.02)):
+        from app.scraper import divar_scraper as _ds
+        s = _ds.DivarScraper(db_session=session, proxy_enabled=False, headless=True)
+        s._job_id_str = str(job.job_id)
+        s.stealth_config.min_delay, s.stealth_config.max_delay = delay
+        self.opened, self.saved, self.photos = [], [], []
+
+        async def _nothing(*_a, **_k):
+            return None
+
+        async def _save(data):
+            self.saved.append(data["divar_id"])
+            s._last_save_created = True
+            return object()
+
+        async def _photos(images, divar_id):
+            self.photos.append(divar_id)
+            return []
+
+        s._check_rate_limit = s._dwell_like_a_reader = s._space_out_reveal = _nothing
+        s.maybe_rotate_account = s._persist_active_session = _nothing
+        s.save_property, s.download_images = _save, _photos
+        self.s, self.job = s, job
+
+    async def go(self, urls):
+        return await self.s.start_scraping_job(
+            city="—", category="اسکرپ تکی", max_items=len(urls), download_images=True,
+            job_id=str(self.job.job_id), urls=urls)
+
+
+@pytest.fixture
+def run_db(pg, monkeypatch):
+    """Postgres rows plus fakeredis for the OTP store the run consults."""
+    from _fake_redis import patch_redis
+    from app.scraper import otp_store
+    patch_redis(monkeypatch, otp_store)
+    return pg
+
+
+async def _one_job(pair, status="pending"):
+    (job,) = await _rows(pair, (None, status))
+    return job
+
+
+class TestACancelWhileWaitingForACode:
+    """Cancel pressed while the ad is open; Divar then asks for a code. The
+    pause must not undo the cancel, and the wait must end at once."""
+
+    async def test_the_cancel_stands_and_the_run_stops_at_this_listing(self, run_db, monkeypatch):
+        eng, maker = run_db
+        job = await _one_job(run_db)
+        waited = {}
+
+        class _Extractor:
+            """ContactExtractor's side of the protocol: pause, wait while
+            asking should_cancel every slice, resume."""
+            contact_channel, needs_identity, account_count = None, False, 1
+
+            def __init__(self, page, images_dir, **kw):
+                self.kw = kw
+
+            async def get_phone_number(self):
+                await _status_from_elsewhere(eng, job.job_id, "cancelled")   # the cancel lands
+                await self.kw["on_pause"]()                                  # then Divar asks for a code
+                t0 = time.monotonic()
+                while time.monotonic() - t0 < 4:                            # «up to six hours»
+                    if await self.kw["should_cancel"]():
+                        break
+                    await asyncio.sleep(0.05)
+                waited["s"] = time.monotonic() - t0
+                await self.kw["on_resume"]()
+                return None
+
+        monkeypatch.setattr(ds, "ContactExtractor", _Extractor)
+        try:
+            async with maker(eng, expire_on_commit=False, autoflush=False)() as session:
+                r = _Run(session, job)
+                r.s.page = FakePage(200, LIVE)
+                await r.go([A, B])
+            row = await _row_now(eng, job.job_id)
+            assert row.status == "cancelled", "the pause or the resume wrote over the cancel"
+            assert waited["s"] < 1, f"the code wait went on for {waited['s']:.1f}s after the cancel"
+            assert r.s.page.url.endswith("aaaaAAAA"), "the run opened the next listing"
+            assert r.saved == [] and r.photos == [], "a listing the run was told to drop was saved"
+        finally:
+            await eng.dispose()
+
+    async def test_a_code_that_comes_back_before_a_cancel_still_resumes(self, run_db):
+        eng, maker = run_db
+        job = await _one_job(run_db, status="running")
+        try:
+            async with maker(eng, expire_on_commit=False, autoflush=False)() as session:
+                s = ds.DivarScraper(db_session=session, proxy_enabled=False, headless=True)
+                s.current_job, s._job_id_str = job, str(job.job_id)
+                await s._pause_for_code()
+                assert (await _row_now(eng, job.job_id)).status == "paused"
+                assert await s._cancelled_now() is False, "a paused run is not a stopped one"
+                await s._resume_after_code()
+                assert (await _row_now(eng, job.job_id)).status == "running"
+                assert not session.in_transaction()
+        finally:
+            # a «running» row left behind is an orphan to the next module's sweep
+            await _status_from_elsewhere(eng, job.job_id, "completed")
+            await eng.dispose()
+
+
+class TestTheEndOfTheRunDoesNotOverwrite:
+    @pytest.mark.parametrize("outside", ["cancelled", "failed"])
+    async def test_a_stop_during_the_last_listing_stands(self, run_db, outside):
+        """The number in hand is kept — its reveal is spent — but the row
+        keeps what the cancel button (or the sweep) said."""
+        eng, maker = run_db
+        job = await _one_job(run_db)
+        try:
+            async with maker(eng, expire_on_commit=False, autoflush=False)() as session:
+                r = _Run(session, job)
+
+                async def _detail(url, **_kw):
+                    r.opened.append(url)
+                    await _status_from_elsewhere(eng, job.job_id, outside)
+                    return {"url": url, "divar_id": url.rsplit("/", 1)[1], "title": "آپارتمان",
+                            "phone_number": "09120000000", "contact_channel": "phone"}
+                r.s.scrape_property_detail = _detail
+                await r.go([A])
+            row = await _row_now(eng, job.job_id)
+            assert row.status == outside, f"«completed» was written over «{outside}»"
+            assert r.saved == ["aaaaAAAA"]
+        finally:
+            await eng.dispose()
+
+    async def test_without_a_stop_it_still_completes(self, run_db):
+        eng, maker = run_db
+        job = await _one_job(run_db)
+        try:
+            async with maker(eng, expire_on_commit=False, autoflush=False)() as session:
+                r = _Run(session, job)
+
+                async def _detail(url, **_kw):
+                    return {"url": url, "divar_id": url.rsplit("/", 1)[1], "title": "آپارتمان",
+                            "phone_number": "09120000000", "contact_channel": "phone"}
+                r.s.scrape_property_detail = _detail
+                await r.go([A, B])
+            row = await _row_now(eng, job.job_id)
+            assert row.status == "completed" and row.new_items == 2
+        finally:
+            await eng.dispose()
+
+    async def test_a_cancel_before_the_run_took_the_row_is_not_undone_by_its_start(self, run_db):
+        """The check at the start read the row once; a cancel committed after
+        that read was overwritten by «running»."""
+        eng, maker = run_db
+        job = await _one_job(run_db)
+        try:
+            async with maker(eng, expire_on_commit=False, autoflush=False)() as session:
+                r = _Run(session, job)
+
+                async def _prune(*_a, **_k):              # runs between the read and the write
+                    await _status_from_elsewhere(eng, job.job_id, "cancelled")
+                monkeypatch_prune = pytest.MonkeyPatch()
+                from app.services import job_log
+                monkeypatch_prune.setattr(job_log, "prune", _prune)
+                try:
+                    await r.go([A])
+                finally:
+                    monkeypatch_prune.undo()
+            assert (await _row_now(eng, job.job_id)).status == "cancelled"
+            assert r.saved == [] and r.opened == []
+        finally:
+            await eng.dispose()
+
+
+class TestACancelInTheMiddleOfAListing:
+    """How long a run goes on after «لغو» lands halfway through a listing:
+    to the end of that listing at most, and not into the next one."""
+
+    async def test_with_a_number_in_hand_the_listing_is_kept_and_the_pause_is_cut(self, run_db):
+        eng, maker = run_db
+        job = await _one_job(run_db)
+        try:
+            async with maker(eng, expire_on_commit=False, autoflush=False)() as session:
+                # a pause between listings of 30 s: only the cancel can end it early
+                r = _Run(session, job, delay=(30.0, 30.0))
+                cancelled_at = {}
+
+                async def _detail(url, **_kw):
+                    r.opened.append(url)
+                    await _status_from_elsewhere(eng, job.job_id, "cancelled")
+                    cancelled_at["t"] = time.monotonic()
+                    return {"url": url, "divar_id": url.rsplit("/", 1)[1], "title": "آپارتمان",
+                            "phone_number": "09120000000", "contact_channel": "phone"}
+                r.s.scrape_property_detail = _detail
+                await r.go([A, B, C])
+                took = time.monotonic() - cancelled_at["t"]
+            assert r.opened == [A], "the run went on to the next listing"
+            assert r.saved == ["aaaaAAAA"], "the number already revealed was thrown away"
+            assert took < 5, f"the run took {took:.1f}s to stop after the cancel"
+            assert (await _row_now(eng, job.job_id)).status == "cancelled"
+        finally:
+            await eng.dispose()
+
+    async def test_without_a_number_it_stops_before_the_photos_and_the_save(self, run_db):
+        eng, maker = run_db
+        job = await _one_job(run_db)
+        try:
+            async with maker(eng, expire_on_commit=False, autoflush=False)() as session:
+                r = _Run(session, job)
+
+                async def _detail(url, **_kw):
+                    r.opened.append(url)
+                    await _status_from_elsewhere(eng, job.job_id, "cancelled")
+                    return {"url": url, "divar_id": url.rsplit("/", 1)[1], "title": "آپارتمان",
+                            "images": ["https://s100.divarcdn.com/static/photo/x.jpg"],
+                            "contact_channel": "unavailable"}
+                r.s.scrape_property_detail = _detail
+                await r.go([A, B])
+            assert r.opened == [A]
+            assert r.photos == [] and r.saved == [], "photos downloaded for a listing being dropped"
+            row = await _row_now(eng, job.job_id)
+            assert row.status == "cancelled" and row.failed_items == 0
+        finally:
+            await eng.dispose()
+
+    async def test_the_sweep_marking_the_run_failed_stops_it_too(self, run_db):
+        """The row says the run is over; carrying on would do work nobody can
+        see, on a number a «ادامه» of it is about to want."""
+        eng, maker = run_db
+        job = await _one_job(run_db)
+        try:
+            async with maker(eng, expire_on_commit=False, autoflush=False)() as session:
+                r = _Run(session, job)
+
+                async def _detail(url, **_kw):
+                    r.opened.append(url)
+                    if url == A:
+                        await _status_from_elsewhere(eng, job.job_id, "failed")
+                    return {"url": url, "divar_id": url.rsplit("/", 1)[1], "title": "آپارتمان",
+                            "phone_number": "09120000000", "contact_channel": "phone"}
+                r.s.scrape_property_detail = _detail
+                await r.go([A, B, C])
+            assert r.opened == [A]
+            assert (await _row_now(eng, job.job_id)).status == "failed"
+        finally:
+            await eng.dispose()
+
+
+class TestTheCancelButton:
+    async def test_a_run_that_finished_meanwhile_is_not_marked_cancelled(self, run_db, monkeypatch):
+        """The button read the row, then wrote «cancelled» — over a
+        «completed» the run had committed in between."""
+        eng, maker = run_db
+        job = await _one_job(run_db, status="running")
+        from fastapi import HTTPException
+        from types import SimpleNamespace as NS
+
+        async def _no_prompts(_job_id):
+            return 0
+        from app.scraper import otp_store
+        monkeypatch.setattr(otp_store, "clear_job", _no_prompts)
+        try:
+            async with maker(eng, expire_on_commit=False)() as db:
+                real_execute = db.execute
+                calls = []
+
+                async def _execute(stmt, *a, **k):
+                    res = await real_execute(stmt, *a, **k)
+                    calls.append(stmt)
+                    if len(calls) == 1:                   # the button has read «running»…
+                        await _status_from_elsewhere(eng, job.job_id, "completed")   # …the run ends
+                    return res
+                db.execute = _execute
+                with pytest.raises(HTTPException) as e:
+                    await routes.cancel_scraping_job(str(job.job_id), db, NS(id=1, role="root"))
+            assert e.value.status_code == 400
+            assert (await _row_now(eng, job.job_id)).status == "completed"
+        finally:
+            await eng.dispose()
+
+    async def test_a_running_run_is_cancelled(self, run_db, monkeypatch):
+        eng, maker = run_db
+        job = await _one_job(run_db, status="paused")
+        from types import SimpleNamespace as NS
+
+        async def _no_prompts(_job_id):
+            return 0
+        from app.scraper import otp_store
+        monkeypatch.setattr(otp_store, "clear_job", _no_prompts)
+        try:
+            async with maker(eng, expire_on_commit=False)() as db:
+                got = await routes.cancel_scraping_job(str(job.job_id), db, NS(id=1, role="root"))
+            assert got["was"] == "paused"
+            row = await _row_now(eng, job.job_id)
+            assert row.status == "cancelled" and row.completed_at is not None
+        finally:
+            await eng.dispose()

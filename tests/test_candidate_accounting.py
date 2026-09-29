@@ -86,7 +86,7 @@ class TestCandidatesNeverReachedAreNotCandidatesDropped:
         before reaching as candidates it threw away."""
         i = SCRAPER.index("examined += 1")
         before = SCRAPER[:i]
-        assert before.rindex("was cancelled, stopping scraping") > \
+        assert before.rindex(", stopping scraping") > \
             before.rindex("for i, listing in enumerate(all_listings):")
 
     def test_it_counts_before_the_duplicate_check(self):

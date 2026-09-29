@@ -70,6 +70,12 @@ STALE_PENDING_REASON = ("این تسک بیش از ۲۴ ساعت در صف ما�
 STALE_PENDING_LOG = ("این تسک بیش از ۲۴ ساعت در صف بود و هیچ ورکری آن را "
                      "برنداشت — ناموفق ثبت شد")
 
+# A row whose saved settings the run cannot be built from. «ادامه» reads the
+# same settings, so it is not what to press.
+UNREADABLE_REASON = ("تنظیمات ذخیره‌شدهٔ این اسکرپ خوانا نبود{what} و اجرا نشد. "
+                     "«ادامه» همین تنظیمات را دوباره می‌خواند؛ با فیلترهای "
+                     "درست یک اسکرپ تازه شروع کنید")
+
 # Unique per process even where the pid is not: a restarted container is
 # PID 1 again, under the same hostname, and must not mistake the dead
 # process's claims for its own.
@@ -184,13 +190,55 @@ async def _take(r, job_id: str) -> None:
             logger.info(f"[queue] {job_id[:8]} is {job.status if job else 'gone'} — not running it")
             await release(job_id)
             return
-        kwargs = job_kwargs(job)
+        try:
+            kwargs = job_kwargs(job)
+        except Exception as e:
+            # Its own failure, not the consumer's: raised from here it took
+            # the consumer down, the sweep put the row back, and the same
+            # row took it down again — with every scrape behind it waiting.
+            await _fail_unreadable(job_id, e)
+            await release(job_id)
+            return
     except BaseException:
         # a database error, or a drain arriving mid-take: the row is still
         # pending, so the sweep puts it back — only the claim must not linger
         await release(job_id)
         raise
     _running[job_id] = asyncio.create_task(_run(job_id, kwargs), name=f"scrape:{job_id[:8]}")
+
+
+def _unreadable_fields(err: Exception) -> str:
+    """« (city، max_items)» for a validation error, «» for anything else."""
+    fields = []
+    try:
+        for detail in err.errors():         # type: ignore[attr-defined]  # pydantic's ValidationError
+            name = ".".join(str(p) for p in detail.get("loc") or ()) or "?"
+            if name not in fields:
+                fields.append(name)
+    except Exception:
+        return ""
+    return f" ({'، '.join(fields[:5])})" if fields else ""
+
+
+async def _fail_unreadable(job_id: str, err: Exception) -> bool:
+    """Close out a pending row whose config no longer builds a run: failed,
+    in words, in its own log — the same shape as the other stops here. Only
+    a row still pending: one cancelled meanwhile keeps its cancel."""
+    reason = UNREADABLE_REASON.format(what=_unreadable_fields(err))[:300]
+    logger.error(f"[queue] {job_id[:8]}: its config cannot be read "
+                 f"({type(err).__name__}: {err}) — marked failed")
+    async with database.async_session_maker() as db:
+        done = (await db.execute(
+            update(ScrapingJob)
+            .where(ScrapingJob.job_id == uuid.UUID(job_id), ScrapingJob.status == "pending")
+            .values(status="failed", completed_at=datetime.now(), finish_reason=reason,
+                    error_message=f"{type(err).__name__}: {err}"[:2000])
+            .returning(ScrapingJob.job_id)
+            .execution_options(synchronize_session=False))).scalars().first()
+        await db.commit()
+    if done is not None:
+        await job_log.record(job_id, job_log.ERROR, reason, level="error")
+    return done is not None
 
 
 async def consume() -> None:
