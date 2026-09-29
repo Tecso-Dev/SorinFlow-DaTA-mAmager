@@ -40,7 +40,7 @@ def _settings(monkeypatch, **env):
     ("DIVAR_SESSION_CHECK_MINUTES", "divar_session_check_minutes", None),
 ])
 def test_a_blank_number_falls_back_to_its_default(monkeypatch, key, attr, default):
-    expected = default if default is not None else getattr(Settings.model_fields[attr], "default")
+    expected = default if default is not None else Settings.model_fields[attr].default
     assert getattr(_settings(monkeypatch, **{key: ""}), attr) == expected
 
 
