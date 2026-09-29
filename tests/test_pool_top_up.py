@@ -41,10 +41,13 @@ def run(monkeypatch):
     return scripted_run(monkeypatch)
 
 
-def rooms_by_token(url):
-    """Listings «so…» have one room, «bg…» three: a «3 rooms or more» run
-    keeps only the second kind, and Divar cannot filter rooms for it."""
-    return {"title": "آپارتمان آزمایشی", "rooms": 3 if "/bg" in url else 1}
+def lift_by_token(url):
+    """Listings «so…» have no lift, «bg…» do: a «with a lift» run keeps only
+    the second kind. Divar has no lift filter for «اجاره مسکونی» (#27), so
+    the scraper checks it itself after opening each ad — the filter this
+    file needs. (It used rooms on «اجاره آپارتمان», which Divar now
+    narrows on itself.)"""
+    return {"title": "آپارتمان آزمایشی", "has_elevator": "/bg" in url}
 
 
 # Three pages of one-room flats, then three-room ones further down the feed.
@@ -56,8 +59,8 @@ SMALL_FIRST = [page(1, tokens("so", 24)), page(2, tokens("so", 24, 24)), page(3,
 class TestThePoolIsToppedUp:
 
     async def test_a_pool_the_filters_ate_pages_on_until_the_target(self, run):
-        job, log, divar = await run(SMALL_FIRST, category="rent-apartment", max_items=10,
-                                    min_rooms=3, held=False, detail=rooms_by_token)
+        job, log, divar = await run(SMALL_FIRST, category="rent-residential", max_items=10,
+                                    has_elevator=True, held=False, detail=lift_by_token)
         assert (job.status, job.new_items) == ("completed", 10), \
             "a run for 10 ended short with 72 three-room flats still on Divar"
         assert job.finish_reason is None or THE_END_SENTENCE not in job.finish_reason
@@ -69,8 +72,8 @@ class TestThePoolIsToppedUp:
         """Only five three-room flats exist: the run gets them, and this time
         «Divar has no more» is the truth."""
         feed = SMALL_FIRST[:3] + [page(4, tokens("bg", 5), next_page=False)]
-        job, _, _ = await run(feed, category="rent-apartment", max_items=10,
-                              min_rooms=3, held=False, detail=rooms_by_token)
+        job, _, _ = await run(feed, category="rent-residential", max_items=10,
+                              has_elevator=True, held=False, detail=lift_by_token)
         assert (job.status, job.new_items) == ("completed", 5)
         assert THE_END_SENTENCE in job.finish_reason
 
@@ -91,8 +94,8 @@ class TestItStopsWhereItShould:
 
     async def test_a_refusal_while_topping_up_ends_partial_with_its_page(self, run):
         feed = SMALL_FIRST[:3] + [refused(429, "rate limit exceeded")]
-        job, log, _ = await run(feed, category="rent-apartment", max_items=10,
-                                min_rooms=3, held=False, detail=rooms_by_token)
+        job, log, _ = await run(feed, category="rent-residential", max_items=10,
+                                has_elevator=True, held=False, detail=lift_by_token)
         assert job.status == "partial"
         assert "صفحهٔ 4" in job.finish_reason and "HTTP 429" in job.finish_reason
         assert any(m.startswith("ادامهٔ جمع‌آوری ناقص ماند") for m in log.messages())
@@ -100,8 +103,8 @@ class TestItStopsWhereItShould:
     async def test_the_pool_never_passes_the_ceiling(self, run, monkeypatch):
         monkeypatch.setattr(DivarScraper, "POOL_CEILING", 100)
         endless = [page(n + 1, tokens("so", 24, 24 * n)) for n in range(10)]
-        job, _, divar = await run(endless, category="rent-apartment", max_items=10,
-                                  min_rooms=3, held=False, detail=rooms_by_token)
+        job, _, divar = await run(endless, category="rent-residential", max_items=10,
+                                  has_elevator=True, held=False, detail=lift_by_token)
         assert job.status == "partial" and job.new_items == 0
         assert "(100 نامزد)" in job.finish_reason, job.finish_reason
         assert THE_END_SENTENCE not in job.finish_reason
@@ -149,8 +152,8 @@ class TestWhatTheTopUpLeavesOnTheRow:
         """«کل» is the run's own pool (#29). With Divar's count present it
         stayed at the first pool while «بررسی» walked on: «82 / 60», a bar
         clamped full from the moment the top-up began."""
-        job, _, _ = await run(SMALL_FIRST, category="rent-apartment", max_items=10,
-                              min_rooms=3, held=False, detail=rooms_by_token)
+        job, _, _ = await run(SMALL_FIRST, category="rent-residential", max_items=10,
+                              has_elevator=True, held=False, detail=lift_by_token)
         assert job.divar_count, "the case needs Divar's own count on the row"
         pool = job.config["outcome"]["pool"]
         assert pool > 72, "the top-up must actually have run"
@@ -169,11 +172,11 @@ class TestWhatTheTopUpLeavesOnTheRow:
                      "url": f"https://divar.ir/v/{owed}"}]
         monkeypatch.setattr(skipped_listings, "awaiting_phone", awaiting_phone)
         opened = []
-        real = rooms_by_token
+        real = lift_by_token
 
         def detail(url):
             opened.append(url)
             return real(url)
-        job, _, _ = await run(SMALL_FIRST, category="rent-apartment", max_items=10,
-                              min_rooms=3, held=False, detail=detail)
+        job, _, _ = await run(SMALL_FIRST, category="rent-residential", max_items=10,
+                              has_elevator=True, held=False, detail=detail)
         assert opened.count(f"https://divar.ir/v/{owed}") == 1, opened[:5]

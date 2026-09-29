@@ -104,6 +104,7 @@ class TestItIsTheInverseOfWhatWeSend:
     def test_a_round_trip_survives(self):
         from app.services.divar_count import build_search_query
         sent = build_search_query(
+            "rent-apartment",
             advertiser_type="personal", has_images=True,
             min_price=None, max_price=None,
             min_deposit=790000000, max_deposit=810000000,

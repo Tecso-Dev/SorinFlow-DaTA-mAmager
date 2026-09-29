@@ -4854,6 +4854,7 @@ class DivarScraper:
         posted_date: Optional[str] = None,
         rotate_every: Optional[int] = None,
         urls: Optional[List[str]] = None,
+        divar_filters: Optional[Dict[str, Any]] = None,
     ) -> ScrapingJob:
         """Start a complete scraping job for a city and category.
 
@@ -4950,8 +4951,24 @@ class DivarScraper:
                 'has_parking': has_parking, 'has_storage': has_storage,
                 'has_balcony': has_balcony, 'advertiser_type': advertiser_type,
                 'max_age_hours': max_age_hours, 'posted_date': posted_date,
+                'divar_filters': divar_filters or None,
             }.items() if v is not None}
             logger.info(f"Starting scraping job for {city}/{category} | filters={active_filters}")
+            # Every filter as the form holds it, for plan_filters (#27).
+            _filter_kw: Dict[str, Any] = dict(
+                advertiser_type=advertiser_type, has_images=has_images,
+                min_price=min_price, max_price=max_price,
+                min_deposit=min_deposit, max_deposit=max_deposit,
+                min_rent=min_rent, max_rent=max_rent,
+                min_price_per_meter=min_price_per_meter, max_price_per_meter=max_price_per_meter,
+                min_area=min_area, max_area=max_area,
+                min_rooms=min_rooms, max_rooms=max_rooms,
+                has_elevator=has_elevator, has_parking=has_parking,
+                has_storage=has_storage, has_balcony=has_balcony,
+                posted_date=posted_date, max_age_hours=max_age_hours,
+                divar_filters=divar_filters,
+            )
+            _plan = None
 
             # ── Collect listings ────────────────────────────────────────────────
             # max_items is the number of *kept* (post-filter) listings the user
@@ -4979,40 +4996,45 @@ class DivarScraper:
                 # more was the wait, not the safety.
                 collect_target = min(max(max_items * 2 + 24, 60), 1500)
 
-            # Hand Divar the filters it can apply itself, before the feed is
-            # loaded. Everything it will not narrow on (rooms, amenities) is
-            # still checked per listing after the ad is opened.
+            # Hand Divar every filter the category has, before the feed is
+            # loaded — and nothing it does not: one filter too many and Divar
+            # refuses the search from its second page on (#27). The category's
+            # form comes from Divar itself (app/services/divar_filters.py);
+            # what it leaves out is said in the log and checked per listing
+            # after the ad is opened.
             try:
-                from app.services.divar_count import build_search_query
-                self._search_query = build_search_query(
-                    advertiser_type=advertiser_type, has_images=has_images,
-                    min_price=min_price, max_price=max_price,
-                    min_deposit=min_deposit, max_deposit=max_deposit,
-                    min_rent=min_rent, max_rent=max_rent,
-                    min_area=min_area, max_area=max_area,
-                )
+                from app.services import divar_count as _dc
+                from app.services import divar_filters as _df
+                await _df.current()
+                _plan = _dc.plan_filters(category, **_filter_kw)
+                self._search_query = _plan.query
                 # The same filters in the shape the search API takes, for the
                 # collection that no longer needs a browser.
-                from app.services.divar_count import build_form_data as _bfd
-                self._search_form = _bfd(
-                    category,
-                    advertiser_type=advertiser_type, has_images=has_images,
-                    min_price=min_price, max_price=max_price,
-                    min_deposit=min_deposit, max_deposit=max_deposit,
-                    min_rent=min_rent, max_rent=max_rent,
-                    min_area=min_area, max_area=max_area,
-                )
-                if self._search_query:
-                    logger.info(f"[collect] Divar-side filters: {self._search_query}")
-                    await job_log.record(
-                        job.job_id, job_log.PAGE,
-                        f"فیلترها به خود دیوار داده شد: {self._search_query}",
-                        query=self._search_query)
+                self._search_form = _plan.form
+                if urls:
+                    pass       # an explicit list: nothing is searched, nothing to say
+                else:
+                    if self._search_query:
+                        logger.info(f"[collect] Divar-side filters: {self._search_query}")
+                        await job_log.record(
+                            job.job_id, job_log.PAGE,
+                            f"فیلترها به خود دیوار داده شد: {self._search_query}",
+                            query=self._search_query)
+                    if _plan.recent_ads and posted_date:
+                        await job_log.record(
+                            job.job_id, job_log.PAGE,
+                            f"تاریخ انتشار به دیوار به‌صورت «آگهی‌های اخیر: {_plan.recent_ads}» "
+                            "داده شد تا فهرست کوتاه‌تر شود؛ روز دقیق را اسکرپر خودش بررسی می‌کند",
+                            recent_ads=_plan.recent_ads)
+                    for _note in _plan.notes:
+                        logger.info(f"[collect] filter not sent: {_note}")
+                        await job_log.record(job.job_id, job_log.PAGE, _note, level="warning")
             except Exception as e:
                 # A filter we cannot express is not a reason to abandon the run;
                 # it just means the local pass does more work, as before.
                 logger.warning(f"[collect] could not build the Divar query: {e}")
                 self._search_query = ""
+                _plan = None
 
             if urls:
                 # An explicit list: no search, no collection, no count. The
@@ -5128,14 +5150,9 @@ class DivarScraper:
                 if urls:
                     raise StopAsyncIteration   # caught below: nothing to ask
                 from app.services import divar_count as dc
-                _form = dc.build_form_data(
-                    category,
-                    advertiser_type=advertiser_type, has_images=has_images,
-                    min_price=min_price, max_price=max_price,
-                    min_deposit=min_deposit, max_deposit=max_deposit,
-                    min_rent=min_rent, max_rent=max_rent,
-                    min_area=min_area, max_area=max_area,
-                )
+                # The very form the collection searched with, so the two
+                # numbers answer the same question.
+                _form = _plan.form if _plan is not None else dc.build_form_data(category, **_filter_kw)
                 _divar_total, _count_err = await dc.fetch_post_count(city, _form)
                 if _divar_total is not None:
                     job.divar_count = int(_divar_total)
@@ -5228,6 +5245,15 @@ class DivarScraper:
                 'has_images': has_images,
                 'target_day': target_day, 'max_age_hours': max_age_hours,
             }
+            # What Divar already filtered is not checked again, and neither is
+            # a filter that means nothing for this category (a deposit on a
+            # sale). A filter Divar does not have for it stays here — the
+            # safety net for what Divar lets through. Not for an explicit
+            # list: nothing was searched, so Divar filtered nothing.
+            if _plan is not None and not urls:
+                for _name in _plan.local_off:
+                    if _name in _pre_filters:
+                        _pre_filters[_name] = None
             
             # Scrape each property detail
             examined = 0

@@ -112,22 +112,31 @@ class TestBuildFormData:
                             has_images=True, max_deposit=100_000_000, min_area=80)
         assert set(f) == {"category", "business-type", "has-photo", "credit", "size"}
 
-    def test_filters_divar_cannot_apply_are_not_sent(self):
-        """Sending them would not narrow anything and would overstate the count."""
+    def test_nothing_is_sent_that_was_not_set(self):
         f = build_form_data("buy-apartment")
-        assert "rooms" not in f and "has-parking" not in f
+        assert set(f) == {"category"}
 
 
 class TestUnsupportedFilters:
-    def test_names_what_divar_will_not_narrow_on(self):
-        out = unsupported_filters(min_rooms=2, has_parking=True, max_price_per_meter=9)
-        assert "حداقل اتاق" in out and "پارکینگ" in out and "قیمت هر متر" in out
+    """What the category leaves to the scraper — per category now (#27): Divar
+    narrows rooms, amenities and price per metre itself where the category has
+    them, so only the rest is «at most this»."""
+
+    def test_names_what_the_category_does_not_narrow_on(self):
+        out = unsupported_filters("buy-residential", min_rooms=2, has_elevator=True,
+                                  max_price_per_meter=9)
+        assert "تعداد اتاق" in out and "آسانسور" in out
+        assert "قیمت هر متر" not in out
+
+    def test_what_the_category_narrows_on_is_not_named(self):
+        assert unsupported_filters("buy-apartment", min_rooms=2, has_parking=True,
+                                   max_price_per_meter=9) == []
 
     def test_nothing_when_none_are_set(self):
-        assert unsupported_filters(min_rooms=None, has_parking=False) == []
+        assert unsupported_filters("buy-residential", min_rooms=None, has_parking=False) == []
 
     def test_false_is_not_a_filter(self):
-        assert unsupported_filters(has_elevator=False, has_storage=False) == []
+        assert unsupported_filters("buy-residential", has_elevator=False, has_storage=False) == []
 
 
 class TestBusinessTypes:

@@ -44,10 +44,9 @@ class TestItAsksDivarAtRunTime:
         assert "dc.fetch_post_count(city, _form)" in BLOCK
 
     def test_it_builds_the_form_from_the_run_s_own_filters(self):
-        for f in ("min_price=min_price", "max_deposit=max_deposit",
-                  "min_rent=min_rent", "max_area=max_area",
-                  "advertiser_type=advertiser_type", "has_images=has_images"):
-            assert f in BLOCK, f
+        """The very form the collection searched with (#27) — the behaviour is
+        checked end to end in test_divar_filter_schema.py."""
+        assert "_plan.form if _plan is not None else dc.build_form_data(category, **_filter_kw)" in BLOCK
 
     def test_it_records_both_numbers_together(self):
         assert "divar_count=_divar_total" in BLOCK

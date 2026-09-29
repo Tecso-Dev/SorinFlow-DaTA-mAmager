@@ -103,6 +103,7 @@ async def run_scraping_job(
     rotate_every: Optional[int] = None,
     owner_user_id: Optional[int] = None,
     urls: Optional[List[str]] = None,
+    divar_filters: Optional[dict] = None,
 ):
     """Background task to run scraping job.
 
@@ -234,6 +235,7 @@ async def run_scraping_job(
                 posted_date=posted_date,
                 rotate_every=rotate_every,
                 urls=urls,
+                divar_filters=divar_filters,
             )
             
             logger.info(f"[{job_id}] Job completed: {result.new_items} new, {result.failed_items} failed, Status={result.status}")

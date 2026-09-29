@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 import httpx
 from loguru import logger
@@ -44,6 +45,14 @@ CATEGORY_TOKENS: Dict[str, str] = {
     "rent-industrial-agricultural-property": "industry-agriculture-business-rent",
     "rent-temporary":                        "temporary-rent",
     "real-estate-services":                  "real-estate-services",
+    # Categories the scraper does not offer yet, read off Divar with the rest
+    # of its filter forms (#27); the schema covers them already.
+    "real-estate":                           "real-estate",
+    "contribution-construction":             "partnership",
+    "pre-sell-home":                         "presell",
+    "rent-temporary-suite-apartment":        "suite-apartment",
+    "rent-temporary-villa":                  "villa",
+    "rent-temporary-workspace":              "workspace",
 }
 
 # Divar's own words for the two kinds of advertiser.
@@ -63,56 +72,361 @@ def _range(minimum: Optional[int], maximum: Optional[int]) -> Optional[dict]:
     return {"number_range": band} if band else None
 
 
-def build_form_data(
+# ── the category's own filters (#27) ────────────────────────────────────────
+#
+# Divar's form is different for every category, and a filter the category does
+# not have makes it refuse the search from the second page on. So what is sent
+# is decided against the category's schema (app/services/divar_filters.py):
+# every filter the person set that the category has goes out, in Divar's shape;
+# one it does not have never does, and the plan says so in Persian for the run
+# log and the estimate.
+#
+# The form's own fields (min_price, has_elevator, …) predate the schema and are
+# still what the panel, saved runs and schedules send. Each maps onto one of
+# Divar's keys. Everything else Divar has arrives as `divar_filters`, keyed by
+# Divar's own names: {"building-age": {"max": 5}, "deed_type": ["single_page"]}.
+
+# Divar key, the form's two fields, the form's name for it.
+_RANGE_FIELDS = (
+    ("price", "min_price", "max_price", "قیمت کل"),
+    ("price_per_square", "min_price_per_meter", "max_price_per_meter", "قیمت هر متر"),
+    ("credit", "min_deposit", "max_deposit", "ودیعه"),
+    ("rent", "min_rent", "max_rent", "اجارهٔ ماهانه"),
+    ("size", "min_area", "max_area", "متراژ"),
+)
+# Divar key, the form's switch, its name. Only «must have» is Divar's: a
+# switch set to False («without a lift») has no Divar filter and stays local.
+_SWITCH_FIELDS = (
+    ("has-photo", "has_images", "عکس‌دار"),
+    ("elevator", "has_elevator", "آسانسور"),
+    ("parking", "has_parking", "پارکینگ"),
+    ("warehouse", "has_storage", "انباری"),
+    ("balcony", "has_balcony", "بالکن"),
+)
+_FORM_KEYS = ({k for k, *_ in _RANGE_FIELDS} | {k for k, *_ in _SWITCH_FIELDS}
+              | {"rooms", "business-type"})
+
+# The price filters mean something in one family only. Asked for elsewhere —
+# a deposit on a sale — they are not a narrower search but a wrong one.
+_FAMILY_OF = {"price": "buy", "price_per_square": "buy", "credit": "rent", "rent": "rent",
+              "daily_rent": "temporary", "person_capacity": "temporary"}
+# Which listing types the scraper's own check applies a form field to after
+# opening an ad (DivarScraper.local_filter_skip); None is every type.
+_LOCAL_FOR = {"price": ("buy",), "price_per_square": ("buy",),
+              "credit": ("rent",), "rent": ("rent",)}
+
+# Divar's room options, and the count each stands for; «بیشتر» is five and up.
+ROOM_OPTIONS = (("بدون اتاق", 0), ("یک", 1), ("دو", 2), ("سه", 3), ("چهار", 4), ("بیشتر", 5))
+
+# recent_ads: each option and the hours it reaches back.
+RECENT_ADS = (("3h", 3), ("12h", 12), ("1d", 24), ("3d", 72), ("7d", 168))
+
+_MAX_VALUES = 12            # choices in one repeated filter
+_MAX_TEXT = 60              # characters in one choice
+
+
+def tehran_today(now: Optional[datetime] = None) -> date:
+    """Today's date in Tehran (a fixed +03:30, like everything else here)."""
+    moment = now or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(TEHRAN).date()
+
+
+def recent_ads_for(posted_date: Optional[str] = None, max_age_hours: Optional[int] = None,
+                   *, today: Optional[date] = None) -> Optional[str]:
+    """The smallest recent_ads that safely covers what the run asks for, or None.
+
+    recent_ads is Divar's sort time — the last bump — not the publish time, so
+    it only pre-filters: the scraper still checks the exact day. A post
+    published on a day was bumped on it or later, so a window reaching back
+    over that whole Tehran day, with a margin, never hides one: today → 1d,
+    yesterday or the day before → 3d, three to six days ago → 7d, older →
+    nothing. A maximum age takes the smallest window at least that long.
+    """
+    if posted_date:
+        try:
+            day = datetime.fromisoformat(str(posted_date).strip()).date()
+        except ValueError:
+            return None
+        ago = ((today or tehran_today()) - day).days
+        if ago <= 0:
+            return "1d"
+        if ago <= 2:
+            return "3d"
+        if ago <= 6:
+            return "7d"
+        return None
+    if max_age_hours and max_age_hours > 0:
+        for value, hours in RECENT_ADS:
+            if hours >= max_age_hours:
+                return value
+    return None
+
+
+def rooms_options(lo: Optional[int], hi: Optional[int]) -> Tuple[List[str], bool]:
+    """(Divar's room options for a min/max band, whether they are exact).
+
+    Exact unless «بیشتر» (five and up) is in and the band stops short of it or
+    starts above five: then Divar lets some through that the band does not,
+    and the scraper keeps checking the rooms itself.
+    """
+    lo_n = 0 if lo is None else int(lo)
+    out = [name for name, n in ROOM_OPTIONS
+           if n >= lo_n and (hi is None or n <= int(hi)) and n < 5]
+    more = hi is None or int(hi) >= 5
+    if more:
+        out.append("بیشتر")
+    exact = not more or (hi is None and lo_n <= 5)
+    return out, exact
+
+
+def _category_name(slug: Optional[str]) -> str:
+    from app.config import CATEGORIES
+    return (CATEGORIES.get(slug or "") or {}).get("name") or (slug or "بدون دسته")
+
+
+def _int_or_none(v: Any) -> Optional[int]:
+    if v is None or v == "" or isinstance(v, bool):
+        return None
+    try:
+        n = int(float(str(v).strip()))
+    except (TypeError, ValueError):
+        raise ValueError(v) from None
+    if n < 0:
+        raise ValueError(v)
+    return n
+
+
+def _as_range(raw: Any) -> Optional[Tuple[Optional[int], Optional[int]]]:
+    """{"min": 3, "max": 5} (or Divar's minimum/maximum) → (3, 5)."""
+    if not isinstance(raw, dict):
+        raise ValueError(raw)
+    lo = _int_or_none(raw.get("min", raw.get("minimum")))
+    hi = _int_or_none(raw.get("max", raw.get("maximum")))
+    return None if lo is None and hi is None else (lo, hi)
+
+
+@dataclass
+class FilterPlan:
+    """What a run sends Divar for one category, and what it does not.
+
+    form     — search_data.form_data.data for the search API, category included
+    query    — the same filters for a divar.ir/s/<city>/<slug> link
+    sent     — Divar key → the value sent (tuple, True, list or str)
+    notes    — one Persian sentence per filter that was not sent, and why
+    not_applied — names of filters that do nothing for this category
+    after_scrape — names of filters the scraper checks itself after opening an ad
+    local_off — the form's fields the scraper need not check again: Divar
+                applied them exactly, or they mean nothing for this category
+    """
+    category: Optional[str]
+    form: Dict[str, Any] = field(default_factory=dict)
+    query: str = ""
+    sent: Dict[str, Any] = field(default_factory=dict)
+    notes: List[str] = field(default_factory=list)
+    not_applied: List[str] = field(default_factory=list)
+    after_scrape: List[str] = field(default_factory=list)
+    local_off: set = field(default_factory=set)
+    recent_ads: Optional[str] = None
+
+
+def _form_value(ftype: str, value: Any) -> Dict[str, Any]:
+    if ftype == "number_range":
+        return _range(*value) or {"number_range": {}}
+    if ftype == "boolean":
+        return {"boolean": {"value": True}}
+    if ftype == "repeated_string":
+        return {"repeated_string": {"value": list(value)}}
+    return {"str": {"value": value}}
+
+
+def _query_value(ftype: str, value: Any) -> str:
+    if ftype == "number_range":
+        lo, hi = value
+        return f"{'' if lo is None else int(lo)}-{'' if hi is None else int(hi)}"
+    if ftype == "boolean":
+        return "true"
+    if ftype == "repeated_string":
+        return ",".join(value)
+    return str(value)
+
+
+def plan_filters(
     category: Optional[str] = None,
     *,
+    schema: Optional[Dict[str, Any]] = None,
+    today: Optional[date] = None,
     advertiser_type: Optional[str] = None,
     has_images: Optional[bool] = None,
     min_price: Optional[int] = None, max_price: Optional[int] = None,
     min_deposit: Optional[int] = None, max_deposit: Optional[int] = None,
     min_rent: Optional[int] = None, max_rent: Optional[int] = None,
+    min_price_per_meter: Optional[int] = None, max_price_per_meter: Optional[int] = None,
     min_area: Optional[int] = None, max_area: Optional[int] = None,
-) -> Dict[str, Any]:
-    """The filters Divar can apply itself, in the shape its API expects.
+    min_rooms: Optional[int] = None, max_rooms: Optional[int] = None,
+    has_elevator: Optional[bool] = None, has_parking: Optional[bool] = None,
+    has_storage: Optional[bool] = None, has_balcony: Optional[bool] = None,
+    posted_date: Optional[str] = None, max_age_hours: Optional[int] = None,
+    divar_filters: Optional[Dict[str, Any]] = None,
+) -> FilterPlan:
+    """Decide, against the category's schema, what goes to Divar."""
+    from app.services import divar_filters as df
 
-    Only what Divar actually honours goes in. Anything it ignores would make
-    the count a promise the scrape could not keep, so rooms and the amenity
-    toggles are deliberately left out — Divar does not narrow on them here, and
-    the scraper still applies those itself after opening each ad.
-    """
-    data: Dict[str, Any] = {}
-    token = CATEGORY_TOKENS.get((category or "").strip())
-    if token:
-        data["category"] = {"str": {"value": token}}
+    fields = {
+        "min_price": min_price, "max_price": max_price,
+        "min_deposit": min_deposit, "max_deposit": max_deposit,
+        "min_rent": min_rent, "max_rent": max_rent,
+        "min_price_per_meter": min_price_per_meter, "max_price_per_meter": max_price_per_meter,
+        "min_area": min_area, "max_area": max_area,
+        "has_images": has_images, "has_elevator": has_elevator, "has_parking": has_parking,
+        "has_storage": has_storage, "has_balcony": has_balcony,
+    }
+    slug = (category or "").strip()
+    schema = schema or df.snapshot()
+    entry = df.category(slug, schema)
+    own = df.filters_for(slug, schema)
+    family = (entry or {}).get("family")
+    cat_fa = _category_name(slug)
+    from app.config import CATEGORIES
+    listing_type = (CATEGORIES.get(slug) or {}).get("type")
+
+    plan = FilterPlan(category=slug or None)
+    sent: Dict[str, Any] = {}
+
+    def locally_checked(key: str) -> bool:
+        types = _LOCAL_FOR.get(key)
+        return types is None or listing_type in types
+
+    def not_here(key: str, name: str, names: Tuple[str, ...]) -> None:
+        """A filter the person set that this category does not have."""
+        if _FAMILY_OF.get(key) and _FAMILY_OF[key] != family:
+            plan.notes.append(f"{name} برای دستهٔ «{cat_fa}» معنا ندارد و اعمال نشد")
+            plan.not_applied.append(name)
+            plan.local_off.update(names)
+        elif names and locally_checked(key):
+            plan.notes.append(f"دیوار برای دستهٔ «{cat_fa}» فیلتر «{name}» ندارد؛ "
+                              "اسکرپر بعد از باز کردن هر آگهی خودش آن را بررسی می‌کند")
+            plan.after_scrape.append(name)
+        else:
+            plan.notes.append(f"دیوار برای دستهٔ «{cat_fa}» فیلتر «{name}» ندارد و اعمال نشد")
+            plan.not_applied.append(name)
+            plan.local_off.update(names)
+
+    # The form's bands.
+    for key, lo_name, hi_name, name in _RANGE_FIELDS:
+        lo, hi = fields[lo_name], fields[hi_name]
+        if lo is None and hi is None:
+            continue
+        if key in own:
+            sent[key] = (lo, hi)
+            plan.local_off.update((lo_name, hi_name))
+        else:
+            not_here(key, name, (lo_name, hi_name))
+
+    # The form's switches: only «must have» is something Divar can say.
+    for key, form_name, name in _SWITCH_FIELDS:
+        if fields[form_name] is not True:
+            continue
+        if key in own:
+            sent[key] = True
+            plan.local_off.add(form_name)
+        else:
+            not_here(key, name, (form_name,))
+
+    # Rooms: the form's band, as Divar's options.
+    if min_rooms is not None or max_rooms is not None:
+        if "rooms" in own:
+            options, exact = rooms_options(min_rooms, max_rooms)
+            if options:
+                sent["rooms"] = options
+                if exact:
+                    plan.local_off.update(("min_rooms", "max_rooms"))
+        else:
+            not_here("rooms", "تعداد اتاق", ("min_rooms", "max_rooms"))
 
     kind = BUSINESS_TYPES.get((advertiser_type or "").strip())
     if kind:
-        data["business-type"] = {"repeated_string": {"value": [kind]}}
+        if "business-type" in own:
+            sent["business-type"] = [kind]
+            plan.local_off.add("advertiser_type")
+        else:
+            not_here("business-type", "نوع آگهی‌دهنده", ("advertiser_type",))
 
-    if has_images:
-        data["has-photo"] = {"boolean": {"value": True}}
+    # The rest of Divar's filters, by Divar's own names.
+    for key, raw in (divar_filters or {}).items():
+        key = str(key)[:_MAX_TEXT]
+        if key == "recent_ads" or key == "category" or raw in (None, "", [], {}, False):
+            continue
+        if key in _FORM_KEYS and key in sent:
+            continue                      # the form's own field already said it
+        f = own.get(key)
+        title = df.title_of(key, schema)
+        if f is None:
+            not_here(key, title, ())
+            continue
+        ftype = f.get("type")
+        try:
+            if ftype == "number_range":
+                value: Any = _as_range(raw)
+                if value is None:
+                    continue
+            elif ftype == "boolean":
+                if raw is not True and str(raw).lower() not in ("true", "1"):
+                    continue
+                value = True
+            elif ftype == "repeated_string":
+                wanted = raw if isinstance(raw, list) else [raw]
+                wanted = [str(v).strip()[:_MAX_TEXT] for v in wanted[:_MAX_VALUES] if str(v).strip()]
+                allowed = df.option_values(f) if df.options_known(f) else None
+                value = [v for v in wanted if allowed is None or v in allowed]
+                if len(value) < len(wanted):
+                    plan.notes.append(f"بعضی گزینه‌های «{title}» در دیوار نیست و فرستاده نشد")
+                if not value:
+                    continue
+            elif ftype == "str":
+                value = str(raw).strip()[:_MAX_TEXT]
+                if df.options_known(f) and value not in df.option_values(f):
+                    raise ValueError(value)
+            else:
+                continue
+        except (ValueError, TypeError):
+            plan.notes.append(f"مقدار «{title}» پذیرفته نشد و اعمال نشد")
+            continue
+        sent[key] = value
 
-    for field, lo, hi in (
-        ("price",  min_price,   max_price),
-        ("credit", min_deposit, max_deposit),   # ودیعه
-        ("rent",   min_rent,    max_rent),
-        ("size",   min_area,    max_area),      # متراژ
-    ):
-        band = _range(lo, hi)
-        if band:
-            data[field] = band
-    return data
+    # The publish date or the maximum age, as Divar's recent_ads — and a
+    # recent_ads picked by hand only when neither is set: a «3 hours» on a run
+    # for yesterday would hide the whole day.
+    recent = recent_ads_for(posted_date, max_age_hours, today=today)
+    if recent is None and not posted_date and not max_age_hours:
+        hand = (divar_filters or {}).get("recent_ads")
+        if isinstance(hand, str) and hand in {v for v, _ in RECENT_ADS}:
+            recent = hand
+    if recent and "recent_ads" in own:
+        sent["recent_ads"] = recent
+        plan.recent_ads = recent
+
+    token = CATEGORY_TOKENS.get(slug) or (entry or {}).get("token")
+    if token:
+        plan.form["category"] = {"str": {"value": token}}
+    parts = []
+    for key in sorted(sent):
+        ftype = (own.get(key) or {}).get("type") or "str"
+        plan.form[key] = _form_value(ftype, sent[key])
+        parts.append(f"{key}={quote(_query_value(ftype, sent[key]), safe='-,')}")
+    plan.query = "&".join(parts)
+    plan.sent = sent
+    return plan
 
 
-def build_search_query(
-    *,
-    advertiser_type: Optional[str] = None,
-    has_images: Optional[bool] = None,
-    min_price: Optional[int] = None, max_price: Optional[int] = None,
-    min_deposit: Optional[int] = None, max_deposit: Optional[int] = None,
-    min_rent: Optional[int] = None, max_rent: Optional[int] = None,
-    min_area: Optional[int] = None, max_area: Optional[int] = None,
-) -> str:
+def build_form_data(category: Optional[str] = None, **filters) -> Dict[str, Any]:
+    """The filters Divar applies itself, in the shape its search API expects:
+    every one the category has, and nothing it does not (see plan_filters)."""
+    return plan_filters(category, **filters).form
+
+
+def build_search_query(category: Optional[str] = None, **filters) -> str:
     """The same filters as build_form_data, in the shape a divar.ir URL wants.
 
     The scraper loaded «/s/{city}/{category}» with no filters at all and then
@@ -121,42 +435,17 @@ def build_search_query(
     that DID match were never looked at, because they were further down a feed
     the run had already stopped reading.
 
-    Divar narrows on exactly the fields build_form_data lists, so asking it to
-    is both far fewer requests and the only way to actually reach the listings
-    the filter promised. Ranges are «min-max», with either side allowed to be
-    empty.
+    It needs the category now: a filter the category does not have is what
+    makes Divar refuse the search (#27). Ranges are «min-max», with either
+    side allowed to be empty; several choices are comma-separated.
     """
-    parts = []
-    for field, lo, hi in (
-        ("price",  min_price,   max_price),
-        ("credit", min_deposit, max_deposit),   # ودیعه
-        ("rent",   min_rent,    max_rent),
-        ("size",   min_area,    max_area),      # متراژ
-    ):
-        if lo is None and hi is None:
-            continue
-        parts.append(f"{field}={'' if lo is None else int(lo)}-"
-                     f"{'' if hi is None else int(hi)}")
-
-    kind = BUSINESS_TYPES.get((advertiser_type or "").strip())
-    if kind:
-        parts.append(f"business-type={kind}")
-    if has_images:
-        parts.append("has-photo=true")
-
-    return "&".join(parts)
+    return plan_filters(category, **filters).query
 
 
-def unsupported_filters(**kwargs) -> list:
-    """Filters the caller asked for that Divar will not narrow on, so the
-    estimate can say the real number is at most this."""
-    names = {
-        "min_rooms": "حداقل اتاق", "max_rooms": "حداکثر اتاق",
-        "has_elevator": "آسانسور", "has_parking": "پارکینگ",
-        "has_storage": "انباری", "has_balcony": "بالکن",
-        "min_price_per_meter": "قیمت هر متر", "max_price_per_meter": "قیمت هر متر",
-    }
-    return [fa for key, fa in names.items() if kwargs.get(key) not in (None, False, "")]
+def unsupported_filters(category: Optional[str] = None, **kwargs) -> list:
+    """Filters the caller asked for that Divar does not narrow on in this
+    category — the scraper checks them itself, so the estimate is at most."""
+    return plan_filters(category, **kwargs).after_scrape
 
 
 async def resolve_city_id(city: str, client: Optional[httpx.AsyncClient] = None) -> Optional[int]:
