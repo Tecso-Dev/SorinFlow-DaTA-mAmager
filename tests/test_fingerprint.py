@@ -217,9 +217,12 @@ class TestTheProfilePersists:
         assert a != b
         assert a == profile_dir("09058432452"), "not stable across calls"
 
-    def test_it_lives_on_the_persistent_volume(self):
+    def test_it_lives_on_the_persistent_volume(self, monkeypatch):
         """/app/data is the PVC. A profile under /tmp would be a fresh device
-        after every pod restart, which is the bug wearing a different hat."""
+        after every pod restart, which is the bug wearing a different hat.
+        The default is what production runs with; conftest points the suite's
+        own runs elsewhere, so that override is lifted here."""
+        monkeypatch.delenv("SCRAPER_PROFILE_DIR", raising=False)
         from app.scraper.stealth import profile_dir
         assert str(profile_dir("0912")).startswith("/app/data/profiles")
 
