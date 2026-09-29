@@ -7,12 +7,15 @@
 // app/api/routes/monitoring.py, gcp.py and stats.py.
 
 import {
-  AlertTriangle, Cable, CircleCheck, Cpu, Database, HardDrive, Loader2, Pause, Play, Radio,
-  RotateCw, ShieldCheck, Terminal, Trash2, Wifi,
+  AlertTriangle, Cable, Cpu, Database, HardDrive, Loader2, Pause, Play, Radio, RotateCw, Trash2, Wifi,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { useEffect, useId, useRef, useState } from "react";
+import { Area, AreaChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import { Lottie } from "@/components/ui/lottie";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "@/components/toaster";
@@ -20,10 +23,15 @@ import { Reveal } from "@/components/viz";
 import {
   Empty, ErrorNote, Field, ListSkeleton, NativeSelect, Section, ToneBadge, Toolbar, useConfirm,
 } from "@/components/panel/kit";
+import { IsoAlert } from "@/components/panel/motion3d";
 import { api, ApiError } from "@/lib/api";
 import { qs } from "@/lib/crm";
 import { faDate, faNum, faPercent } from "@/lib/format";
 import { can, type User } from "@/lib/session";
+import emptyLottie from "@/lotties/empty.json";
+import shieldLottie from "@/lotties/shield.json";
+import successLottie from "@/lotties/success.json";
+import { IsoServerRack } from "./rack";
 
 /* ───────────────────────── types (app/api/routes/monitoring.py, gcp.py, stats.py) ───────────────────────── */
 
@@ -70,6 +78,19 @@ function duration(sec?: number): string {
   if (h > 0) return `${faNum(h)} ساعت و ${faNum(m)} دقیقه`;
   return `${faNum(m)} دقیقه`;
 }
+
+const MotionRow = motion.create(TableRow);
+const errorArt = <IsoAlert />;
+const emptyArt = <Lottie animationData={emptyLottie} className="max-w-[100px]" />;
+const goodArt = <Lottie animationData={successLottie} className="max-w-[92px]" />;
+
+/** A row that plays its entrance once, when it first mounts; polled lists keep
+ *  their ids, so a refetch leaves every row that was already there alone. */
+const rowIn = (i: number) => ({
+  initial: { opacity: 0, y: 8 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.4, delay: Math.min(i, 10) * 0.035, ease: [0.22, 1, 0.36, 1] as const },
+});
 
 /* ───────────────────────── health tiles ───────────────────────── */
 
@@ -135,14 +156,17 @@ function ServerTable({ ov }: { ov: Overview }) {
   ];
   return (
     <Section title="سرور و سیستم">
-      <dl className="grid gap-2 text-sm sm:grid-cols-2">
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex items-center justify-between gap-2 rounded-lg bg-muted/30 px-3 py-2">
-            <dt className="text-muted-foreground">{k}</dt>
-            <dd className="font-medium">{v}</dd>
-          </div>
-        ))}
-      </dl>
+      <div className="flex items-center gap-4">
+        <dl className="grid min-w-0 flex-1 gap-2 text-sm sm:grid-cols-2">
+          {rows.map(([k, v]) => (
+            <div key={k} className="flex items-center justify-between gap-2 rounded-lg bg-muted/30 px-3 py-2">
+              <dt className="text-muted-foreground">{k}</dt>
+              <dd className="font-medium">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        <IsoServerRack className="hidden h-24 w-28 shrink-0 xl:block" />
+      </div>
     </Section>
   );
 }
@@ -224,9 +248,9 @@ function CookiesTable() {
       {q.isPending ? (
         <ListSkeleton rows={3} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={errorArt} />
       ) : q.data.items.length === 0 ? (
-        <Empty icon={ShieldCheck}>هیچ نشست دیواری ثبت نشده است.</Empty>
+        <Empty illustration={<Lottie animationData={shieldLottie} className="max-w-[100px]" />}>هیچ نشست دیواری ثبت نشده است.</Empty>
       ) : (
         <div className="overflow-x-auto">
           <Table aria-label="نشست‌های دیوار">
@@ -239,8 +263,8 @@ function CookiesTable() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {q.data.items.map((c) => (
-                <TableRow key={c.id}>
+              {q.data.items.map((c, i) => (
+                <MotionRow key={c.id} {...rowIn(i)}>
                   <TableCell dir="ltr" className="text-end tabular">{c.phone_number}</TableCell>
                   <TableCell>
                     <ToneBadge tone={c.state === "active" ? "success" : c.state === "expiring" ? "warning" : "danger"}>{c.note}</ToneBadge>
@@ -257,7 +281,7 @@ function CookiesTable() {
                       </Button>
                     </div>
                   </TableCell>
-                </TableRow>
+                </MotionRow>
               ))}
             </TableBody>
           </Table>
@@ -321,7 +345,7 @@ function GcpCard() {
       {q.isPending ? (
         <ListSkeleton rows={2} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={errorArt} />
       ) : (
         <div className="flex flex-col gap-2 text-sm">
           <ToneBadge tone={STATE_TONE[q.data.state] ?? "neutral"} className="w-fit">{q.data.state}</ToneBadge>
@@ -342,17 +366,17 @@ function RuntimeCard() {
       {q.isPending ? (
         <ListSkeleton rows={3} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={errorArt} />
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           <div>
             <div className="mb-2 text-xs font-semibold text-muted-foreground">پردازه‌ها</div>
             <ul className="flex flex-col gap-1.5 text-sm">
               {q.data.processes.map((p, i) => (
-                <li key={i} className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-1.5">
+                <motion.li key={i} {...rowIn(i)} className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-1.5">
                   <span>{p.role ?? "?"} · {p.host ?? "?"}</span>
                   <span className="tabular text-[11px] text-muted-foreground">{faNum(Math.round(p.age_seconds))}s پیش</span>
-                </li>
+                </motion.li>
               ))}
               {q.data.processes.length === 0 && <li className="text-muted-foreground">پردازه‌ای گزارش نشده است.</li>}
             </ul>
@@ -360,11 +384,11 @@ function RuntimeCard() {
           <div>
             <div className="mb-2 text-xs font-semibold text-muted-foreground">حلقه‌های پس‌زمینه</div>
             <ul className="flex flex-col gap-1.5 text-sm">
-              {q.data.loops.map((l) => (
-                <li key={l.name} className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-1.5">
+              {q.data.loops.map((l, i) => (
+                <motion.li key={l.name} {...rowIn(i)} className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-1.5">
                   <span>{l.name}</span>
                   <ToneBadge tone={l.off ? "neutral" : l.stale ? "danger" : "success"}>{l.off ? "خاموش" : l.stale ? "متوقف‌مانده" : "سالم"}</ToneBadge>
-                </li>
+                </motion.li>
               ))}
               {q.data.loops.length === 0 && <li className="text-muted-foreground">حلقه‌ای گزارش نشده است.</li>}
             </ul>
@@ -405,16 +429,16 @@ function ClientErrorsCard() {
       {q.isPending ? (
         <ListSkeleton rows={3} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={errorArt} />
       ) : q.data.items.length === 0 ? (
-        <Empty icon={CircleCheck}>خطایی ثبت نشده است.</Empty>
+        <Empty illustration={goodArt}>خطایی ثبت نشده است.</Empty>
       ) : (
         <ul tabIndex={0} aria-label="خطاهای مرورگر کاربران" className="flex max-h-72 flex-col gap-1.5 overflow-y-auto text-xs">
           {q.data.items.map((e, i) => (
-            <li key={i} className="rounded-lg bg-muted/30 px-3 py-2">
+            <motion.li key={i} {...rowIn(i)} className="rounded-lg bg-muted/30 px-3 py-2">
               <div className="font-medium">{String(e.message ?? "—")}</div>
               <div className="mt-0.5 truncate text-muted-foreground">{String(e.url ?? "")} · {String(e.browser ?? "")}</div>
-            </li>
+            </motion.li>
           ))}
         </ul>
       )}
@@ -424,10 +448,41 @@ function ClientErrorsCard() {
 
 /* ───────────────────────── live chart ───────────────────────── */
 
+const liveConfig = {
+  rps: { label: "درخواست در ثانیه", color: "var(--chart-1)" },
+  cpu: { label: "CPU", color: "var(--chart-3)" },
+  ram: { label: "RAM", color: "var(--chart-4)" },
+} satisfies ChartConfig;
+
+type LivePoint = { t: number; rps: number; cpu: number | null; ram: number | null };
+
+/** One point per pair of neighbouring snapshots: the rates are the same ones
+ *  the numbers above the chart show, never a figure of the chart's own. */
+function livePoints(samples: LiveSnap[]): LivePoint[] {
+  return samples.slice(1).map((s, i) => {
+    const p = samples[i];
+    const d = Math.max(0.001, s.ts - p.ts);
+    const cpu = s.cpu_usage_usec !== undefined && p.cpu_usage_usec !== undefined
+      ? ((s.cpu_usage_usec - p.cpu_usage_usec) / 1e6 / d / (s.cpu_limit_cores || s.cpu_count || 1)) * 100
+      : null;
+    const ram = s.memory_used_bytes && s.memory_limit_bytes ? (s.memory_used_bytes / s.memory_limit_bytes) * 100 : null;
+    return {
+      t: s.ts,
+      rps: Math.max(0, (s.requests - p.requests) / d),
+      cpu: cpu === null ? null : Math.min(100, Math.max(0, cpu)),
+      ram,
+    };
+  });
+}
+
+const clock = (ts: number) => faDate(new Date(ts * 1000), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
 function LiveCard() {
   const [paused, setPaused] = useState(false);
   const [samples, setSamples] = useState<LiveSnap[]>([]);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // an SVG id is document-wide: derive it from this instance
+  const fill = `lv${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
   useEffect(() => {
     async function tick() {
@@ -453,6 +508,8 @@ function LiveCard() {
     ? ((last.cpu_usage_usec - prev.cpu_usage_usec) / 1e6 / dt / (last.cpu_limit_cores || last.cpu_count || 1)) * 100
     : null;
   const ramPct = last?.memory_used_bytes && last?.memory_limit_bytes ? (last.memory_used_bytes / last.memory_limit_bytes) * 100 : null;
+  const points = livePoints(samples);
+  const hasLoad = points.some((p) => p.cpu !== null || p.ram !== null);
 
   const bar = (label: string, pct: number | null) => (
     <div>
@@ -487,18 +544,51 @@ function LiveCard() {
           {bar("Swap", last?.swap_used_percent ?? null)}
         </div>
       </div>
-      {samples.length > 1 && (
-        <div className="mt-4 flex h-16 items-end gap-0.5" aria-hidden>
-          {samples.slice(1).map((s, i) => {
-            const p = samples[i];
-            const d = Math.max(0.001, s.ts - p.ts);
-            const r = Math.max(0, (s.requests - p.requests) / d);
-            const max = Math.max(1, ...samples.slice(1).map((s2, j) => {
-              const p2 = samples[j];
-              return Math.max(0, (s2.requests - p2.requests) / Math.max(0.001, s2.ts - p2.ts));
-            }));
-            return <div key={s.ts} className="flex-1 rounded-t bg-primary/60" style={{ height: `${Math.max(2, (r / max) * 100)}%` }} />;
-          })}
+      {points.length > 1 && (
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <div className="min-w-0">
+            <div className="mb-1.5 text-[11px] text-muted-foreground">درخواست در ثانیه، نمونه‌های چند دقیقهٔ اخیر</div>
+            <ChartContainer config={liveConfig} className="aspect-auto h-[140px] w-full">
+              <AreaChart data={points} margin={{ top: 6, left: 0, right: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id={fill} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--color-rps)" stopOpacity={0.45} />
+                    <stop offset="100%" stopColor="var(--color-rps)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} reversed tickLine={false} axisLine={false} tickMargin={6} minTickGap={48} tickFormatter={clock} />
+                <YAxis orientation="right" tickLine={false} axisLine={false} width={30} allowDecimals tickFormatter={(v: number) => faNum(v, { maximumFractionDigits: 1 })} />
+                <ChartTooltip content={<ChartTooltipContent indicator="line" labelFormatter={(_, p) => (p?.[0] ? clock(Number(p[0].payload.t)) : "")} />} />
+                <Area dataKey="rps" type="monotone" stroke="var(--color-rps)" strokeWidth={2} fill={`url(#${fill})`} isAnimationActive={false} />
+              </AreaChart>
+            </ChartContainer>
+          </div>
+          {hasLoad && (
+            <div className="min-w-0">
+              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <span>مصرف منابع، درصد</span>
+                <span className="flex items-center gap-3">
+                  {(["cpu", "ram"] as const).map((k) => (
+                    <span key={k} className="flex items-center gap-1.5">
+                      <span className="size-2 rounded-full" style={{ background: liveConfig[k].color }} />
+                      {liveConfig[k].label}
+                    </span>
+                  ))}
+                </span>
+              </div>
+              <ChartContainer config={liveConfig} className="aspect-auto h-[140px] w-full">
+                <LineChart data={points} margin={{ top: 6, left: 0, right: 0, bottom: 0 }}>
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                  <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} reversed tickLine={false} axisLine={false} tickMargin={6} minTickGap={48} tickFormatter={clock} />
+                  <YAxis orientation="right" domain={[0, 100]} tickLine={false} axisLine={false} width={30} tickFormatter={(v: number) => faNum(v)} />
+                  <ChartTooltip content={<ChartTooltipContent indicator="line" labelFormatter={(_, p) => (p?.[0] ? clock(Number(p[0].payload.t)) : "")} />} />
+                  <Line dataKey="cpu" type="monotone" stroke="var(--color-cpu)" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
+                  <Line dataKey="ram" type="monotone" stroke="var(--color-ram)" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
+                </LineChart>
+              </ChartContainer>
+            </div>
+          )}
         </div>
       )}
     </Section>
@@ -540,9 +630,9 @@ function LogViewerCard() {
       {q.isPending ? (
         <ListSkeleton rows={4} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={errorArt} />
       ) : q.data.lines.length === 0 ? (
-        <Empty icon={Terminal}>{q.data.note ?? "خطی یافت نشد."}</Empty>
+        <Empty illustration={emptyArt}>{q.data.note ?? "خطی یافت نشد."}</Empty>
       ) : (
         <pre dir="ltr" tabIndex={0} role="region" aria-label="لاگ سامانه" className="max-h-96 overflow-auto rounded-xl bg-muted/40 p-3 text-start text-[11px] leading-5">
           {q.data.lines.join("\n")}
@@ -559,7 +649,7 @@ export function OverviewTab({ user }: { user?: User }) {
   const isBoss = can(user, { roles: ["root", "super_admin"] });
 
   if (q.isPending) return <ListSkeleton rows={8} />;
-  if (q.isError) return <ErrorNote error={q.error} />;
+  if (q.isError) return <ErrorNote error={q.error} illustration={errorArt} />;
   const ov = q.data;
 
   return (

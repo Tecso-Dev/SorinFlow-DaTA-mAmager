@@ -8,8 +8,9 @@
 import { Activity } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/panel/kit";
+import { IsoAntenna } from "@/components/panel/motion3d";
+import { Reveal } from "@/components/viz";
 import { useSession, can } from "@/lib/session";
-import { IsoServerRack } from "./rack";
 import { OverviewTab } from "./overview-tab";
 import { AlertsTab, CicdTab, K8sTab, ServerTab, ServicesTab } from "./extra-tabs";
 
@@ -19,12 +20,12 @@ export function MonitoringView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader
-        icon={Activity}
-        title="پایش سامانه"
-        hint="سلامت سرور، اتصال دیوار و صف‌های پس‌زمینه"
-        actions={<IsoServerRack className="h-14 w-20 sm:h-16 sm:w-24" />}
-      />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_130px]">
+        <PageHeader icon={Activity} title="پایش سامانه" hint="سلامت سرور، اتصال دیوار و صف‌های پس‌زمینه" />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <IsoAntenna className="max-w-[108px]" />
+        </Reveal>
+      </div>
 
       {isBoss ? (
         <Tabs defaultValue="overview" className="gap-4">
