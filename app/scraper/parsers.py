@@ -534,6 +534,30 @@ def parse_listing_card(card, base_url: str = DIVAR_BASE_URL) -> Optional[Dict[st
 # Price extraction
 # ---------------------------------------------------------------------------
 
+def _group_table_pairs(table) -> List[tuple]:
+    """(heading, cell) for each column of one of Divar's group tables, or [] when
+    the two rows do not line up.
+
+    The headings sit in <thead> and the cells in the <tbody> row. A heading's
+    class may be on the <th> itself or on a span inside it, so both are looked
+    for — extract_property_details always knew that and extract_price_info only
+    knew the span, so a deposit and a rent in a table with the class on its
+    <th> were read by neither. Columns are paired by position only when the
+    counts agree: a mismatch means a cell was skipped, and every pairing after
+    it would be wrong.
+    """
+    header_cells = (table.select('thead th .kt-group-row-item__title')
+                    or table.select('thead th'))
+    data_row = table.select_one('tbody tr')
+    if not header_cells or not data_row:
+        return []
+    value_cells = data_row.select('td.kt-group-row-item') or data_row.select('td')
+    if len(header_cells) != len(value_cells):
+        return []
+    return [(h.get_text(strip=True), v.get_text(strip=True))
+            for h, v in zip(header_cells, value_cells, strict=True)]
+
+
 def extract_price_info(soup) -> Dict[str, Any]:
     """Extract total_price / deposit / rent_price from a property page."""
     price_info: Dict[str, Any] = {}
@@ -573,18 +597,8 @@ def extract_price_info(soup) -> Dict[str, Any]:
         # Pass 1: table-based (headers in <thead>, values in <tbody>)
         # On Divar, deposit/rent often appear as table columns next to area/rooms
         for table in soup.select('table.kt-group-row'):
-            header_cells = table.select('thead th .kt-group-row-item__title')
-            data_row = table.select_one('tbody tr')
-            if not header_cells or not data_row:
-                continue
-            value_cells = data_row.select('td.kt-group-row-item') or data_row.select('td')
-            if len(header_cells) != len(value_cells):
-                continue
-            for idx, hcell in enumerate(header_cells):
-                _apply_price_pair(
-                    hcell.get_text(strip=True),
-                    value_cells[idx].get_text(strip=True),
-                )
+            for heading, cell in _group_table_pairs(table):
+                _apply_price_pair(heading, cell)
 
         # Pass 2: row-based (.kt-base-row / .kt-unexpandable-row / individual cells)
         rows = soup.select('.kt-base-row, .kt-unexpandable-row, .kt-group-row-item')
@@ -705,31 +719,50 @@ def extract_rooms_from_text(text: str) -> Optional[int]:
 # Property detail extraction
 # ---------------------------------------------------------------------------
 
+# The amenities a page states, by the word Divar prints for them.
+_AMENITY_FIELDS = {
+    'آسانسور': 'has_elevator',
+    'پارکینگ': 'has_parking',
+    'انباری': 'has_storage',
+    'بالکن': 'has_balcony',
+    'تراس': 'has_balcony',
+}
+# Any of these in a cell or a chip means the ad does NOT have it.
+_NO_WORDS = ('ندارد', 'ندارند', 'خیر', 'فاقد', 'بدون', 'نیست')
+
+
+def _says_no(text: str) -> bool:
+    return any(w in text for w in _NO_WORDS)
+
+
+def _ad_text(soup) -> str:
+    """What the poster wrote about THIS ad — its description, and nothing around it.
+
+    The page also carries other people's ads: «آگهی‌های مشابه» sits under every
+    listing with «۳ خوابه» and «سوئیت» in the titles, and the text of the whole
+    page used to be searched for rooms when the ad's own rows had none. A shop
+    was read as having no rooms (0) or two, and a min-rooms filter judged it on
+    that.
+    """
+    parts = []
+    for el in soup.select('[class*="description-row__text"]'):
+        if 'description-row__text--small' in ' '.join(el.get('class', [])):
+            continue        # the publish line, not the description
+        parts.append(el.get_text(' '))
+    return ' '.join(parts)
+
+
 def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
     """Extract area, rooms, floor, amenities, etc. from a property page."""
     details: Dict[str, Any] = {}
 
     try:
-        # Table-layout: headers in <thead>, values in <tbody>
+        # Table-layout: headers in <thead>, values in <tbody>. Every table is
+        # read — the spec table (متراژ، ساخت، اتاق) is followed by one of
+        # amenities (آسانسور، پارکینگ، انباری) — and each field is taken once.
         try:
             for table in soup.select('table.kt-group-row'):
-                # The title class may sit on the <th> itself or on a child
-                header_cells = (table.select('thead th .kt-group-row-item__title')
-                                or table.select('thead th'))
-                data_row = table.select_one('tbody tr')
-                if not header_cells or not data_row:
-                    continue
-                value_cells = data_row.select('td.kt-group-row-item') or data_row.select('td')
-                if not value_cells:
-                    continue
-                headers = [h.get_text(strip=True) for h in header_cells]
-                values  = [v.get_text(strip=True) for v in value_cells]
-                # Only use positional matching when counts match; a mismatch means
-                # some cells were skipped by the selector and indices would be wrong.
-                if len(headers) != len(values):
-                    continue
-                for idx, header_text in enumerate(headers):
-                    value_text = values[idx]
+                for header_text, value_text in _group_table_pairs(table):
                     if not header_text or not value_text:
                         continue
                     if 'متراژ' in header_text and not details.get('area'):
@@ -744,8 +777,13 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
                             details['rooms'] = val
                     elif 'ساخت' in header_text and not details.get('year_built'):
                         details['year_built'] = parse_persian_number(value_text)
-                if details.get('area') is not None and details.get('rooms') is not None:
-                    break
+                    else:
+                        # «آسانسور» over «ندارد»: the cell says whether the ad has
+                        # one. The heading alone says nothing.
+                        for keyword, field in _AMENITY_FIELDS.items():
+                            if keyword in header_text and field not in details:
+                                details[field] = not _says_no(value_text)
+                                break
         except Exception:
             pass
 
@@ -852,18 +890,15 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
         # Amenity chips: Divar renders امکانات as title-only chips (present)
         # or short "آسانسور ندارد" texts (absent). The title+value loop above
         # skips valueless rows entirely, so handle them here.
-        AMENITY_CHIP_MAP = {
-            'آسانسور': 'has_elevator',
-            'پارکینگ': 'has_parking',
-            'انباری': 'has_storage',
-            'بالکن': 'has_balcony',
-            'تراس': 'has_balcony',
-        }
+        AMENITY_CHIP_MAP = _AMENITY_FIELDS
         try:
             for elem in soup.select(
                 '.kt-group-row-item, .kt-icon-row-item, .kt-amenity-feat-cell, '
                 '[class*="feat-cell"], [class*="amenity"], [class*="feature-item"]'
             ):
+                # A column heading names a feature; it does not say the ad has it
+                if elem.name == 'th':
+                    continue
                 text = elem.get_text(strip=True)
                 # Chips are short; long texts are other rows/descriptions
                 if not text or len(text) > 40:
@@ -874,6 +909,12 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
                         details[field] = not negated
         except Exception:
             pass
+
+        # An old house or a plot has «متراژ زمین» and no plain «متراژ»: its land is
+        # the only area the page states. With a built area beside it, which of the
+        # two «متراژ» means is not ours to guess.
+        if not details.get('area') and details.get('land_area') and not details.get('built_area'):
+            details['area'] = details['land_area']
 
         # Fallback: infer area from title
         if not details.get('area') and title:
@@ -916,10 +957,10 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
             except Exception:
                 pass
 
-        # Fallback: full page text
+        # Fallback: the ad's own description
         if not details.get('rooms'):
             try:
-                r = extract_rooms_from_text(soup.get_text(separator=' '))
+                r = extract_rooms_from_text(_ad_text(soup))
                 if r is not None:
                     details['rooms'] = r
             except Exception:
@@ -972,14 +1013,14 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
             if not details.get('year_built'):
                 details['year_built'] = rooms_val
             del details['rooms']
-            # Re-try: infer from title or full text
+            # Re-try: infer from title or the ad's own description
             if title:
                 r = extract_rooms_from_text(title)
                 if r is not None:
                     details['rooms'] = r
             if not details.get('rooms'):
                 try:
-                    r = extract_rooms_from_text(soup.get_text(separator=' '))
+                    r = extract_rooms_from_text(_ad_text(soup))
                     if r is not None:
                         details['rooms'] = r
                 except Exception:
