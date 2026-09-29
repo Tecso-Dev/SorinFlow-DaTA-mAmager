@@ -37,6 +37,10 @@ logs/
 data/cookies/
 data/images/
 data/debug/
+# app/services/backup_service.py writes whole-database dumps here; on a
+# machine with real customer data, one `git add -A` would put one in a
+# public repository
+data/backups/
 
 # Debug screenshots
 debug_*.png
@@ -103,6 +107,7 @@ k8s/*secret*.yaml
 data/cookies/
 data/images/
 data/debug/
+data/backups/
 debug_*.png
 graphify-out/
 docker-compose.override.yml
