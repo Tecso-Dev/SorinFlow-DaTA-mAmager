@@ -276,13 +276,21 @@ async def put_ai_settings(payload: AiSettingsIn,
 
 @router.post("/test")
 async def ai_test(db: AsyncSession = Depends(get_db), user: User = _super_admin):
-    """One tiny request, on the write model. Ignores the daily cap — a card
-    that cannot be tested because the cap is full tells nobody anything."""
+    """One tiny request, on the write model. Ignores the daily cap and the
+    credit pause — a card that cannot be tested because the cap is full, or
+    because the agents are waiting for credit, tells nobody anything. An answer
+    is what lifts the pause (`pause_cleared`); a refusal for credit keeps it and
+    says, in the gateway's own words, what the account was told."""
     try:
         out = await llm.test_connection(db)
+    except llm.QuotaExhausted as e:
+        # this route is for root and super_admin: the gateway's words are theirs to read
+        detail = f"{e} — پیام سرویس: «{e.gateway_message}»" if e.gateway_message else str(e)
+        raise HTTPException(status_code=502, detail=detail) from e
     except llm.LLMError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    logger.info(f"[ai] connection tested by {user.username}: {out['model']} in {out['ms']}ms")
+    logger.info(f"[ai] connection tested by {user.username}: {out['model']} in {out['ms']}ms"
+                + (" — the credit pause is over" if out.get("pause_cleared") else ""))
     return out
 
 

@@ -4419,6 +4419,61 @@ function _aiBreakerText(brk) {
     return brk.until ? `مکث تا ${_aiUntil(brk.until)}` : 'در حال تلاش دوباره…';
 }
 
+// The gateway itself said the credit is gone (a 402, or a 403/429 that says the
+// credit, quota or balance is used up): every agent waits until the next Tehran
+// midnight, or until «تست اتصال» is answered — whichever comes first. The
+// server sends `pause` = {since, until, status, message, agent} or null, and
+// `message` is the gateway's own sentence, so the admin reads the cause here
+// instead of hunting for it in a log.
+function _aiPauseUntil(iso) {
+    const d = iso ? new Date(iso) : null;
+    if (!d || isNaN(d)) return '';
+    const tehran = { timeZone: 'Asia/Tehran' };
+    return `${d.toLocaleDateString('fa-IR', { ...tehran, weekday: 'long', day: 'numeric', month: 'long' })} ساعت ${d.toLocaleTimeString('fa-IR', { ...tehran, hour: '2-digit', minute: '2-digit' })}`;
+}
+
+/** The sentence in a ledger error: «HTTP 400: {"error":{"message":"…"}}» reads
+ *  «HTTP 400 — …». The column keeps 300 characters, so the JSON may be cut
+ *  short — the sentence is found with a pattern, not a parser. Anything that is
+ *  not that shape is shown as it is. */
+function _aiErrText(err) {
+    const s = String(err || '').trim();
+    const head = s.match(/^HTTP (\d+):\s*/);
+    if (!head) return s;
+    const body = s.slice(head[0].length);
+    const m = body.match(/"(?:message|detail|error)":"((?:[^"\\]|\\.)*)/);
+    return `HTTP ${head[1]} — ${m ? m[1].replace(/\\"/g, '"').replace(/\\n/g, ' ') : body}`;
+}
+
+/** The banner at the top of the AI page — one element, whichever of the two
+ *  loaders (the screen, the settings card) ran last draws it. */
+function _aiRenderPause(p) {
+    const section = document.getElementById('section-ai');
+    if (!section) return;
+    let box = document.getElementById('ai-pause-banner');
+    if (!p) { if (box) box.remove(); return; }
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'ai-pause-banner';
+        box.className = 'alert alert-warning';
+        box.setAttribute('role', 'status');
+        section.prepend(box);
+    }
+    const began = p.since ? new Date(p.since) : null;
+    const facts = [
+        p.status ? `HTTP ${p.status}` : '',
+        p.agent ? `اولین بار در ایجنت «${p.agent}»` : '',
+        began && !isNaN(began) ? `از ${began.toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit' })}` : '',
+    ].filter(Boolean).join(' · ');
+    box.innerHTML = html`
+        <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle"></i> اعتبار یا سهمیهٔ سرویس هوش مصنوعی تمام شده — ایجنت‌ها متوقف‌اند</div>
+        <div class="small mb-1">پیام سرویس: <span dir="ltr" class="d-inline-block">${p.message || '—'}</span></div>
+        <div class="small">ایجنت‌های پس‌زمینه (برچسب‌زن عکس، خوانندهٔ آگهی، جستجوی معنایی، توضیح‌دهنده) درخواستی نمی‌فرستند و تا
+            <b>${_aiPauseUntil(p.until)}</b> (به وقت تهران) صبر می‌کنند. اگر اعتبار را شارژ کرده‌اید، «تست اتصال» را بزنید:
+            با اولین پاسخ موفق همه همین حالا ادامه می‌دهند.</div>
+        ${facts ? raw(`<div class="small text-muted mt-1">${esc(facts)}</div>`) : ''}`;
+}
+
 async function loadAi() {
     const badge = document.getElementById('ai-badge');
     if (!badge) return;
@@ -4426,7 +4481,8 @@ async function loadAi() {
         const s = await apiCall('/ai/status');
         _aiStatus = s;
         const ok = s.configured && s.enabled;
-        const paused = _aiBreakerText(s.breaker);
+        const paused = s.pause ? 'متوقف — اعتبار تمام شده' : _aiBreakerText(s.breaker);
+        _aiRenderPause(s.pause);
         badge.textContent = !s.configured ? 'تنظیم نشده' : (!s.enabled ? 'خاموش' : (paused || (s.cap_reached ? 'سقف امروز پر شد' : 'فعال')));
         badge.className = 'badge ' + (!s.configured ? 'bg-secondary' : (!s.enabled ? 'bg-secondary' : (paused || s.cap_reached ? 'bg-warning text-dark' : 'bg-success')));
 
@@ -4503,10 +4559,18 @@ async function aiTest() {
     btn.disabled = true; out.textContent = 'در حال تست…'; out.className = 'small text-muted';
     try {
         const r = await apiCall('/ai/test', { method: 'POST' });
-        out.innerHTML = `✓ ${esc(r.model)} در ${formatNumber(r.ms)} میلی‌ثانیه پاسخ داد — «${esc(r.reply)}»`;
+        out.innerHTML = `✓ ${esc(r.model)} در ${formatNumber(r.ms)} میلی‌ثانیه پاسخ داد — «${esc(r.reply)}»`
+            + (r.pause_cleared ? ' — ایجنت‌ها دوباره ادامه می‌دهند' : '');
         out.className = 'small text-success';
         loadAi();
-    } catch (e) { out.textContent = e.message; out.className = 'small text-danger'; }
+        if (document.getElementById('ai-agents-grid')) loadAiScreen();
+    } catch (e) {
+        // a refusal for credit is what sets the pause: the message says why, and
+        // the banner (drawn by the reload) says until when
+        out.textContent = e.message; out.className = 'small text-danger';
+        loadAi();
+        if (document.getElementById('ai-agents-grid')) loadAiScreen();
+    }
     btn.disabled = false;
 }
 
@@ -4550,9 +4614,12 @@ function _aiAgentState(a) {
     return bits.join(' · ');
 }
 
-function _aiAgentCard(a) {
+function _aiAgentCard(a, pause) {
     const st = a.state || {};
     const runnable = a.kind === 'loop';
+    // while the gateway has no credit every agent is waiting, whatever its own numbers say
+    const waiting = pause && a.enabled
+        ? `<span class="text-warning">متوقف تا ${esc(_aiPauseUntil(pause.until))} — اعتبار سرویس تمام شده</span> · ` : '';
     const err = (a.today.failed || 0);
     const spent = a.today.cost_usd || 0;
     const capPct = a.cap_usd ? Math.min(100, Math.round(spent / a.cap_usd * 100)) : 0;
@@ -4572,7 +4639,7 @@ function _aiAgentCard(a) {
         </div>
         <div class="ai-card-desc">${esc(a.desc)}</div>
         <div class="ai-card-where">${(a.where || []).map(w => `<span class="pill">${esc(w)}</span>`).join('')}</div>
-        <div class="ai-card-state">${_aiAgentState(a)}</div>
+        <div class="ai-card-state">${waiting}${_aiAgentState(a)}</div>
         <div class="ai-card-budget">
             <span>بودجهٔ امروز: $${spent >= 0.01 ? spent.toFixed(2) : spent.toFixed(4)} از $${(a.cap_usd || 0).toFixed(2)}</span>
             <div class="ai-cap-bar"><span style="width:${capPct}%" class="${capPct >= 100 ? 'is-full' : ''}"></span></div>
@@ -4583,7 +4650,7 @@ function _aiAgentCard(a) {
             <span>امروز: ${formatNumber(a.today.calls || 0)} فراخوانی · ${formatNumber(a.today.cost_toman || 0)} تومان</span>
             ${err ? `<button class="ai-err ${(a.today.ok_since_error || 0) >= 5 ? 'is-stale' : ''}"
                 onclick="aiShowErrors(${jsArg(a.key)})"
-                title="${esc(a.today.last_error || '')}">
+                title="${esc(_aiErrText(a.today.last_error))}">
                 ${formatNumber(err)} خطا${(a.today.ok_since_error || 0) >= 5
                     ? ` · از آن به بعد ${formatNumber(a.today.ok_since_error)} موفق`
                     : ''}${a.today.last_error_at ? ` · آخری ${esc(a.today.last_error_at.slice(11, 16))}` : ''}
@@ -4602,11 +4669,13 @@ async function loadAiScreen() {
         const s = await apiCall('/ai/overview');
         const u = s.usage || { today: {}, month: {} };
         const paused = _aiBreakerText(s.breaker);
+        _aiRenderPause(s.pause);
         const conn = document.getElementById('ai-t-conn');
-        conn.textContent = paused ? 'موقتاً متوقف' : (s.configured ? (s.enabled ? 'وصل است' : 'خاموش') : 'تنظیم نشده');
-        conn.className = 'stat-value ' + (paused ? 'text-warning' : (s.configured && s.enabled ? 'text-success' : 'text-warning'));
+        conn.textContent = s.pause ? 'متوقف — اعتبار تمام شده' : (paused ? 'موقتاً متوقف' : (s.configured ? (s.enabled ? 'وصل است' : 'خاموش') : 'تنظیم نشده'));
+        conn.className = 'stat-value ' + (s.pause || paused ? 'text-warning' : (s.configured && s.enabled ? 'text-success' : 'text-warning'));
         conn.style.fontSize = '1rem';
-        document.getElementById('ai-t-conn-sub').textContent = paused || (s.workspace ? `پروژهٔ ${s.workspace}` : 'کلید در GitHub تنظیم نشده');
+        document.getElementById('ai-t-conn-sub').textContent = s.pause ? `تا ${_aiPauseUntil(s.pause.until)}`
+            : (paused || (s.workspace ? `پروژهٔ ${s.workspace}` : 'کلید در GitHub تنظیم نشده'));
         document.getElementById('ai-t-today').textContent = `${formatNumber(u.today.cost_toman || 0)} تومان`;
         const capPct = s.cap_usd ? Math.min(100, Math.round((u.today.cost_usd || 0) / s.cap_usd * 100)) : 0;
         document.getElementById('ai-t-cap').innerHTML =
@@ -4623,7 +4692,7 @@ async function loadAiScreen() {
             ? `${_aiTokens(q.remainingCompletionFreeTokens)} خروجی باقی مانده${s.quota.plan ? ` · پلن ${s.quota.plan}` : ''}`
             : '';
 
-        grid.innerHTML = (s.agents || []).map(_aiAgentCard).join('');
+        grid.innerHTML = (s.agents || []).map(a => _aiAgentCard(a, s.pause)).join('');
         const sel = document.getElementById('ai-log-agent');
         if (sel && sel.options.length <= 1) {
             sel.innerHTML = '<option value="">همهٔ ایجنت‌ها</option>' +
@@ -4670,7 +4739,8 @@ async function aiRunAgent(key, btn) {
     try {
         const r = await apiCall(url, { method: 'POST' });
         const done = r.read ?? r.embedded ?? r.tagged ?? 0;
-        showToast('اجرا شد', `${formatNumber(r.scanned || 0)} بررسی، ${formatNumber(done)} انجام${r.failed ? `، ${formatNumber(r.failed)} خطا` : ''}${r.stopped ? ` — متوقف: ${r.stopped}` : ''}`, r.failed ? 'warning' : 'success');
+        const stopped = r.stopped === 'QuotaExhausted' ? 'اعتبار سرویس تمام شده' : r.stopped;
+        showToast('اجرا شد', `${formatNumber(r.scanned || 0)} بررسی، ${formatNumber(done)} انجام${r.failed ? `، ${formatNumber(r.failed)} خطا` : ''}${stopped ? ` — متوقف: ${stopped}` : ''}`, r.failed || r.stopped === 'QuotaExhausted' ? 'warning' : 'success');
         loadAiScreen(); loadAiLog();
     } catch (e) { showToast('اجرا نشد', e.message, 'danger'); }
     if (btn) btn.disabled = false;
@@ -4704,7 +4774,7 @@ async function loadAiLog() {
                 <td>${formatNumber((i.prompt_tokens || 0) + (i.completion_tokens || 0))}</td>
                 <td>${formatNumber(Math.round(i.cost_toman || 0))}</td>
                 <td>${formatNumber(i.ms || 0)}</td>
-                <td>${i.ok ? '<span class="text-success">✓</span>' : `<span class="text-danger" title="${esc(i.error || '')}">✗ ${esc((i.error || '').slice(0, 40))}</span>`}</td>
+                <td>${i.ok ? '<span class="text-success">✓</span>' : `<span class="text-danger" title="${esc(i.error || '')}">✗ ${esc(_aiErrText(i.error).slice(0, 90))}</span>`}</td>
             </tr>`).join('') : '<tr><td colspan="8" class="text-center text-muted py-3">چیزی ثبت نشده</td></tr>';
     } catch (e) {
         body.innerHTML = `<tr><td colspan="8" class="text-danger text-center py-3">${esc(e.message)}</td></tr>`;

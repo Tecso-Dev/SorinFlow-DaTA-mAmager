@@ -404,7 +404,8 @@ def _pending():
 async def reader_will_run(db) -> bool:
     """True while the reader can plausibly still get to a listing: the
     gateway is configured, both switches are on, both caps (the shared one
-    and the reader's own) have room, and the breaker is not holding calls.
+    and the reader's own) have room, the gateway has not said its credit is
+    gone (llm.pause_state), and the breaker is not holding calls.
     False is the match engine's cue that waiting for a read is pointless —
     otherwise every new listing waits out the full READ_WAIT_TIMEOUT."""
     if llm.breaker_status()["state"] == "open":
@@ -455,8 +456,17 @@ async def run_once(db, *, limit: int = BATCH) -> Dict[str, Any]:
     a pass it stays put, so a listing the model could not read this time is
     the first thing the next pass reports; listings read after it are
     stored and excluded by _pending(), never paid for twice. A gate error
-    ends the pass with the cursor at the last success."""
+    ends the pass with the cursor at the last success.
+
+    While the gateway has no credit (llm.pause_state — set by the first
+    refusal, in app_settings, for every pod) the pass ends before it starts,
+    with one note in the log for the whole pause: nothing would be asked, and
+    no listing is charged an attempt."""
     global _last_stop
+    pause = await llm.pause_state(db)
+    llm.note_pause("reader", pause)
+    if pause:
+        return {"scanned": 0, "read": 0, "failed": 0, "cursor": await _cursor(db), "stopped": "QuotaExhausted"}
     since = await _cursor(db)
     props = (await db.execute(
         select(Property).where(_pending())

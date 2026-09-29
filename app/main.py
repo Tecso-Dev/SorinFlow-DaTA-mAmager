@@ -1323,25 +1323,34 @@ async def portal_page():
 # back 405, on a file that serves perfectly over GET.
 @app.api_route("/kvn-push-sw.js", methods=["GET", "HEAD"], include_in_schema=False)
 async def kavenegar_push_service_worker():
-    """Kavenegar's web-push service worker, served from the ORIGIN ROOT.
+    """The retired push worker's address, now serving a worker that removes itself.
 
-    A service worker can only control pages at or below its own path, so this
-    one has to answer at /kvn-push-sw.js — mounting it under /dashboard would
-    scope it to the panel and Kavenegar's «بررسی اتصال» would not find it.
+    Browsers that visited while the Kavenegar push SDK was on the landing page
+    or the portal registered a worker at THIS path, and a registration outlives
+    the page that made it. The worker imported Kavenegar's own script and
+    connected to Kavenegar's domain — the log held 70 CSP reports of
+    `connect-src` from it, from browsers no page of ours had asked to. The only way to get rid of a
+    registration is a newer script at the same address that unregisters
+    itself (frontend/kvn-push-sw.js does exactly that and nothing else), so the
+    route stays, and must stay reachable without a credential: the browser's
+    update check sends none, and the API-key allowlist above names it for that
+    reason. A 401 here would keep the old worker in every browser that has it.
 
-    Service-Worker-Allowed is sent explicitly: without it a browser refuses any
-    registration asking for a scope broader than the script's own directory,
-    which is the failure people hit when the file is served correctly and the
-    registration still will not take.
+    Cache-Control: no-cache. The old answer was «public, max-age=86400», which
+    is how a worker stays a day past the change that replaced it — a browser
+    honours that cap on the script it checks for updates, and any HTTP cache on
+    the way honours it whole. Revalidating every time costs a few hundred
+    bytes and makes the replacement land on the browser's next visit.
+
+    Service-Worker-Allowed stays: a registration for scope «/» is what is out
+    there, and a script served without it is refused for a scope wider than its
+    directory.
     """
     return FileResponse(
         "frontend/kvn-push-sw.js",
         media_type="application/javascript",
         headers={"Service-Worker-Allowed": "/",
-                 # The SDK it imports is versioned upstream; caching this
-                 # one-line shim for a day is enough and keeps a stale worker
-                 # from outliving a change here.
-                 "Cache-Control": "public, max-age=86400"},
+                 "Cache-Control": "no-cache, max-age=0, must-revalidate"},
     )
 
 

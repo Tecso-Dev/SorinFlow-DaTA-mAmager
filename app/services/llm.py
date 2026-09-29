@@ -15,6 +15,11 @@ through this module and nothing else. What lives here, once:
   * the ledger and the cap — one ai_usage row per call with Liara's own cost
     figure, and a daily cap in dollars: past it, background agents stop until
     tomorrow (BudgetExceeded) and the panel says so;
+  * the gateway's own «no credit» — a 402, or a 403/429 whose body says the
+    credit, quota or balance is used up, pauses every agent until the next
+    Tehran midnight or until the card's test is answered (QuotaExhausted, a
+    BudgetExceeded), and a refusal's body is kept, scrubbed, so the log and the
+    card can say what it was;
   * structured answers — JSON mode with a pydantic schema, one retry on a
     malformed answer, then LLMError — never a half-parsed dict.
 
@@ -28,7 +33,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, NoReturn, Optional, Tuple, Type
 
 import httpx
 from loguru import logger
@@ -45,6 +50,10 @@ KEY_MODELS = {job: f"ai_model_{job}" for job in JOBS}
 KEY_CAP = "ai_daily_cap_usd"
 KEY_NOTES = "ai_office_notes"       # appended to every «write» prompt — the office's own rules
 KEY_ENABLED = "ai_enabled"
+# The gateway said the credit is gone: a JSON object in app_settings — the one
+# place every pod reads — naming when it began, until when it lasts and the
+# gateway's own words. Absent, unreadable or past its `until` = no pause.
+KEY_PAUSE = "ai_quota_pause"
 # One switch per agent, so a noisy one can be stopped without stopping the
 # rest. Absent = on: an agent added later runs without a settings row.
 AGENTS = ("explainer", "reader", "need", "embed", "vision", "assistant")
@@ -92,6 +101,23 @@ class BudgetExceeded(LLMError):
     pass
 
 
+class QuotaExhausted(BudgetExceeded):
+    """The GATEWAY says the account's credit, quota or balance is used up — not
+    our own daily cap, which is BudgetExceeded. It is one, on purpose: every
+    caller that already ends a pass on a budget error, does not count it
+    against the listing and carries on without the model, does exactly that
+    here. `str(e)` is one stable Persian sentence for the whole pause (so a log
+    that dedupes on it stays quiet) and does not carry the gateway's words —
+    those are `gateway_message`, for the admin's card and the log."""
+
+    def __init__(self, message: str, *, gateway_message: str = "", status: Optional[int] = None,
+                 until: Optional[datetime] = None):
+        super().__init__(message)
+        self.gateway_message = gateway_message
+        self.status = status
+        self.until = until
+
+
 class CircuitOpen(LLMError):
     """The gateway failed repeatedly; calls are refused without going out
     until the cooldown ends."""
@@ -133,7 +159,8 @@ async def config(db) -> Dict[str, Any]:
     agent_cap_keys = tuple(agent_cap_key(a) for a in AGENTS)
     rows = {}
     try:
-        rows = await secret_box.get_many(db, (*KEY_MODELS.values(), KEY_CAP, KEY_NOTES, KEY_ENABLED, *agent_cap_keys))
+        rows = await secret_box.get_many(db, (*KEY_MODELS.values(), KEY_CAP, KEY_NOTES, KEY_ENABLED,
+                                               KEY_PAUSE, *agent_cap_keys))
     except Exception as e:
         logger.warning(f"[ai] settings unreadable: {e}")
     models, sources = {}, {}
@@ -164,6 +191,8 @@ async def config(db) -> Dict[str, Any]:
         "cap_usd": cap,
         "agent_caps": agent_caps,
         "notes": rows.get(KEY_NOTES) or "",
+        # the gateway said the credit is gone and the agents are waiting — or None
+        "pause": _parse_pause(rows.get(KEY_PAUSE)),
     }
 
 
@@ -255,6 +284,111 @@ async def spent_today(db, agent: Optional[str] = None) -> float:
     return float((await db.execute(q)).scalar_one() or 0.0)
 
 
+# ── the pause: the gateway itself has no credit left ─────────────────────────
+#
+# Unlike the breaker (one process's memory, see the note above _Breaker), this
+# lives in app_settings: the API pods, the worker and the scheduler each run
+# agents of their own, and the one that first meets «no credit» must stop them
+# all. It ends at the next Tehran midnight, or when the AI card's test is
+# answered, whichever comes first — nobody has to remember to lift it, and
+# nobody has to wait for midnight after topping the account up.
+
+# What this process has already said about a pause, so that many calls meeting
+# the same one make one log line each — not one per listing. A pause is told
+# apart from the next one by when it began (`since`): one that ends and a later
+# one the same day are two news items.
+_pause_told: Dict[str, str] = {}      # "since": the pause this process last logged the start of
+_pause_noted: Dict[str, str] = {}     # loop tag -> `since` of the pause it last noted
+
+
+def _next_tehran_midnight(now: Optional[datetime] = None) -> datetime:
+    """When the Tehran day `now` falls in ends, in UTC — the day the daily cap
+    counts, and so the day a credit pause lasts. Fixed +03:30, no tz database."""
+    return _day_start_utc(now) + timedelta(days=1)
+
+
+def _parse_pause(raw: Optional[str], now: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
+    """The pause stored in `raw`, or None: nothing there, not JSON, no end
+    date, or the end has passed — which is how it lifts itself at midnight."""
+    if not raw:
+        return None
+    try:
+        state = json.loads(raw)
+        until = datetime.fromisoformat(state["until"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    if (now or datetime.now(timezone.utc)) >= until:
+        return None
+    return {"since": str(state.get("since") or ""), "until": until.isoformat(),
+            "status": state.get("status"), "message": str(state.get("message") or ""),
+            "agent": str(state.get("agent") or ""), "job": str(state.get("job") or "")}
+
+
+async def pause_state(db=None) -> Optional[Dict[str, Any]]:
+    """The credit pause in force, or None. What a background loop asks before
+    it looks at its queue — a pass that would only be refused at the door
+    should not fetch a photo or prepare a prompt first. Never raises: a
+    settings table nobody can read is not a reason to stop the agents."""
+    from app.database import async_session_maker
+    own = db is None
+    session = async_session_maker() if own else db
+    try:
+        rows = await secret_box.get_many(session, (KEY_PAUSE,))
+    except Exception as e:
+        logger.warning(f"[ai] pause state unreadable: {type(e).__name__}: {e}")
+        return None
+    finally:
+        if own:
+            await session.close()
+    return _parse_pause(rows.get(KEY_PAUSE))
+
+
+async def clear_pause(db, actor: str = "ai_test") -> bool:
+    """Lift the pause — the card's test just got an answer, so the account has
+    credit. True when there was one to lift."""
+    try:
+        if not _parse_pause((await secret_box.get_many(db, (KEY_PAUSE,))).get(KEY_PAUSE)):
+            return False
+        await secret_box.put(db, KEY_PAUSE, None, actor)
+    except Exception as e:
+        logger.warning(f"[ai] credit pause could not be lifted: {type(e).__name__}: {e}")
+        return False
+    logger.info("[ai] credit pause lifted: the panel's test got an answer from the gateway")
+    return True
+
+
+def note_pause(tag: str, pause: Optional[Dict[str, Any]]) -> None:
+    """A background loop's one line about a pause, when it begins for that
+    loop — not on every pass. With no pause it forgets, so the next one is
+    news again."""
+    if not pause:
+        _pause_noted.pop(tag, None)
+        return
+    since = pause.get("since") or ""
+    if _pause_noted.get(tag) == since:
+        return
+    _pause_noted[tag] = since
+    logger.info(f"[{tag}] paused until the next Tehran midnight or a successful test — "
+                f"the gateway said: {pause.get('message') or '—'}")
+
+
+def _pause_error(state: Dict[str, Any]) -> QuotaExhausted:
+    """What a call refused at the door raises. One sentence for the whole
+    pause: it names the hour and the way out, not the gateway's words."""
+    until: Optional[datetime]
+    try:
+        until = datetime.fromisoformat(state["until"])
+    except (ValueError, KeyError, TypeError):
+        until = None
+    hour = until.astimezone(TEHRAN).strftime("%H:%M") if until else "00:00"
+    return QuotaExhausted(
+        f"اعتبار یا سهمیهٔ سرویس هوش مصنوعی تمام شده است (HTTP {state.get('status')}) — "
+        f"ایجنت‌ها تا فردا ساعت {hour} (به وقت تهران) یا تا موفق شدن «تست اتصال» در کارت هوش مصنوعی متوقف‌اند",
+        gateway_message=str(state.get("message") or ""), status=state.get("status"), until=until)
+
+
 async def _record(agent: str, job: str, model: str, usage: Dict[str, Any], ms: int,
                   ok: bool, error: str = "") -> None:
     """One row, on its own session — a ledger that fails must not look like a
@@ -328,6 +462,10 @@ async def _gate(db, cfg: Optional[Dict[str, Any]] = None, agent: str = "") -> Di
         raise Disabled("هوش مصنوعی از پنل خاموش است")
     if agent and not await agent_enabled(db, agent):
         raise Disabled(f"این ایجنت از پنل خاموش است ({agent})")
+    if cfg.get("pause"):
+        # the gateway said the credit is gone: nothing goes out until midnight
+        # or until the card's test is answered — one refusal, not one per listing
+        raise _pause_error(cfg["pause"])
     spent = await spent_today(db)
     if spent >= cfg["cap_usd"]:
         who = f" — ایجنت «{agent}»" if agent else ""
@@ -537,6 +675,184 @@ def _fill_cost(model: str, usage: Dict[str, Any], sent: str, received: str = "")
     return usage
 
 
+# ── what the gateway said when it refused ────────────────────────────────────
+#
+# The door used to keep resp.text[:160]: «HTTP 400: {"error": {"message": "…»
+# and the sentence that says why was on the far side of the cut. A refusal is
+# now kept whole — compacted, scrubbed, at most ERROR_BODY_MAX characters — in
+# the error a caller logs, and as far as the ledger's column reaches.
+
+ERROR_BODY_MAX = 1000       # characters of a refusal's body an error, a log line and the pause keep
+_BODY_READ_MAX = 20000      # what is read of a body at all, before it is scrubbed: a proxy's HTML error page is not data
+_SPACES = re.compile(r"\s+")
+
+
+def _clip(text: str, limit: int) -> str:
+    text = _SPACES.sub(" ", text or "").strip()
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def _scrub(text: str) -> str:
+    """What a refusal may say before it is stored or logged: the API key itself
+    out (some gateways echo the key they refused), then the same masking as
+    everything else that leaves or is kept — phone numbers and e-mail addresses."""
+    key = (settings.llm_api_key or "").strip()
+    if len(key) >= 8:
+        text = text.replace(key, "***")
+    return mask_pii(text)
+
+
+def _reason_in(data: Any, depth: int = 0) -> str:
+    """The sentence in an error body: OpenAI's {"error": {"message": …}} and
+    the few other shapes gateways use ({"message"}, {"detail"}, {"error": "…"})."""
+    if depth > 3:
+        return ""
+    if isinstance(data, str):
+        return data
+    if isinstance(data, list):
+        return "; ".join(filter(None, (_reason_in(x, depth + 1) for x in data[:3])))
+    if not isinstance(data, dict):
+        return ""
+    err = data.get("error")
+    for holder in (err if isinstance(err, dict) else None, data):
+        if isinstance(holder, dict):
+            for k in ("message", "detail", "msg", "error_description", "description"):
+                found = _reason_in(holder.get(k), depth + 1)
+                if found.strip():
+                    return found
+    return err if isinstance(err, str) else ""
+
+
+def _refusal(resp) -> Tuple[str, str]:
+    """(body, reason) of a refused call: the whole body, and the reason inside
+    it in the gateway's own words — both scrubbed and bounded. A body that is
+    not JSON (a proxy's page, plain text) is its own reason."""
+    try:
+        raw = (resp.text or "")[:_BODY_READ_MAX]
+    except Exception:
+        raw = ""
+    body = reason = raw
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        data = None
+    if isinstance(data, (dict, list)):
+        # re-dumped without \uXXXX escapes, so Persian in a body is Persian to
+        # the check below and to whoever reads the log
+        body = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        reason = _reason_in(data) or body
+    return _clip(_scrub(body), ERROR_BODY_MAX), _clip(_scrub(reason), ERROR_BODY_MAX)
+
+
+# A refusal that says the money is gone. Two tiers, so that a rate limit with
+# the word «limit» in it is never mistaken for one: STRONG says credit, quota or
+# balance outright, and holds even with a Retry-After; WEAK names a period or
+# the workspace beside a limit («Workspace daily token limit exceeded») and is
+# read only when nothing says «rate» and no Retry-After came. Lower-cased text.
+_QUOTA_STRONG = re.compile("|".join((
+    r"insufficient[\s_-]*(?:quota|credits?|balance|funds?)",
+    r"exceeded (?:your|the|its|their) (?:current |free |daily |monthly )?(?:quota|credits?)\b",
+    r"\b(?:quota|credits?|balance|funds?)\b[^.\n]{0,40}\b(?:exhausted|depleted|used[\s-]up|insufficient|not enough|"
+    r"too low|(?:has|have) run out|ran out|is (?:zero|negative|empty|over))\b",
+    r"\btokens\b[^.\n]{0,40}\b(?:exhausted|depleted|used[\s-]up|(?:has|have) run out|ran out)\b",
+    r"(?:not|n't)[\s-]+(?:have\s+)?enough[^.\n]{0,20}\b(?:credits?|balance|funds?|quota|tokens)\b",
+    r"\b(?:out of|ran out of|run out of|exhausted|depleted)\b[^.\n]{0,20}\b(?:quota|credits?|balance|funds?|(?:free )?tokens)\b",
+    r"\bno[\s-]+(?:quota|credits?|balance|funds?)\b",
+    r"\bno[\s-]+(?:remaining|more|free|available)[\s-]+(?:quota|credits?|balance|funds?|tokens?)\b",
+    r"payment required|top[\s-]?up|add (?:more )?(?:credits?|funds)|recharge (?:your|the)",
+    r"اعتبار[^.\n]{0,30}(?:تمام|پایان|کافی نیست|ناکافی|صفر)",
+    r"موجودی[^.\n]{0,30}(?:کافی نیست|ناکافی|صفر|تمام)",
+    r"(?:شارژ|سهمیه)[^.\n]{0,30}(?:تمام|پایان|کافی نیست|ناکافی)",
+    r"سقف[^.\n]{0,30}(?:مصرف|توکن|روزانه|ماهانه|اعتبار)",
+)))
+_QUOTA_WEAK = re.compile("|".join((
+    r"\bworkspace\b[^.\n]{0,80}\b(?:limit|quota|credits?|balance|budget)\b",
+    r"\b(?:usage|spending|token|free[\s-]*token)s?[\s_-]*(?:limit|cap|quota|allowance|budget)\b",
+    r"\b(?:daily|monthly|weekly)\b[^.\n]{0,20}\b(?:limit|cap|quota|allowance|budget)\b",
+    r"\bquota\b[^.\n]{0,30}\b(?:reached|exceeded|exhausted)\b",
+    r"\b(?:reached|exceeded|hit)\b[^.\n]{0,20}\b(?:daily|monthly|weekly|usage|spending|quota)\b",
+    r"\bfree[\s-]*tokens?\b[^.\n]{0,30}\b(?:finished|ended|over|gone|used|left)\b",
+)))
+_RATE_LIMIT = re.compile("|".join((
+    r"rate[\s_-]*limit", r"too many (?:concurrent )?requests", r"slow down", r"concurren\w+",
+    r"requests?[\s-]*(?:per|/)[\s-]*(?:min|sec|hour)", r"per[\s-]*(?:minute|min|second|sec|hour)\b",
+    r"\b(?:rpm|tpm|rps)\b",
+)))
+
+
+def quota_exhausted(status: int, body: str, *, retry_after: bool = False) -> bool:
+    """Does this refusal say the account's credit, quota or balance is used up?
+
+    A 402 always does. A 403 or 429 does when its body says so; a plain 429 —
+    «rate limit», «too many requests», a per-minute quota, or any answer that
+    came with a Retry-After — stays what it always was: a rate limit, which the
+    breaker and Retry-After already handle. Anything else (a 401 is the key, a
+    400 the request, a 5xx the road) never does, whatever it says."""
+    if status == 402:
+        return True
+    if status not in (403, 429):
+        return False
+    text = (body or "").lower()
+    if _QUOTA_STRONG.search(text):
+        return True
+    if retry_after or _RATE_LIMIT.search(text):
+        return False
+    return bool(_QUOTA_WEAK.search(text))
+
+
+async def _pause_for_quota(*, status: int, reason: str, agent: str, job: str) -> QuotaExhausted:
+    """Pause every agent until the next Tehran midnight, and return the error
+    to raise. Written on a session of its own, like the ledger — the caller's
+    may be in the middle of a listing — and read back first: a second refusal
+    the same day keeps when the pause began, and takes the newest words."""
+    now = datetime.now(timezone.utc)
+    state: Dict[str, Any] = {"since": now.isoformat(), "until": _next_tehran_midnight(now).isoformat(),
+                             "status": status, "message": reason, "agent": agent, "job": job}
+    try:
+        from app.database import async_session_maker
+        async with async_session_maker() as s:
+            earlier = _parse_pause((await secret_box.get_many(s, (KEY_PAUSE,))).get(KEY_PAUSE), now)
+            if earlier and earlier.get("since"):
+                state["since"] = earlier["since"]
+            await secret_box.put(s, KEY_PAUSE, json.dumps(state, ensure_ascii=False), "ai_gateway")
+    except Exception as e:
+        logger.warning(f"[ai] the credit pause could not be stored ({type(e).__name__}: {e}) — "
+                       f"the next call asks the gateway again")
+    err = _pause_error(state)
+    if _pause_told.get("since") != state["since"]:
+        _pause_told["since"] = state["since"]
+        hour = err.until.astimezone(TEHRAN).strftime("%H:%M") if err.until else "?"
+        logger.warning(f"[ai] the gateway refused {agent or '?'}/{job} (HTTP {status}): {reason} — every agent waits until "
+                       f"{hour} Tehran tomorrow, or until the AI card's test is answered")
+    return err
+
+
+async def _refused(resp, *, agent: str, job: str, model: str, ms: int) -> NoReturn:
+    """The gateway answered with something other than a completion: put it on
+    the ledger, and raise what the caller needs to know — always raises."""
+    status = resp.status_code
+    body, reason = _refusal(resp)
+    error = f"HTTP {status}: {body}"
+    named_wait = _parse_retry_after(resp.headers.get("retry-after")) if status in (429, 503) else None
+    await _record(agent, job, model, {}, ms, False, error)      # the ledger keeps as much as its column holds
+    if quota_exhausted(status, f"{reason} {body}", retry_after=bool((resp.headers.get("retry-after") or "").strip())):
+        # the road is fine and the request was fine: the account is empty. The
+        # breaker is for the road, so it is left as the answer found it.
+        _breaker.on_success()
+        raise await _pause_for_quota(status=status, reason=reason, agent=agent, job=job)
+    if named_wait is not None:
+        # the gateway itself named a wait — obey it, do not retry
+        _breaker.on_failure(retry_after=named_wait)
+        raise RateLimited(error, named_wait)
+    if status == 429 or status >= 500:
+        _breaker.on_failure()
+    else:
+        # the gateway answered: the request was wrong (a key, a body), not
+        # the road — the breaker is for the road
+        _breaker.on_success()
+    raise LLMError(error)
+
+
 async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
                schema: Optional[Type] = None, json_mode: bool = False,
                max_tokens: int = 400, temperature: float = 0.2,
@@ -550,9 +866,12 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
     specs) the model may answer with `tool_calls` instead of content, and
     `message` is its raw turn to append to the conversation. Raises LLMError
     (or a subclass) for anything the caller cannot use — including CircuitOpen
-    when the gateway has failed repeatedly and this call never goes out, and
-    RateLimited (with `.retry_after`) on a 429/503 that named one. `cap=False`
-    skips the daily cap — for the panel's own test. `model_override` is for a
+    when the gateway has failed repeatedly and this call never goes out,
+    RateLimited (with `.retry_after`) on a 429/503 that named one, and
+    QuotaExhausted (a BudgetExceeded) when the gateway says the account has no
+    credit left — or already said so, and every agent is paused until midnight
+    or the card's test. `cap=False` skips the daily cap and that pause — for
+    the panel's own test, which is how the pause ends. `model_override` is for a
     bake-off only: the same door, the same ledger, another model than the one
     configured for the job."""
     if job not in JOBS:
@@ -606,20 +925,7 @@ async def chat(job: str, messages: List[Dict[str, Any]], *, agent: str, db=None,
                 resp = await client.post(_url("chat/completions"), headers=_headers(), json=body)
             ms = int((time.monotonic() - t0) * 1000)
             if resp.status_code != 200:
-                last_error = f"HTTP {resp.status_code}: {resp.text[:160]}"
-                retry_after = _parse_retry_after(resp.headers.get("retry-after")) if resp.status_code in (429, 503) else None
-                await _record(agent, job, model, {}, ms, False, last_error)
-                if retry_after is not None:
-                    # the gateway itself named a wait — obey it, do not retry
-                    _breaker.on_failure(retry_after=retry_after)
-                    raise RateLimited(last_error, retry_after)
-                if resp.status_code == 429 or resp.status_code >= 500:
-                    _breaker.on_failure()
-                else:
-                    # the gateway answered: the request was wrong (a key, a
-                    # credit, a body), not the road — the breaker is for the road
-                    _breaker.on_success()
-                raise LLMError(last_error)
+                await _refused(resp, agent=agent, job=job, model=model, ms=ms)
             _breaker.on_success()
             data = resp.json()
             usage = data.get("usage") or {}
@@ -701,17 +1007,7 @@ async def embed(texts: List[str], *, agent: str, db=None, timeout: float = TIMEO
         raise LLMError(f"{type(e).__name__}: {str(e)[:160]}")
     ms = int((time.monotonic() - t0) * 1000)
     if resp.status_code != 200:
-        err = f"HTTP {resp.status_code}: {resp.text[:160]}"
-        retry_after = _parse_retry_after(resp.headers.get("retry-after")) if resp.status_code in (429, 503) else None
-        await _record(agent, "embed", model, {}, ms, False, err)
-        if retry_after is not None:
-            _breaker.on_failure(retry_after=retry_after)
-            raise RateLimited(err, retry_after)
-        if resp.status_code == 429 or resp.status_code >= 500:
-            _breaker.on_failure()
-        else:
-            _breaker.on_success()   # answered — see chat()
-        raise LLMError(err)
+        await _refused(resp, agent=agent, job="embed", model=model, ms=ms)
     _breaker.on_success()
     data = resp.json()
     usage = _fill_cost(model, data.get("usage") or {}, "".join(clean))
@@ -724,8 +1020,10 @@ async def test_connection(db) -> Dict[str, Any]:
     """The panel's «تست»: one tiny request on the write model, cap ignored."""
     out = await chat("write", [{"role": "user", "content": "فقط بنویس: سلام سورین"}],
                      agent="test", db=db, max_tokens=12, cap=False)
+    # an answer means the account has credit: whatever paused the agents is over
+    cleared = await clear_pause(db)
     return {"ok": True, "model": out["model"], "reply": out["content"].strip()[:40], "ms": out["ms"],
-            "cost_usd": out["cost_usd"], "cost_toman": out["cost_toman"]}
+            "cost_usd": out["cost_usd"], "cost_toman": out["cost_toman"], "pause_cleared": cleared}
 
 
 # ── Liara's own view, when the account token is there ────────────────────────

@@ -107,51 +107,60 @@ class TestATemplateCannotBecomeASinglePointOfFailure:
 
 
 class TestTheServiceWorkerIsReachable:
-    """A service worker only controls pages at or below its own path, so
-    Kavenegar's has to answer at the origin root. And it is fetched with no
-    credentials — left out of the API-key allowlist it 401s in production and
-    works locally, exactly as the login endpoints did."""
+    """A service worker only controls pages at or below its own path, so it
+    has to answer at the origin root. And it is fetched with no credentials —
+    left out of the API-key allowlist it 401s in production and works locally,
+    exactly as the login endpoints did. What it serves now is a worker that
+    removes itself (see tests/test_kvn_push_sw.py); it has to stay reachable
+    for the browsers that still hold the old one to ever replace it."""
 
-    def test_the_file_exists_and_is_what_kavenegar_generated(self):
+    @staticmethod
+    def _client():
+        from fastapi.testclient import TestClient
+        import app.main as m
+        return m, TestClient(m.app)      # no lifespan: startup wants Postgres
+
+    def test_the_file_exists_and_removes_its_own_registration(self):
         from pathlib import Path
         sw = Path("frontend/kvn-push-sw.js")
         assert sw.exists(), "the service worker file is missing"
-        assert "cdn.kavenegar.com/sdk/sw.js" in sw.read_text(encoding="utf-8")
+        assert "registration.unregister()" in sw.read_text(encoding="utf-8")
 
     def test_it_is_served_from_the_origin_root(self):
-        import re
-        src = open("app/main.py", encoding="utf-8").read()
-        assert re.search(r'@app\.(get|api_route)\(\s*["\']/kvn-push-sw\.js["\']', src), \
-            "no root route serves the service worker"
+        _, client = self._client()
+        r = client.get("/kvn-push-sw.js")
+        assert r.status_code == 200, "no root route serves the service worker"
+        assert "unregister" in r.text
 
     def test_head_is_allowed_too(self):
         """A checker asking «does this file exist» often sends HEAD, and
         @app.get registers GET alone — so HEAD answered 405 on a file that
         served perfectly over GET."""
-        import re
-        src = open("app/main.py", encoding="utf-8").read()
-        m = re.search(r'@app\.api_route\(\s*["\']/kvn-push-sw\.js["\'][^)]*\)', src)
-        assert m and "HEAD" in m.group(0), "HEAD is not accepted for the service worker"
+        _, client = self._client()
+        assert client.head("/kvn-push-sw.js").status_code == 200
 
-    def test_it_is_in_the_api_key_allowlist(self):
-        src = open("app/main.py", encoding="utf-8").read()
-        pub = src.split("public_paths = {")[1].split("}")[0]
-        assert "/kvn-push-sw.js" in pub, \
+    def test_it_is_in_the_api_key_allowlist(self, monkeypatch):
+        m, client = self._client()
+        monkeypatch.setattr(m.settings, "api_key", "a-key-is-configured", raising=False)
+        assert client.get("/kvn-push-sw.js").status_code == 200, \
             "the service worker would 401 in production, where API_KEY is set"
 
     def test_the_scope_header_is_sent(self):
-        src = open("app/main.py", encoding="utf-8").read()
-        fn = src.split("async def kavenegar_push_service_worker")[1][:900]
-        assert "Service-Worker-Allowed" in fn
+        _, client = self._client()
+        assert client.get("/kvn-push-sw.js").headers.get("service-worker-allowed") == "/"
 
-    def test_the_sdk_is_on_the_public_pages_and_not_the_admin_panel(self):
+    def test_no_page_loads_the_push_sdk_any_more(self):
+        """Web push was removed and the worker at /kvn-push-sw.js now only
+        unregisters itself. A page that still loaded Kavenegar's SDK would
+        register that address on every visit, ask the visitor for a
+        notification permission that leads nowhere, and keep reaching
+        Kavenegar's domain — the very thing the CSP kept reporting."""
+        import re
         from pathlib import Path
-        for page in ("frontend/landing.html", "frontend/portal.html"):
-            assert "cdn.kavenegar.com/sdk/page.js" in Path(page).read_text(encoding="utf-8"), \
-                f"{page} does not load the push SDK"
-        panel = Path("frontend/index.html").read_text(encoding="utf-8")
-        assert "cdn.kavenegar.com" not in panel, \
-            "the admin panel should not load a third-party script into an authenticated session"
+        for page in ("frontend/landing.html", "frontend/portal.html", "frontend/index.html"):
+            html = Path(page).read_text(encoding="utf-8")
+            sources = re.findall(r'<script\b[^>]*\bsrc\s*=\s*["\']([^"\']+)', html, re.I)
+            assert not [s for s in sources if "kavenegar" in s.lower()], f"{page} loads {sources}"
 
 
 class TestTheTestButtonTestsTheConfiguredRoute:
