@@ -149,14 +149,18 @@ class TestTheServiceWorkerIsReachable:
         _, client = self._client()
         assert client.get("/kvn-push-sw.js").headers.get("service-worker-allowed") == "/"
 
-    def test_the_sdk_is_on_the_public_pages_and_not_the_admin_panel(self):
+    def test_no_page_loads_the_push_sdk_any_more(self):
+        """Web push was removed and the worker at /kvn-push-sw.js now only
+        unregisters itself. A page that still loaded Kavenegar's SDK would
+        register that address on every visit, ask the visitor for a
+        notification permission that leads nowhere, and keep reaching
+        Kavenegar's domain — the very thing the CSP kept reporting."""
+        import re
         from pathlib import Path
-        for page in ("frontend/landing.html", "frontend/portal.html"):
-            assert "cdn.kavenegar.com/sdk/page.js" in Path(page).read_text(encoding="utf-8"), \
-                f"{page} does not load the push SDK"
-        panel = Path("frontend/index.html").read_text(encoding="utf-8")
-        assert "cdn.kavenegar.com" not in panel, \
-            "the admin panel should not load a third-party script into an authenticated session"
+        for page in ("frontend/landing.html", "frontend/portal.html", "frontend/index.html"):
+            html = Path(page).read_text(encoding="utf-8")
+            sources = re.findall(r'<script\b[^>]*\bsrc\s*=\s*["\']([^"\']+)', html, re.I)
+            assert not [s for s in sources if "kavenegar" in s.lower()], f"{page} loads {sources}"
 
 
 class TestTheTestButtonTestsTheConfiguredRoute:
