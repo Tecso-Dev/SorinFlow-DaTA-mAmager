@@ -57,9 +57,9 @@ class TestPageTwoRefused:
             assert must in reason, f"{must!r} missing from {reason!r}"
         assert THE_END_SENTENCE not in reason
         assert job.can_resume is True
-        assert (job.scraped_items, job.total_items) == (24, 105), \
-            "«105 / 105» over 24 candidates was the other half of the lie"
-        assert job.progress < 100
+        # «105 / 105» over 24 candidates was the other half of the lie: «کل»
+        # is the run's own pool of 24 now, and Divar's 105 is kept apart (#29).
+        assert (job.scraped_items, job.total_items, job.divar_count) == (24, 24, 105)
 
     async def test_the_run_log_names_the_page_the_status_and_divar_s_message(self, run):
         _, log, _ = await run(
@@ -114,7 +114,7 @@ class TestTheEndOfTheListIsStillComplete:
         assert THE_END_SENTENCE in job.finish_reason, "this one really did reach the end"
         assert any("بیشتر از این در دیوار نبود" in m for m in log.messages())
         assert job.can_resume is False
-        assert (job.scraped_items, job.total_items) == (105, 105) and job.progress == 100.0, \
+        assert (job.scraped_items, job.total_items) == (34, 34) and job.progress == 100.0, \
             "a finished run is finished whatever Divar said it held"
 
     async def test_an_empty_last_page_is_complete(self, run):
@@ -156,7 +156,7 @@ class TestTheFallback:
         assert [c for c in calls if c[0] == "dom"], "an empty API answer must fall back to the browser walk"
         fell = [m for m in log.messages() if "به پیمایش مرورگر برمی‌گردیم" in m]
         assert fell and "HTTP 400" in fell[0] and "invalid filter" in fell[0]
-        assert job.updated_items == 30, "the browser's listings are the ones walked"
+        assert job.config["outcome"]["duplicate"] == 30, "the browser's listings are the ones walked"
         assert job.status == "completed", "the browser walk reached the end of the list"
 
     async def test_a_full_api_answer_never_opens_the_browser_walk(self, run):
@@ -196,7 +196,7 @@ class TestTheFallback:
                                            replay_pages=[(listings("kg", 24), True),
                                                          (listings("kh", 9), False)]))
         assert calls.count(("replay", 2)) == 1 and ("replay", 3) not in calls
-        assert job.status == "completed" and job.updated_items == 73
+        assert job.status == "completed" and job.config["outcome"]["duplicate"] == 73
         assert THE_END_SENTENCE in job.finish_reason
 
     async def test_a_replay_stuck_on_the_same_page_is_not_the_end(self, run):

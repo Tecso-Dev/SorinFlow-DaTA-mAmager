@@ -180,6 +180,7 @@ class ScrapingJobResponse(BaseModel):
     accounts_used: List[str] = []           # every account it touched, in order
     owner_user_id: Optional[int] = None     # who started it
     owner_name: Optional[str] = None
+    owner_deleted: bool = False             # it names an owner who is no longer a user
     status: str
     total_pages: int = 0
     scraped_pages: int = 0
@@ -192,7 +193,12 @@ class ScrapingJobResponse(BaseModel):
     # Why a run stopped short of what was asked for. Not an error: a healthy
     # job that scraped a day smaller than its cap fills this in too.
     finish_reason: Optional[str] = None
+    # Where the rest went when «تازه» fell short — «۱۶ تاریخ انتشار، ۳ تکراری»
+    # — from the run's own final account; None when there is nothing to explain.
+    reason_line: Optional[str] = None
     progress: float = 0.0
+    # scraped_items / total_items: listings this run examined / its own
+    # candidate pool. Divar's count is divar_count, shown beside them.
     divar_count: Optional[int] = None       # what Divar said existed at the start
     max_items: Optional[int] = None         # new listings asked for (none: a whole day)
     resumed_from: Optional[str] = None      # the run this one continues

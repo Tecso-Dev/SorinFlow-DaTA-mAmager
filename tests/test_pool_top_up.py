@@ -82,7 +82,9 @@ class TestThePoolIsToppedUp:
                               held=lambda divar_id: divar_id.startswith("dup"),
                               detail={"title": "آپارتمان"})
         assert (job.status, job.new_items) == ("completed", 10)
-        assert job.updated_items == 72, "every held listing of the first three pages was walked"
+        # held and complete, so «تکراری» — not opened again, not «بروز» (#32)
+        assert job.config["outcome"]["duplicate"] == 72, \
+            "every held listing of the first three pages was walked"
 
 
 class TestItStopsWhereItShould:

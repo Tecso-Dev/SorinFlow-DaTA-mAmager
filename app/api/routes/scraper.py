@@ -15,7 +15,7 @@ import uuid
 from loguru import logger
 
 from app.database import get_db, get_redis
-from app.models.scraping_job import FINISHED_STATUSES, ScrapingJob
+from app.models.scraping_job import FINISHED_STATUSES, RESUMABLE_STATUSES, ScrapingJob
 from app.scraper.divar_scraper import DivarScraper, crash_reason, start_failure_reason
 from app.config import get_settings, CITIES, CATEGORIES
 from pydantic import BaseModel, Field
@@ -688,52 +688,122 @@ async def get_scraping_jobs(
     result = await db.execute(query)
     jobs = result.scalars().all()
 
-    # id → name lookups so the UI can show/filter by city & category
-    city_map = {c.id: c.name for c in (await db.execute(select(City))).scalars().all()}
-    cat_map = {c.id: c.name for c in (await db.execute(select(Category))).scalars().all()}
+    names = await _job_names(db, jobs)
+    return ScrapingJobList(items=[_job_response(j, *names) for j in jobs], total=len(jobs))
+
+
+def _job_config(j) -> dict:
+    return j.config if isinstance(j.config, dict) else {}
+
+
+# A finished run that stopped short can be continued: failed, cancelled, and
+# «partial» — the collection cut short by Divar. A completed run already
+# walked its whole pool, so «continue» would be a rerun wearing the wrong label.
+# One list, the model's, so the row and the resume route cannot disagree.
+_RESUMABLE = RESUMABLE_STATUSES
+
+
+async def _job_names(db: AsyncSession, jobs) -> tuple:
+    """(cities, categories, owners): id → name, for just these runs."""
+    from app.models.property import City, Category
+    city_ids = {j.city_id for j in jobs} - {None}
+    cat_ids = {j.category_id for j in jobs} - {None}
     # who started each run — the launch puts the owner on the config
-    owner_ids = {(j.config or {}).get("owner_user_id") for j in jobs} - {None}
+    owner_ids = {o for o in (_job_config(j).get("owner_user_id") for j in jobs)
+                 if isinstance(o, int)}
+    cities = {c.id: c.name for c in (await db.execute(
+        select(City).where(City.id.in_(city_ids)))).scalars().all()} if city_ids else {}
+    categories = {c.id: c.name for c in (await db.execute(
+        select(Category).where(Category.id.in_(cat_ids)))).scalars().all()} if cat_ids else {}
     owners = {u.id: (u.full_name or u.username) for u in (await db.execute(
         select(User).where(User.id.in_(owner_ids)))).scalars().all()} if owner_ids else {}
+    return cities, categories, owners
 
-    return ScrapingJobList(
-        items=[ScrapingJobResponse(
-            id=j.id,
-            job_id=str(j.job_id),
-            city_id=j.city_id,
-            category_id=j.category_id,
-            city_name=city_map.get(j.city_id),
-            # An explicit-list run has no category row; its label is the
-            # kind of run it was («اسکرپ تکی», «بازاسکرپ»).
-            category_name=cat_map.get(j.category_id)
-                or ((j.config or {}).get("category") if (j.config or {}).get("urls") else None),
-            status=j.status,
-            total_pages=j.total_pages,
-            scraped_pages=j.scraped_pages,
-            total_items=j.total_items,
-            scraped_items=j.scraped_items,
-            new_items=j.new_items,
-            updated_items=j.updated_items,
-            failed_items=j.failed_items,
-            error_message=j.error_message,
-            # Why it stopped where it did. The schema has always had the
-            # field and the row has always rendered it; nothing passed it,
-            # so no row ever showed one.
-            finish_reason=cast(Optional[str], j.finish_reason),
-            progress=j.progress,
-            divar_count=j.divar_count,
-            max_items=j.max_items,
-            resumed_from=str(j.resumed_from) if j.resumed_from else None,
-            can_resume=j.can_resume,
-            divar_phone=j.divar_phone,
-            accounts_used=j.accounts_used or [],
-            owner_user_id=(j.config or {}).get("owner_user_id"),
-            owner_name=owners.get((j.config or {}).get("owner_user_id")),
-            started_at=j.started_at,
-            completed_at=j.completed_at,
-            created_at=j.created_at
-        ) for j in jobs],
-        total=len(jobs)
+
+def _reason_line(j) -> Optional[str]:
+    """Where the rest of the candidates went, for the table's «تازه» cell (#29).
+
+    Job 43 read «0 / 3» with nothing beside it; «۲۱ آگهی مال روز دیگری بود،
+    ۳ تکراری» was only in its log. The three biggest buckets of the run's own
+    final account (config.outcome, written by the scraper as the run ends),
+    in the words the run log uses. None while there is nothing to explain:
+    a run still going, one that got what it was asked for, and runs from
+    before the account was kept — their finish_reason is still shown.
+    """
+    outcome = _job_config(j).get("outcome")
+    if not isinstance(outcome, dict):
+        return None
+    new = j.new_items or 0
+    if new >= (j.max_items or outcome.get("examined") or 0):
+        return None
+    # The class itself, as get_job_skipped reads it — not this module's
+    # DivarScraper name, which is only the worker's way in.
+    from app.scraper.divar_scraper import DivarScraper as _Scraper
+    labels = _Scraper._FILTER_LABELS_FA
+    parts = []
+    if outcome.get("duplicate"):
+        parts.append((outcome["duplicate"], "تکراری"))
+    if j.updated_items:
+        parts.append((j.updated_items, "بروز"))
+    for bucket, n in (outcome.get("skipped") or {}).items():
+        parts.append((n, labels.get(bucket, bucket)))
+    failed = dict(outcome.get("failed") or {})
+    for named in ("بدون شماره", "نیاز به تأیید هویت"):
+        if failed.get(named):
+            parts.append((failed.pop(named), named))
+    if sum(failed.values()):
+        parts.append((sum(failed.values()), "ناموفق"))
+    if outcome.get("gone"):
+        parts.append((outcome["gone"], _Scraper.GONE_FROM_DIVAR))
+    if outcome.get("unreached"):
+        parts.append((outcome["unreached"], "بررسی‌نشده"))
+    top = sorted((p for p in parts if p[0]), key=lambda p: -p[0])[:3]
+    return "، ".join(f"{n} {label}" for n, label in top) or None
+
+
+def _job_response(j, cities: dict, categories: dict, owners: dict) -> ScrapingJobResponse:
+    """One run as the jobs table reads it — the list and the single view alike."""
+    cfg = _job_config(j)
+    owner = cfg.get("owner_user_id")
+    return ScrapingJobResponse(
+        id=j.id,
+        job_id=str(j.job_id),
+        city_id=j.city_id,
+        category_id=j.category_id,
+        city_name=cities.get(j.city_id),
+        # An explicit-list run has no category row; its label is the
+        # kind of run it was («اسکرپ تکی», «بازاسکرپ»).
+        category_name=categories.get(j.category_id)
+            or (cfg.get("category") if cfg.get("urls") else None),
+        status=j.status,
+        # A row a hand-written INSERT left NULL must not take the list down.
+        total_pages=j.total_pages or 0,
+        scraped_pages=j.scraped_pages or 0,
+        total_items=j.total_items or 0,
+        scraped_items=j.scraped_items or 0,
+        new_items=j.new_items or 0,
+        updated_items=j.updated_items or 0,
+        failed_items=j.failed_items or 0,
+        error_message=j.error_message,
+        # Written on every run that stopped short; never sent until now, so
+        # the panel's reason line under the status had nothing to show.
+        finish_reason=cast(Optional[str], j.finish_reason),
+        reason_line=_reason_line(j),
+        progress=j.progress,
+        divar_count=j.divar_count,
+        max_items=j.max_items,
+        resumed_from=str(j.resumed_from) if j.resumed_from else None,
+        can_resume=bool(cfg) and j.status in _RESUMABLE,
+        divar_phone=j.divar_phone,
+        accounts_used=j.accounts_used or [],
+        owner_user_id=owner,
+        owner_name=owners.get(owner),
+        # The run names an owner who is no longer a user: «کاربر حذف‌شده»,
+        # not the «—» of a run nobody started.
+        owner_deleted=owner is not None and owner not in owners,
+        started_at=j.started_at,
+        completed_at=j.completed_at,
+        created_at=j.created_at
     )
 
 
@@ -862,34 +932,13 @@ async def get_scraping_job(
             raise HTTPException(status_code=400, detail="Invalid job identifier")
     
     job = result.scalar_one_or_none()
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    return ScrapingJobResponse(
-        id=job.id,
-        job_id=str(job.job_id),
-        city_id=job.city_id,
-        category_id=job.category_id,
-        status=job.status,
-        total_pages=job.total_pages,
-        scraped_pages=job.scraped_pages,
-        total_items=job.total_items,
-        scraped_items=job.scraped_items,
-        new_items=job.new_items,
-        updated_items=job.updated_items,
-        failed_items=job.failed_items,
-        error_message=job.error_message,
-        finish_reason=cast(Optional[str], job.finish_reason),
-        progress=job.progress,
-        divar_count=job.divar_count,
-        max_items=job.max_items,
-        resumed_from=str(job.resumed_from) if job.resumed_from else None,
-        can_resume=job.can_resume,
-        started_at=job.started_at,
-        completed_at=job.completed_at,
-        created_at=job.created_at
-    )
+
+    # The same fields as the list — this one used to leave out the names,
+    # the owner and finish_reason, so the two views of one run disagreed.
+    return _job_response(job, *await _job_names(db, [job]))
 
 
 # A job that has already stopped has nothing left to cancel. Everything else —

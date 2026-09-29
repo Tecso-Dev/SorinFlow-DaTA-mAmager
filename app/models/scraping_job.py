@@ -148,14 +148,20 @@ class ScrapingJob(Base):
     def progress(self) -> float:
         """Percent complete, never above 100.
 
-        The denominator is Divar's own count, and the candidate pool can run
-        past it — Divar's result page injects promoted ads its total leaves
-        out — so without the clamp a run read 123% and kept going.
+        Walked is «بررسی» over «کل»: the listings this run examined out of
+        its own candidate pool. Divar's count is not the denominator any
+        more — it ignores the day, so a one-day run of 24 read «251 / 251»
+        (#29) — and is shown beside the pool instead.
 
         A run with a requested number stops at whichever comes first: that
         many new listings saved, or the listings walked. Against Divar's count
         alone, job 37 read 4% with 176 of its 200 saved and then jumped to
-        100%, so the bar is the nearer of the two ends."""
+        100%, so the bar is the nearer of the two ends.
+
+        A completed run is full: it is over, even when the day it was asked
+        for held nothing at all and its pool was 0 of 0."""
+        if self.status == "completed":
+            return 100.0
         walked = (self.scraped_items or 0) / self.total_items if self.total_items else 0.0
         cap = self.max_items or 0
         saved = (self.new_items or 0) / cap if cap > 0 else 0.0

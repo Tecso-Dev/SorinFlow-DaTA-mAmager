@@ -114,24 +114,31 @@ class TestResume:
         assert "ادامهٔ اسکرپ" in src
 
 
+def _view(status, config):
+    import uuid
+    job = ScrapingJob(id=1, job_id=uuid.uuid4(), status=status, config=config)
+    return sr._job_response(job, {}, {}, {})
+
+
 class TestTheResponseSaysWhetherItCan:
     def test_the_fields_exist(self):
         assert "can_resume" in ScrapingJobResponse.model_fields
         assert "resumed_from" in ScrapingJobResponse.model_fields
 
     def test_can_resume_needs_a_config_and_a_stopped_status(self):
-        """One rule, on the model; the jobs list and the single job read it
-        (through the app: tests/test_partial_status.py)."""
+        """What the jobs table is told, by the builder both job views use."""
         cfg = {"city": "urmia", "category": "rent-apartment"}
-        assert ScrapingJob(status="failed", config=cfg).can_resume is True
-        assert ScrapingJob(status="failed", config=None).can_resume is False
-        assert ScrapingJob(status="running", config=cfg).can_resume is False
+        for status in ("failed", "cancelled", "partial"):
+            assert _view(status, cfg).can_resume is True, status
+        for status in ("running", "paused", "pending"):
+            assert _view(status, cfg).can_resume is False, status
+        assert _view("failed", None).can_resume is False, "nothing to continue with"
 
     def test_the_model_agrees(self):
         cfg = {"city": "urmia", "category": "rent-apartment"}
-        for status in ("pending", "running", "paused", "completed", "partial", "failed", "cancelled"):
+        for status in ("failed", "cancelled", "partial", "completed", "running"):
             job = ScrapingJob(status=status, config=cfg)
-            assert job.to_dict()["can_resume"] is job.can_resume, status
+            assert job.to_dict()["can_resume"] is _view(status, cfg).can_resume, status
 
 
 class TestThePanel:
@@ -163,21 +170,17 @@ class TestACompletedRunIsNotOfferedResume:
     run walked its whole pool; «continue» would be a rerun wearing the wrong
     label. Failed and cancelled stopped short, and those are what it is for."""
 
-    CFG = {"city": "urmia", "category": "rent-apartment"}
-
     def test_completed_is_not_in_the_set(self):
-        job = ScrapingJob(status="completed", config=dict(self.CFG))
-        assert job.can_resume is False
+        assert _view("completed", {"city": "urmia", "category": "rent-apartment"}).can_resume is False
 
     def test_the_model_agrees(self):
-        job = ScrapingJob(status="completed", config=dict(self.CFG))
-        assert job.to_dict()["can_resume"] is False
+        cfg = {"city": "urmia", "category": "rent-apartment"}
+        assert ScrapingJob(status="completed", config=cfg).to_dict()["can_resume"] is False
 
     def test_failed_and_cancelled_still_are(self):
-        """…and a partial run (#28): its collection stopped short too."""
+        cfg = {"city": "urmia", "category": "rent-apartment"}
         for status in ("failed", "cancelled", "partial"):
-            job = ScrapingJob(status=status, config=dict(self.CFG))
-            assert job.can_resume is True and job.to_dict()["can_resume"] is True, status
+            assert ScrapingJob(status=status, config=cfg).to_dict()["can_resume"] is True, status
 
 
 class TestTheCountsHaveTheirOwnColumn:

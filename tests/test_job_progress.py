@@ -14,9 +14,11 @@ agree if every candidate is saved, which never happens. So candidate 100 of
 The loop ends when the pool runs out or the target is met, whichever comes
 first, so the pool is the honest denominator.
 """
-import inspect
 import os
 import sys
+from datetime import datetime, timedelta
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -29,6 +31,16 @@ os.environ.setdefault("IMAGES_PATH", "/tmp")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRAPER = open(os.path.join(ROOT, "app/scraper/divar_scraper.py"),
                encoding="utf-8-sig").read()
+
+import _scrape_harness as h  # noqa: E402
+
+
+@pytest.fixture
+async def db(monkeypatch):
+    h.quiet(monkeypatch, divar_says=113)
+    eng, maker = await h.open_db()
+    yield maker
+    await eng.dispose()
 
 
 def job(total, scraped):
@@ -53,26 +65,43 @@ class TestTheRunThatWasReported:
 
 
 class TestTheDenominatorIsThePool:
-    def test_the_candidate_count_is_the_fallback_denominator(self):
-        """Divar's own count took over as the denominator when the operator
-        asked for it; the pool remains the denominator when Divar does not
-        answer, which is the case this test originally pinned."""
-        assert "else len(all_listings)" in SCRAPER
+    """Read off real runs (tests/_scrape_harness.py): the loop, the counters
+    and the row as it is committed, with the browser replaced."""
+
+    async def test_the_candidate_pool_is_the_denominator(self, db):
+        """Divar's own count was the denominator for a while; #29 put the pool
+        back, because Divar's count ignores the day. It is kept beside it."""
+        feed = [h.token() for _ in range(5)]
+        job_id = await h.new_job(db, max_items=10)
+        job, _ = await h.run(db, job_id, {"feed": feed, "pages": {
+            t: h.page(t, phone=h.PHONE.format(700 + i)) for i, t in enumerate(feed)}})
+        assert (job.total_items, job.divar_count) == (5, 113)
 
     def test_the_target_is_no_longer_the_denominator(self):
         assert "job.total_items = len(all_listings) if" not in SCRAPER, \
             "the target-based branch is what filled the bar early"
 
-    def test_progress_counts_candidates_examined(self):
-        assert "job.scraped_items = i + 1" in SCRAPER
+    async def test_progress_counts_candidates_examined(self, db):
+        """Filtered or saved, a listing the run is done with moves the bar —
+        one at a time, never both at once and never neither."""
+        old = datetime.utcnow() - timedelta(days=3)
+        feed = [h.token() for _ in range(4)]
+        pages = {feed[0]: h.page(feed[0], posted=old),
+                 feed[1]: h.page(feed[1], phone=h.PHONE.format(710)),
+                 feed[2]: h.page(feed[2], posted=old),
+                 feed[3]: h.page(feed[3], phone=h.PHONE.format(711))}
+        job_id = await h.new_job(db, max_items=10)
+        seen = []
+
+        async def watch(_tok):
+            seen.append((await h.job_row(db, job_id)).scraped_items)
+        job, _ = await h.run(db, job_id, {"feed": feed, "pages": pages, "on_open": watch},
+                             max_age_hours=24)
+        assert seen == [0, 1, 2, 3], "the filtered branch and the saved branch both advance it"
+        assert job.scraped_items == 4 and job.new_items == 2
 
     def test_the_capped_counter_is_gone(self):
         assert "min(i + 1, max_items)" not in SCRAPER
-
-    def test_both_write_sites_were_changed(self):
-        """One is the filtered-out branch, one the processed branch. Leaving
-        either behind would make the bar jump between them."""
-        assert SCRAPER.count("job.scraped_items = i + 1") == 2
 
     def test_the_two_modes_no_longer_need_telling_apart(self):
         """pool_progress existed only to pick a denominator."""
@@ -80,15 +109,16 @@ class TestTheDenominatorIsThePool:
 
 
 class TestARunThatStopsAtItsTargetStillReadsFull:
-    def test_completion_fills_the_bar(self):
-        src = SCRAPER[SCRAPER.index("# Complete job"):]
-        assert "job.scraped_items = job.total_items" in src[:600]
-
-    def test_it_is_set_before_the_row_is_committed(self):
-        i = SCRAPER.index("# Complete job")
-        window = SCRAPER[i:i + 600]
-        assert window.index("job.scraped_items = job.total_items") < \
-            window.index("await self.db_session.commit()")
+    async def test_completion_fills_the_bar_as_committed(self, db):
+        """Asked for one, it stops after the first of three. The bar reads
+        full on the row as committed — and «بررسی» still says one, not three."""
+        feed = [h.token() for _ in range(3)]
+        job_id = await h.new_job(db, max_items=1)
+        await h.run(db, job_id, {"feed": feed, "pages": {
+            t: h.page(t, phone=h.PHONE.format(720 + i)) for i, t in enumerate(feed)}})
+        row = await h.job_row(db, job_id)
+        assert row.status == "completed" and row.progress == 100.0
+        assert (row.scraped_items, row.total_items) == (1, 3)
 
 
 class TestTheBarCannotOverfill:
