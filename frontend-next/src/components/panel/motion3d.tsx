@@ -12,15 +12,29 @@
 // spins here check `useReducedMotion()` themselves, the same way Donut3D does).
 
 import { motion, useAnimationFrame, useMotionValue, useReducedMotion, useSpring, useTransform } from "motion/react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { cn } from "cn";
 
 const FLOAT = { duration: 5, repeat: Infinity, ease: "easeInOut" } as const;
+
+/** Gradient ids that belong to one instance.
+ *
+ *  An SVG id is global to the document, so two of the same piece on one page
+ *  would both paint from whichever <linearGradient> the browser saw last —
+ *  the mark that mounted second silently wearing the first one's colours, or
+ *  nothing at all if it unmounts. Every piece here appears once today, which
+ *  is exactly the kind of "true for now" that breaks the day a section is
+ *  reused. components/brand/logos.tsx solved this the same way. */
+function useSvgIds<const K extends string>(keys: readonly K[]): Record<K, string> {
+  const base = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  return Object.fromEntries(keys.map((k) => [k, `m3${base}${k}`])) as Record<K, string>;
+}
 
 /* ───────────────────────── isometric phone (divar login, sms) ───────────────────────── */
 
 /** An extruded phone, floating — the login/SMS motif for divar and sms. */
 export function IsoPhone({ className, tone = "indigo" }: { className?: string; tone?: "indigo" | "cyan" }) {
+  const gid = useSvgIds(["phone_face", "phone_shadow"] as const);
   const reduce = useReducedMotion();
   const screenTop = tone === "cyan" ? "#22d3ee" : "#a5b4fc";
   return (
@@ -32,20 +46,20 @@ export function IsoPhone({ className, tone = "indigo" }: { className?: string; t
       transition={FLOAT}
     >
       <defs>
-        <linearGradient id="iso-phone-face" x1="20" y1="10" x2="140" y2="190" gradientUnits="userSpaceOnUse">
+        <linearGradient id={gid.phone_face} x1="20" y1="10" x2="140" y2="190" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor={screenTop} />
           <stop offset="1" stopColor="#4f46e5" />
         </linearGradient>
-        <radialGradient id="iso-phone-shadow">
+        <radialGradient id={gid.phone_shadow}>
           <stop offset="0" stopColor="#6366f1" stopOpacity={0.4} />
           <stop offset="1" stopColor="#6366f1" stopOpacity={0} />
         </radialGradient>
       </defs>
-      <ellipse cx="80" cy="192" rx="46" ry="8" fill="url(#iso-phone-shadow)" />
+      <ellipse cx="80" cy="192" rx="46" ry="8" fill={`url(#${gid.phone_shadow})`} />
       {[9, 7, 5, 3, 1].map((k) => (
         <rect key={k} x={20 + k * 0.8} y={10 + k} width="120" height="170" rx="18" fill="#2e1065" opacity={0.3 + (9 - k) * 0.06} />
       ))}
-      <rect x="20" y="10" width="120" height="170" rx="18" fill="url(#iso-phone-face)" stroke="#c7d2fe" strokeOpacity={0.5} />
+      <rect x="20" y="10" width="120" height="170" rx="18" fill={`url(#${gid.phone_face})`} stroke="#c7d2fe" strokeOpacity={0.5} />
       <rect x="32" y="30" width="96" height="120" rx="8" fill="#1e1b4b" opacity={0.85} />
       <rect x="60" y="18" width="40" height="5" rx="2.5" fill="#ffffff" opacity={0.5} />
       {[0, 1, 2].map((i) => (
@@ -59,6 +73,7 @@ export function IsoPhone({ className, tone = "indigo" }: { className?: string; t
 /* ───────────────────────── isometric envelope (email) ───────────────────────── */
 
 export function IsoEnvelope({ className }: { className?: string }) {
+  const gid = useSvgIds(["env_face"] as const);
   const reduce = useReducedMotion();
   return (
     <motion.svg
@@ -69,7 +84,7 @@ export function IsoEnvelope({ className }: { className?: string }) {
       transition={FLOAT}
     >
       <defs>
-        <linearGradient id="iso-env-face" x1="20" y1="20" x2="180" y2="140" gradientUnits="userSpaceOnUse">
+        <linearGradient id={gid.env_face} x1="20" y1="20" x2="180" y2="140" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#eef2ff" />
           <stop offset="1" stopColor="#c7d2fe" />
         </linearGradient>
@@ -78,7 +93,7 @@ export function IsoEnvelope({ className }: { className?: string }) {
       {[7, 5, 3, 1].map((k) => (
         <rect key={k} x={20} y={20 + k} width="160" height="104" rx="10" fill="#3730a3" opacity={0.25 + (7 - k) * 0.08} />
       ))}
-      <rect x="20" y="20" width="160" height="104" rx="10" fill="url(#iso-env-face)" stroke="#4338ca" strokeOpacity={0.5} />
+      <rect x="20" y="20" width="160" height="104" rx="10" fill={`url(#${gid.env_face})`} stroke="#4338ca" strokeOpacity={0.5} />
       <path d="M20 30 L100 84 L180 30" fill="none" stroke="#4338ca" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />
       <motion.g animate={reduce ? undefined : { y: [0, -10, 0], opacity: [0.9, 1, 0.9] }} transition={{ duration: 3.4, repeat: Infinity, ease: "easeInOut" }}>
         <rect x="72" y="50" width="56" height="38" rx="4" fill="#ffffff" stroke="#22d3ee" strokeWidth={3} />
@@ -92,6 +107,7 @@ export function IsoEnvelope({ className }: { className?: string }) {
 /* ───────────────────────── isometric AI chip (ai) ───────────────────────── */
 
 export function IsoChip({ className }: { className?: string }) {
+  const gid = useSvgIds(["chip_face"] as const);
   const reduce = useReducedMotion();
   const pins = Array.from({ length: 5 }, (_, i) => 30 + i * 20);
   return (
@@ -103,7 +119,7 @@ export function IsoChip({ className }: { className?: string }) {
       transition={FLOAT}
     >
       <defs>
-        <linearGradient id="iso-chip-face" x1="20" y1="20" x2="140" y2="140" gradientUnits="userSpaceOnUse">
+        <linearGradient id={gid.chip_face} x1="20" y1="20" x2="140" y2="140" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#a5b4fc" />
           <stop offset="1" stopColor="#7c3aed" />
         </linearGradient>
@@ -117,7 +133,7 @@ export function IsoChip({ className }: { className?: string }) {
       {[9, 7, 5, 3, 1].map((k) => (
         <rect key={k} x={20 + k * 0.6} y={20 + k} width="120" height="120" rx="16" fill="#2e1065" opacity={0.28 + (9 - k) * 0.06} />
       ))}
-      <rect x="20" y="20" width="120" height="120" rx="16" fill="url(#iso-chip-face)" stroke="#e0e7ff" strokeOpacity={0.5} />
+      <rect x="20" y="20" width="120" height="120" rx="16" fill={`url(#${gid.chip_face})`} stroke="#e0e7ff" strokeOpacity={0.5} />
       <motion.circle
         cx="80" cy="80" r="22" fill="#0e1030"
         animate={reduce ? undefined : { r: [20, 24, 20] }}
@@ -138,6 +154,7 @@ export function IsoChip({ className }: { className?: string }) {
 /* ───────────────────────── isometric shield (audit, security) ───────────────────────── */
 
 export function IsoShield({ className, size = 140 }: { className?: string; size?: number }) {
+  const gid = useSvgIds(["shield_face"] as const);
   const reduce = useReducedMotion();
   const face = "M80 14 L136 36 V84 C136 118 112 140 80 152 C48 140 24 118 24 84 V36 Z";
   return (
@@ -151,7 +168,7 @@ export function IsoShield({ className, size = 140 }: { className?: string; size?
       transition={FLOAT}
     >
       <defs>
-        <linearGradient id="iso-shield-face" x1="24" y1="14" x2="136" y2="152" gradientUnits="userSpaceOnUse">
+        <linearGradient id={gid.shield_face} x1="24" y1="14" x2="136" y2="152" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#a5b4fc" />
           <stop offset="0.55" stopColor="#6366f1" />
           <stop offset="1" stopColor="#7c3aed" />
@@ -161,7 +178,7 @@ export function IsoShield({ className, size = 140 }: { className?: string; size?
       {[8, 6, 4, 2].map((k) => (
         <path key={k} d={face} transform={`translate(${k * 0.6} ${k})`} fill="#2e1065" opacity={0.3 + (8 - k) * 0.06} />
       ))}
-      <path d={face} fill="url(#iso-shield-face)" stroke="#ffffff" strokeOpacity={0.5} strokeWidth={1.5} />
+      <path d={face} fill={`url(#${gid.shield_face})`} stroke="#ffffff" strokeOpacity={0.5} strokeWidth={1.5} />
       <motion.circle
         cx="80" cy="82" r="26" fill="#22d3ee"
         animate={reduce ? undefined : { opacity: [0.18, 0.4, 0.18], scale: [1, 1.14, 1] }}
@@ -177,6 +194,7 @@ export function IsoShield({ className, size = 140 }: { className?: string; size?
 /* ───────────────────────── isometric ID card (profile) ───────────────────────── */
 
 export function IsoIDCard({ className }: { className?: string }) {
+  const gid = useSvgIds(["id_face"] as const);
   const reduce = useReducedMotion();
   return (
     <motion.svg
@@ -187,7 +205,7 @@ export function IsoIDCard({ className }: { className?: string }) {
       transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
     >
       <defs>
-        <linearGradient id="iso-id-face" x1="10" y1="10" x2="170" y2="120" gradientUnits="userSpaceOnUse">
+        <linearGradient id={gid.id_face} x1="10" y1="10" x2="170" y2="120" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#818cf8" />
           <stop offset="1" stopColor="#6d28d9" />
         </linearGradient>
@@ -195,7 +213,7 @@ export function IsoIDCard({ className }: { className?: string }) {
       {[7, 5, 3, 1].map((k) => (
         <rect key={k} x={10 + k * 0.7} y={10 + k} width="160" height="100" rx="14" fill="#2e1065" opacity={0.28 + (7 - k) * 0.07} />
       ))}
-      <rect x="10" y="10" width="160" height="100" rx="14" fill="url(#iso-id-face)" stroke="#e0e7ff" strokeOpacity={0.5} />
+      <rect x="10" y="10" width="160" height="100" rx="14" fill={`url(#${gid.id_face})`} stroke="#e0e7ff" strokeOpacity={0.5} />
       <circle cx="46" cy="52" r="20" fill="#eef2ff" opacity={0.92} />
       <circle cx="46" cy="46" r="8" fill="#6d28d9" opacity={0.6} />
       <path d="M30 66 a16 12 0 0 1 32 0 Z" fill="#6d28d9" opacity={0.6} />
