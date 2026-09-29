@@ -11,9 +11,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
+import { Lottie } from "@/components/ui/lottie";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
 import { faNum, faPercent } from "@/lib/format";
+import aiThinkingLottie from "@/lotties/ai-thinking.json";
 import { can, useSession } from "@/lib/session";
 import type { ListingFacts, PhotoTags, Property } from "./types";
 
@@ -100,8 +102,17 @@ export function AiFactsBlock({ property }: { property: Property }) {
           </Button>
         )}
       </div>
-      {!facts ? (
-        <p className="text-xs text-muted-foreground">هنوز خوانده نشده — خواننده هر دو دقیقه آگهی‌های تازه را می‌خواند.</p>
+      {reread.isPending ? (
+        // the model really is reading this listing right now: say so with the picture that means it
+        <div role="status" className="flex items-center gap-3">
+          <Lottie animationData={aiThinkingLottie} className="size-14 shrink-0" />
+          <p className="text-xs text-muted-foreground">هوش مصنوعی در حال خواندن آگهی است…</p>
+        </div>
+      ) : !facts ? (
+        <div className="flex items-center gap-3">
+          <Lottie animationData={aiThinkingLottie} className="size-12 shrink-0 opacity-70" />
+          <p className="text-xs text-muted-foreground">هنوز خوانده نشده — خواننده هر دو دقیقه آگهی‌های تازه را می‌خواند.</p>
+        </div>
       ) : (
         <>
           {facts.summary && <p className="mb-2 text-sm leading-6">{facts.summary}</p>}

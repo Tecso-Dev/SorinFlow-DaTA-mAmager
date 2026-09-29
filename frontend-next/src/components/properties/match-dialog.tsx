@@ -10,10 +10,13 @@ import { Eye, Network, Sparkles } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { Empty, ErrorNote, ListSkeleton, RingDialog, ToneBadge } from "@/components/panel/kit";
+import { IsoAlert } from "@/components/panel/motion3d";
 import { Button } from "@/components/ui/button";
+import { Lottie } from "@/components/ui/lottie";
 import { api } from "@/lib/api";
 import { price } from "@/lib/crm";
 import { faNum } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
 import { DupBadge, formatSerial, PhoneLink, ScoreDial } from "./shared";
 import type { MatchResult } from "./types";
 
@@ -70,9 +73,9 @@ export function MatchDialog({ propertyId, onClose, onOpenProperty }: { propertyI
       {q.isLoading ? (
         <ListSkeleton rows={4} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={<IsoAlert className="max-w-[80px]" />} />
       ) : !items.length ? (
-        <Empty icon={Network}>
+        <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[90px]" />}>
           ملک مشابهی پیدا نشد.
           {crit && <span className="mt-1 block text-xs">جستجو بر اساس: {crit}</span>}
         </Empty>

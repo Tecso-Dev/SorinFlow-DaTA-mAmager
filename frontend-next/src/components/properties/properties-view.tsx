@@ -12,25 +12,35 @@ import {
   Building2, ExternalLink, Eye, FileJson, FileSpreadsheet, Search, SlidersHorizontal, Trash2,
 } from "lucide-react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 import { CountUp, Reveal, Tilt } from "@/components/viz";
 import {
   Empty, ErrorNote, Field, ListSkeleton, NativeSelect, PageHeader, Pagination, Section, Toolbar, useConfirm,
 } from "@/components/panel/kit";
+import { CardDeck3D, IsoAlert } from "@/components/panel/motion3d";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Lottie } from "@/components/ui/lottie";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
 import { exportHref, price, qs } from "@/lib/crm";
 import { faNum } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
 import { CityPicker } from "./city-picker";
 import { PropertySheet } from "./detail-sheet";
 import { MatchDialog } from "./match-dialog";
 import { AgencyBadge, DupBadge, formatSerial, NoPhoneCell, PhoneLink, safeUrl } from "./shared";
+import { TrendCard } from "./trend-card";
 import type { Category, City, PropertyPage } from "./types";
 
 const SIZE = 20;
+
+// A table row that plays its entrance once, when it first mounts. Rows are keyed
+// by property id, so a refetch that returns the same page leaves them alone and
+// only a new page or a new search brings a fresh set in.
+const MotionRow = motion.create(TableRow);
 
 type Filters = {
   search: string;
@@ -159,32 +169,40 @@ export function PropertiesView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader
-        icon={Building2}
-        title="لیست املاک"
-        hint="همهٔ آگهی‌های اسکرپ‌شده، با فیلتر شهر و دسته‌بندی"
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button asChild variant="outline" size="sm">
-              <a href={excelHref} download><FileSpreadsheet /> خروجی اکسل</a>
-            </Button>
-            <Button variant="outline" size="sm" disabled={jsonExport.isPending} onClick={() => jsonExport.mutate()}>
-              <FileJson /> خروجی JSON
-            </Button>
-          </div>
-        }
-      />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_190px]">
+        <PageHeader
+          icon={Building2}
+          title="لیست املاک"
+          hint="همهٔ آگهی‌های اسکرپ‌شده، با فیلتر شهر و دسته‌بندی"
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <Button asChild variant="outline" size="sm">
+                <a href={excelHref} download><FileSpreadsheet /> خروجی اکسل</a>
+              </Button>
+              <Button variant="outline" size="sm" disabled={jsonExport.isPending} onClick={() => jsonExport.mutate()}>
+                <FileJson /> خروجی JSON
+              </Button>
+            </div>
+          }
+        />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <CardDeck3D />
+        </Reveal>
+      </div>
 
       <Reveal>
-        <Tilt className="w-fit">
-          <div className="flex items-center gap-3 rounded-2xl border bg-card px-4 py-3 shadow-sm dark:bg-linear-to-b dark:from-white/[0.04] dark:to-transparent dark:shadow-none">
-            <div className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary"><Building2 className="size-4.5" /></div>
-            <div>
-              <div className="text-[26px] leading-none font-black tabular"><CountUp value={total} /></div>
-              <div className="text-[11px] text-muted-foreground">ملک یافت‌شده</div>
+        <div className="grid items-stretch gap-3 lg:grid-cols-[auto_minmax(0,1fr)]">
+          <Tilt className="w-fit">
+            <div className="flex h-full items-center gap-3 rounded-2xl border bg-card px-4 py-3 shadow-sm dark:bg-linear-to-b dark:from-white/[0.04] dark:to-transparent dark:shadow-none">
+              <div className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary"><Building2 className="size-4.5" /></div>
+              <div>
+                <div className="text-[26px] leading-none font-black tabular"><CountUp value={total} /></div>
+                <div className="text-[11px] text-muted-foreground">ملک یافت‌شده</div>
+              </div>
             </div>
-          </div>
-        </Tilt>
+          </Tilt>
+          <TrendCard />
+        </div>
       </Reveal>
 
       <Section>
@@ -273,9 +291,9 @@ export function PropertiesView() {
         {list.isLoading ? (
           <ListSkeleton rows={6} />
         ) : list.isError ? (
-          <ErrorNote error={list.error} />
+          <ErrorNote error={list.error} illustration={<IsoAlert />} />
         ) : !items.length ? (
-          <Empty icon={Building2}>هیچ ملکی یافت نشد</Empty>
+          <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[110px]" />}>هیچ ملکی یافت نشد</Empty>
         ) : (
           <div className="overflow-x-auto rounded-xl border">
             <Table>
@@ -292,10 +310,15 @@ export function PropertiesView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map((p) => {
+                {items.map((p, i) => {
                   const url = safeUrl(p.url);
                   return (
-                    <TableRow key={p.id}>
+                    <MotionRow
+                      key={p.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.4, delay: Math.min(i, 10) * 0.03, ease: [0.22, 1, 0.36, 1] }}
+                    >
                       <TableCell className="font-mono text-xs tabular text-primary">{formatSerial(p.serial_no)}</TableCell>
                       <TableCell className="max-w-64">
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -329,7 +352,7 @@ export function PropertiesView() {
                           <Button variant="ghost" size="icon-sm" aria-label="حذف" onClick={() => handleDelete(p.id, p.title)}><Trash2 className="size-4 text-destructive" /></Button>
                         </div>
                       </TableCell>
-                    </TableRow>
+                    </MotionRow>
                   );
                 })}
               </TableBody>

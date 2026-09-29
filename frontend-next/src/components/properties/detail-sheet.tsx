@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { cn } from "cn";
 import { Empty, ErrorNote, ListSkeleton, NativeSelect, useConfirm } from "@/components/panel/kit";
+import { IsoAlert } from "@/components/panel/motion3d";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "@/components/toaster";
@@ -171,7 +172,7 @@ export function PropertySheet({
           {q.isLoading ? (
             <ListSkeleton rows={6} />
           ) : q.isError ? (
-            <ErrorNote error={q.error} />
+            <ErrorNote error={q.error} illustration={<IsoAlert className="max-w-[80px]" />} />
           ) : !p ? null : (
             <div className="grid gap-3">
               <div className="flex flex-wrap gap-2">
