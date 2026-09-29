@@ -7,6 +7,7 @@
 import { Clock, Pencil, Play, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { Field, RingDialog, Section, useConfirm } from "@/components/panel/kit";
 import { toast } from "@/components/toaster";
 import { Button } from "@/components/ui/button";
@@ -98,7 +99,7 @@ export function SchedulesCard({ onRanNow }: { onRanNow: () => void }) {
   return (
     <Section title="اسکرپ‌های زمان‌بندی‌شده" hint={`${faNum(rows.length)} زمان‌بندی`}>
         <div className="grid gap-2">
-          {rows.map((s) => {
+          {rows.map((s, i) => {
             const cfg = s.config;
             const what = [
               [s.city_name || cfg.city, s.category_name || cfg.category].filter(Boolean).join(" / "),
@@ -109,7 +110,13 @@ export function SchedulesCard({ onRanNow }: { onRanNow: () => void }) {
             const mm = String(s.minute).padStart(2, "0");
             const lr = s.last_result;
             return (
-              <div key={s.id} className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${s.enabled ? "" : "opacity-60"}`}>
+              <motion.div
+                key={s.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: Math.min(i, 10) * 0.03 }}
+                className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${s.enabled ? "" : "opacity-60"}`}
+              >
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold">
                     {s.name}
@@ -140,7 +147,7 @@ export function SchedulesCard({ onRanNow }: { onRanNow: () => void }) {
                     <Trash2 />
                   </Button>
                 </div>
-              </div>
+              </motion.div>
             );
           })}
         </div>

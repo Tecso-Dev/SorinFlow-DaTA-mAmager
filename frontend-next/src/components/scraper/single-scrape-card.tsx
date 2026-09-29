@@ -9,10 +9,12 @@ import { Download } from "lucide-react";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Section } from "@/components/panel/kit";
+import { Lottie } from "@/components/ui/lottie";
 import { toast } from "@/components/toaster";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
+import scanLottie from "@/lotties/scan.json";
 import type { ScrapeJob } from "./types";
 
 export function SingleScrapeCard() {
@@ -40,13 +42,14 @@ export function SingleScrapeCard() {
   }
 
   return (
-    <Section title="اسکرپ تکی" bodyClassName="grid gap-3 p-4">
+    <Section title="اسکرپ تکی" bodyClassName="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_72px] sm:items-center">
       <form onSubmit={submit} className="grid gap-3">
         <Input dir="ltr" type="url" aria-label="آدرس ملک در دیوار" placeholder="آدرس ملک در دیوار…" value={url} onChange={(e) => setUrl(e.target.value)} />
         <Button type="submit" variant="outline" className="w-full" disabled={mutate.isPending}>
           <Download /> اسکرپ این ملک
         </Button>
       </form>
+      <Lottie animationData={scanLottie} className="hidden sm:block" label="در حال اسکرپ" />
     </Section>
   );
 }

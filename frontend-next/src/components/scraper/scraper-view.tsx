@@ -10,6 +10,7 @@
 import { Bot } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { PageHeader } from "@/components/panel/kit";
+import { LayerStack } from "@/components/panel/motion3d";
 import { Reveal } from "@/components/viz";
 import { api } from "@/lib/api";
 import { JobsTable } from "./jobs-table";
@@ -27,7 +28,12 @@ export function ScraperView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader icon={Bot} title="اسکرپر" hint="آگهی‌های دیوار را طبق فیلترهای شما جمع‌آوری می‌کند" />
+      <div className="grid grid-cols-1 items-center gap-4 xl:grid-cols-[minmax(0,1fr)_220px]">
+        <PageHeader icon={Bot} title="اسکرپر" hint="آگهی‌های دیوار را طبق فیلترهای شما جمع‌آوری می‌کند" />
+        <Reveal delay={0.1} className="hidden xl:block">
+          <LayerStack labels={["صفحات", "آگهی‌ها", "لیدها"]} />
+        </Reveal>
+      </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         <div className="flex flex-col gap-5">

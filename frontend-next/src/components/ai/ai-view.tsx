@@ -5,7 +5,7 @@
 // against app/api/routes/ai.py + ai_assistant.py.
 
 import {
-  Bot, CircleAlert, Gauge, Loader2, MessageCircle, Play, Plug, Save, Send, ShieldAlert, Sparkles, Wallet, Zap,
+  Bot, Gauge, Loader2, Play, Plug, Save, Send, ShieldAlert, Sparkles, Wallet, Zap,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -18,9 +18,13 @@ import { Reveal, Tilt } from "@/components/viz";
 import {
   Empty, ErrorNote, Field, ListSkeleton, NativeSelect, PageHeader, Section, ToneBadge, Toolbar,
 } from "@/components/panel/kit";
+import { IsoChip } from "@/components/panel/motion3d";
+import { Lottie } from "@/components/ui/lottie";
 import { api, ApiError } from "@/lib/api";
 import { qs } from "@/lib/crm";
 import { faDate, faNum } from "@/lib/format";
+import aiThinkingLottie from "@/lotties/ai-thinking.json";
+import emptyLottie from "@/lotties/empty.json";
 import { useSession, can } from "@/lib/session";
 
 /* ───────────────────────── types (app/api/routes/ai.py, ai_assistant.py) ───────────────────────── */
@@ -214,9 +218,9 @@ function LogCard({ agentFilter, onAgentFilter }: { agentFilter: { agent: string;
       {q.isPending ? (
         <ListSkeleton rows={5} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />} />
       ) : q.data.items.length === 0 ? (
-        <Empty icon={CircleAlert}>فراخوانی‌ای ثبت نشده است.</Empty>
+        <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />}>فراخوانی‌ای ثبت نشده است.</Empty>
       ) : (
         <ul tabIndex={0} aria-label="لاگ فراخوانی‌ها" className="flex max-h-96 flex-col gap-1.5 overflow-y-auto text-sm">
           {q.data.items.map((r) => (
@@ -278,7 +282,9 @@ function AssistantCard() {
       ) : log.isError ? (
         <ErrorNote error={log.error} />
       ) : log.data.items.length === 0 ? (
-        <Empty icon={MessageCircle}>سؤالی ثبت نشده است.</Empty>
+        <Empty illustration={<Lottie animationData={aiThinkingLottie} className="max-w-[100px]" loop label="آمادهٔ پاسخ‌گویی" />}>
+          سؤالی ثبت نشده است.
+        </Empty>
       ) : (
         <ul tabIndex={0} aria-label="سؤال‌های دستیار سورین" className="flex max-h-96 flex-col gap-3 overflow-y-auto text-sm">
           {log.data.items.map((c) => (
@@ -426,7 +432,12 @@ export function AiView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader icon={Sparkles} title="هوش مصنوعی" hint="ایجنت‌ها، دستیار «سورین» و تنظیمات مدل" />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_150px]">
+        <PageHeader icon={Sparkles} title="هوش مصنوعی" hint="ایجنت‌ها، دستیار «سورین» و تنظیمات مدل" />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <IsoChip />
+        </Reveal>
+      </div>
       {q.isPending ? (
         <ListSkeleton rows={6} />
       ) : q.isError ? (
@@ -437,8 +448,10 @@ export function AiView() {
           <Reveal>
             <Section title="ایجنت‌ها">
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {q.data.agents.map((a) => (
-                  <AgentCard key={a.key} agent={a} onErrorClick={(key) => setAgentFilter({ agent: key, failedOnly: true })} />
+                {q.data.agents.map((a, i) => (
+                  <Reveal key={a.key} delay={Math.min(i, 8) * 0.04}>
+                    <AgentCard agent={a} onErrorClick={(key) => setAgentFilter({ agent: key, failedOnly: true })} />
+                  </Reveal>
                 ))}
               </div>
             </Section>

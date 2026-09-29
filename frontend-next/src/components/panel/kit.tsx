@@ -118,19 +118,26 @@ export function LabelBadge({ map, value }: { map: Record<string, Labeled>; value
   return <ToneBadge tone={l?.tone ?? "neutral"}>{l?.label ?? value}</ToneBadge>;
 }
 
-/** Nothing to show: says so, with a small isometric stack. */
-export function Empty({ children, icon: Icon, action }: { children: React.ReactNode; icon?: LucideIcon; action?: React.ReactNode }) {
+/**
+ * Nothing to show: says so, with a small isometric stack — or, when given an
+ * `illustration` (a `<Lottie>` clip or a bespoke 3D/SVG piece), that instead.
+ * `illustration` is additive: every existing `<Empty icon={...}>` call keeps
+ * its old look untouched.
+ */
+export function Empty({
+  children, icon: Icon, action, illustration,
+}: { children: React.ReactNode; icon?: LucideIcon; action?: React.ReactNode; illustration?: React.ReactNode }) {
   return (
     <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-      {Icon && <IsoBadge icon={Icon} className="scale-75 opacity-80" />}
+      {illustration ?? (Icon && <IsoBadge icon={Icon} className="scale-75 opacity-80" />)}
       <div>{children}</div>
       {action}
     </div>
   );
 }
 
-export function ErrorNote({ error }: { error: unknown }) {
-  return <Empty>{error instanceof ApiError ? error.message : "بارگیری ناموفق بود"}</Empty>;
+export function ErrorNote({ error, illustration }: { error: unknown; illustration?: React.ReactNode }) {
+  return <Empty illustration={illustration}>{error instanceof ApiError ? error.message : "بارگیری ناموفق بود"}</Empty>;
 }
 
 export function ListSkeleton({ rows = 4 }: { rows?: number }) {

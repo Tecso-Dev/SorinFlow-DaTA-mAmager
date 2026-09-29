@@ -7,17 +7,22 @@
 import { ScrollText } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { motion } from "motion/react";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { JalaliDateInput } from "@/components/panel/date-input";
 import {
   Empty, ErrorNote, Field, ListSkeleton, NativeSelect, PageHeader, Pagination, Section, ToneBadge, Toolbar,
 } from "@/components/panel/kit";
+import { IsoShield } from "@/components/panel/motion3d";
+import { Lottie } from "@/components/ui/lottie";
 import { Reveal } from "@/components/viz";
 import { can, useSession } from "@/lib/session";
 import { api } from "@/lib/api";
 import { qs } from "@/lib/crm";
 import { faDate, faNum } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
+import shieldLottie from "@/lotties/shield.json";
 
 type AuditEvent = {
   id: number; created_at: string | null; actor_user_id: number | null; actor_username: string | null;
@@ -95,9 +100,9 @@ function AuditTable() {
         {q.isPending ? (
           <ListSkeleton />
         ) : q.isError ? (
-          <ErrorNote error={q.error} />
+          <ErrorNote error={q.error} illustration={<Lottie animationData={shieldLottie} className="max-w-[100px]" />} />
         ) : q.data.items.length === 0 ? (
-          <Empty icon={ScrollText}>رویدادی با این فیلتر پیدا نشد.</Empty>
+          <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />}>رویدادی با این فیلتر پیدا نشد.</Empty>
         ) : (
           <>
             <div className="overflow-x-auto rounded-lg border">
@@ -112,8 +117,15 @@ function AuditTable() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {q.data.items.map((e) => (
-                    <TableRow key={e.id}>
+                  {q.data.items.map((e, i) => (
+                    <motion.tr
+                      key={e.id}
+                      data-slot="table-row"
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3, delay: Math.min(i, 10) * 0.03 }}
+                      className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+                    >
                       <TableCell className="whitespace-nowrap tabular">{when(e.created_at)}</TableCell>
                       <TableCell>
                         <div className="font-medium">{e.actor_username || "—"}</div>
@@ -127,7 +139,7 @@ function AuditTable() {
                         {e.target_type ? `${e.target_type}${e.target_id ? ` #${faNum(e.target_id)}` : ""}` : "—"}
                       </TableCell>
                       <TableCell dir="ltr" className="text-xs tabular text-muted-foreground">{e.ip || "—"}</TableCell>
-                    </TableRow>
+                    </motion.tr>
                   ))}
                 </TableBody>
               </Table>
@@ -148,13 +160,18 @@ export function AuditPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader icon={ScrollText} title="رویدادها" hint="ثبت اقدام‌های مدیریتی روی پنل" />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
+        <PageHeader icon={ScrollText} title="رویدادها" hint="ثبت اقدام‌های مدیریتی روی پنل" />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <IsoShield size={110} />
+        </Reveal>
+      </div>
       {session.isPending ? (
-        <div className="h-40 animate-pulse rounded-2xl bg-muted/40" />
+        <ListSkeleton rows={4} />
       ) : session.isError ? (
         <ErrorNote error={session.error} />
       ) : !can(user, { roles: ["root", "super_admin"] }) ? (
-        <Empty>این بخش فقط برای root و مدیر ارشد است.</Empty>
+        <Empty illustration={<Lottie animationData={shieldLottie} className="max-w-[110px]" />}>این بخش فقط برای root و مدیر ارشد است.</Empty>
       ) : (
         <AuditTable />
       )}

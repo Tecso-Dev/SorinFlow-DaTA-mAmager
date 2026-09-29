@@ -8,12 +8,17 @@
 import { Inbox, RefreshCw, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Empty, ErrorNote, ListSkeleton, NativeSelect, PageHeader, Pagination, Section, ToneBadge, Toolbar } from "@/components/panel/kit";
+import { CardDeck3D } from "@/components/panel/motion3d";
+import { Reveal } from "@/components/viz";
+import { Lottie } from "@/components/ui/lottie";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
 import { CustomerMatchesSheet } from "@/components/crm/customers/matches-sheet";
 
 type RequestUser = { id: number; full_name: string | null; phone: string | null; email: string | null };
@@ -93,18 +98,23 @@ export function AdminPortalRequestsView() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        icon={Inbox}
-        title="درخواست‌های مشتریان"
-        hint="درخواست‌های ثبت‌شده در پورتال مشتریان، برای بررسی و پیگیری."
-        actions={
-          <Button variant="outline" size="sm" onClick={() => void query.refetch()} disabled={query.isFetching}>
-            <RefreshCw className="size-4" /> به‌روزرسانی
-          </Button>
-        }
-      />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_190px]">
+        <PageHeader
+          icon={Inbox}
+          title="درخواست‌های مشتریان"
+          hint="درخواست‌های ثبت‌شده در پورتال مشتریان، برای بررسی و پیگیری."
+          actions={
+            <Button variant="outline" size="sm" onClick={() => void query.refetch()} disabled={query.isFetching}>
+              <RefreshCw className="size-4" /> به‌روزرسانی
+            </Button>
+          }
+        />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <CardDeck3D />
+        </Reveal>
+      </div>
 
-      <Section
+      <Reveal><Section
         action={
           <Toolbar>
             <NativeSelect
@@ -129,9 +139,9 @@ export function AdminPortalRequestsView() {
         {query.isPending ? (
           <ListSkeleton rows={6} />
         ) : query.isError ? (
-          <ErrorNote error={query.error} />
+          <ErrorNote error={query.error} illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />} />
         ) : query.data.items.length === 0 ? (
-          <Empty icon={Inbox}>درخواستی یافت نشد.</Empty>
+          <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[110px]" />}>درخواستی یافت نشد.</Empty>
         ) : (
           <>
             <div className="overflow-x-auto">
@@ -147,10 +157,19 @@ export function AdminPortalRequestsView() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {query.data.items.map((r) => {
+                  {query.data.items.map((r, i) => {
                     const need = [DEAL_LABEL[r.deal_type] ?? r.deal_type, r.city, r.districts].filter(Boolean).join(" · ");
                     return (
-                      <TableRow key={r.id}>
+                      // A plain motion.tr, not the shared TableRow (it does not forward to a
+                      // motion component) — same classes, so the row still looks identical.
+                      <motion.tr
+                        key={r.id}
+                        data-slot="table-row"
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.35, delay: Math.min(i, 8) * 0.035 }}
+                        className="border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted"
+                      >
                         <TableCell>
                           <div className="font-medium">{r.user?.full_name || "—"}</div>
                           <div dir="ltr" className="text-end text-xs text-muted-foreground">
@@ -196,7 +215,7 @@ export function AdminPortalRequestsView() {
                             <ToneBadge tone="neutral">بدون مشتری</ToneBadge>
                           )}
                         </TableCell>
-                      </TableRow>
+                      </motion.tr>
                     );
                   })}
                 </TableBody>
@@ -207,7 +226,7 @@ export function AdminPortalRequestsView() {
             </div>
           </>
         )}
-      </Section>
+      </Section></Reveal>
 
       <CustomerMatchesSheet
         open={!!matchesFor}

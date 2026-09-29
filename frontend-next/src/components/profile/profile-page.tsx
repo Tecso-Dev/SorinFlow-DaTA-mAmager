@@ -1,7 +1,11 @@
 "use client";
 
 import { UserCircle } from "lucide-react";
-import { ErrorNote, PageHeader } from "@/components/panel/kit";
+import { ErrorNote, ListSkeleton, PageHeader } from "@/components/panel/kit";
+import { IsoIDCard } from "@/components/panel/motion3d";
+import { Lottie } from "@/components/ui/lottie";
+import { Reveal } from "@/components/viz";
+import shieldLottie from "@/lotties/shield.json";
 import { useSession } from "@/lib/session";
 import { HeroCard } from "./hero-card";
 import { DetailsForm } from "./details-form";
@@ -14,12 +18,17 @@ export function ProfilePage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader icon={UserCircle} title="پروفایل من" hint="اطلاعات حساب، امنیت و اتصال‌ها" />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_160px]">
+        <PageHeader icon={UserCircle} title="پروفایل من" hint="اطلاعات حساب، امنیت و اتصال‌ها" />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <IsoIDCard />
+        </Reveal>
+      </div>
 
       {session.isPending ? (
-        <div className="h-40 animate-pulse rounded-2xl bg-muted/40" />
+        <ListSkeleton rows={4} />
       ) : session.isError ? (
-        <ErrorNote error={session.error} />
+        <ErrorNote error={session.error} illustration={<Lottie animationData={shieldLottie} className="max-w-[100px]" />} />
       ) : (
         <>
           <HeroCard me={session.data.user} />

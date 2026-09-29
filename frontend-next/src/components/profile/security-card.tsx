@@ -11,9 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Field, Section, ToneBadge } from "@/components/panel/kit";
+import { Lottie } from "@/components/ui/lottie";
 import { Reveal } from "@/components/viz";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
+import shieldLottie from "@/lotties/shield.json";
 import { SESSION_KEY, type User } from "@/lib/session";
 import { TotpDialog } from "./totp-dialog";
 
@@ -104,7 +106,7 @@ export function SecurityCard({ me }: { me: User }) {
 
   return (
     <Reveal delay={0.2}>
-      <Section title="امنیت">
+      <Section title="امنیت" action={<Lottie animationData={shieldLottie} className="size-11" />}>
         <div className="flex flex-col gap-5">
           <PasswordForm />
 

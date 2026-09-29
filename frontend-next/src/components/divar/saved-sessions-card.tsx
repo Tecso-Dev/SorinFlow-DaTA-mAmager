@@ -6,14 +6,16 @@
 // button under the login form did not offer once a person has more than one
 // number.
 
-import { BadgeCheck, IdCard, LogOut, RefreshCw, ShieldOff, Trash2 } from "lucide-react";
+import { IdCard, LogOut, RefreshCw, ShieldOff, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Empty, ErrorNote, ListSkeleton, Section, ToneBadge, useConfirm } from "@/components/panel/kit";
+import { Lottie } from "@/components/ui/lottie";
 import { toast } from "@/components/toaster";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { api, ApiError } from "@/lib/api";
 import { faDate, faNum } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
 import type { CookiesResponse, DivarCookie } from "./types";
 
 function when(iso: string | null) {
@@ -115,7 +117,7 @@ export function SavedSessionsCard() {
       ) : list.isError ? (
         <ErrorNote error={list.error} />
       ) : !rows.length ? (
-        <Empty icon={BadgeCheck}>هنوز شمارهٔ دیواری وارد این حساب نشده است.</Empty>
+        <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[110px]" />}>هنوز شمارهٔ دیواری وارد این حساب نشده است.</Empty>
       ) : (
         <ul className="grid gap-2">
           {rows.map((row) => (

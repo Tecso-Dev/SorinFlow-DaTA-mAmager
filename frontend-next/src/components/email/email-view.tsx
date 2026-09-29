@@ -20,9 +20,13 @@ import {
   Empty, ErrorNote, Field, ListSkeleton, NativeSelect, PageHeader, Pagination, RingDialog, Section, ToneBadge,
   Toolbar,
 } from "@/components/panel/kit";
+import { IsoEnvelope } from "@/components/panel/motion3d";
+import { Lottie } from "@/components/ui/lottie";
 import { api, ApiError } from "@/lib/api";
 import { qs } from "@/lib/crm";
 import { faDate, faNum } from "@/lib/format";
+import emptyLottie from "@/lotties/empty.json";
+import envelopeLottie from "@/lotties/envelope.json";
 import { useSession, can } from "@/lib/session";
 
 /* ───────────────────────── types (app/api/routes/email.py) ───────────────────────── */
@@ -268,20 +272,23 @@ function SendCard() {
 
   return (
     <Section title="ارسال ایمیل">
-      <div className="grid gap-3">
-        <Field label="گیرنده" htmlFor="em-send-to">
-          <Input id="em-send-to" dir="ltr" value={to} onChange={(e) => setTo(e.target.value)} className="max-w-72" />
-        </Field>
-        <Field label="موضوع" htmlFor="em-send-subject">
-          <Input id="em-send-subject" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={200} />
-        </Field>
-        <Field label="متن" htmlFor="em-send-body">
-          <Textarea id="em-send-body" rows={4} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={4000} />
-        </Field>
-        <Button onClick={send} disabled={busy} className="w-fit gap-1.5">
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-          ارسال
-        </Button>
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_96px] sm:items-center">
+        <div className="grid gap-3">
+          <Field label="گیرنده" htmlFor="em-send-to">
+            <Input id="em-send-to" dir="ltr" value={to} onChange={(e) => setTo(e.target.value)} className="max-w-72" />
+          </Field>
+          <Field label="موضوع" htmlFor="em-send-subject">
+            <Input id="em-send-subject" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={200} />
+          </Field>
+          <Field label="متن" htmlFor="em-send-body">
+            <Textarea id="em-send-body" rows={4} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={4000} />
+          </Field>
+          <Button onClick={send} disabled={busy} className="w-fit gap-1.5">
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+            ارسال
+          </Button>
+        </div>
+        <Lottie animationData={envelopeLottie} className="hidden sm:block" label="در حال ارسال ایمیل" />
       </div>
     </Section>
   );
@@ -491,9 +498,9 @@ function HistoryCard() {
       {q.isPending ? (
         <ListSkeleton rows={6} />
       ) : q.isError ? (
-        <ErrorNote error={q.error} />
+        <ErrorNote error={q.error} illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />} />
       ) : q.data.items.length === 0 ? (
-        <Empty icon={Mail}>ایمیلی یافت نشد.</Empty>
+        <Empty illustration={<Lottie animationData={emptyLottie} className="max-w-[100px]" />}>ایمیلی یافت نشد.</Empty>
       ) : (
         <div className="overflow-x-auto">
           <Table aria-label="تاریخچهٔ ایمیل">
@@ -537,7 +544,12 @@ export function EmailView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader icon={Mail} title="ایمیل" hint="SMTP، قالب‌ها، کمپین و تاریخچهٔ ارسال" />
+      <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[minmax(0,1fr)_170px]">
+        <PageHeader icon={Mail} title="ایمیل" hint="SMTP، قالب‌ها، کمپین و تاریخچهٔ ارسال" />
+        <Reveal delay={0.1} className="hidden lg:block">
+          <IsoEnvelope />
+        </Reveal>
+      </div>
       <Tiles settings={settings.data} stats={stats.data} />
       {isBoss && <Reveal><SettingsCard /></Reveal>}
       {isBoss && <Reveal><SendCard /></Reveal>}

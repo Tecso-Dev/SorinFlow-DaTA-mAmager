@@ -9,11 +9,13 @@ import { KeyRound, Send } from "lucide-react";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Field, RingDialog, Section } from "@/components/panel/kit";
+import { Lottie } from "@/components/ui/lottie";
 import { toast } from "@/components/toaster";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
 import { parseDigits } from "@/lib/format";
+import smsLottie from "@/lotties/sms.json";
 import type { AuthResponse } from "./types";
 import { SixDigitOtp } from "./otp-input";
 
@@ -124,6 +126,7 @@ export function LoginCard() {
           </form>
         ) : (
           <div className="grid gap-3">
+            <Lottie animationData={smsLottie} className="mx-auto max-w-[120px]" label="در حال ارسال کد پیامکی" />
             <SixDigitOtp value={code} onChange={setCode} onComplete={verify} disabled={busy} autoFocus aria-label="کد تأیید دیوار" />
             {error && <p className="text-center text-xs text-destructive">{error}</p>}
             <Button className="w-full" disabled={busy || code.length !== 6} onClick={() => verify(code)}>تأیید و ورود</Button>
