@@ -4,7 +4,7 @@ SorinFlow Divar Scraper - Scraper API Routes
 import re
 import json
 import time
-from fastapi import Request, APIRouter, Depends, HTTPException
+from fastapi import Request, APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, false, delete, update
 from typing import Optional, List, cast
@@ -1192,34 +1192,56 @@ async def estimate_matching_posts(
     has_elevator: Optional[bool] = None,
     has_parking: Optional[bool] = None,
     has_storage: Optional[bool] = None,
+    has_balcony: Optional[bool] = None,
     min_price_per_meter: Optional[int] = None,
     max_price_per_meter: Optional[int] = None,
+    posted_date: Optional[str] = None,
+    max_age_hours: Optional[int] = None,
+    divar_filters: Optional[str] = Query(None, max_length=4000),
 ):
     """How many ads Divar has for these filters, before scraping any of them.
 
     The same number Divar prints above its own results. Costs one request,
     where finding out by scraping costs opening every ad in the city.
-    """
-    from app.services import divar_count as dc
 
-    form = dc.build_form_data(
+    Asked with exactly the form a run of these filters would search with
+    (#27): the category's own filters, nothing it lacks. What was left out is
+    said in Persian — `not_applied` does nothing for this category,
+    `applied_after_scrape` is checked by the scraper after opening each ad,
+    and `notes` has one sentence for each.
+    """
+    import json as _json
+    from app.services import divar_count as dc
+    from app.services import divar_filters as df
+
+    extra = None
+    if divar_filters:
+        try:
+            extra = _json.loads(divar_filters)
+        except ValueError:
+            extra = None
+        if not isinstance(extra, dict):
+            raise HTTPException(status_code=422, detail="فیلترهای دیوار خوانده نشد")
+    await df.current()
+    plan = dc.plan_filters(
         category,
         advertiser_type=advertiser_type, has_images=has_images,
         min_price=min_price, max_price=max_price,
         min_deposit=min_deposit, max_deposit=max_deposit,
         min_rent=min_rent, max_rent=max_rent,
         min_area=min_area, max_area=max_area,
-    )
-    count, error = await dc.fetch_post_count(city, form)
-    # Filters Divar will not narrow on are still applied by the scraper after
-    # it opens each ad, so the real yield is at most this number.
-    ignored = dc.unsupported_filters(
         min_rooms=min_rooms, max_rooms=max_rooms,
-        has_elevator=has_elevator, has_parking=has_parking, has_storage=has_storage,
+        has_elevator=has_elevator, has_parking=has_parking,
+        has_storage=has_storage, has_balcony=has_balcony,
         min_price_per_meter=min_price_per_meter, max_price_per_meter=max_price_per_meter,
+        posted_date=posted_date, max_age_hours=max_age_hours,
+        divar_filters=extra,
     )
-    return {"count": count, "error": error, "applied_by_divar": sorted(form),
-            "applied_after_scrape": ignored}
+    count, error = await dc.fetch_post_count(city, plan.form)
+    return {"count": count, "error": error, "applied_by_divar": sorted(plan.form),
+            "applied_after_scrape": plan.after_scrape,
+            "not_applied": plan.not_applied, "notes": plan.notes,
+            "recent_ads": plan.recent_ads}
 
 
 @lookup_router.get("/cities")
@@ -1233,9 +1255,16 @@ async def get_available_cities():
 
 @lookup_router.get("/categories")
 async def get_available_categories():
-    """Get list of available categories for scraping"""
+    """The categories the scraper offers, each with the filters Divar has for
+    it (#27): key, type, Persian title, options and unit, in the order the
+    scrape form shows them. `options` null is a choice whose options are not
+    known yet — the form leaves it out until a live read of Divar fills it."""
+    from app.services import divar_filters as df
+    schema = await df.current()
     return [
-        {"slug": slug, "name": info["name"], "type": info["type"]}
+        {"slug": slug, "name": info["name"], "type": info["type"],
+         "family": (df.category(slug, schema) or {}).get("family"),
+         "filters": df.form_filters(slug, schema)}
         for slug, info in CATEGORIES.items()
     ]
 

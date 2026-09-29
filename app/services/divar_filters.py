@@ -128,6 +128,31 @@ def option_values(f: Dict[str, Any]) -> List[str]:
     return [str(o.get("value")) for o in (f.get("options") or []) if isinstance(o, dict)]
 
 
+# The order the scrape form shows a category's filters in; anything a live
+# read brings that is not here goes last, by key.
+DISPLAY_ORDER = (
+    "price", "price_per_square", "credit", "rent", "daily_rent", "size", "rooms",
+    "person_capacity", "building-age", "floor", "floors_count", "unit_per_floor",
+    "deed_type", "building_direction", "toilet", "cooling_system", "heating_system",
+    "floor_type", "warm_water_provider", "business-type",
+    "parking", "elevator", "warehouse", "balcony", "rebuilt", "bizzDeed",
+    "has-photo", "has-video", "recent_ads",
+)
+
+
+def form_filters(slug: Optional[str], schema: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """The category's filters for the panel: key, type, title, options (None
+    while unknown), unit — in DISPLAY_ORDER."""
+    rank = {k: i for i, k in enumerate(DISPLAY_ORDER)}
+    out = []
+    for f in filters_for(slug, schema).values():
+        row = {"key": f["key"], "type": f.get("type"), "title": f.get("title") or f["key"],
+               "options": f.get("options") if f.get("type") in (REPEATED, STRING) else None,
+               "unit": f.get("unit")}
+        out.append(row)
+    return sorted(out, key=lambda f: (rank.get(f["key"], len(rank)), f["key"]))
+
+
 # ── reading Divar's page ────────────────────────────────────────────────────
 
 _STATE_MARK = re.compile(r"window\.__PRELOADED_STATE__\s*=\s*")
