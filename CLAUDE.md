@@ -7,9 +7,11 @@
 
 ## git و دیپلوی
 - برانچ کاری `sorinflow-v2` است و همهٔ کارها روی آن انجام می‌شود.
-- هویت کامیت فقط:
-  `git config user.name "sobhan azimzadeh"` و `git config user.email "sobhan.gjhav.azimzadeh@gmail.com"`.
+- هر کس با هویت git خودش کامیت می‌زند. پیش از اولین کامیت هر نشست، حساب را با `gh api user --jq .login` ببین:
+  - `sobhanaz` (سبحان): `git config user.name "sobhan azimzadeh"` و `git config user.email "sobhan.gjhav.azimzadeh@gmail.com"`.
+  - `sahandmusanezhad` (سهند): همان name و email که سهند در git خودش تنظیم کرده؛ اگر تنظیم نشده، از خودش بپرس.
   هیچ خط `Co-Authored-By` یا `Claude-Session` و هیچ اشاره‌ای به Claude در پیام کامیت، PR یا فایل‌ها نباشد.
+- کار دو نفره: بازبینی اسکرپر در issue پیگیری #48 بین سبحان و سهند تقسیم شده است. هر issue روی برانچ `fix/<شماره>-<موضوع>` از `origin/sorinflow-v2` انجام می‌شود و با PR به `sorinflow-v2` می‌رود.
 - کامیت‌ها کوچک و زیاد باشند. پیام با `fix:`، `feat:`، `perf:`، `docs:`، `ci:` یا `test:` شروع شود و بگوید چه خراب بود، چه عوض شد و چه چیزی بررسی شد.
 - **هرگز به `main` پوش نکن و هرگز دیپلوی نکن.** پوش به `main` یعنی دیپلوی خودکار روی sorinflow.com (`.github/workflows/deploy.yml`)، و سایت کاربر واقعی دارد. پوش و دیپلوی فقط با دستور صریح سبحان انجام می‌شود.
 - `gh workflow run` یا «Run workflow» را برای `deploy.yml` اجرا نکن. هر برانچی را که با آن اجرا شود دیپلوی می‌کند، نه فقط main.

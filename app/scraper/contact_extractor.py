@@ -151,6 +151,11 @@ class ContactExtractor:
             try:
                 await contact_button.scroll_into_view_if_needed()
                 await asyncio.sleep(0.5)
+                # Divar may text this account the instant the click lands, and
+                # the phone's label on that code can name the other SIM
+                # (issue #37). Noted BEFORE the click, so the code can never
+                # reach the server ahead of the note that explains it.
+                await self._note_click(opens=True)
                 try:
                     await contact_button.click(force=True, timeout=5000)
                     logger.info("Contact button clicked successfully")
@@ -528,6 +533,19 @@ class ContactExtractor:
             except Exception as e:
                 logger.warning(f"[identity] on_identity_required failed: {e}")
 
+    async def _note_click(self, *, opens: bool = False) -> None:
+        """Tell the OTP store this account is about to be texted. Never raises.
+
+        `opens` for the click that starts a challenge (the contact button),
+        not one inside it (a resend, the number typed into the challenge).
+        See otp_store.note_click.
+        """
+        try:
+            from app.scraper import otp_store
+            await otp_store.note_click(getattr(self, "account_phone", None), "contact", opens=opens)
+        except Exception as e:
+            logger.debug(f"[otp] could not note the click: {e}")
+
     async def _request_otp_resend(self) -> bool:
         """Click Divar's resend control if it is offering one.
 
@@ -549,6 +567,7 @@ class ContactExtractor:
                     if not await el.is_enabled():
                         logger.info(f"OTP resend still counting down ({text!r}) — a code was sent")
                         return False
+                    await self._note_click()
                     await el.click(force=True, timeout=3000)
                     logger.info(f"Asked Divar to send the OTP again via {text!r}")
                     await asyncio.sleep(1.0)
@@ -883,6 +902,7 @@ class ContactExtractor:
             logger.warning(f"[otp] could not enter the account number: {e}")
             return None
 
+        await self._note_click()
         if not await self._click_confirm():
             logger.warning(
                 "[otp] the number is typed but no button on this modal would "
