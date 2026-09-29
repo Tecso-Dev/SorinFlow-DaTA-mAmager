@@ -391,6 +391,10 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+    # Moving docs_url does not move this one: FastAPI keeps its default
+    # /docs/oauth2-redirect, which is outside /api and so outside everything
+    # the Ingress sends here after the phase-4 switchover.
+    swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
     lifespan=lifespan
 )
 
