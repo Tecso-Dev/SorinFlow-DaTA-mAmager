@@ -407,18 +407,22 @@ async def refresh(*, force: bool = False, slugs: Optional[Iterable[str]] = None,
     """
     r = await _redis()
     if not force:
-        raw = await r.get(LIVE_KEY)
-        if raw:
+        # The last attempt, answered or not: Divar is asked at most once in
+        # max_age, and a Divar that did not answer is not asked again hourly.
+        for key in (LIVE_KEY, STATE_KEY):
+            raw = await r.get(key)
+            if not raw:
+                continue
             try:
                 age = time.time() - float(json.loads(raw).get("at") or 0)
             except (ValueError, TypeError):
-                age = LIVE_MAX_AGE
+                age = max_age
             if age < max_age:
                 return await state()
     base = committed()
     wanted = list(slugs or sorted((base.get("categories") or {})))
     got, names, failed = await read_divar(wanted, gap=gap, client=client, sleep=sleep)
-    record: Dict[str, Any] = {"checked_at": _now_iso(), "failed": failed}
+    record: Dict[str, Any] = {"at": time.time(), "checked_at": _now_iso(), "failed": failed}
     if not got:
         # Divar did not answer at all: the committed file stays in charge,
         # and a live read from earlier is left to expire on its own.

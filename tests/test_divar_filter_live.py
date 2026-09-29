@@ -120,6 +120,14 @@ class TestTheDailyRead:
         await df.refresh(slugs=["rent-store"], client=divar.client(), sleep=Sleeps())
         assert divar.asked == ["rent-store"]
 
+    async def test_a_divar_that_did_not_answer_is_not_asked_again_within_the_day(self, redis):
+        divar = Divar({})
+        await df.refresh(force=True, slugs=["rent-store"], client=divar.client(), sleep=Sleeps())
+        await df.refresh(slugs=["rent-store"], client=divar.client(), sleep=Sleeps())
+        assert divar.asked == ["rent-store"]
+        await df.refresh(slugs=["rent-store"], max_age=0, client=divar.client(), sleep=Sleeps())
+        assert divar.asked == ["rent-store", "rent-store"]
+
     async def test_a_change_is_recorded_and_used(self, redis):
         """Divar added rooms to «اجاره مغازه»: the monitoring card says so, and
         the next plan sends it."""
