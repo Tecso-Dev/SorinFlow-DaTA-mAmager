@@ -257,16 +257,21 @@ function Stack({ active }: { active: number }) {
       <line x1="100" y1={TOP + 40} x2="100" y2={TOP + 40 + GAP * 3} stroke="#6366f1" strokeOpacity="0.35" strokeWidth="2" strokeDasharray="4 5" />
       {!still && (
         <>
+          {/* y, not cy: motion writes an animated SVG attribute as a bare
+              value and can put "undefined" there for a frame while it sets
+              the animation up — the browser then logs an error and the e2e
+              specs count it as a page problem. A transform has no such
+              state, so both dots sit at their start and travel by translate. */}
           <motion.circle
             r="4" fill="#22d3ee" cx="100" cy={TOP + 40}
-            initial={{ cy: TOP + 40, opacity: 0 }}
-            animate={{ cy: [TOP + 40, TOP + 40 + GAP * 3], opacity: [0, 1, 1, 0] }}
+            initial={{ y: 0, opacity: 0 }}
+            animate={{ y: [0, GAP * 3], opacity: [0, 1, 1, 0] }}
             transition={{ duration: 2.6, repeat: Infinity, repeatDelay: 0.6, ease: "easeInOut" }}
           />
           <motion.circle
             r="3.5" fill="#f0abfc" cx="100" cy={TOP + 40 + GAP * 3}
-            initial={{ cy: TOP + 40 + GAP * 3, opacity: 0 }}
-            animate={{ cy: [TOP + 40 + GAP * 3, TOP + 40], opacity: [0, 1, 1, 0] }}
+            initial={{ y: 0, opacity: 0 }}
+            animate={{ y: [0, -GAP * 3], opacity: [0, 1, 1, 0] }}
             transition={{ duration: 2.6, repeat: Infinity, repeatDelay: 0.6, delay: 1.3, ease: "easeInOut" }}
           />
         </>

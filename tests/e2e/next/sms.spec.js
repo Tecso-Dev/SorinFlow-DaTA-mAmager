@@ -32,13 +32,36 @@ test('broadcast shows the audience counts and guards a zero-count group from sen
   await page.goto('/panel/sms');
   await expect(page.getByRole('heading', { name: 'ارسال گروهی' })).toBeVisible();
   await expect(page.getByText('کارکنان پنل')).toBeVisible();
-  await page.getByText('کارکنان پنل').click();
   await page.getByLabel('متن پیام').nth(1).fill('پیام گروهی آزمایشی');
-  // The local seed has no staff phone numbers, so the guarded send button
-  // must stay disabled rather than let a 0-recipient broadcast through.
+
+  // The rule, not one group's seeded size: whichever audience is chosen, the
+  // button carries that group's own count and is disabled exactly when the
+  // count is zero. Naming a group that happened to be empty made this test a
+  // hostage of scripts/seed_local.py — giving the seeded staff a verified
+  // phone (a fix on an unrelated branch) turned «کارکنان پنل» non-empty and
+  // failed it on all three browsers, with nothing wrong in the panel.
   const sendButton = page.getByRole('button', { name: /ارسال به .* نفر/ });
-  await expect(sendButton).toBeDisabled();
-  await expect(sendButton).toContainText('۰ نفر');
+  const groups = page.locator('input[name="sms-audience"]');
+  const total = await groups.count();
+  expect(total, 'no audience groups came back from /sms/audiences').toBeGreaterThan(0);
+
+  let sawEmpty = false;
+  for (let i = 0; i < total; i++) {
+    const row = groups.nth(i).locator('xpath=ancestor::label[1]');
+    await row.click();
+    const count = (await row.innerText()).match(/([۰-۹]+) نفر/)?.[1];
+    expect(count, `group ${i} shows no count`).toBeTruthy();
+    await expect(sendButton).toContainText(`${count} نفر`);
+    if (count === '۰') {
+      sawEmpty = true;
+      await expect(sendButton).toBeDisabled();
+    } else {
+      await expect(sendButton).toBeEnabled();
+    }
+  }
+  // and at least one empty group has to exist for the guard to have been
+  // exercised at all — otherwise this test silently stops testing it
+  expect(sawEmpty, 'no audience was empty, so the zero-count guard went unchecked').toBeTruthy();
 });
 
 test('history search and status filter narrow the table', async ({ page }) => {

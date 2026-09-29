@@ -134,9 +134,14 @@ export function IsoChip({ className }: { className?: string }) {
         <rect key={k} x={20 + k * 0.6} y={20 + k} width="120" height="120" rx="16" fill="#2e1065" opacity={0.28 + (9 - k) * 0.06} />
       ))}
       <rect x="20" y="20" width="120" height="120" rx="16" fill={`url(#${gid.chip_face})`} stroke="#e0e7ff" strokeOpacity={0.5} />
+      {/* scale, not r: animating the attribute itself made motion write
+          r="undefined" for a frame while it set the animation up, which the
+          browser reports as an error and the e2e specs count as a page
+          problem. A transform cannot be written as a non-length, and at this
+          size the two look identical (22 × 0.91…1.09 = 20…24). */}
       <motion.circle
         cx="80" cy="80" r="22" fill="#0e1030"
-        animate={reduce ? undefined : { r: [20, 24, 20] }}
+        animate={reduce ? undefined : { scale: [0.91, 1.09, 0.91] }}
         transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
       />
       <motion.circle
