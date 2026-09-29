@@ -125,7 +125,8 @@ class TestABlockedRunFails:
         job, _, _ = await run([page(1, [], next_page=False)], category="rent-apartment",
                               browser=walk(listings("re", 7), ("error", "TimeoutError: page crashed"),
                                            calls=[]))
-        assert job.status == "partial" and job.updated_items == 7
+        # the seven were already held, so «تکراری» — walked, not opened (#32)
+        assert job.status == "partial" and job.config["outcome"]["duplicate"] == 7
         assert "TimeoutError" in job.finish_reason
 
     def test_the_refusal_message_names_the_status_codes(self):

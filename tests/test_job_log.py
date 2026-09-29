@@ -100,11 +100,16 @@ class TestTheScraperActuallyReports:
     def test_a_missing_divar_session_is_recorded(self):
         """This is the silent one: the run 'succeeds' but every listing comes
         back without a phone number, and nothing said why."""
+        # Since #36 the run does not carry on without numbers: it stops, and
+        # the reason — which number failed how, and what to do — is the one
+        # line _init_failed writes to the run's log and its finish line.
         import inspect
-        from app.scraper.divar_scraper import DivarScraper
+        from app.scraper.divar_scraper import DivarScraper, _no_session_reason
         src = inspect.getsource(DivarScraper)
         assert "_jl.SESSION" in src
-        assert "هیچ نشست معتبر دیواری از شماره‌های خودتان پیدا نشد" in src
+        assert "_log_run" in inspect.getsource(DivarScraper._init_failed)
+        msg = _no_session_reason(["09120000001", "09120000002"], [], [], [])
+        assert "اسکرپ شروع نشد" in msg and "احراز هویت دیوار" in msg
 
     def test_events_are_pruned_so_the_table_cannot_grow_without_bound(self):
         import inspect
