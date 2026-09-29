@@ -487,3 +487,99 @@ class TestARowTheRunCannotBeBuiltFrom:
         await _set_status(jid, "cancelled")
         await sq._fail_unreadable(jid, ValueError("config is not a dict"))
         assert (await _row(jid)).status == "cancelled"
+
+
+class TestFourAtOnce:
+    """«سقف ۳ اسکرپ همزمان»: four started together — three run, the fourth
+    waits in the queue and starts the moment one of them ends. A fourth
+    started while three are already running is refused at the door."""
+
+    async def test_the_fourth_waits_for_a_free_slot(self, queue, monkeypatch):
+        assert sq.settings.scrape_worker_concurrency == 3, "the cap this test is about"
+        gate = asyncio.Event()
+        runs = _stand_in(monkeypatch, gate)
+        ids = []
+        async with database.async_session_maker() as db:
+            for owner in (21, 22, 23, 24):
+                resp = await routes._launch_job(
+                    ScrapingJobCreate(city="urmia", category="rent-apartment"), db,
+                    SimpleNamespace(id=owner))
+                queue.made.append(resp.job_id)
+                ids.append(resp.job_id)
+        consumer = asyncio.create_task(sq.consume())
+        try:
+            await _until(lambda: len(runs) == 3)
+            await asyncio.sleep(0.3)
+            assert [r["job_id"] for r in runs] == ids[:3]
+            assert len(await sq.claims()) == 3 and len(sq.running_ids()) == 3
+            assert await queue.redis.lrange(sq.QUEUE, 0, -1) == [ids[3]], "the fourth waits"
+            assert (await _row(ids[3])).status == "pending"
+            gate.set()                                   # the first three end
+            await _until(lambda: len(runs) == 4)
+            assert runs[3]["job_id"] == ids[3]
+            await _until(lambda: not sq.running_ids())
+        finally:
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+        for jid in ids:
+            assert (await _row(jid)).status == "completed"
+
+    async def test_a_fourth_started_while_three_run_is_refused_at_the_door(self, queue):
+        from fastapi import HTTPException
+        running = [await _job(queue, status="running") for _ in range(3)]
+        try:
+            async with database.async_session_maker() as db:
+                with pytest.raises(HTTPException) as e:
+                    await routes._launch_job(
+                        ScrapingJobCreate(city="urmia", category="rent-apartment"), db,
+                        SimpleNamespace(id=25))
+            assert e.value.status_code == 429
+            assert await queue.redis.llen(sq.QUEUE) == 0
+        finally:
+            for jid in running:
+                await _set_status(jid, "completed")
+
+
+class TestResumingACancelledRun:
+    """«ادامه» on a run that was cancelled: a new run with the same settings,
+    linked back and queued — and the cancelled run's own record left as it was."""
+
+    async def test_cancel_then_resume(self, queue, monkeypatch):
+        from fastapi import HTTPException
+        from _fake_redis import patch_redis
+        from app.scraper import otp_store
+        patch_redis(monkeypatch, otp_store)
+        runs = _stand_in(monkeypatch)
+        owner = SimpleNamespace(id=31, role="admin")
+        config = {"city": "urmia", "category": "rent-apartment", "max_items": 40,
+                  "min_area": 60, "download_images": False, "owner_user_id": owner.id}
+        old = await _job(queue, status="running", config=config)
+        await otp_store.request(f"{old}:abcd1234", "09990000001")   # it was waiting for a code
+
+        async with database.async_session_maker() as db:
+            got = await routes.cancel_scraping_job(old, db, owner)
+        assert got["was"] == "running" and got["otp_cleared"] == 1
+        assert (await _row(old)).status == "cancelled"
+        async with database.async_session_maker() as db:           # a second press
+            with pytest.raises(HTTPException) as e:
+                await routes.cancel_scraping_job(old, db, owner)
+        assert e.value.status_code == 400
+
+        async with database.async_session_maker() as db:
+            resp = await routes.resume_scraping_job(old, db, owner)
+        queue.made.append(resp.job_id)
+        new = await _row(resp.job_id)
+        assert new.status == "pending" and str(new.resumed_from) == old
+        for k, v in config.items():
+            assert new.config[k] == v, k
+        assert await queue.redis.lrange(sq.QUEUE, 0, -1) == [resp.job_id]
+        assert (await _row(old)).status == "cancelled", "the cancelled run's record changed"
+
+        consumer = asyncio.create_task(sq.consume())
+        try:
+            await _until(lambda: runs)
+        finally:
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+        assert runs[0]["job_id"] == resp.job_id and runs[0]["owner_user_id"] == owner.id
+        assert runs[0]["max_items"] == 40 and runs[0]["min_area"] == 60
