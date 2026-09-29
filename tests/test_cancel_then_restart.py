@@ -390,6 +390,8 @@ class TestACancelWhileWaitingForACode:
                 assert (await _row_now(eng, job.job_id)).status == "running"
                 assert not session.in_transaction()
         finally:
+            # a «running» row left behind is an orphan to the next module's sweep
+            await _status_from_elsewhere(eng, job.job_id, "completed")
             await eng.dispose()
 
 
