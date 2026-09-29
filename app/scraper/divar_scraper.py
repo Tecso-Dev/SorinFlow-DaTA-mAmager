@@ -135,11 +135,11 @@ class DivarScraper:
         'buy-store':    ['مغازه', 'فروشگاه'],
 
         # Industrial / Agricultural
-        'buy-industrial-agricultural-property':  ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین'],
-        'rent-industrial-agricultural-property': ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین'],
+        'buy-industrial-agricultural-property':  ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین', 'سوله', 'انبار', 'باغ', 'مزرعه'],
+        'rent-industrial-agricultural-property': ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین', 'سوله', 'انبار', 'باغ', 'مزرعه'],
 
         # Temporary rental
-        'rent-temporary': ['اجاره-کوتاه', 'اجاره-روزانه', 'اجاره-موقت', 'روزانه', 'کوتاه-مدت'],
+        'rent-temporary': ['اجاره-کوتاه', 'اجاره-روزانه', 'اجاره-موقت', 'روزانه', 'کوتاه-مدت', 'سوئیت', 'اقامتگاه', 'بوم-گردی'],
     }
     
     def __init__(
@@ -1784,12 +1784,20 @@ class DivarScraper:
         and «اجاره آپارتمان» in a title — and the pattern lists were written
         for slugs. So «اجاره-مسکن» could never match a real ad titled «اجاره
         مسکن مهر کوثر»: the hyphen was doing the rejecting, not the words.
-        Both sides collapse to single spaces before comparing.
+        Both sides collapse to single spaces before comparing — and to one
+        spelling: Divar writes «کوتاه‌مدت» with a zero-width non-joiner where the
+        list has a space, and Arabic «ي» and «ك» turn up in titles.
         """
         if not text:
             return False
-        flat = " ".join(text.replace("-", " ").replace("_", " ").split())
-        return any(" ".join(p.replace("-", " ").split()) in flat for p in patterns)
+
+        def flatten(t: str) -> str:
+            t = (t.replace("-", " ").replace("_", " ").replace("\u200c", " ")
+                 .replace("ي", "ی").replace("ك", "ک"))
+            return " ".join(t.split())
+
+        flat = flatten(text)
+        return any(flatten(p) in flat for p in patterns)
 
     # What an ad's own words look like when it is real estate. Used twice: as
     # a hint on the URL, and as the verdict on Divar's breadcrumb.
