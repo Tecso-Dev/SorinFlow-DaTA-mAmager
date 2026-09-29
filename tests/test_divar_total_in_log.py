@@ -73,25 +73,38 @@ class TestItCannotCostARun:
         assert "Divar's own total unavailable" in BLOCK
 
 
-class TestTheDenominatorDecisionWasReversedDeliberately:
+class TestTheDecisionWentBackToThePool:
     """This file argued that Divar's count must not be the denominator. The
     operator then asked for exactly that — «درصد پیشرفت بر اساس تعداد دقیق
-    آگهی‌های دیوار» — and the concern was answered differently: not by
-    refusing the number, but by clamping progress at 100 and filling the bar
-    on completion. The pool stays as the fallback when Divar does not answer.
-    Pinned here so the reversal reads as a decision, not a regression."""
+    آگهی‌های دیوار» — and for a while it was, clamped at 100 and filled on
+    completion. Then job 44 read «251 / 251» with 24 candidates of which 8
+    were that day: Divar's count ignores the day, and at the end «بررسی» was
+    set to it (#29). So the pool is «کل» again, and Divar's number is kept
+    beside it, as Divar's, which is what this file asked for in the first
+    place. Pinned here so the second reversal reads as a decision too."""
 
-    def test_divars_count_is_the_denominator_when_it_answered(self):
-        i = SCRAPER.index("job.total_items = (job.divar_count")
-        assert "else len(all_listings)" in SCRAPER[i:i + 200]
+    async def test_the_pool_is_the_denominator_and_divars_count_is_kept(self, monkeypatch):
+        import _scrape_harness as h
+        h.quiet(monkeypatch, divar_says=113)
+        eng, maker = await h.open_db()
+        try:
+            feed = [h.token() for _ in range(4)]
+            job_id = await h.new_job(maker, max_items=10)
+            job, _ = await h.run(maker, job_id, {"feed": feed, "pages": {
+                t: h.page(t, phone=h.PHONE.format(900 + i)) for i, t in enumerate(feed)}})
+            assert (job.total_items, job.divar_count) == (4, 113)
+            lines = await h.log_lines(maker, job_id)
+            assert any(m.startswith("دیوار می‌گوید 113 آگهی") for m in lines), \
+                "both numbers are still written down together"
+        finally:
+            await eng.dispose()
 
     def test_the_two_failure_modes_are_both_handled(self):
         from app.models.scraping_job import ScrapingJob
-        j = ScrapingJob(); j.total_items, j.scraped_items = 113, 119
-        assert j.progress == 100.0, "a pool larger than the count must clamp"
-        i = SCRAPER.index('job.status = "completed"')
-        assert "job.scraped_items = job.total_items" in SCRAPER[i:i + 700], \
-            "a pool smaller than the count must be filled on completion"
+        j = ScrapingJob(total_items=113, scraped_items=119)
+        assert j.progress == 100.0, "a count past the pool must clamp"
+        j = ScrapingJob(total_items=113, scraped_items=60, status="completed")
+        assert j.progress == 100.0, "a finished run reads full whatever it walked"
 
 
 class TestTheArithmeticOfTheTwoFailureModes:

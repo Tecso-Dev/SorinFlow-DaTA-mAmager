@@ -135,3 +135,72 @@ async def resolve(divar_id: str) -> int:
     except Exception as e:
         logger.warning(f"[skipped] could not resolve {divar_id}: {type(e).__name__}: {e}")
         return 0
+
+
+# The two ways a listing is saved without a number that a later visit can
+# fix. chat_only is the poster's choice and never changes, so it is not here.
+AWAITING_PHONE = ("no_phone", "needs_identity")
+# A number that never shows — a hidden or a virtual one — must not cost a
+# reveal on every run for a month. Three visits, counting the first.
+PHONE_ATTEMPTS = 3
+
+
+async def awaiting_phone(db, *, city_id, category_id, owner_user_id=None,
+                         limit: int = 20, attempts: int = PHONE_ATTEMPTS) -> list:
+    """The listings the next run of this city and category owes a retry.
+
+    Saved without a phone number by an earlier run of the same city and
+    category started by the same person — the account budget a retry spends
+    is theirs — newest first, as [{divar_id, url, title}]. Only while the
+    listing is still stored, still has no number and is not chat-only; not
+    once Divar has said it is gone; and not after `attempts` visits, where
+    every skipped row for the listing counts, whichever run wrote it.
+
+    A read on the caller's session; the caller commits.
+    """
+    from app.models.property import Property
+    from app.models.scraping_job import ScrapingJob, SkippedListing
+
+    if city_id is None or category_id is None or limit <= 0:
+        return []
+    rows = (await db.execute(
+        select(SkippedListing.divar_id, SkippedListing.url, SkippedListing.title,
+               ScrapingJob.config)
+        .join(ScrapingJob, ScrapingJob.job_id == SkippedListing.job_id)
+        .where(SkippedListing.reason.in_(AWAITING_PHONE),
+               ScrapingJob.city_id == city_id,
+               ScrapingJob.category_id == category_id)
+        .order_by(SkippedListing.id.desc())
+    )).all()
+    owed: dict = {}
+    for divar_id, url, title, cfg in rows:
+        if divar_id in owed or (cfg or {}).get("owner_user_id") != owner_user_id:
+            continue
+        owed[divar_id] = {"divar_id": divar_id, "url": url, "title": title}
+    if not owed:
+        return []
+
+    ids = list(owed)
+    visits: dict = {}
+    for divar_id, reason in (await db.execute(
+            select(SkippedListing.divar_id, SkippedListing.reason)
+            .where(SkippedListing.divar_id.in_(ids)))).all():
+        visits.setdefault(divar_id, []).append(reason)
+    held = {d: (phone, channel) for d, phone, channel in (await db.execute(
+        select(Property.divar_id, Property.phone_number, Property.contact_channel)
+        .where(Property.divar_id.in_(ids)))).all()}
+
+    out = []
+    for d in ids:
+        if d not in held:
+            continue            # removed from the table by hand: not ours to bring back
+        phone, channel = held[d]
+        if (phone or "").strip() or channel == "chat_only":
+            continue
+        seen = visits.get(d, [])
+        if "deleted" in seen or len(seen) >= attempts:
+            continue
+        out.append(owed[d])
+        if len(out) >= limit:
+            break
+    return out

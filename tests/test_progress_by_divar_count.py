@@ -2,20 +2,21 @@
 «تعداد دقیق آگهی‌های موجود در دیوار استخراج و گزارش شود … و درصد پیشرفت بر
 اساس این محاسبه شود.»
 
-The pool was the more exact denominator — it is what the loop walks — but it
-is a number nobody sees until the run is over. «۶۰ از ۱۲۰» reads against the
-figure the panel showed before the button was pressed. So: Divar's count
-when it answered, the pool when it did not.
+That made Divar's count the progress denominator, and #29 took it back out.
+Divar's count for the filters ignores the day — Divar does not filter by it
+— so a one-day run that collected 24 candidates read «251 / 251», and at the
+end «بررسی» was bent to match it.
 
-Two things keep it from lying. The pool can run PAST the count — Divar's
-result page injects promoted ads its own total leaves out — and progress
-clamps at 100 rather than reading 123%. And the pool can fall SHORT of it,
-in which case completion fills the bar, because a finished run is finished
-whatever Divar said it held.
+What stands now: Divar's count is still asked for at run time and stored on
+the run (divar_count), and the panel shows it as «دیوار می‌گوید: N» beside
+the run's own pair — «بررسی» (examined) over «کل» (this run's pool). The bar
+walks the pool, never reads past 100, and a completed run is full.
 """
 import inspect
 import os
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -26,9 +27,9 @@ os.environ.setdefault("LOGS_PATH", "/tmp")
 os.environ.setdefault("IMAGES_PATH", "/tmp")
 
 from app.models.scraping_job import ScrapingJob  # noqa: E402
+import _scrape_harness as h  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRAPER = open(os.path.join(ROOT, "app/scraper/divar_scraper.py"), encoding="utf-8-sig").read()
 APP_JS = open(os.path.join(ROOT, "frontend/js/app.js"), encoding="utf-8").read()
 DB = open(os.path.join(ROOT, "app/database.py"), encoding="utf-8").read()
 
@@ -39,19 +40,50 @@ def job(total, scraped):
     return j
 
 
+def job_like(*, total, scraped, status):
+    j = job(total, scraped)
+    j.status = status
+    return j
+
+
+@pytest.fixture
+async def db(monkeypatch):
+    h.quiet(monkeypatch, divar_says=251)
+    eng, maker = await h.open_db()
+    yield maker
+    await eng.dispose()
+
+
 class TestTheDenominator:
-    def test_divars_count_is_stored_on_the_run(self):
-        assert "divar_count" in ScrapingJob.__table__.c
-        assert "job.divar_count = int(_divar_total)" in SCRAPER
+    async def test_divars_count_is_stored_on_the_run(self, db):
+        job_id = await h.new_job(db, max_items=10)
+        feed = [h.token() for _ in range(3)]
+        job, _ = await h.run(db, job_id, {"feed": feed, "pages": {
+            t: h.page(t, phone=h.PHONE.format(800 + i)) for i, t in enumerate(feed)}})
+        assert job.divar_count == 251
 
-    def test_it_is_the_denominator_when_known(self):
-        i = SCRAPER.index("job.total_items = (job.divar_count")
-        assert "else len(all_listings)" in SCRAPER[i:i + 200]
+    async def test_it_is_kept_beside_the_pool_not_under_it(self, db):
+        """«کل» is the pool the run walks; Divar's 251 is its own number."""
+        job_id = await h.new_job(db, max_items=10)
+        feed = [h.token() for _ in range(3)]
+        job, _ = await h.run(db, job_id, {"feed": feed, "pages": {
+            t: h.page(t, phone=h.PHONE.format(810 + i)) for i, t in enumerate(feed)}})
+        assert (job.scraped_items, job.total_items, job.divar_count) == (3, 3, 251)
+        running = job_like(total=24, scraped=12, status="running")
+        running.divar_count = 251
+        assert running.progress == 50.0
 
-    def test_the_pool_is_the_fallback_not_zero(self):
-        """Divar not answering must not freeze the bar at 0/0."""
-        i = SCRAPER.index("job.total_items = (job.divar_count")
-        assert "> 0" in SCRAPER[i:i + 200]
+    async def test_divar_not_answering_changes_nothing_but_the_line(self, db, monkeypatch):
+        """No count from Divar: no «دیوار می‌گوید», and the pair is the same."""
+        async def _silent(_city, _form):
+            return None, "stubbed"
+        from app.services import divar_count
+        monkeypatch.setattr(divar_count, "fetch_post_count", _silent)
+        job_id = await h.new_job(db, max_items=10)
+        feed = [h.token() for _ in range(2)]
+        job, _ = await h.run(db, job_id, {"feed": feed, "pages": {
+            t: h.page(t, phone=h.PHONE.format(820 + i)) for i, t in enumerate(feed)}})
+        assert job.divar_count is None and (job.scraped_items, job.total_items) == (2, 2)
 
     def test_the_migration_adds_it(self):
         assert "ADD COLUMN IF NOT EXISTS divar_count INTEGER" in DB
@@ -59,8 +91,8 @@ class TestTheDenominator:
 
 class TestItCannotLie:
     def test_a_pool_past_the_count_reads_100_not_123(self):
-        """148 candidates, Divar said 120 — the real run that prompted the
-        earlier argument against this denominator."""
+        """148 examined of a total of 120 — the clamp still holds whatever
+        the two numbers are."""
         assert job(120, 148).progress == 100.0
 
     def test_the_last_candidate_inside_the_count_is_not_yet_full(self):
@@ -71,11 +103,11 @@ class TestItCannotLie:
         src = inspect.getsource(ScrapingJob.progress.fget)
         assert "min(100.0" in src
 
-    def test_completion_still_fills_a_run_that_fell_short(self):
-        """The rule from the earlier fix survives: a finished run is finished
-        whatever Divar said it held."""
-        i = SCRAPER.index('job.status = "completed"')
-        assert "job.scraped_items = job.total_items" in SCRAPER[i:i + 700]
+    def test_a_completed_run_is_full_whatever_it_walked(self):
+        """A run that met its target, or a day that held nothing at all, is
+        over — the bar says so without «بررسی» being set to «کل»."""
+        assert job_like(total=10, scraped=2, status="completed").progress == 100.0
+        assert job_like(total=0, scraped=0, status="completed").progress == 100.0
 
     def test_an_empty_total_does_not_divide_by_zero(self):
         assert job(0, 0).progress == 0
@@ -127,15 +159,21 @@ class TestTheRequestedNumber:
 
 
 class TestThePanelShowsBothNumbers:
+    """The behaviour is checked by rendering the real _renderJobsTable
+    (tests/js/jobs_table.mjs, run by test_jobs_table.py): the pair is the
+    run's own and Divar's count has a line of its own, «دیوار می‌گوید»."""
+
     def test_the_counts_are_shown_beside_the_bar(self):
         """Moved out of the bar's cell into their own column — the pair was
         unreadable crammed under the percent."""
         assert '<bdi title="بررسی‌شده">${job.scraped_items}</bdi>' in APP_JS
         assert '<bdi title="کل">${job.total_items}</bdi>' in APP_JS
 
-    def test_the_tooltip_says_which_denominator(self):
-        assert "تعدادی که دیوار برای این فیلترها اعلام کرد" in APP_JS
-        assert "نامزدهای جمع‌شده" in APP_JS
+    def test_the_tooltip_says_whose_numbers_they_are(self):
+        start = APP_JS.index("function _renderJobsTable(")
+        fn = APP_JS[start:APP_JS.index("\n}\n", start)]
+        assert "همین اجرا" in fn, "the pair's tooltip does not say it is the run's own"
+        assert "دیوار می‌گوید: ${esc(job.divar_count)}" in fn
 
 
 class TestTheCountIsOnScreenBeforeTheRun:

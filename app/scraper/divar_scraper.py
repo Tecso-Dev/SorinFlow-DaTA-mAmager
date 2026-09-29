@@ -3919,7 +3919,56 @@ class DivarScraper:
         except Exception as e:
             logger.error(f"Failed to check property existence: {e}")
             return False
-    
+
+    # At most this many numberless listings are retried per run, on top of
+    # the run's own candidates: each one costs a reveal, and reveals are what
+    # bring Divar's code prompts. A run asked for fewer takes fewer.
+    PHONE_RETRIES_PER_RUN = 20
+
+    @staticmethod
+    def _set_counts(job, **counts) -> None:
+        """Write the run's counters on its row. The one place the models'
+        Column[int] typing is bridged, rather than an ignore on every line
+        that moves a counter."""
+        for name, value in counts.items():
+            setattr(job, name, value)
+
+    async def _with_phone_retries(self, job, pool: List[Dict[str, Any]],
+                                  max_items: Optional[int]):
+        """The pool with the numberless listings owed a retry put first.
+
+        Owed: saved without a number by an earlier run of this city and
+        category started by the same person — the account budget spent on
+        them is that person's — while still stored and still numberless
+        (skipped_listings.awaiting_phone). Returns (pool, their ids). Never
+        raises: a retry that cannot be looked up must not cost the run.
+        """
+        try:
+            cap = min(self.PHONE_RETRIES_PER_RUN, max_items) if max_items else self.PHONE_RETRIES_PER_RUN
+            owed = await skipped_listings.awaiting_phone(
+                self.db_session, city_id=job.city_id, category_id=job.category_id,
+                owner_user_id=(job.config or {}).get("owner_user_id"), limit=cap)
+        except Exception as e:
+            logger.warning(f"[retry] numberless listings not looked up: {e}")
+            try:
+                await self.db_session.rollback()
+            except Exception:
+                pass
+            return pool, set()
+        if not owed:
+            return pool, set()
+        ids = {o["divar_id"] for o in owed}
+        first = [{"divar_id": o["divar_id"], "title": o.get("title"),
+                  "url": o.get("url") or f"https://divar.ir/v/{o['divar_id']}"} for o in owed]
+        logger.info(f"[retry] {len(first)} listing(s) saved without a number earlier — trying them first")
+        from app.services import job_log
+        await job_log.record(
+            job.job_id, job_log.PAGE,
+            f"{len(first)} آگهیِ بدون شماره از اجراهای قبلیِ همین شهر و دسته دوباره "
+            "برای شماره امتحان می‌شود — اول از همه، و بدون فیلترهای این اجرا",
+            retries=len(first))
+        return first + [lst for lst in pool if lst["divar_id"] not in ids], ids
+
     async def save_property(self, property_data: Dict[str, Any]) -> Optional[Property]:
         """Save property to database, surviving a dropped connection.
 
@@ -4408,25 +4457,26 @@ class DivarScraper:
                 # Advisory. It must never cost a run.
                 logger.warning(f"[count] could not ask Divar for its total: {e}")
 
-            # Progress is measured against what Divar says exists.
+            # Listings earlier runs of this city and category saved without a
+            # phone number. Their skipped rows promise that the next run tries
+            # again, and that was only ever true when Divar's feed happened to
+            # hand the same listing over again — never, for a daily run of
+            # another day (#32). They go first, so a run that meets its target
+            # early still reaches them, and no filter of this run drops them
+            # (see _skip below): the run that saved them already judged them.
+            retry_ids: set = set()
+            if not urls:
+                all_listings, retry_ids = await self._with_phone_retries(
+                    job, all_listings, max_items)
+
+            # «کل» is this run's own pool: what the loop walks (#29).
             #
-            # Asked for as «درصد پیشرفت بر اساس تعداد دقیق آگهی‌های دیوار». It
-            # was the candidate pool before that, and the pool is the more
-            # exact denominator — it is what the loop actually walks — but it
-            # is also a number nobody sees until the run is over, and «۶۰ از
-            # ۱۲۰» reads against the figure the panel showed before the button
-            # was pressed. So Divar's count when it answered, the pool when it
-            # did not.
-            #
-            # Two things stop this from lying. The pool can exceed the count
-            # (Divar injects promoted ads its own total leaves out) and the
-            # property's progress clamps at 100 rather than reading 123%. And
-            # the pool can fall short of it, in which case the completion below
-            # fills the bar, because a finished run is finished whatever Divar
-            # said it held.
-            job.total_items = (job.divar_count
-                               if (getattr(job, "divar_count", None) or 0) > 0
-                               else len(all_listings))
+            # It was Divar's count for the filters when Divar answered, and
+            # that count ignores the day — Divar does not filter by it — so a
+            # run for one day of 24 candidates read «251 / 251». Divar's number
+            # stays on the row as divar_count, and the panel shows it beside
+            # this one as «دیوار می‌گوید», where the two can be compared.
+            self._set_counts(job, total_items=len(all_listings))
             await self.db_session.commit()
 
             logger.info(
@@ -4479,7 +4529,19 @@ class DivarScraper:
             
             # Scrape each property detail
             examined = 0
+            # «تکراری»: stored with its number already, so not opened and not
+            # written. Not «بروز», which is a stored listing this run opened
+            # again and saved over — job 43 counted both as updated_items, and
+            # its log, its finish line and its table column each called that
+            # one number something different (#32).
+            duplicates = 0
+            # Numberless listings owed a retry that got their number this time.
+            recovered = 0
+            # Read once: after a rollback `job` is expired, and reading an
+            # expired attribute is a lazy load outside the greenlet.
+            _job_uuid = job.job_id
             for i, listing in enumerate(all_listings):
+                _counted = False
                 try:
                     # Stop as soon as the numeric target is reached
                     # (in whole-day mode max_items is None — no cap).
@@ -4498,16 +4560,22 @@ class DivarScraper:
                     # dropped. The two are different answers to «where did they
                     # go?».
                     examined += 1
+                    _counted = True
+                    # A numberless listing an earlier run saved (see
+                    # _with_phone_retries): no filter of this run applies.
+                    _retry = listing['divar_id'] in retry_ids
 
                     # Check if already scraped. Not for an explicit list: a
                     # listing named by hand is one somebody wants opened,
                     # whatever the table already holds about it.
                     if not urls and await self.property_exists(listing['divar_id']):
-                        # Already stored AND complete: nothing is written here.
-                        # «بروز» counts «از قبل موجود بود» — which is what the
-                        # column's own tooltip says — not «was refreshed».
+                        # Already stored AND complete: «تکراری». Nothing is
+                        # written, so it is not «بروز» — but it was examined,
+                        # and «بررسی» says so now rather than at the next
+                        # listing the run opens.
                         logger.info(f"Property already exists: {listing['divar_id']}")
-                        job.updated_items += 1
+                        duplicates += 1
+                        self._set_counts(job, scraped_items=examined)
                         await self.db_session.commit()
                         continue
                     
@@ -4539,7 +4607,7 @@ class DivarScraper:
                     detail = await self.scrape_property_detail(
                         listing['url'], target_category=category,
                         source_title=listing.get('title'),
-                        wants_contact=lambda pd: self.pre_contact_skip(
+                        wants_contact=None if _retry else lambda pd: self.pre_contact_skip(
                             pd, _listing_type, _pre_filters),
                     )
                     
@@ -4565,6 +4633,13 @@ class DivarScraper:
                         _why: Dict[str, str] = {}
 
                         def _skip(reason: str) -> bool:
+                            if _retry:  # noqa: B023 — called in this same iteration
+                                # Owed a number by an earlier run, which kept
+                                # it under its own filters. A daily run's date
+                                # filter would otherwise drop yesterday's
+                                # listing every time, before the reveal.
+                                logger.info(f"{did}: {reason} — not applied to a phone retry")  # noqa: B023
+                                return False
                             logger.info(f"Skipping {did}: {reason}")
                             bucket = reason.split()[0] if reason else "other"
                             skip_tally[bucket] = skip_tally.get(bucket, 0) + 1
@@ -4657,7 +4732,7 @@ class DivarScraper:
                         if skip:
                             # Same as the other site: a filtered-out listing is
                             # still a listing we processed.
-                            job.scraped_items = i + 1
+                            self._set_counts(job, scraped_items=examined)
                             await self.db_session.commit()
                             # …and one somebody may want to look at by hand. A
                             # filter saying no is usually right and occasionally
@@ -4757,6 +4832,14 @@ class DivarScraper:
                             # got a number from every listing that had one —
                             # report nineteen failures.
                             _ch = property_data.get("contact_channel")
+                            # What happens to it next, said as it is (#32). A
+                            # search run's numberless listings are owed a retry
+                            # by the next run of its city and category
+                            # (_with_phone_retries); an explicit list has
+                            # neither, so nothing picks it up by itself.
+                            _next = (f"اجرای بعدیِ همین کاربر در همین شهر و دسته دوباره "
+                                     f"امتحانش می‌کند (تا {skipped_listings.PHONE_ATTEMPTS} بار)"
+                                     if not urls else "با «بازاسکرپ» دوباره امتحانش کنید")
                             if _ch == "needs_identity":
                                 # Ours, not the poster's, and temporary: the
                                 # listing is retried once the account is
@@ -4767,7 +4850,7 @@ class DivarScraper:
                                     self._job_id_str, divar_id=did,
                                     url=listing.get("url"), title=property_data.get("title"),
                                     reason="needs_identity",
-                                    detail="دیوار از این حساب تأیید هویت خواسته — بعد از تأیید دوباره تلاش می‌شود")
+                                    detail=f"دیوار از این حساب تأیید هویت خواسته — {_next}")
                             elif _ch == "chat_only":
                                 # The poster chose Divar chat. There is no
                                 # number to get, no run will ever find one, and
@@ -4788,19 +4871,22 @@ class DivarScraper:
                                     self._job_id_str, divar_id=did,
                                     url=listing.get("url"), title=property_data.get("title"),
                                     reason="no_phone",
-                                    detail="ذخیره شد ولی شمارهٔ تماس گرفته نشد — در اجرای بعدی دوباره تلاش می‌شود")
+                                    detail=f"ذخیره شد ولی شمارهٔ تماس گرفته نشد — {_next}")
                                 logger.warning(f"{did}: saved without a phone number — counted as failed, not new")
                         elif saved and getattr(self, "_last_save_created", True):
                             job.new_items += 1
                         elif saved:
-                            # An UPDATE, not an insert. save_property returns a
-                            # Property either way, so every success was counted
-                            # as «جدید» — and the row most often updated is a
-                            # stored listing that had no phone number, which
-                            # property_exists deliberately lets through for a
-                            # second visit. Job 106 reported 32 new against 28
-                            # rows actually created; job 102, 50 against 43.
+                            # An UPDATE, not an insert: «بروز». save_property
+                            # returns a Property either way, so every success
+                            # was counted as «جدید» — and the row most often
+                            # updated is a stored listing that had no phone
+                            # number, which property_exists deliberately lets
+                            # through for a second visit. Job 106 reported 32
+                            # new against 28 rows actually created; job 102,
+                            # 50 against 43.
                             job.updated_items += 1
+                            if _retry:
+                                recovered += 1
                         else:
                             # save_property rolled back the shared session, which
                             # expires `job`. Refreshing re-reads it so the counter
@@ -4876,7 +4962,7 @@ class DivarScraper:
                     # listings we already had sat at «۰٪ / در حال اجرا» for its
                     # whole length while doing real work on every one of them.
                     # A bar that cannot move is worse than no bar.
-                    job.scraped_items = i + 1
+                    self._set_counts(job, scraped_items=examined)
                     await self.db_session.commit()
 
                     # spread the load across saved Divar accounts
@@ -4896,28 +4982,40 @@ class DivarScraper:
 
                 except Exception as e:
                     logger.error(f"Failed to process listing: {e}")
-                    job.failed_items += 1
+                    if not _counted:
+                        # Reached, and failed before it was counted: still one
+                        # of the listings this run examined, or «بررسی» and
+                        # the failures stop adding up.
+                        examined += 1
                     fail_tally[type(e).__name__] = fail_tally.get(type(e).__name__, 0) + 1
                     try:
                         await skipped_listings.record(
-                            job.job_id, divar_id=listing.get('divar_id'),
+                            _job_uuid, divar_id=str(listing.get('divar_id') or ''),
                             url=listing.get('url'), title=listing.get('title'),
                             reason="failed", detail=type(e).__name__)
                     except Exception:
                         pass
+                    # Counted after the rollback, not before it. The rollback
+                    # expires `job` and discards whatever was not committed —
+                    # the failure counted here used to vanish with it, so the
+                    # run's «ناموفق» came up short of its own tally.
                     try:
                         await self.db_session.rollback()
+                        await self.db_session.refresh(job)
+                        self._set_counts(job, failed_items=(job.failed_items or 0) + 1,
+                                         scraped_items=examined)
                         await self.db_session.commit()
-                    except Exception:
-                        pass
+                    except Exception as _count_err:
+                        logger.warning(f"could not count the failed listing: {_count_err}")
             
             # Complete job
             job.status = "completed"
             job.completed_at = datetime.now()
-            # A run that met its target stops with candidates left over. The
-            # work is over, so the bar reads full rather than freezing at the
-            # candidate it happened to stop on.
-            job.scraped_items = job.total_items
+            # «بررسی» stays what the run examined. It was set to «کل» here, so
+            # a run that met its target at 2 of 10 read «10 / 10» (#29); the
+            # bar of a finished run is full because it is finished
+            # (ScrapingJob.progress), not because the counter was bent.
+            self._set_counts(job, scraped_items=examined)
             await self.db_session.commit()
             # The FINISH event is recorded further down, AFTER finish_reason has
             # been composed. Written here it always said «تمام شد» with no
@@ -4929,7 +5027,12 @@ class DivarScraper:
             # losing it would make the next job start from a stale snapshot.
             await self._persist_active_session()
 
-            logger.info(f"Scraping job completed. New: {job.new_items}, Updated: {job.updated_items}, Failed: {job.failed_items}")
+            logger.info(f"Scraping job completed. New: {job.new_items}, Updated: {job.updated_items}, "
+                        f"Duplicates: {duplicates}, Failed: {job.failed_items}")
+            # «تکراری» and «بروز» in one phrase, for the sentences below that
+            # explain a short run by what was already held.
+            _held = "، ".join(p for p in (f"{duplicates} تکراری" if duplicates else "",
+                                          f"{job.updated_items} بروز" if job.updated_items else "") if p)
             # Say so when the feed ran dry before the target was met, rather
             # than completing at «۴۰ / ۲۰۰» with no explanation.
             #
@@ -4941,7 +5044,7 @@ class DivarScraper:
                 if date_mode:
                     logger.info(
                         f"Day exhausted: {job.new_items}/{max_items} new for {target_day}. "
-                        f"{job.updated_items} were already in the database."
+                        f"{duplicates} duplicates, {job.updated_items} updated."
                     )
                     if not finish_reason:
                         from app.services.dpa_service import to_jalali
@@ -4952,13 +5055,13 @@ class DivarScraper:
                 else:
                     logger.warning(
                         f"Ran out of candidates: {job.new_items}/{max_items} new from a pool of "
-                        f"{len(all_listings)}. {job.updated_items} were already in the database. "
+                        f"{len(all_listings)}. {duplicates} duplicates, {job.updated_items} updated. "
                         "Divar has no more matching listings, or the filters are too tight."
                     )
                     finish_reason = (
-                        f"آگهی بیشتری پیدا نشد — {job.new_items} از {max_items} درخواستی. "
-                        f"{job.updated_items} آگهی از قبل در پایگاه داده بود. "
-                        "یا دیوار آگهی دیگری ندارد یا فیلترها خیلی تنگ‌اند"
+                        f"آگهی بیشتری پیدا نشد — {job.new_items} از {max_items} درخواستی"
+                        + (f" ({_held})" if _held else "")
+                        + ". یا دیوار آگهی دیگری ندارد یا فیلترها خیلی تنگ‌اند"
                     )
 
             # Which filter actually cost the run its listings. Asking for 78 and
@@ -4987,6 +5090,10 @@ class DivarScraper:
             except Exception as e:
                 logger.warning(f"could not check OTP suppression: {e}")
 
+            # The column holds 300 characters, and a reason assembled from
+            # several clauses can run past that — which Postgres refuses at
+            # the commit, turning a finished run into a failed one.
+            finish_reason = finish_reason[:300] if finish_reason else finish_reason
             job.finish_reason = finish_reason
             await self.db_session.commit()
 
@@ -5007,8 +5114,11 @@ class DivarScraper:
                     level="info" if (not _ch or _rv // _ch >= _goal) else "warning",
                     reveals=_rv, challenges=_ch,
                     reveals_per_challenge=(_rv // _ch if _ch else None), goal=_goal)
+            # The same three words, for the same three numbers, as the tally
+            # below and the table: تازه (created), بروز (stored, opened again
+            # and saved over), تکراری (stored complete, not opened).
             _summary = (f"اسکرپ تمام شد — {job.new_items} تازه، "
-                        f"{job.updated_items} از قبل ذخیره شده بود، "
+                        f"{job.updated_items} بروز، {duplicates} تکراری، "
                         f"{job.failed_items} ناموفق")
             if finish_reason:
                 _summary += f"\n{finish_reason}"
@@ -5018,7 +5128,7 @@ class DivarScraper:
             await job_log.record(
                 job.job_id, job_log.FINISH, _summary,
                 level="warning" if _short_of_target else "info",
-                new=job.new_items, updated=job.updated_items,
+                new=job.new_items, updated=job.updated_items, duplicates=duplicates,
                 failed=job.failed_items, pages=job.scraped_pages,
                 requested=max_items, candidates=len(all_listings),
                 skipped=(sum(skip_tally.values()) or None))
@@ -5026,11 +5136,19 @@ class DivarScraper:
             # computed and only ever written to a log file nobody reads per-job,
             # so «۴۲ نامزد، ۳ ذخیره» looked like a fault when it was usually the
             # filters doing exactly what they were told.
-            if job.updated_items:
+            if duplicates:
+                # Only the duplicates: a «بروز» listing WAS saved again, and
+                # this sentence used to count those too.
                 await job_log.record(
                     job.job_id, job_log.PAGE,
-                    f"{job.updated_items} آگهی از قبل در پایگاه داده بود و دوباره ذخیره نشد",
-                    duplicates=job.updated_items)
+                    f"{duplicates} آگهی تکراری بود — از قبل با شماره در پایگاه داده بود "
+                    "و دوباره باز نشد",
+                    duplicates=duplicates)
+            if retry_ids:
+                await job_log.record(
+                    job.job_id, job_log.PAGE,
+                    f"از {len(retry_ids)} آگهیِ بدون شمارهٔ اجراهای قبل، {recovered} شماره گرفت",
+                    retries=len(retry_ids), recovered=recovered)
 
             # Every candidate, accounted for.
             #
@@ -5042,9 +5160,10 @@ class DivarScraper:
             # and when it still does not, say that too rather than let the
             # difference pass unremarked.
             _dropped = sum(skip_tally.values())
-            _accounted = (job.new_items + job.updated_items
+            _accounted = (job.new_items + job.updated_items + duplicates
                           + job.failed_items + _dropped + gone)
-            _parts = [f"{job.new_items} تازه", f"{job.updated_items} تکراری"]
+            _parts = [f"{job.new_items} تازه", f"{job.updated_items} بروز",
+                      f"{duplicates} تکراری"]
             if job.failed_items:
                 _named = "، ".join(f"{k}: {v}" for k, v in
                                    sorted(fail_tally.items(), key=lambda kv: -kv[1]))
@@ -5060,6 +5179,19 @@ class DivarScraper:
             _unaccounted = examined - _accounted
             if _unaccounted > 0:
                 _parts.append(f"{_unaccounted} بی‌حساب")
+            # The same account, kept on the row: the table's «تازه» cell says
+            # where the rest went from this, and there is no column for
+            # duplicates (JSON on the run's config, so no migration). A job
+            # without a config is one nothing can resume, and stays without.
+            if isinstance(job.config, dict):
+                job.config = {**job.config, "outcome": {
+                    "pool": len(all_listings), "examined": examined,
+                    "duplicate": duplicates, "failed": dict(fail_tally),
+                    "skipped": dict(skip_tally), "gone": gone,
+                    "unreached": max(_unreached, 0),
+                    "retried": len(retry_ids), "recovered": recovered,
+                }}
+                await self.db_session.commit()
             await job_log.record(
                 job.job_id, job_log.PAGE,
                 f"{len(all_listings)} نامزد — " + "، ".join(_parts),
