@@ -627,7 +627,7 @@ All application routes are mounted below `/api`.
 | `/api/backup` | Nightly snapshot status, Telegram offsite settings, chat discovery, run-now, the morning digest's preview and extra send (root/super_admin) |
 | `/api/ai` | The AI screen (root/super_admin): `overview` draws it in one request, `settings` and `test` for the connection, `agents/{key}` switches one agent, `log` is the filtered ledger, `usage` the last calls |
 | `/api/ai/reader`, `/api/ai/embed`, `/api/ai/photo`, `/api/ai/assistant` | Each agent's own status, one pass now, and re-doing a single listing; `ai/embed`'s search / similar / duplicates and `ai/need/parse` sit behind the CRM key instead, because consultants use them |
-| `/api/scraper/schedules` | Saved scrapes that fire daily at a Tehran hour, as their owner — list, create, edit, delete, run-now |
+| `/api/scraper/schedules` | Saved scrapes that fire daily at a Tehran hour, as their owner — list, create, edit, delete, run-now. The publish date is stored relative (`config.posted_days_ago`: 0 today, 1 yesterday, N days ago, up to 30) and turned into the Tehran day at every firing; a schedule saved with a fixed `posted_date` is read as the same distance from its creation day |
 | `/api/crm/calls/*` | The call queue: `calls/today` (leads due now, mine or unassigned), `leads/{id}/call` (one outcome per dial), `calls/summary` |
 | `/api/portal` | Visitor requests and upgrade tickets, plus the staff screens that triage them |
 | `/api/public/auth` | Visitor sign-up, resend, verify, login — unauthenticated, per-IP throttled |
