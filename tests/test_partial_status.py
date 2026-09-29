@@ -230,3 +230,41 @@ class TestThroughTheApp:
         job_id = _run(_go)
         stored = _run(lambda maker: _read(maker, job_id))
         assert len(stored) == 300 and stored.endswith("…")
+
+
+class TestWhatTheReviewFound:
+    """Found in the review of the merged fixes."""
+
+    def test_resuming_a_run_whose_settings_no_longer_read_is_a_409_not_a_500(self, client):
+        """The queue fails such a row with «ادامه will not work»; the button
+        still showed, and pressing it answered 500."""
+        ids = _seed()
+
+        async def _go(maker):
+            async with maker() as s:
+                bad = ScrapingJob(status="failed", finish_reason="تنظیمات خوانا نبود",
+                                  config={**CONFIG, "owner_user_id": ids["boss"],
+                                          "max_items": "not-a-number"})
+                s.add(bad)
+                await s.commit()
+                return str(bad.job_id)
+        bad_id = _run(_go)
+        r = client.post(f"/api/scraper/jobs/{bad_id}/resume", headers=_tok(client, "ps_boss"))
+        assert r.status_code == 409, r.text
+        assert "ادامه" in r.json()["detail"]
+
+    def test_monitoring_counts_a_partial_run_as_the_scraper_working(self, client):
+        """«آخرین تسک موفق» and its 48-hour warning read only «completed», so
+        a city whose runs end «ناقص» looked like an idle scraper."""
+        from datetime import datetime, timedelta
+        ids = _seed()
+        when = datetime.now() + timedelta(days=3650)       # later than any other row
+
+        async def _go(maker):
+            async with maker() as s:
+                s.add(ScrapingJob(status="partial", config={**CONFIG, "owner_user_id": ids["boss"]},
+                                  completed_at=when))
+                await s.commit()
+        _run(_go)
+        body = client.get("/api/monitoring/overview", headers=_tok(client, "ps_boss")).json()
+        assert body["scraper"]["last_completed_at"].startswith(when.date().isoformat()), body["scraper"]

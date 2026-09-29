@@ -436,9 +436,11 @@ async def monitoring_overview(db: AsyncSession = Depends(get_db)):
             ScrapingJob.status == "running",
             ScrapingJob.started_at < stale_cutoff))).scalar() or 0
 
+    # «ناقص» (#28) is a run that worked and saved what it walked — Divar cut
+    # its list short — so it counts as the scraper being alive.
     last_done = (await db.execute(
         select(func.max(ScrapingJob.completed_at)).where(
-            ScrapingJob.status == "completed"))).scalar()
+            ScrapingJob.status.in_(("completed", "partial"))))).scalar()
 
     # ── storage ──
     storage = {}

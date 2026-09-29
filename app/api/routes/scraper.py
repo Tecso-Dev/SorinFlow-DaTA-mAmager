@@ -18,7 +18,7 @@ from app.database import get_db, get_redis
 from app.models.scraping_job import FINISHED_STATUSES, RESUMABLE_STATUSES, ScrapingJob
 from app.scraper.divar_scraper import DivarScraper, crash_reason, start_failure_reason
 from app.config import get_settings, CITIES, CATEGORIES
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from app.schemas import ScrapingJobCreate, ScrapingJobResponse, ScrapingJobList
 from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.auth.dependencies import require_verified_phone
@@ -352,8 +352,15 @@ async def resume_scraping_job(
             raise HTTPException(status_code=409,
                                 detail=f"شمارهٔ موبایل صاحب این اسکرپ تأیید نشده است — {why}")
 
-    config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
-                                  if k in ScrapingJobCreate.model_fields})
+    try:
+        config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
+                                      if k in ScrapingJobCreate.model_fields})
+    except ValidationError:
+        # A config that no longer builds a run (the queue fails such a row
+        # with the same words): a 409 that says so, not a 500.
+        raise HTTPException(status_code=409,
+                            detail="تنظیمات ذخیره‌شدهٔ این اسکرپ دیگر خوانا نیست و «ادامه» ممکن نیست؛ "
+                                   "با فیلترهای درست یک اسکرپ تازه شروع کنید")
     resp = await _launch_job(config, db, run_as,
                              resumed_from=job.job_id, interactive=False)
     await job_log.record(
