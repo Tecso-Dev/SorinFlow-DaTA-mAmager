@@ -7,6 +7,7 @@ import json
 import uuid
 import hashlib
 from datetime import datetime, timedelta, timezone
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Optional, Dict, List, Any
 from urllib.parse import urljoin
 
@@ -20,14 +21,22 @@ DIVAR_BASE_URL = "https://divar.ir"
 # ---------------------------------------------------------------------------
 
 def normalize_persian_digits(text: str) -> str:
-    """Convert Persian/Arabic digits to ASCII; clean ZWNJ, NBSP, etc."""
+    """Convert Persian/Arabic digits to ASCII; clean ZWNJ, NBSP, etc.
+
+    The two Arabic number marks go with them: «٫» (U+066B, the decimal
+    separator of «۱٫۸ میلیارد») becomes a dot and «٬» (U+066C, the thousands
+    separator of «۶٬۲۰۰٬۰۰۰ تومان») a comma. Left as they were, a digit regex
+    stopped at the first one and a price came out as its first digit group.
+    The Persian comma «،» is not touched: it separates words, and callers
+    strip it from the ends of cells.
+    """
     if not text:
         return text
     text = str(text)
     persian = '۰۱۲۳۴۵۶۷۸۹'
     arabic  = '٠١٢٣٤٥٦٧٨٩'
     english = '0123456789'
-    table = str.maketrans(persian + arabic, english * 2)
+    table = str.maketrans(persian + arabic + '٫٬', english * 2 + '.,')
     text = text.translate(table)
     text = text.replace('ك', 'ک').replace('ي', 'ی')
     text = text.replace('‌', '').replace(' ', ' ')
@@ -67,11 +76,33 @@ def parse_divar_published(text: Optional[str]) -> Optional[datetime]:
     return None
 
 
+# One digit group with its separators, and the shape of a decimal among them:
+# «92.5», «1,200.25» — a dot followed by one or two digits, which no thousands
+# separator ever is.
+_DIGIT_GROUP = re.compile(r"\d[\d.,]*")
+_DECIMAL_GROUP = re.compile(r"\d{1,3}(?:[.,]\d{3})*\.\d{1,2}|\d+\.\d{1,2}")
+
+
+def _round_half_up(value: Decimal) -> int:
+    return int(value.quantize(Decimal(1), rounding=ROUND_HALF_UP))
+
+
 def parse_persian_number(text: str) -> Optional[int]:
-    """Convert a Persian/Arabic digit string to int."""
+    """Convert a Persian/Arabic digit string to int.
+
+    Every separator is thrown away — «۲٬۵۰۰» is 2500 — except a decimal one,
+    when the text is a single number: «۹۲٫۵ متر» is 93, not 925. An area read
+    ten times too big passes a max-area filter and lands in the wrong band.
+    """
     if not text:
         return None
     normalized = normalize_persian_digits(str(text))
+    groups = _DIGIT_GROUP.findall(normalized)
+    if len(groups) == 1:
+        group = groups[0].rstrip(".,")
+        if _DECIMAL_GROUP.fullmatch(group):
+            whole, fraction = group.rsplit(".", 1)
+            return _round_half_up(Decimal(f"{re.sub(r'[.,]', '', whole)}.{fraction}"))
     cleaned = re.sub(r'[^\d]', '', normalized)
     try:
         return int(cleaned) if cleaned else None
@@ -360,32 +391,87 @@ def infer_advertiser_type(seller_name: Optional[str],
     return detected
 
 
+_PRICE_UNITS = {"میلیارد": 10 ** 9, "میلیون": 10 ** 6, "هزار": 10 ** 3}
+# A figure and, if it has one, the unit written after it: «۲ میلیارد», «500».
+_PRICE_FIGURE = re.compile(r"(\d[\d.,]*)\s*(میلیارد|میلیون|هزار)?")
+# What may sit between two parts of one price: «۲ میلیارد و ۵۰۰ میلیون».
+_PRICE_JOINER = re.compile(r"\s*(?:و\s*)?")
+
+
+def _price_figure(token: str, has_unit: bool) -> Optional[Decimal]:
+    """A digit group, separators and all, as the number it spells.
+
+    Commas are thousands («1,200» is 1200) unless what follows is not a group
+    of three («1,5» is one and a half). A dot is a decimal mark next to a unit
+    — «۱.۸۰۰ میلیارد» is 1.8 billion — and a thousands mark when it repeats
+    («1.200.000») or, with no unit to scale it, stands before exactly three
+    digits («۵۰۰.۰۰۰ تومان» is five hundred thousand).
+    """
+    token = token.rstrip(".,")
+    if not token:
+        return None
+    if "." in token and "," in token:
+        decimal = "." if token.rfind(".") > token.rfind(",") else ","
+        thousands = "," if decimal == "." else "."
+        token = token.replace(thousands, "").replace(decimal, ".")
+    elif "," in token:
+        head, *rest = token.split(",")
+        if all(len(g) == 3 for g in rest):
+            token = head + "".join(rest)
+        elif len(rest) == 1:
+            token = f"{head}.{rest[0]}"
+        else:
+            token = head + "".join(rest)
+    elif "." in token:
+        head, *rest = token.split(".")
+        if len(rest) > 1:
+            token = head + "".join(rest)
+        elif not has_unit and len(rest[0]) == 3:
+            token = head + rest[0]
+    try:
+        return Decimal(token)
+    except InvalidOperation:
+        return None
+
+
 def parse_price_with_unit(text: str) -> Optional[int]:
-    """Parse '۹۰۰ میلیون', '۱.۸۰۰ میلیارد', 'رایگان' etc. → int (Tomans)."""
+    """Parse '۹۰۰ میلیون', '۱٫۸ میلیارد', '۲ میلیارد و ۵۰۰ میلیون', 'رایگان' → int (Tomans).
+
+    A price written in parts is added up — «۲ میلیارد و ۵۰۰ میلیون» is two and
+    a half billion, where the first part alone used to be returned — but only
+    when the parts descend (میلیارد, میلیون, هزار) and are joined by nothing
+    but «و». «۲۰۰ میلیون … ۵ میلیون» is two figures, and the first is the price.
+    """
     if not text:
         return None
     normalized = normalize_persian_digits(text)
     if any(w in normalized for w in ["رایگان", "مجانی"]):
         return 0
-    multiplier = 1
-    if "میلیارد" in normalized:
-        multiplier = 10 ** 9
-    elif "میلیون" in normalized:
-        multiplier = 10 ** 6
-    elif "هزار" in normalized:
-        multiplier = 10 ** 3
-    match = re.search(r"[0-9]+(?:\.[0-9]+)?", normalized)
-    if match:
-        try:
-            number = float(match.group(0))
-        except ValueError:
-            number = None
-    else:
-        number = None
-    if number is None:
-        base_int = parse_persian_number(normalized)
-        return (base_int * multiplier) if base_int is not None else None
-    return int(round(number * multiplier))
+    figures = list(_PRICE_FIGURE.finditer(normalized))
+    start = next((i for i, m in enumerate(figures) if m.group(2)), None)
+    if start is None:
+        # no unit anywhere: a plain figure in Tomans
+        if not figures:
+            return None
+        plain = _price_figure(figures[0].group(1), False)
+        return _round_half_up(plain) if plain is not None else None
+    total = Decimal(0)
+    scale = None
+    ended = 0
+    for m in figures[start:]:
+        unit = m.group(2)
+        if not unit:
+            break
+        step = _PRICE_UNITS[unit]
+        if scale is not None and (
+                step >= scale or not _PRICE_JOINER.fullmatch(normalized[ended:m.start()])):
+            break
+        figure = _price_figure(m.group(1), True)
+        if figure is None:
+            break
+        total += figure * step
+        scale, ended = step, m.end()
+    return _round_half_up(total)
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +534,30 @@ def parse_listing_card(card, base_url: str = DIVAR_BASE_URL) -> Optional[Dict[st
 # Price extraction
 # ---------------------------------------------------------------------------
 
+def _group_table_pairs(table) -> List[tuple]:
+    """(heading, cell) for each column of one of Divar's group tables, or [] when
+    the two rows do not line up.
+
+    The headings sit in <thead> and the cells in the <tbody> row. A heading's
+    class may be on the <th> itself or on a span inside it, so both are looked
+    for — extract_property_details always knew that and extract_price_info only
+    knew the span, so a deposit and a rent in a table with the class on its
+    <th> were read by neither. Columns are paired by position only when the
+    counts agree: a mismatch means a cell was skipped, and every pairing after
+    it would be wrong.
+    """
+    header_cells = (table.select('thead th .kt-group-row-item__title')
+                    or table.select('thead th'))
+    data_row = table.select_one('tbody tr')
+    if not header_cells or not data_row:
+        return []
+    value_cells = data_row.select('td.kt-group-row-item') or data_row.select('td')
+    if len(header_cells) != len(value_cells):
+        return []
+    return [(h.get_text(strip=True), v.get_text(strip=True))
+            for h, v in zip(header_cells, value_cells, strict=True)]
+
+
 def extract_price_info(soup) -> Dict[str, Any]:
     """Extract total_price / deposit / rent_price from a property page."""
     price_info: Dict[str, Any] = {}
@@ -487,18 +597,8 @@ def extract_price_info(soup) -> Dict[str, Any]:
         # Pass 1: table-based (headers in <thead>, values in <tbody>)
         # On Divar, deposit/rent often appear as table columns next to area/rooms
         for table in soup.select('table.kt-group-row'):
-            header_cells = table.select('thead th .kt-group-row-item__title')
-            data_row = table.select_one('tbody tr')
-            if not header_cells or not data_row:
-                continue
-            value_cells = data_row.select('td.kt-group-row-item') or data_row.select('td')
-            if len(header_cells) != len(value_cells):
-                continue
-            for idx, hcell in enumerate(header_cells):
-                _apply_price_pair(
-                    hcell.get_text(strip=True),
-                    value_cells[idx].get_text(strip=True),
-                )
+            for heading, cell in _group_table_pairs(table):
+                _apply_price_pair(heading, cell)
 
         # Pass 2: row-based (.kt-base-row / .kt-unexpandable-row / individual cells)
         rows = soup.select('.kt-base-row, .kt-unexpandable-row, .kt-group-row-item')
@@ -619,31 +719,50 @@ def extract_rooms_from_text(text: str) -> Optional[int]:
 # Property detail extraction
 # ---------------------------------------------------------------------------
 
+# The amenities a page states, by the word Divar prints for them.
+_AMENITY_FIELDS = {
+    'آسانسور': 'has_elevator',
+    'پارکینگ': 'has_parking',
+    'انباری': 'has_storage',
+    'بالکن': 'has_balcony',
+    'تراس': 'has_balcony',
+}
+# Any of these in a cell or a chip means the ad does NOT have it.
+_NO_WORDS = ('ندارد', 'ندارند', 'خیر', 'فاقد', 'بدون', 'نیست')
+
+
+def _says_no(text: str) -> bool:
+    return any(w in text for w in _NO_WORDS)
+
+
+def _ad_text(soup) -> str:
+    """What the poster wrote about THIS ad — its description, and nothing around it.
+
+    The page also carries other people's ads: «آگهی‌های مشابه» sits under every
+    listing with «۳ خوابه» and «سوئیت» in the titles, and the text of the whole
+    page used to be searched for rooms when the ad's own rows had none. A shop
+    was read as having no rooms (0) or two, and a min-rooms filter judged it on
+    that.
+    """
+    parts = []
+    for el in soup.select('[class*="description-row__text"]'):
+        if 'description-row__text--small' in ' '.join(el.get('class', [])):
+            continue        # the publish line, not the description
+        parts.append(el.get_text(' '))
+    return ' '.join(parts)
+
+
 def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
     """Extract area, rooms, floor, amenities, etc. from a property page."""
     details: Dict[str, Any] = {}
 
     try:
-        # Table-layout: headers in <thead>, values in <tbody>
+        # Table-layout: headers in <thead>, values in <tbody>. Every table is
+        # read — the spec table (متراژ، ساخت، اتاق) is followed by one of
+        # amenities (آسانسور، پارکینگ، انباری) — and each field is taken once.
         try:
             for table in soup.select('table.kt-group-row'):
-                # The title class may sit on the <th> itself or on a child
-                header_cells = (table.select('thead th .kt-group-row-item__title')
-                                or table.select('thead th'))
-                data_row = table.select_one('tbody tr')
-                if not header_cells or not data_row:
-                    continue
-                value_cells = data_row.select('td.kt-group-row-item') or data_row.select('td')
-                if not value_cells:
-                    continue
-                headers = [h.get_text(strip=True) for h in header_cells]
-                values  = [v.get_text(strip=True) for v in value_cells]
-                # Only use positional matching when counts match; a mismatch means
-                # some cells were skipped by the selector and indices would be wrong.
-                if len(headers) != len(values):
-                    continue
-                for idx, header_text in enumerate(headers):
-                    value_text = values[idx]
+                for header_text, value_text in _group_table_pairs(table):
                     if not header_text or not value_text:
                         continue
                     if 'متراژ' in header_text and not details.get('area'):
@@ -658,8 +777,13 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
                             details['rooms'] = val
                     elif 'ساخت' in header_text and not details.get('year_built'):
                         details['year_built'] = parse_persian_number(value_text)
-                if details.get('area') is not None and details.get('rooms') is not None:
-                    break
+                    else:
+                        # «آسانسور» over «ندارد»: the cell says whether the ad has
+                        # one. The heading alone says nothing.
+                        for keyword, field in _AMENITY_FIELDS.items():
+                            if keyword in header_text and field not in details:
+                                details[field] = not _says_no(value_text)
+                                break
         except Exception:
             pass
 
@@ -766,18 +890,15 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
         # Amenity chips: Divar renders امکانات as title-only chips (present)
         # or short "آسانسور ندارد" texts (absent). The title+value loop above
         # skips valueless rows entirely, so handle them here.
-        AMENITY_CHIP_MAP = {
-            'آسانسور': 'has_elevator',
-            'پارکینگ': 'has_parking',
-            'انباری': 'has_storage',
-            'بالکن': 'has_balcony',
-            'تراس': 'has_balcony',
-        }
+        AMENITY_CHIP_MAP = _AMENITY_FIELDS
         try:
             for elem in soup.select(
                 '.kt-group-row-item, .kt-icon-row-item, .kt-amenity-feat-cell, '
                 '[class*="feat-cell"], [class*="amenity"], [class*="feature-item"]'
             ):
+                # A column heading names a feature; it does not say the ad has it
+                if elem.name == 'th':
+                    continue
                 text = elem.get_text(strip=True)
                 # Chips are short; long texts are other rows/descriptions
                 if not text or len(text) > 40:
@@ -788,6 +909,12 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
                         details[field] = not negated
         except Exception:
             pass
+
+        # An old house or a plot has «متراژ زمین» and no plain «متراژ»: its land is
+        # the only area the page states. With a built area beside it, which of the
+        # two «متراژ» means is not ours to guess.
+        if not details.get('area') and details.get('land_area') and not details.get('built_area'):
+            details['area'] = details['land_area']
 
         # Fallback: infer area from title
         if not details.get('area') and title:
@@ -830,10 +957,10 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
             except Exception:
                 pass
 
-        # Fallback: full page text
+        # Fallback: the ad's own description
         if not details.get('rooms'):
             try:
-                r = extract_rooms_from_text(soup.get_text(separator=' '))
+                r = extract_rooms_from_text(_ad_text(soup))
                 if r is not None:
                     details['rooms'] = r
             except Exception:
@@ -886,14 +1013,14 @@ def extract_property_details(soup, title: str = "") -> Dict[str, Any]:
             if not details.get('year_built'):
                 details['year_built'] = rooms_val
             del details['rooms']
-            # Re-try: infer from title or full text
+            # Re-try: infer from title or the ad's own description
             if title:
                 r = extract_rooms_from_text(title)
                 if r is not None:
                     details['rooms'] = r
             if not details.get('rooms'):
                 try:
-                    r = extract_rooms_from_text(soup.get_text(separator=' '))
+                    r = extract_rooms_from_text(_ad_text(soup))
                     if r is not None:
                         details['rooms'] = r
                 except Exception:

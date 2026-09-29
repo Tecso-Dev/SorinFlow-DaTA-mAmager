@@ -13,6 +13,8 @@ saying the opposite of what they say.
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./_adv.db")
@@ -157,3 +159,152 @@ class TestTheDisagreementWithDivar:
     def test_an_unknown_declaration_is_not_a_disagreement(self):
         """Nothing to disagree with."""
         assert not adv.disagrees_with_divar({"agency_suspected": True})
+
+
+class TestAnOwnerKeepingAgentsAway:
+    """«مشاورین املاک تماس نگیرند» is what a private seller writes to keep
+    agencies off the phone. The negator only ever looked BEFORE the phrase, so
+    all of these — the words of the person who is not an agency — were labelled
+    as one."""
+
+    @pytest.mark.parametrize("text", [
+        # «don't call»
+        "مشاورین املاک تماس نگیرند",
+        "مشاور املاک تماس نگیرد",
+        "لطفا مشاورین املاک تماس نگیرید",
+        "مشاورین محترم املاک لطفاً تماس نگیرید",
+        "بنگاه ها تماس نگیرند",
+        "املاکی‌ها تماس نگیرن",
+        # «don't come» / «don't bother me»
+        "املاک نیاید",
+        "املاکی ها نیایند",
+        "املاک مزاحم نشوند",
+        "مشاورین املاک مزاحم نشوید",
+        "بنگاه مزاحم نشه",
+        # «not handed to an agency»
+        "به املاکی واگذار نمی‌شود",
+        "به مشاور املاک واگذار نمیشه",
+        "به بنگاه واگذار نمی‌شود",
+        "به املاک نمی‌دهم",
+        "این ملک به هیچ مشاور املاکی واگذار نشده است",
+        "فایل به هیچ املاکی سپرده نشده",
+        "به بنگاه ندادم",
+        # «keep away»
+        "از تماس مشاورین املاک خودداری کنید",
+        "مشاورین املاک ممنوع",
+        "با املاکی ها کار نمیکنم",
+        # «I am not one»
+        "مشاور املاک نیستم",
+        "بنگاه نیستم",
+        "املاکی نیستیم",
+        # the commission is not being asked for
+        "کمیسیون ندارد",
+        "کمسیون نمی‌گیرم",
+        "حق الزحمه نداریم",
+        # negated before the phrase, beyond the old list
+        "عدم تماس مشاورین املاک",
+        "نه مشاور املاک نه بنگاه",
+        "فاقد کمیسیون",
+    ])
+    def test_it_is_not_an_agency(self, text):
+        assert adv.detect(text) == (False, None), text
+
+    def test_a_list_of_agents_kept_away_is_still_one_refusal(self):
+        """The refusal comes after the last agent in the list, not the first."""
+        assert adv.detect("از تماس املاکی ها و مشاورین املاک خودداری کنید")[0] is False
+
+    def test_the_refusal_on_its_own_line_of_a_longer_description(self):
+        text = ("فروش فوری آپارتمان ۸۵ متری\n"
+                "مشاورین املاک تماس نگیرند\n"
+                "قیمت توافقی، فقط تماس تلفنی")
+        assert adv.detect(text)[0] is False
+
+    def test_the_refusal_written_in_the_title(self):
+        assert adv.detect("فروش آپارتمان ۹۰ متری — املاک نیاید")[0] is False
+
+    def test_an_owner_who_also_says_owner(self):
+        assert adv.detect("مالک هستم. مشاور املاک تماس نگیرد.")[0] is False
+
+
+class TestARealAgencyIsStillOne:
+    """The other direction: none of the above may switch the label off for an
+    ad an agency wrote."""
+
+    @pytest.mark.parametrize("text,phrase", [
+        ("مشاور املاک صداقت، ارومیه", "مشاور املاک"),
+        ("مشاورین املاک پارسیان", "مشاورین املاک"),
+        ("با مشاور املاک ما تماس بگیرید", "مشاور املاک"),
+        ("جهت اطلاعات بیشتر با بنگاه املاک نور تماس بگیرید", "بنگاه املاک"),
+        ("املاک آرمان — کمیسیون طبق نرخ اتحادیه", "کمیسیون"),
+        ("ثبت رایگان فایل شما در بنگاه ما", "ثبت رایگان فایل"),
+        ("همکار محترم تماس بگیرید", "همکار محترم"),
+        ("همکاری با همکاران محترم", "همکاری با همکاران"),
+        # a declaration, whatever follows it
+        ("مشاور املاک هستم، مالک نیستم", "مشاور املاک"),
+        ("املاک هستم، تماس نگیرید مگر برای خرید", "املاک هستم"),
+        ("مشاور املاک هستم، تماس نگیرید مگر برای خرید", "املاک هستم"),
+        # a refusal in ANOTHER sentence does not reach across
+        ("مشاور املاک آرمان. مالک نیستم", "مشاور املاک"),
+        ("بنگاه املاک نور.\nمزاحم نمی‌شوم", "بنگاه املاک"),
+        ("مشاورین املاک تماس نگیرند. املاک هستم", "املاک هستم"),
+        # a dash ends the clause: the words after it are about something else
+        ("آژانس املاک صدف — ورود بدون هماهنگی ممنوع", "آژانس املاک"),
+    ])
+    def test_it_is_still_an_agency(self, text, phrase):
+        assert adv.detect(text) == (True, phrase), text
+
+    @pytest.mark.parametrize("text,phrase", [
+        # «نه» is inside ماهانه, «بی» inside بیستم, «نه» inside آشپزخانه
+        ("ودیعه ماهانه، کمیسیون طبق نرخ", "کمیسیون"),
+        ("طبقه بیستم، مشاور املاک آرمان", "مشاور املاک"),
+        ("آشپزخانه اپن، بنگاه املاک نور", "بنگاه املاک"),
+        ("اجاره روزانه، بنگاه املاک نور", "بنگاه املاک"),
+    ])
+    def test_a_negator_inside_another_word_is_not_a_negator(self, text, phrase):
+        """«بدون» and «نه» count as words. Found inside «ماهانه» they said
+        nothing, and an agency's ad was read as a private one."""
+        assert adv.detect(text) == (True, phrase), text
+
+    def test_a_negator_before_a_comma_does_not_reach_the_phrase(self):
+        """«بدون پارکینگ» is about the parking, and the comma ends it."""
+        assert adv.detect("بدون پارکینگ، مشاور املاک آرمان") == (True, "مشاور املاک")
+
+    def test_a_negator_before_a_full_stop_does_not_either(self):
+        assert adv.detect("بدون پارکینگ. مشاور املاک آرمان") == (True, "مشاور املاک")
+
+    def test_the_negator_still_works_when_it_is_the_word_before(self):
+        assert adv.detect("بدون هیچ کمیسیون")[0] is False
+        assert adv.detect("بی‌ کمیسیون")[0] is False
+
+    def test_the_first_occurrence_being_refused_does_not_hide_the_second(self):
+        text = "مشاورین املاک تماس نگیرند\nمشاور املاک صداقت"
+        assert adv.detect(text) == (True, "مشاور املاک")
+
+    def test_a_refused_phrase_and_a_real_one_in_the_same_sentence(self):
+        """The evidence is the phrase that still stands, not the refused one."""
+        text = "مشاورین املاک تماس نگیرند، مشاور املاک صداقت"
+        assert adv.detect(text) == (True, "مشاور املاک")
+
+    def test_diacritics_do_not_hide_a_phrase(self):
+        assert adv.detect("مشاورِ املاک") == (True, "مشاور املاک")
+        assert adv.detect("مشاورـ املاک")[0] is True
+
+
+class TestTheSamePhrasesFromAnAnnotatedRecord:
+    """annotate() is what the scraper calls; the label it writes is what the
+    panel shows."""
+
+    def test_an_owner_keeping_agents_away_is_not_labelled(self):
+        d = adv.annotate({"description": "فروش فوری\nمشاورین املاک تماس نگیرند"})
+        assert d["agency_suspected"] is False
+        assert d["agency_evidence"] is None
+
+    def test_a_real_agency_is_labelled_with_its_phrase(self):
+        d = adv.annotate({"description": "۸۵ متر، دو خواب\nمشاور املاک صداقت"})
+        assert d["agency_suspected"] is True
+        assert d["agency_evidence"] == "مشاور املاک"
+
+    def test_the_title_and_the_card_hint_are_read_with_the_same_rules(self):
+        d = adv.annotate({"description": None, "title": "آپارتمان ۷۰ متری — املاک نیاید",
+                          "category_hint": "ارومیه"})
+        assert d["agency_suspected"] is False

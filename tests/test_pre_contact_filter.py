@@ -11,60 +11,27 @@ This is the predicate that avoids that. It must never keep an ad the filters
 would drop (that wastes the budget) and must never drop one they would keep
 (that loses a listing) — so both directions are pinned here.
 """
+import os
+import sys
+
 import pytest
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Mirror of DivarScraper.pre_contact_skip — pure, so it can be exercised
-# without a browser or a database.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./_pcf.db")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/9")
+os.environ.setdefault("SECRET_KEY", "0123456789abcdef0123456789abcdef")
+os.environ.setdefault("LOGS_PATH", "/tmp")
+os.environ.setdefault("IMAGES_PATH", "/tmp")
+
+from app.scraper.divar_scraper import DivarScraper  # noqa: E402
+
+
+# The real DivarScraper.pre_contact_skip. This file used to carry a copy of the
+# function pasted in here, which meant every assertion below was about the copy
+# and none of them could ever fail when the scraper changed.
 def pre_contact_skip(detail, listing_type, f):
-    adv = f.get("advertiser_type")
-    if adv:
-        actual = detail.get("advertiser_type")
-        if not actual:
-            return f"advertiser_type unknown; {adv} filter active"
-        if actual != adv:
-            return f"advertiser_type {actual} != {adv}"
-
-    if listing_type == "rent":
-        bands = (("deposit", f.get("min_deposit"), f.get("max_deposit")),
-                 ("rent_price", f.get("min_rent"), f.get("max_rent")))
-    else:
-        bands = (("__price__", f.get("min_price"), f.get("max_price")),
-                 ("price_per_meter", f.get("min_price_per_meter"),
-                  f.get("max_price_per_meter")))
-    for field, lo, hi in bands:
-        value = (detail.get("total_price") or detail.get("price")
-                 if field == "__price__" else detail.get(field))
-        if value is None:
-            continue
-        if lo and value < lo:
-            return f"{field} {value} < min {lo}"
-        if hi and value > hi:
-            return f"{field} {value} > max {hi}"
-
-    for field, lo, hi in (("area", f.get("min_area"), f.get("max_area")),
-                          ("rooms", f.get("min_rooms"), f.get("max_rooms"))):
-        value = detail.get(field)
-        if value is None:
-            continue
-        if lo is not None and value < lo:
-            return f"{field} {value} < min {lo}"
-        if hi is not None and value > hi:
-            return f"{field} {value} > max {hi}"
-
-    for key, wanted in (("has_elevator", f.get("has_elevator")),
-                        ("has_parking", f.get("has_parking")),
-                        ("has_storage", f.get("has_storage")),
-                        ("has_balcony", f.get("has_balcony")),
-                        ("has_images", f.get("has_images"))):
-        if wanted is None:
-            continue
-        actual = bool(detail.get(key))
-        if wanted and not actual:
-            return f"{key} required but not present"
-        if not wanted and actual:
-            return f"{key} must be absent"
-    return None
+    return DivarScraper.__new__(DivarScraper).pre_contact_skip(detail, listing_type, f)
 
 
 def asks(detail, listing_type="buy", **f):

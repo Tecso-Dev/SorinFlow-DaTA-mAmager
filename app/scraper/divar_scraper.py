@@ -264,11 +264,11 @@ class DivarScraper:
         'buy-store':    ['مغازه', 'فروشگاه'],
 
         # Industrial / Agricultural
-        'buy-industrial-agricultural-property':  ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین'],
-        'rent-industrial-agricultural-property': ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین'],
+        'buy-industrial-agricultural-property':  ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین', 'سوله', 'انبار', 'باغ', 'مزرعه'],
+        'rent-industrial-agricultural-property': ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین', 'سوله', 'انبار', 'باغ', 'مزرعه'],
 
         # Temporary rental
-        'rent-temporary': ['اجاره-کوتاه', 'اجاره-روزانه', 'اجاره-موقت', 'روزانه', 'کوتاه-مدت'],
+        'rent-temporary': ['اجاره-کوتاه', 'اجاره-روزانه', 'اجاره-موقت', 'روزانه', 'کوتاه-مدت', 'سوئیت', 'اقامتگاه', 'بوم-گردی'],
     }
     
     def __init__(
@@ -2353,53 +2353,77 @@ class DivarScraper:
         if why:
             return why
 
-        adv = f.get("advertiser_type")
-        if adv:
-            actual = detail.get("advertiser_type")
-            if not actual:
-                return f"advertiser_type unknown; {adv} filter active"
-            if actual != adv:
-                return f"advertiser_type {actual} != {adv}"
+        # …then the same judgement the scrape loop makes once the ad is
+        # saved-or-not. It is one function on purpose: this was a second copy,
+        # and the two disagreed (a deposit of 0, an unnamed category).
+        return self.local_filter_skip(detail, listing_type, f)
 
-        if listing_type == "rent":
-            bands = (("deposit", f.get("min_deposit"), f.get("max_deposit")),
-                     ("rent_price", f.get("min_rent"), f.get("max_rent")))
-        else:
-            bands = (("__price__", f.get("min_price"), f.get("max_price")),
-                     ("price_per_meter", f.get("min_price_per_meter"),
-                      f.get("max_price_per_meter")))
-        for field, lo, hi in bands:
-            value = (detail.get("total_price") or detail.get("price")
-                     if field == "__price__" else detail.get(field))
-            if value is None:
-                continue
-            if lo and value < lo:
-                return f"{field} {value} < min {lo}"
-            if hi and value > hi:
-                return f"{field} {value} > max {hi}"
+    @staticmethod
+    def local_filter_skip(detail: Dict[str, Any], listing_type: str,
+                          f: Dict[str, Any]) -> Optional[str]:
+        """Why the run's own filters drop this ad, or None. Judged from what the
+        ad page gave up — no phone, no date.
 
-        for field, lo, hi in (("area", f.get("min_area"), f.get("max_area")),
-                              ("rooms", f.get("min_rooms"), f.get("max_rooms"))):
-            value = detail.get(field)
-            if value is None:
-                continue
+        Divar applies most of these itself (rooms, amenities, price per metre,
+        …), so this is a safety net for what it lets through. It is also the one
+        place that decides, for `pre_contact_skip` (before a reveal is spent)
+        and for the scrape loop (which keeps or drops the row), so the two can
+        never disagree about the same ad.
+
+        A figure the ad does not state does not fail a band: missing is not the
+        same as out of range. A figure of 0 is one it does state — a deposit of
+        «مجانی», an ad with no rooms — except for prices and areas, where 0 is
+        how a blank reads. An amenity the page never mentions counts as absent,
+        which is how Divar prints it. The reason's first word is the bucket the
+        run tallies it under, and every one has a name in _FILTER_LABELS_FA.
+        """
+        def band(label, value, lo, hi, *, zero_value=False, zero_bound=False):
+            if value is None or (value == 0 and not zero_value):
+                return None
+            if not zero_bound:
+                lo, hi = lo or None, hi or None
             if lo is not None and value < lo:
-                return f"{field} {value} < min {lo}"
+                return f"{label} {value} < min {lo}"
             if hi is not None and value > hi:
-                return f"{field} {value} > max {hi}"
+                return f"{label} {value} > max {hi}"
+            return None
 
-        for key, wanted in (("has_elevator", f.get("has_elevator")),
-                            ("has_parking", f.get("has_parking")),
-                            ("has_storage", f.get("has_storage")),
-                            ("has_balcony", f.get("has_balcony")),
-                            ("has_images", f.get("has_images"))):
+        if listing_type == "buy":
+            why = (band("price", detail.get("total_price") or detail.get("price"),
+                        f.get("min_price"), f.get("max_price"))
+                   or band("price/m²", detail.get("price_per_meter"),
+                           f.get("min_price_per_meter"), f.get("max_price_per_meter")))
+        elif listing_type == "rent":
+            why = (band("deposit", detail.get("deposit"),
+                        f.get("min_deposit"), f.get("max_deposit"), zero_value=True)
+                   or band("rent", detail.get("rent_price"),
+                           f.get("min_rent"), f.get("max_rent"), zero_value=True))
+        else:
+            why = None
+        why = (why
+               or band("area", detail.get("area"), f.get("min_area"), f.get("max_area"))
+               or band("rooms", detail.get("rooms"), f.get("min_rooms"), f.get("max_rooms"),
+                       zero_value=True, zero_bound=True))
+        if why:
+            return why
+
+        for key in ("has_images", "has_elevator", "has_parking", "has_storage", "has_balcony"):
+            wanted = f.get(key)
             if wanted is None:
                 continue
-            actual = bool(detail.get(key))
+            actual = bool(detail.get(key) or (key == "has_images" and detail.get("images")))
             if wanted and not actual:
                 return f"{key} required but not present"
             if not wanted and actual:
                 return f"{key} must be absent"
+
+        adv = f.get("advertiser_type")
+        if adv:
+            actual_type = detail.get("advertiser_type")
+            if not actual_type:
+                return f"advertiser_type unknown; {adv} filter active"
+            if actual_type != adv:
+                return f"advertiser_type {actual_type} != {adv}"
         return None
 
     @staticmethod
@@ -2410,12 +2434,20 @@ class DivarScraper:
         and «اجاره آپارتمان» in a title — and the pattern lists were written
         for slugs. So «اجاره-مسکن» could never match a real ad titled «اجاره
         مسکن مهر کوثر»: the hyphen was doing the rejecting, not the words.
-        Both sides collapse to single spaces before comparing.
+        Both sides collapse to single spaces before comparing — and to one
+        spelling: Divar writes «کوتاه‌مدت» with a zero-width non-joiner where the
+        list has a space, and Arabic «ي» and «ك» turn up in titles.
         """
         if not text:
             return False
-        flat = " ".join(text.replace("-", " ").replace("_", " ").split())
-        return any(" ".join(p.replace("-", " ").split()) in flat for p in patterns)
+
+        def flatten(t: str) -> str:
+            t = (t.replace("-", " ").replace("_", " ").replace("\u200c", " ")
+                 .replace("ي", "ی").replace("ك", "ک"))
+            return " ".join(t.split())
+
+        flat = flatten(text)
+        return any(flatten(p) in flat for p in patterns)
 
     # What an ad's own words look like when it is real estate. Used twice: as
     # a hint on the URL, and as the verdict on Divar's breadcrumb.
@@ -4420,6 +4452,35 @@ class DivarScraper:
     # the rent rules and reported as missing a rent price.
     _VALIDATOR_TYPES = {"buy": "sale", "sale": "sale", "rent": "rent"}
 
+    # An agency posting as a private seller — Divar says «شخصی», the ad's own
+    # words say «املاک هستم» — is kept and labelled, never dropped. What a run
+    # owes the person who set it going is the number, so it is counted here and
+    # written to the report at the end. Per job, so nothing carries over to the
+    # next run on the same scraper.
+    def _count_agency_posing(self, evidence: Optional[str]) -> None:
+        job = getattr(self, "current_job", None)
+        key = str(getattr(job, "job_id", None))
+        tally: Dict[str, Dict[str, int]] = getattr(self, "_agency_posing", None) or {}
+        self._agency_posing = tally
+        per_phrase = tally.setdefault(key, {})
+        phrase = evidence or "؟"
+        per_phrase[phrase] = per_phrase.get(phrase, 0) + 1
+
+    async def _report_agency_posing(self, job) -> None:
+        """«n آگهی با برچسب «شخصی» دیوار، در متنشان مشاور املاک بود» — once, at
+        the end of the run, and nothing when there were none."""
+        per_phrase = (getattr(self, "_agency_posing", None) or {}).pop(
+            str(getattr(job, "job_id", None)), None)
+        if not per_phrase:
+            return
+        n = sum(per_phrase.values())
+        from app.services import job_log
+        await job_log.record(
+            job.job_id, job_log.PAGE,
+            f"{n} آگهی با برچسب «شخصی» دیوار، در متنشان مشاور املاک بود — "
+            "حذف نشدند و با برچسب «املاکی» علامت خوردند",
+            agency_looks_personal=n, evidence=per_phrase)
+
     def _grade_property(self, property_data: Dict[str, Any]) -> None:
         """Score a listing against PropertyDataValidator and attach the result.
 
@@ -5283,7 +5344,10 @@ class DivarScraper:
                         elif not urls:
                             property_data['category_name'] = category
                         listing_type = CATEGORIES.get(category, {}).get('type', 'unknown')
-                        property_data['listing_type'] = listing_type
+                        # A label like «اسکرپ تکی» is not a category: its «unknown»
+                        # must not replace the buy/rent the page's breadcrumb said.
+                        if listing_type != 'unknown' or not property_data.get('listing_type'):
+                            property_data['listing_type'] = listing_type
 
                         did = listing['divar_id']
 
@@ -5310,75 +5374,20 @@ class DivarScraper:
 
                         skip = False
 
-                        # ── Price filters (listing-type specific) ──────────────────
-                        if listing_type == 'buy':
-                            price = detail.get('total_price') or detail.get('price')
-                            if min_price and price and price < min_price:
-                                skip = _skip(f"price {price} < min {min_price}")
-                            elif max_price and price and price > max_price:
-                                skip = _skip(f"price {price} > max {max_price}")
-                            ppm = detail.get('price_per_meter')
-                            if not skip and min_price_per_meter and ppm and ppm < min_price_per_meter:
-                                skip = _skip(f"price/m² {ppm} < min {min_price_per_meter}")
-                            elif not skip and max_price_per_meter and ppm and ppm > max_price_per_meter:
-                                skip = _skip(f"price/m² {ppm} > max {max_price_per_meter}")
-                        elif listing_type == 'rent':
-                            deposit = detail.get('deposit')
-                            rent = detail.get('rent_price')
-                            if min_deposit and deposit and deposit < min_deposit:
-                                skip = _skip(f"deposit {deposit} < min {min_deposit}")
-                            elif max_deposit and deposit and deposit > max_deposit:
-                                skip = _skip(f"deposit {deposit} > max {max_deposit}")
-                            elif min_rent and rent and rent < min_rent:
-                                skip = _skip(f"rent {rent} < min {min_rent}")
-                            elif max_rent and rent and rent > max_rent:
-                                skip = _skip(f"rent {rent} > max {max_rent}")
-
-                        # ── Area filter ────────────────────────────────────────────
-                        if not skip:
-                            area = detail.get('area')
-                            if min_area and area and area < min_area:
-                                skip = _skip(f"area {area} < min {min_area}")
-                            elif max_area and area and area > max_area:
-                                skip = _skip(f"area {area} > max {max_area}")
-
-                        # ── Rooms filter ───────────────────────────────────────────
-                        if not skip:
-                            rooms = detail.get('rooms')
-                            if min_rooms is not None and rooms is not None and rooms < min_rooms:
-                                skip = _skip(f"rooms {rooms} < min {min_rooms}")
-                            elif max_rooms is not None and rooms is not None and rooms > max_rooms:
-                                skip = _skip(f"rooms {rooms} > max {max_rooms}")
-
-                        # ── Boolean amenity filters ────────────────────────────────
-                        bool_filters = [
-                            ('has_images', has_images),
-                            ('has_elevator', has_elevator),
-                            ('has_parking', has_parking),
-                            ('has_storage', has_storage),
-                            ('has_balcony', has_balcony),
-                        ]
-                        for field, wanted in bool_filters:
-                            if not skip and wanted is not None:
-                                actual = bool(detail.get(field) or (field == 'has_images' and detail.get('images')))
-                                if wanted and not actual:
-                                    skip = _skip(f"{field} required but not present")
-                                elif not wanted and actual:
-                                    skip = _skip(f"{field} must be absent")
-
-                        # ── Advertiser type filter ─────────────────────────────────
-                        # An undetermined type is a miss, not a match. Letting it
-                        # through is what put agency ads in the results of a
-                        # «شخصی» scrape: every ad whose type could not be read
-                        # satisfied the filter by default. The publish-date
-                        # filter below has always treated unknown this way.
-                        if not skip and advertiser_type:
-                            actual_type = detail.get('advertiser_type')
-                            if not actual_type:
-                                skip = _skip(
-                                    f"advertiser_type unknown; {advertiser_type} filter active")
-                            elif actual_type != advertiser_type:
-                                skip = _skip(f"advertiser_type {actual_type} != {advertiser_type}")
+                        # ── The run's own filters ──────────────────────────────────
+                        # Price, price per metre, deposit and rent, area, rooms,
+                        # photos, elevator, parking, storage, balcony and the
+                        # advertiser type — one function, the same one
+                        # pre_contact_skip asked before the reveal, so the two
+                        # cannot disagree about an ad. (They did: a deposit of
+                        # 0 was dropped there and kept here, and the ad was
+                        # saved with no number because the reveal never
+                        # happened.) An undetermined advertiser type is a miss,
+                        # not a match — letting it through is what put agency ads
+                        # in the results of a «شخصی» scrape.
+                        _filter_why = self.local_filter_skip(detail, listing_type, _pre_filters)
+                        if _filter_why:
+                            skip = _skip(_filter_why)
 
                         # ── Publish-date filters: age, or the exact day ────────────
                         if not skip:
@@ -5448,6 +5457,8 @@ class DivarScraper:
                             logger.info(
                                 f"{did}: Divar says personal, the ad says "
                                 f"{property_data.get('agency_evidence')!r}")
+                            # Kept, labelled — and counted, for the run's report.
+                            self._count_agency_posing(property_data.get('agency_evidence'))
 
                         # Grade the record before storing it. Recorded, never
                         # enforced: we already spent a contact reveal on this
@@ -5887,6 +5898,7 @@ class DivarScraper:
                     "نمونه‌ای از آگهی‌هایی که خارج از دسته‌بندی شمرده شدند: "
                     + "؛ ".join(category_drops),
                     samples=len(category_drops))
+            await self._report_agency_posing(job)
 
             if skip_tally:
                 breakdown = ", ".join(f"{k}={v}" for k, v in
