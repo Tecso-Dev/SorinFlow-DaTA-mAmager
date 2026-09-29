@@ -1,7 +1,8 @@
 "use client";
 
 // The 3D pieces for the panel's weaker sections (divar, sms, email, ai,
-// audit, profile, scraper, admin-portal) — the same two techniques already
+// audit, profile, scraper, admin-portal, and in the second pass forwarder,
+// monitoring, properties, proxies, settings, users) — the same two techniques already
 // used by IsoBadge/Skyline/Donut3D/Shield3D elsewhere in the app: an
 // isometric SVG built from stacked, offset copies for a cheap extrusion, or
 // a real CSS 3D transform (`preserve-3d`, `rotateX/Y`, `translateZ`) with a

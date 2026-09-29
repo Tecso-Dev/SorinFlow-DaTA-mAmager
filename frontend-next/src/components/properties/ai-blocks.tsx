@@ -9,13 +9,13 @@
 import { Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
+import { useEffect, useState } from "react";
 import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Lottie } from "@/components/ui/lottie";
 import { toast } from "@/components/toaster";
 import { api, ApiError } from "@/lib/api";
 import { faNum, faPercent } from "@/lib/format";
-import aiThinkingLottie from "@/lotties/ai-thinking.json";
 import { can, useSession } from "@/lib/session";
 import type { ListingFacts, PhotoTags, Property } from "./types";
 
@@ -28,6 +28,24 @@ const AI_AMENITIES: [keyof ListingFacts, string][] = [
 const AI_DEAL_FLAGS: [keyof ListingFacts, string][] = [
   ["convertible", "قابل تبدیل"], ["exchange", "معاوضه"], ["vacant", "تخلیه"], ["negotiable", "قابل مذاکره"],
 ];
+
+/** The AI-thinking clip is by far the biggest of the Lottie files (about 37 KB
+ *  against 5 KB for the rest) and only the AI boxes want it, so it is fetched
+ *  when one of them first shows it instead of riding in the properties page's
+ *  first load. The box it will fill is reserved meanwhile, so nothing jumps. */
+function Thinking({ className }: { className: string }) {
+  const [data, setData] = useState<object | null>(null);
+  useEffect(() => {
+    let live = true;
+    void import("@/lotties/ai-thinking.json").then((m) => {
+      if (live) setData(m.default);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return <div className={className} aria-hidden>{data && <Lottie animationData={data} className="size-full" />}</div>;
+}
 
 function Chip({ label, value, warn, off, conf }: { label?: string; value: string; warn?: boolean; off?: boolean; conf?: number }) {
   return (
@@ -105,12 +123,12 @@ export function AiFactsBlock({ property }: { property: Property }) {
       {reread.isPending ? (
         // the model really is reading this listing right now: say so with the picture that means it
         <div role="status" className="flex items-center gap-3">
-          <Lottie animationData={aiThinkingLottie} className="size-14 shrink-0" />
+          <Thinking className="size-16 shrink-0" />
           <p className="text-xs text-muted-foreground">هوش مصنوعی در حال خواندن آگهی است…</p>
         </div>
       ) : !facts ? (
         <div className="flex items-center gap-3">
-          <Lottie animationData={aiThinkingLottie} className="size-12 shrink-0 opacity-70" />
+          <Thinking className="size-14 shrink-0 opacity-80" />
           <p className="text-xs text-muted-foreground">هنوز خوانده نشده — خواننده هر دو دقیقه آگهی‌های تازه را می‌خواند.</p>
         </div>
       ) : (
