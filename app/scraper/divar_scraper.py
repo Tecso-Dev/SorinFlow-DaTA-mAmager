@@ -5701,7 +5701,7 @@ class DivarScraper:
                             else "completed")
             _finished = await self._finish_status(final_status)
             if _finished:
-                job.completed_at = datetime.now()
+                self._set_counts(job, completed_at=datetime.now())
             # «بررسی» stays what the run examined. It was set to «کل» here, so
             # a run that met its target at 2 of 10 read «10 / 10» (#29); the
             # bar of a finished run is full because it is finished
@@ -5946,10 +5946,9 @@ class DivarScraper:
                 moved = await self._move_status("failed")
             except Exception:
                 moved = True          # the session cannot say: the plain write, as before
-                job.status = "failed"
+                self._set_counts(job, status="failed")
             if moved:
-                job.error_message = str(e)
-                job.completed_at = datetime.now()
+                self._set_counts(job, error_message=str(e), completed_at=datetime.now())
             await self.db_session.commit()
             logger.error(f"Scraping job failed: {e}")
             from app.services import job_log

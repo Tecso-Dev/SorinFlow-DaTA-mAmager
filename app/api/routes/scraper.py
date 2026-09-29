@@ -360,7 +360,7 @@ async def resume_scraping_job(
         # with the same words): a 409 that says so, not a 500.
         raise HTTPException(status_code=409,
                             detail="تنظیمات ذخیره‌شدهٔ این اسکرپ دیگر خوانا نیست و «ادامه» ممکن نیست؛ "
-                                   "با فیلترهای درست یک اسکرپ تازه شروع کنید")
+                                   "با فیلترهای درست یک اسکرپ تازه شروع کنید") from None
     resp = await _launch_job(config, db, run_as,
                              resumed_from=job.job_id, interactive=False)
     await job_log.record(
