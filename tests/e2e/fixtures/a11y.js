@@ -18,9 +18,12 @@ function isBaselined(pageKey, ruleId, target) {
 /**
  * @param {import('@playwright/test').Page} page
  * @param {string} pageKey - human-readable label matching a baseline "page" entry
+ * @param {{include?: string}} [opts] - `include`: a CSS selector to check only that
+ *   part of the page, for a spec about one card whose neighbours are another
+ *   spec's business (and whose findings depend on what else the run created)
  * @returns {Promise<string[]>} one line per new critical/serious violation; empty means clean
  */
-async function checkA11y(page, pageKey) {
+async function checkA11y(page, pageKey, opts = {}) {
   // Measure the page at rest. The landing's CTAs fade in from opacity 0
   // (0.6 s delay, 1 s rise): axe running inside that window read them as
   // low-contrast — a PR run failed on it twice while push runs of the same
@@ -30,9 +33,9 @@ async function checkA11y(page, pageKey) {
     .filter(a => a.effect && a.effect.getComputedTiming().endTime !== Infinity)
     .map(a => a.finished.catch(() => null))));
 
-  const results = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa'])
-    .analyze();
+  let builder = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']);
+  if (opts.include) builder = builder.include(opts.include);
+  const results = await builder.analyze();
 
   const fresh = [];
   for (const violation of results.violations) {
