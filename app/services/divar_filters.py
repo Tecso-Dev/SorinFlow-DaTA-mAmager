@@ -398,6 +398,7 @@ def forget() -> None:
 
 
 async def refresh(*, force: bool = False, slugs: Optional[Iterable[str]] = None,
+                  max_age: float = LIVE_MAX_AGE,
                   gap: float = PAGE_GAP, client: Any = None,
                   sleep: Callable[[float], Any] = asyncio.sleep) -> Dict[str, Any]:
     """Read Divar's forms again unless a read younger than a day is in Redis.
@@ -412,7 +413,7 @@ async def refresh(*, force: bool = False, slugs: Optional[Iterable[str]] = None,
                 age = time.time() - float(json.loads(raw).get("at") or 0)
             except (ValueError, TypeError):
                 age = LIVE_MAX_AGE
-            if age < LIVE_MAX_AGE:
+            if age < max_age:
                 return await state()
     base = committed()
     wanted = list(slugs or sorted((base.get("categories") or {})))
@@ -470,7 +471,7 @@ async def refresh_loop() -> None:
     while True:
         beat("divar_filters")
         try:
-            await refresh()
+            await refresh(max_age=every * 3600)
         except Exception as e:
             logger.warning(f"[filters] live schema read failed: {type(e).__name__}: {e}")
         await asyncio.sleep(3600)    # a read younger than a day is kept, so this is cheap

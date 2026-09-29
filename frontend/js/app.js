@@ -12592,6 +12592,26 @@ async function loadRuntime() {
     const loops = d.loops || [];
     document.getElementById('mon-rt-loops').innerHTML = loops.map(_rtLoop).join('')
         || '<span class="text-muted small">هنوز هیچ کار پس‌زمینه‌ای گزارش نداده است</span>';
+    _rtFilterSchema(d.divar_filter_schema);
+}
+
+/* Where the scraper's per-category filters come from (#27), and what the
+ * last live read of Divar found different from the committed schema — a
+ * filter Divar dropped would start costing runs their second page again. */
+function _rtFilterSchema(st) {
+    const box = document.getElementById('mon-rt-filters');
+    if (!box || !st) return;
+    const changes = st.changes || [];
+    const where = st.source === 'live'
+        ? `از خود دیوار، خوانده‌شده ${st.fetched_at || ''}`
+        : 'نسخهٔ ذخیره‌شده در مخزن (دیوار هنوز خوانده نشده یا جواب نداد)';
+    const failed = (st.failed || []).length
+        ? html`<div class="text-warning">صفحه‌هایی که خوانده نشد: ${(st.failed || []).join('، ')}</div>` : '';
+    box.innerHTML = html`<div>فیلترهای دسته‌ها: ${where}</div>` + failed
+        + (changes.length
+            ? html`<div class="text-warning">دیوار با نسخهٔ مخزن فرق دارد — scripts/fetch_divar_filters.py را اجرا کنید:</div>`
+              + changes.map(c => html`<div class="text-warning" dir="auto">• ${c}</div>`).join('')
+            : '');
 }
 
 async function loadMonitoringLogs() {
