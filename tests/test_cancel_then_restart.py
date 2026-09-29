@@ -419,6 +419,64 @@ class TestTheEndOfTheRunDoesNotOverwrite:
         finally:
             await eng.dispose()
 
+    async def test_the_sweeps_own_sentence_is_not_replaced_by_a_finish(self, run_db):
+        """The sweep's «failed» comes with its own «ادامه» sentence. The run
+        that ends a moment later must not write «اسکرپ تمام شد» or its own
+        finish reason over it (found in the review of the merged fixes)."""
+        from sqlalchemy import update
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        from app.models.scraping_job import ScrapingJob
+        eng, maker = run_db
+        job = await _one_job(run_db)
+        sweep_says = "کارگر اسکرپ از دست رفت — «ادامه» را بزنید"
+        try:
+            async with maker(eng, expire_on_commit=False, autoflush=False)() as session:
+                r = _Run(session, job)
+
+                async def _detail(url, **_kw):
+                    async with async_sessionmaker(eng)() as other:
+                        await other.execute(update(ScrapingJob)
+                                            .where(ScrapingJob.job_id == job.job_id)
+                                            .values(status="failed", finish_reason=sweep_says))
+                        await other.commit()
+                    return {"url": url, "divar_id": url.rsplit("/", 1)[1], "title": "آپارتمان",
+                            "phone_number": "09120000000", "contact_channel": "phone"}
+                r.s.scrape_property_detail = _detail
+                # asked for two of a list of one: the run has a finish reason
+                # of its own («۱ از ۲ …») that it would write
+                await r.s.start_scraping_job(
+                    city="—", category="اسکرپ تکی", max_items=2, download_images=True,
+                    job_id=str(job.job_id), urls=[A])
+            row = await _row_now(eng, job.job_id)
+            assert row.status == "failed"
+            assert row.finish_reason == sweep_says, row.finish_reason
+        finally:
+            await eng.dispose()
+
+    async def test_an_error_after_a_cancel_does_not_turn_it_into_failed(self, run_db, monkeypatch):
+        """A step after the loop raises; the run's outer handler must not
+        write «ناموفق» over the cancel that had already landed."""
+        eng, maker = run_db
+        job = await _one_job(run_db)
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("a late step failed")
+        monkeypatch.setattr(ds.DivarScraper, "_collection_shortfall", _boom)
+        try:
+            async with maker(eng, expire_on_commit=False, autoflush=False)() as session:
+                r = _Run(session, job)
+
+                async def _detail(url, **_kw):
+                    await _status_from_elsewhere(eng, job.job_id, "cancelled")
+                    return {"url": url, "divar_id": url.rsplit("/", 1)[1], "title": "آپارتمان",
+                            "phone_number": "09120000000", "contact_channel": "phone"}
+                r.s.scrape_property_detail = _detail
+                await r.go([A])
+            row = await _row_now(eng, job.job_id)
+            assert row.status == "cancelled", "the error handler wrote «failed» over the cancel"
+        finally:
+            await eng.dispose()
+
     async def test_without_a_stop_it_still_completes(self, run_db):
         eng, maker = run_db
         job = await _one_job(run_db)

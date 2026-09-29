@@ -88,7 +88,7 @@ _CLOSE_STEP_TIMEOUT = 60.0
 # written from outside — «لغو», the queue's sweep — and a run that reads it
 # stops, and never writes over it (DivarScraper._move_status).
 _LIVE_STATUSES = ("running", "paused")
-_STOPPED_STATUSES = ("cancelled", "failed", "completed")
+_STOPPED_STATUSES = ("cancelled", "failed", "completed", "partial")
 
 
 # ── why a run could not start, in words the person who started it can act on ──
@@ -5082,10 +5082,12 @@ class DivarScraper:
                                      msg, level="error", collected=len(all_listings),
                                      target=collect_target,
                                      refusals=_detail if _stop == "refused" else None)
-                job.status = "failed"
-                job.error_message = msg
-                job.finish_reason = msg
-                job.completed_at = datetime.now()
+                # Conditional, like every status write of a run: a cancel
+                # pressed during a minutes-long collection stays a cancel.
+                if await self._move_status("failed"):
+                    job.error_message = msg
+                    job.finish_reason = msg
+                    job.completed_at = datetime.now()
                 await self.db_session.commit()
                 return job
 
@@ -5164,6 +5166,10 @@ class DivarScraper:
             if not urls:
                 all_listings, retry_ids = await self._with_phone_retries(
                     job, all_listings, max_items)
+                # Already in the pool: a top-up page that brings one of them
+                # again must not add it twice — a second reveal on the owner's
+                # number, and a second «بدون شماره» row off its three tries.
+                seen_ids |= retry_ids
 
             # «کل» is this run's own pool: what the loop walks (#29).
             #
@@ -5270,10 +5276,16 @@ class DivarScraper:
                     # with the rest of the city unread (#30).
                     if max_items and i == len(all_listings) - 1:
                         _left = max_items - int(getattr(job, "new_items", 0) or 0)
+                        # The refresh above opened a transaction, and the top-up
+                        # pages Divar over HTTP for as long as it needs: closed
+                        # first, so Postgres's idle-in-transaction timeout does
+                        # not kill the connection under it (see the commit below).
+                        await self.db_session.commit()
                         if await self._top_up_pool(all_listings, seen_ids, 2 * _left + 24,
-                                                   max_items) \
-                                and not (getattr(job, "divar_count", None) or 0):
-                            job.total_items = len(all_listings)  # type: ignore[assignment]
+                                                   max_items):
+                            # «کل» is this run's own pool (#29), so it grows with
+                            # it — or the row reads «82 / 60» and a full bar.
+                            self._set_counts(job, total_items=len(all_listings))
 
                     # Check if already scraped. Not for an explicit list: a
                     # listing named by hand is one somebody wants opened,
@@ -5687,15 +5699,22 @@ class DivarScraper:
                 pool=len(all_listings), saved=_saved, asked=max_items)
             final_status = ("partial" if _cut_reason and not (max_items and _saved >= max_items)
                             else "completed")
-            if not await self._finish_status(final_status):
-                final_status = str(job.status)   # a cancel or the sweep's «failed» stands
-            job.completed_at = datetime.now()
+            _finished = await self._finish_status(final_status)
+            if _finished:
+                job.completed_at = datetime.now()
             # «بررسی» stays what the run examined. It was set to «کل» here, so
             # a run that met its target at 2 of 10 read «10 / 10» (#29); the
             # bar of a finished run is full because it is finished
             # (ScrapingJob.progress), not because the counter was bent.
             self._set_counts(job, scraped_items=examined)
             await self.db_session.commit()
+            if not _finished:
+                # Stopped from outside during the last listing: a cancel, or
+                # the sweep's «failed» with its own «ادامه» sentence. That is
+                # the row's last word — no «اسکرپ تمام شد» and no finish reason
+                # of this run written over it. The session is still worth keeping.
+                await self._persist_active_session()
+                return job
             # The FINISH event is recorded further down, AFTER finish_reason has
             # been composed. Written here it always said «تمام شد» with no
             # reason attached, because the reason does not exist yet at this
@@ -5920,9 +5939,17 @@ class DivarScraper:
                         level="warning")
             
         except Exception as e:
-            job.status = "failed"
-            job.error_message = str(e)
-            job.completed_at = datetime.now()
+            # Only a run still live becomes «ناموفق»: a cancel, the sweep's
+            # «failed», or a finish already written (a later step raised)
+            # stays what it is.
+            try:
+                moved = await self._move_status("failed")
+            except Exception:
+                moved = True          # the session cannot say: the plain write, as before
+                job.status = "failed"
+            if moved:
+                job.error_message = str(e)
+                job.completed_at = datetime.now()
             await self.db_session.commit()
             logger.error(f"Scraping job failed: {e}")
             from app.services import job_log

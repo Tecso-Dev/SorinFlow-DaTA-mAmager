@@ -140,3 +140,40 @@ class TestTheTopUpOnItsOwn:
     async def test_nothing_to_top_up_from_is_a_no_op(self):
         s = DivarScraper.__new__(DivarScraper)
         assert await s._top_up_pool([], set(), 10) == 0
+
+
+class TestWhatTheTopUpLeavesOnTheRow:
+    """Found in the review of the merged fixes: the pool grew, «کل» did not."""
+
+    async def test_the_pool_total_grows_with_the_top_up(self, run):
+        """«کل» is the run's own pool (#29). With Divar's count present it
+        stayed at the first pool while «بررسی» walked on: «82 / 60», a bar
+        clamped full from the moment the top-up began."""
+        job, _, _ = await run(SMALL_FIRST, category="rent-apartment", max_items=10,
+                              min_rooms=3, held=False, detail=rooms_by_token)
+        assert job.divar_count, "the case needs Divar's own count on the row"
+        pool = job.config["outcome"]["pool"]
+        assert pool > 72, "the top-up must actually have run"
+        assert job.total_items == pool
+        assert job.scraped_items <= job.total_items
+
+    async def test_a_listing_owed_a_retry_is_not_opened_twice(self, run, monkeypatch):
+        """A numberless listing from an earlier run goes first; when a top-up
+        page brings it again it must not be added a second time — that is a
+        second reveal on the owner's number."""
+        from app.services import skipped_listings
+        owed = tokens("bg", 1)[0]          # it is on page 4, which the top-up reads
+
+        async def awaiting_phone(*_a, **_k):
+            return [{"divar_id": owed, "title": "آگهی بدون شماره",
+                     "url": f"https://divar.ir/v/{owed}"}]
+        monkeypatch.setattr(skipped_listings, "awaiting_phone", awaiting_phone)
+        opened = []
+        real = rooms_by_token
+
+        def detail(url):
+            opened.append(url)
+            return real(url)
+        job, _, _ = await run(SMALL_FIRST, category="rent-apartment", max_items=10,
+                              min_rooms=3, held=False, detail=detail)
+        assert opened.count(f"https://divar.ir/v/{owed}") == 1, opened[:5]
