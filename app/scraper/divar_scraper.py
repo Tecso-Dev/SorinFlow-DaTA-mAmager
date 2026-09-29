@@ -4619,7 +4619,10 @@ class DivarScraper:
                         elif not urls:
                             property_data['category_name'] = category
                         listing_type = CATEGORIES.get(category, {}).get('type', 'unknown')
-                        property_data['listing_type'] = listing_type
+                        # A label like «اسکرپ تکی» is not a category: its «unknown»
+                        # must not replace the buy/rent the page's breadcrumb said.
+                        if listing_type != 'unknown' or not property_data.get('listing_type'):
+                            property_data['listing_type'] = listing_type
 
                         did = listing['divar_id']
 
