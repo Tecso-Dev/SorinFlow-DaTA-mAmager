@@ -36,6 +36,7 @@ export SCRAPE_WORKER_ENABLED=false     # a run the scrape-form spec starts stays
 export MATCH_ENGINE=false              # also gates the reader/embed/photo AI loops
 export DIVAR_SESSION_CHECK_MINUTES=0   # the loop that pings divar.ir with the seeded fake cookies
 export APK_MIRROR_HOURS=0              # mirrors the forwarder APK from GitHub
+export DIVAR_FILTER_SCHEMA_HOURS=0     # reads divar.ir category pages once a day (#27)
 export FORWARDER_WATCH_MINUTES=0       # would email about forwarders that don't exist here
 export PROXY_ENABLED=false
 export GCP_ENABLED=false

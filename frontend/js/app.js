@@ -3288,7 +3288,8 @@ async function loadCategories() {
 
         const select = document.getElementById('scraper-category');
         categories.forEach(cat => {
-            select.innerHTML += `<option value="${cat.slug}">${cat.name}</option>`;
+            _scraperCategories[cat.slug] = cat;
+            select.innerHTML += `<option value="${esc(cat.slug)}">${esc(cat.name)}</option>`;
         });
         onScraperCategoryChange();
 
@@ -3307,13 +3308,187 @@ async function loadCategories() {
     }
 }
 
+/* ── the scrape form, built from Divar's own filters for the category (#27) ──
+ *
+ * /scraper/categories carries each category's filters as Divar has them
+ * (key, type, Persian title, options, unit). Only those are shown: a filter
+ * the category lacks — a deposit on a sale — made Divar refuse the search
+ * from its second page on. The form's long-standing fields (price, deposit,
+ * rooms, the amenity boxes…) keep their ids and are shown or hidden by their
+ * data-filter-key; everything else Divar has is built into
+ * #scraper-extra-filters and sent as divar_filters under Divar's own key.
+ * Switching the category hides AND clears what no longer applies, so a
+ * leftover can never narrow a run out of sight.                          */
+const _scraperCategories = {};
+// Values waiting for their fields: a remembered form restored before the
+// categories arrived, or a link's filters for a category not yet rendered.
+let _pendingExtraValues = null;
+// Divar filters a link carried that the form has no field for (a choice
+// whose options are not known yet): sent as they came, cleared with the category.
+let _carriedDivarFilters = {};
+
+function _scraperFilterKeys(slug) {
+    const cat = _scraperCategories[slug];
+    return cat && Array.isArray(cat.filters) ? new Set(cat.filters.map(f => f.key)) : null;
+}
+
+function _clearInputs(root) {
+    root.querySelectorAll('input, select').forEach(el => {
+        if (el.type === 'range') return;         // a slider follows its money box
+        if (el.type === 'checkbox' || el.type === 'radio') el.checked = false;
+        else el.value = '';
+        el._syncRange?.();
+    });
+}
+
 function onScraperCategoryChange() {
-    const cat = document.getElementById('scraper-category').value;
-    const isRent = cat.startsWith('rent-');
-    const isBuy  = cat.startsWith('buy-');
-    document.getElementById('scraper-buy-filters').classList.toggle('d-none', !isBuy);
-    document.getElementById('scraper-rent-filters').classList.toggle('d-none', !isRent);
-    document.getElementById('scraper-common-filters').classList.toggle('d-none', !isBuy && !isRent);
+    const slug = document.getElementById('scraper-category').value;
+    const keys = _scraperFilterKeys(slug);
+    const before = _scraperExtraValues();
+    _carriedDivarFilters = {};
+    document.querySelectorAll('#scraper-form [data-filter-key]').forEach(el => {
+        // Before the categories have loaded nothing is known: show all.
+        const on = !keys || keys.has(el.dataset.filterKey);
+        el.classList.toggle('d-none', !on);
+        if (!on) _clearInputs(el);
+    });
+    // A block whose every field is hidden goes too, label and all.
+    for (const id of ['scraper-buy-filters', 'scraper-rent-filters', 'scraper-common-filters', 'scraper-features']) {
+        const block = document.getElementById(id);
+        if (!block) continue;
+        const fields = [...block.querySelectorAll('[data-filter-key]')];
+        block.classList.toggle('d-none', !!fields.length && fields.every(el => el.classList.contains('d-none')));
+    }
+    renderScraperExtraFilters(slug, before);
+    if (typeof _scraperMoreSync === 'function') _scraperMoreSync();
+}
+
+// Keys that have a long-standing field of their own in the form.
+const _LEGACY_FILTER_KEYS = new Set(['price', 'price_per_square', 'credit', 'rent', 'size', 'rooms',
+    'business-type', 'has-photo', 'elevator', 'parking', 'warehouse', 'balcony']);
+
+function _extraId(key) { return 'scraper-f-' + String(key).replace(/[^A-Za-z0-9_-]/g, '_'); }
+
+/** Build the category's other Divar filters into #scraper-extra-filters,
+ *  keeping the value of any that the new category has too. */
+function renderScraperExtraFilters(slug, keep = {}) {
+    const box = document.getElementById('scraper-extra-filters');
+    if (!box) return;
+    const cat = _scraperCategories[slug];
+    const rows = (cat?.filters || []).filter(f => !_LEGACY_FILTER_KEYS.has(f.key)
+        // a choice whose options are not known yet cannot be offered
+        && !((f.type === 'repeated_string' || f.type === 'str') && !(f.options || []).length));
+    box.innerHTML = rows.map(f => {
+        const id = _extraId(f.key);
+        const key = esc(f.key), type = esc(f.type), title = esc(f.title || f.key);
+        const wrap = `data-extra-key="${key}" data-extra-type="${type}"`;
+        if (f.type === 'number_range') {
+            const money = f.unit === 'تومان';
+            const attrs = money ? 'type="text" inputmode="numeric"' : 'type="number" min="0"';
+            const cls = money ? ' money-input' : '';
+            const unit = f.unit ? ` (${esc(f.unit)})` : '';
+            return `<div class="mb-2" ${wrap}>
+                <label class="form-label small text-muted" for="${id}-min">${title}${unit}</label>
+                <div class="d-flex gap-2">
+                    <input ${attrs} id="${id}-min" class="form-control form-control-sm${cls}" placeholder="از" aria-label="${title} از">
+                    <input ${attrs} id="${id}-max" class="form-control form-control-sm${cls}" placeholder="تا" aria-label="${title} تا">
+                </div></div>`;
+        }
+        if (f.type === 'boolean') {
+            return `<div class="form-check mb-2" ${wrap}>
+                <input class="form-check-input" type="checkbox" id="${id}">
+                <label class="form-check-label small" for="${id}">${title}</label></div>`;
+        }
+        if (f.type === 'repeated_string') {
+            return `<fieldset class="mb-2" ${wrap}>
+                <legend class="form-label small text-muted mb-1" style="font-size:.8rem">${title}</legend>
+                <div class="d-flex flex-wrap gap-2">` + (f.options || []).map((o, i) => `
+                    <div class="form-check"><input class="form-check-input" type="checkbox" id="${id}-${i}" value="${esc(o.value)}">
+                    <label class="form-check-label small" for="${id}-${i}">${esc(o.title || o.value)}</label></div>`).join('')
+                + '</div></fieldset>';
+        }
+        return `<div class="mb-2" ${wrap}>
+            <label class="form-label small text-muted" for="${id}">${title}</label>
+            <select id="${id}" class="form-select form-select-sm"><option value="">همه</option>`
+            + (f.options || []).map(o => `<option value="${esc(o.value)}">${esc(o.title || o.value)}</option>`).join('')
+            + '</select></div>';
+    }).join('');
+    initMoneyInputs(box);
+    const values = { ...keep, ...(_pendingExtraValues || {}) };
+    if (cat && _pendingExtraValues) _pendingExtraValues = null;
+    _setScraperExtraValues(values);
+}
+
+/** The built filters' values, by Divar key, in the shape divar_filters takes. */
+function _scraperExtraValues() {
+    const out = {};
+    document.querySelectorAll('#scraper-extra-filters [data-extra-key]').forEach(el => {
+        const key = el.dataset.extraKey, type = el.dataset.extraType, id = _extraId(key);
+        if (type === 'number_range') {
+            const lo = _intOrZero(id + '-min'), hi = _intOrZero(id + '-max');
+            if (lo !== null || hi !== null) {
+                out[key] = {};
+                if (lo !== null) out[key].min = lo;
+                if (hi !== null) out[key].max = hi;
+            }
+        } else if (type === 'boolean') {
+            if (document.getElementById(id)?.checked) out[key] = true;
+        } else if (type === 'repeated_string') {
+            const picked = [...el.querySelectorAll('input:checked')].map(i => i.value);
+            if (picked.length) out[key] = picked;
+        } else {
+            const v = document.getElementById(id)?.value || '';
+            if (v) out[key] = v;
+        }
+    });
+    return out;
+}
+
+function _setScraperExtraValues(values) {
+    for (const [key, v] of Object.entries(values || {})) {
+        const el = document.querySelector(`#scraper-extra-filters [data-extra-key="${CSS.escape(key)}"]`);
+        if (!el) {
+            // Not a field of this category's form. Kept only while the
+            // categories are still loading; otherwise it does not apply.
+            if (!Object.keys(_scraperCategories).length) {
+                _pendingExtraValues = { ...(_pendingExtraValues || {}), [key]: v };
+            }
+            continue;
+        }
+        const id = _extraId(key), type = el.dataset.extraType;
+        if (type === 'number_range' && v && typeof v === 'object') {
+            for (const [end, val] of [['min', v.min ?? v.minimum], ['max', v.max ?? v.maximum]]) {
+                const input = document.getElementById(`${id}-${end}`);
+                if (input && val != null) {
+                    input.value = val;
+                    if (input.classList.contains('money-input')) _formatMoneyInput(input);
+                }
+            }
+        } else if (type === 'boolean') {
+            const input = document.getElementById(id);
+            if (input) input.checked = !!v;
+        } else if (type === 'repeated_string') {
+            const wanted = new Set(Array.isArray(v) ? v.map(String) : [String(v)]);
+            el.querySelectorAll('input[type="checkbox"]').forEach(i => { i.checked = wanted.has(i.value); });
+        } else {
+            const input = document.getElementById(id);
+            if (input) input.value = String(v);
+        }
+    }
+}
+
+/** divar_filters for the request: the built fields and what a link carried
+ *  that has no field. null when there is nothing. */
+function _scraperDivarFilters() {
+    const out = { ..._carriedDivarFilters, ..._scraperExtraValues() };
+    return Object.keys(out).length ? out : null;
+}
+
+function _intOrZero(id) {
+    const raw = _digitsOnly(document.getElementById(id)?.value || '');
+    if (raw === '') return null;
+    const v = parseInt(raw, 10);
+    return isNaN(v) ? null : v;
 }
 
 // ═══ Scraper publish-date (Jalali) ════════════════════════════
@@ -3790,8 +3965,7 @@ async function applyDivarLink() {
         }
         const adv = document.getElementById('scraper-advertiser-type');
         if (adv) adv.value = d.filters?.advertiser_type || '';
-        const img = document.getElementById('scraper-has-images');
-        if (img) img.checked = !!d.filters?.has_images;
+        _fillScraperLinkExtras(d.filters || {});
 
         saveScraperForm();
 
@@ -3814,11 +3988,31 @@ async function applyDivarLink() {
     }
 }
 
+/** A link's switches and the rest of Divar's filters for the category (#27):
+ *  into the built fields; what has no field yet (options not known) is
+ *  carried as it came. Everything is cleared first, like the bands. */
+function _fillScraperLinkExtras(filters) {
+    for (const [key, id] of [['has_images', 'scraper-has-images'], ['has_elevator', 'scraper-has-elevator'],
+                             ['has_parking', 'scraper-has-parking'], ['has_storage', 'scraper-has-storage'],
+                             ['has_balcony', 'scraper-has-balcony']]) {
+        const box = document.getElementById(id);
+        if (box) box.checked = !!filters[key];
+    }
+    const extraBox = document.getElementById('scraper-extra-filters');
+    if (extraBox) _clearInputs(extraBox);
+    const incoming = filters.divar_filters || {};
+    _setScraperExtraValues(incoming);
+    _carriedDivarFilters = Object.fromEntries(Object.entries(incoming).filter(([k]) =>
+        !document.querySelector(`#scraper-extra-filters [data-extra-key="${CSS.escape(k)}"]`)));
+    _scraperMoreSync();
+}
+
 function saveScraperForm() {
     try {
         const data = { city: document.getElementById('scraper-city')?.value || '' };
         _SCRAPER_TEXT_FIELDS.forEach(id => { data[id] = document.getElementById(id)?.value ?? ''; });
         _SCRAPER_CHECKS.forEach(id => { data[id] = !!document.getElementById(id)?.checked; });
+        data.divar_filters = _scraperExtraValues();
         localStorage.setItem('sf_scraper_form', JSON.stringify(data));
     } catch (_) {}
 }
@@ -3843,6 +4037,9 @@ function restoreScraperForm() {
     // city picker + category-driven filter visibility
     const picker = document.getElementById('scraper-city-picker');
     if (picker && picker._setCityValue && data.city) picker._setCityValue(data.city);
+    // The category's own Divar filters: set once its fields are built —
+    // now, or when the categories arrive.
+    if (data.divar_filters && typeof data.divar_filters === 'object') _pendingExtraValues = data.divar_filters;
     if (document.getElementById('scraper-category')?.value) {
         try { onScraperCategoryChange(); } catch (_) {}
     }
@@ -3866,7 +4063,7 @@ const _SCRAPER_FILTER_IDS = [
 ];
 
 function _scraperActiveFilters() {
-    return _SCRAPER_FILTER_IDS.filter(id => {
+    return Object.keys(_scraperExtraValues()).length + _SCRAPER_FILTER_IDS.filter(id => {
         const el = document.getElementById(id);
         if (!el) return false;
         // A hidden block belongs to the other deal type — its leftovers are
@@ -3948,9 +4145,18 @@ async function estimateScrape(quiet = false) {
     }
     for (const [key, id] of [['has_elevator','scraper-has-elevator'],
                              ['has_parking','scraper-has-parking'],
-                             ['has_storage','scraper-has-storage']]) {
+                             ['has_storage','scraper-has-storage'],
+                             ['has_balcony','scraper-has-balcony']]) {
         if (document.getElementById(id)?.checked) p.set(key, 'true');
     }
+    // The publish date narrows Divar's count too, as «آگهی‌های اخیر» (#27).
+    const dateEl = document.getElementById('scraper-posted-date');
+    if (dateEl?.dataset.userSet === '1' && dateEl.value.trim()) {
+        const g = jalaliToGregorian(dateEl.value.trim());
+        if (g) p.set('posted_date', g);
+    }
+    const extra = _scraperDivarFilters();
+    if (extra) p.set('divar_filters', JSON.stringify(extra));
 
     box.classList.remove('d-none');
     box.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm"></span> در حال پرسیدن از دیوار...</div>';
@@ -3965,12 +4171,17 @@ async function estimateScrape(quiet = false) {
         // Divar cannot narrow on some of our filters; the scraper applies those
         // itself after opening each ad, so the real yield is at most this.
         const rest = r.applied_after_scrape || [];
+        // Filters that do nothing for this category (a deposit on a sale):
+        // not sent, and said so in Divar-free words (#27).
+        const dropped = r.not_applied || [];
         box.innerHTML = `
             <div class="alert alert-info py-2 mb-0" style="font-size:.8rem">
                 <b style="font-size:1.05rem">${formatNumber(r.count)}</b> آگهی با این فیلترها در دیوار هست.
                 ${rest.length ? `<div class="mt-1" style="font-size:.7rem">
                     ${esc(rest.join('، '))} را دیوار فیلتر نمی‌کند — اسکرپر خودش بعد از باز کردن هر آگهی
                     اعمالش می‌کند، پس نتیجهٔ نهایی از این عدد کمتر می‌شود.</div>` : ''}
+                ${dropped.length ? `<div class="mt-1 text-warning" id="scraper-estimate-dropped" style="font-size:.7rem">
+                    ${esc(dropped.join('، '))} برای این دسته معنا ندارد و اعمال نشد.</div>` : ''}
             </div>`;
     } catch (e) {
         box.innerHTML = `<div class="alert alert-danger py-2 mb-0" style="font-size:.75rem">${esc(e.message)}</div>`;
@@ -4019,6 +4230,8 @@ async function startScraping(e) {
         advertiser_type:       document.getElementById('scraper-advertiser-type')?.value || null,
         // چرخش شماره دیوار (خالی = پیش‌فرض سرور)
         rotate_every:          _intOrNull('scraper-rotate-every'),
+        // بقیهٔ فیلترهای دیوار برای همین دسته، با نام خود دیوار (#27)
+        divar_filters:         _scraperDivarFilters(),
     };
 
     // Date mode: scrape the selected Jalali day (count becomes an optional cap)
@@ -4065,6 +4278,7 @@ function _scrapeFormConfig() {
         advertiser_type: document.getElementById('scraper-advertiser-type')?.value || null,
         rotate_every: _intOrNull('scraper-rotate-every'),
         max_age_hours: _intOrNull('scraper-max-age'),
+        divar_filters: _scraperDivarFilters(),
     };
     if (Number.isFinite(maxItems) && maxItems > 0) cfg.max_items = maxItems;
     const picked = document.getElementById('scraper-account')?.value || '';

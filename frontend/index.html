@@ -863,7 +863,7 @@
                                         <summary>فیلترهای بیشتر<span id="scraper-more-count"></span></summary>
                                         <div class="scraper-more-body">
                                         <div id="scraper-buy-filters" class="d-none">
-                                            <div class="mb-2">
+                                            <div class="mb-2" data-filter-key="price">
                                                 <label class="form-label small text-muted">قیمت کل (تومان)</label>
                                                 <div class="d-flex gap-2">
                                                     <input type="text" inputmode="numeric" id="scraper-min-price" class="form-control form-control-sm money-input"
@@ -873,7 +873,7 @@
                                                 </div>
     <div class="range-slider" data-min-input="scraper-min-price" data-max-input="scraper-max-price" data-ceiling="100000000000"></div>
                                             </div>
-                                            <div class="mb-2">
+                                            <div class="mb-2" data-filter-key="price_per_square">
                                                 <label class="form-label small text-muted">قیمت هر متر مربع (تومان)</label>
                                                 <div class="d-flex gap-2">
                                                     <input type="text" inputmode="numeric" id="scraper-min-ppm" class="form-control form-control-sm money-input"
@@ -887,7 +887,7 @@
 
                                         <!-- فیلتر قیمت اجاره -->
                                         <div id="scraper-rent-filters" class="d-none">
-                                            <div class="mb-2">
+                                            <div class="mb-2" data-filter-key="credit">
                                                 <label class="form-label small text-muted">ودیعه (تومان)</label>
                                                 <div class="d-flex gap-2">
                                                     <input type="text" inputmode="numeric" id="scraper-min-deposit" class="form-control form-control-sm money-input"
@@ -897,7 +897,7 @@
                                                 </div>
     <div class="range-slider" data-min-input="scraper-min-deposit" data-max-input="scraper-max-deposit" data-ceiling="20000000000"></div>
                                             </div>
-                                            <div class="mb-2">
+                                            <div class="mb-2" data-filter-key="rent">
                                                 <label class="form-label small text-muted">اجاره ماهانه (تومان)</label>
                                                 <div class="d-flex gap-2">
                                                     <input type="text" inputmode="numeric" id="scraper-min-rent" class="form-control form-control-sm money-input"
@@ -911,7 +911,7 @@
 
                                         <!-- فیلترهای مشترک -->
                                         <div id="scraper-common-filters" class="d-none">
-                                            <div class="mb-2">
+                                            <div class="mb-2" data-filter-key="size">
                                                 <label class="form-label small text-muted">متراژ (متر)</label>
                                                 <div class="d-flex gap-2">
                                                     <input type="number" id="scraper-min-area" class="form-control form-control-sm"
@@ -920,7 +920,7 @@
                                                            placeholder="تا">
                                                 </div>
                                             </div>
-                                            <div class="mb-2">
+                                            <div class="mb-2" data-filter-key="rooms">
                                                 <label class="form-label small text-muted">تعداد اتاق</label>
                                                 <div class="d-flex gap-2">
                                                     <input type="number" id="scraper-min-rooms" class="form-control form-control-sm"
@@ -929,7 +929,7 @@
                                                            placeholder="تا" min="0">
                                                 </div>
                                             </div>
-                                            <div class="mb-2">
+                                            <div class="mb-2" data-filter-key="business-type">
                                                 <label class="form-label small text-muted" for="scraper-advertiser-type">آگهی‌دهنده</label>
                                                 <select id="scraper-advertiser-type" class="form-select form-select-sm">
                                                     <option value="">همه</option>
@@ -942,32 +942,42 @@
                                                     ولی دقیق است.
                                                 </div>
                                             </div>
-                                            <div class="mb-2">
+                                            <div class="mb-2" id="scraper-features">
                                                 <label class="form-label small text-muted">ویژگی‌ها</label>
                                                 <div class="d-flex flex-wrap gap-2">
-                                                    <div class="form-check">
+                                                    <div class="form-check" data-filter-key="has-photo">
                                                         <input class="form-check-input" type="checkbox" id="scraper-has-images">
                                                         <label class="form-check-label small" for="scraper-has-images">دارای عکس</label>
                                                     </div>
-                                                    <div class="form-check">
+                                                    <div class="form-check" data-filter-key="elevator">
                                                         <input class="form-check-input" type="checkbox" id="scraper-has-elevator">
                                                         <label class="form-check-label small" for="scraper-has-elevator">آسانسور</label>
                                                     </div>
-                                                    <div class="form-check">
+                                                    <div class="form-check" data-filter-key="parking">
                                                         <input class="form-check-input" type="checkbox" id="scraper-has-parking">
                                                         <label class="form-check-label small" for="scraper-has-parking">پارکینگ</label>
                                                     </div>
-                                                    <div class="form-check">
+                                                    <div class="form-check" data-filter-key="warehouse">
                                                         <input class="form-check-input" type="checkbox" id="scraper-has-storage">
                                                         <label class="form-check-label small" for="scraper-has-storage">انباری</label>
                                                     </div>
-                                                    <div class="form-check">
+                                                    <div class="form-check" data-filter-key="balcony">
                                                         <input class="form-check-input" type="checkbox" id="scraper-has-balcony">
                                                         <label class="form-check-label small" for="scraper-has-balcony">بالکن</label>
                                                     </div>
                                                 </div>
                                             </div>
                                         </div>
+
+                                        <!-- The rest of what Divar filters for the chosen category
+                                             (#27), built from /scraper/categories by
+                                             renderScraperExtraFilters(): building age, floor, deed… -->
+                                        <div id="scraper-extra-filters" class="scraper-extra-filters"></div>
+                                        <small class="text-muted d-block mb-3" id="scraper-filters-help">
+                                            فقط فیلترهایی که دیوار برای همین دسته دارد نشان داده می‌شوند و همه
+                                            به خود دیوار داده می‌شوند. با عوض کردن دسته، فیلترهایی که به دستهٔ
+                                            تازه نمی‌خورند پنهان و پاک می‌شوند.
+                                        </small>
 
                                         <div class="mb-3">
                                             <label class="form-label">تاریخ انتشار آگهی (شمسی)</label>
@@ -988,6 +998,9 @@
                                                 با انتخاب تاریخ، فقط آگهی‌های منتشرشده در همان روز اسکرپ می‌شوند.
                                                 جمع‌آوری تا آخر همان روز پیش می‌رود و «تعداد» فقط سقف آگهی‌های
                                                 ذخیره‌شده است؛ اگر آن روز آگهی کمتری داشت، کمتر ذخیره می‌شود.
+                                                تاریخ به دیوار هم به‌صورت «آگهی‌های اخیر» (مثلاً ۳ روز اخیر برای
+                                                دیروز) داده می‌شود تا فهرست کوتاه‌تر شود؛ روز دقیق را اسکرپر خودش
+                                                بررسی می‌کند.
                                             </small>
                                         </div>
                                         </div>
@@ -5340,7 +5353,7 @@
 <script src="vendor/jquery-3.7.1.min.js"></script>
 <script src="vendor/persian-date.min.js"></script>
 <script src="vendor/persian-datepicker.min.js"></script>
-<script src="js/app.js?v=20260929b"></script>
+<script src="js/app.js?v=20260929c"></script>
 <!-- the AI agents' panel pieces, one file each (app/ai/) — loaded after app.js, whose globals they use -->
 <script src="js/ai/reader.js?v=20260924b"></script>
 <script src="js/ai/embed.js?v=20260924b"></script>
