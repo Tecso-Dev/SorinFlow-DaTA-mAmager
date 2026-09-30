@@ -9,6 +9,13 @@ before the account is proven.
 
 Through the real ASGI app, on Postgres, with a fake Redis — the pattern
 tests/test_login_hardening.py's `client` fixture already uses.
+
+Every number here is in its own 09128880xx block. This file and four others
+(test_divar_numbers_are_personal, test_job_owner_and_account, test_match_engine,
+test_profile) all reach for DATABASE_URL with setdefault, so on Postgres they
+share one database — and User.phone has a unique index. Two files using the
+same number is then a duplicate-key error in whichever runs second, which is
+not a bug in either of them.
 """
 import asyncio
 import os
@@ -93,7 +100,7 @@ def _login(client, identifier, password=PW):
 class TestASuccessfulVisitorLoginSetsTheCookie:
 
     def test_the_cookie_and_csrf_cookie_are_set_and_no_token_in_the_body(self, client):
-        phone = "09121110001"
+        phone = "09128880001"
         _mk_user(phone)
         r = _login(client, phone)
         assert r.status_code == 200, r.text
@@ -116,7 +123,7 @@ class TestASuccessfulVisitorLoginSetsTheCookie:
         client.cookies.clear()
 
     def test_remember_keeps_the_cookie_for_the_token_lifetime(self, client):
-        phone = "09121110005"
+        phone = "09128880005"
         _mk_user(phone)
         r = client.post("/api/public/auth/session/login",
                         json={"identifier": phone, "password": PW, "remember": True})
@@ -126,7 +133,7 @@ class TestASuccessfulVisitorLoginSetsTheCookie:
         client.cookies.clear()
 
     def test_email_identifier_works_too(self, client):
-        phone = "09121110002"
+        phone = "09128880002"
         _mk_user(phone, email="visitor2@example.com")
         r = _login(client, "visitor2@example.com")
         assert r.status_code == 200, r.text
@@ -140,7 +147,7 @@ class TestAStaffAccountIsRefused:
         from app.models.user import User
         from app.auth.jwt import get_password_hash
 
-        phone = "09121110009"
+        phone = "09128880009"
 
         async def _go():
             eng = create_async_engine(os.environ["DATABASE_URL"])
@@ -165,7 +172,7 @@ class TestAStaffAccountIsRefused:
 class TestAnUnverifiedVisitorStillGetsAFreshCode:
 
     def test_the_same_pending_response_the_bearer_login_gives_no_cookie_set(self, client):
-        phone = "09121110003"
+        phone = "09128880003"
         _mk_user(phone, phone_verified=False, email_verified=False)
         r = _login(client, phone)
         assert r.status_code == 200, r.text
@@ -179,7 +186,7 @@ class TestAnUnverifiedVisitorStillGetsAFreshCode:
 class TestWrongPasswordSetsNothing:
 
     def test_wrong_password_is_401_with_no_cookie(self, client):
-        phone = "09121110004"
+        phone = "09128880004"
         _mk_user(phone)
         r = _login(client, phone, password="totally-wrong")
         assert r.status_code == 401

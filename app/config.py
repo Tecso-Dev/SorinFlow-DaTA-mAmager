@@ -47,8 +47,8 @@ class Settings(BaseSettings):
             # (the default is True) instead of crash-looping — quieter, and
             # therefore worth a line that names exactly which keys were
             # ignored and what they fell back to.
-            import logging
-            logging.getLogger("sorinflow.config").warning(
+            from loguru import logger
+            logger.warning(
                 "ignoring blank values, using defaults: %s",
                 ", ".join(f"{k}={getattr(by_alias[k.lower()] if k.lower() in by_alias else by_alias[k], 'default', '?')!r}"
                           for k in sorted(dropped)))
