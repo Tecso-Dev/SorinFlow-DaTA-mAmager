@@ -107,7 +107,7 @@ test('robots.txt and sitemap.xml point search engines at the landing page only',
   expect(sitemap).not.toContain('/panel');
 });
 
-test('the logo gallery shows the three concepts and is not indexed', async ({ page }) => {
+test('the logo gallery shows every concept, marks the one in use, and is not indexed', async ({ page }) => {
   const problems = watchProblems(page);
   const s = await site(page);
   await page.goto('/brand-preview');

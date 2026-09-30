@@ -150,6 +150,16 @@ function Concept({ concept, site }: { concept: (typeof ORDER)[number]; site: Sit
           ))}
         </div>
 
+        {/* The full treatment only for the mark in use.
+         *
+         * Ten concepts × (10 size renders + 4 tiles + 2 browser tabs + a phone
+         * home screen) put tens of thousands of SVG paths on one page. It was
+         * heavy to scroll and heavy to check: the accessibility run timed out
+         * at sixty seconds on WebKit. The rejected concepts keep their size
+         * row — which is what a comparison actually needs — and the chosen one
+         * keeps everything. */}
+        {!current ? null : (
+        <>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <Tile title="لوگو با نام، تیره" className={DARK}>
             <Lockup name={site.brandName} tagline={site.tagline} size={48} nameClassName="text-xl" taglineClassName="text-[#8f9ab0]" />
@@ -175,6 +185,8 @@ function Concept({ concept, site }: { concept: (typeof ORDER)[number]; site: Sit
           </div>
           <PhoneHome Mark={Mark} name={site.brandName} />
         </div>
+        </>
+        )}
       </section>
     </Reveal>
   );
