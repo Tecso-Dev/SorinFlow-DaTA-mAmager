@@ -118,7 +118,12 @@ async def _set_status(job_id, status):
         await db.commit()
 
 
-async def _until(cond, timeout=5.0):
+async def _until(cond, timeout=20.0):
+    # A ceiling, not a delay: every wait here is for something that must
+    # happen, and returns the moment it does. 5 s was two BRPOP rounds plus a
+    # handful of fresh Postgres connections (DB_POOL_SIZE=0), which a loaded
+    # CI runner with coverage on missed once while the same commit's other
+    # run passed.
     end = time.monotonic() + timeout
     while not (await cond() if inspect.iscoroutinefunction(cond) else cond()):
         assert time.monotonic() < end, "condition not reached in time"
