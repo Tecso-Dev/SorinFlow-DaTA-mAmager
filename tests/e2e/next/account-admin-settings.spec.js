@@ -1,12 +1,23 @@
-// /panel/settings (root only): every GET/PUT /api/settings/site field, with
-// a live preview mirroring the login page's brand corner.
+// /panel/settings (root and super_admin — what app/api/routes/site.py has
+// always enforced): every GET/PUT /api/settings/site field, with a live
+// preview mirroring the login page's brand corner.
 const { test, expect } = require('@playwright/test');
 const { signIn, watchProblems, noHorizontalScroll, scrollThrough, a11y } = require('./helpers');
 
-test('super_admin (not root) is refused', async ({ page }) => {
+test('a super_admin gets in, and an admin does not', async ({ page }) => {
+  // The backend allows root and super_admin; the panel used to say "root
+  // only" while serving a super_admin anyway — a page they could reach by
+  // typing the URL, and a refusal the UI claimed but nothing enforced.
   await signIn(page, 'owner');
   await page.goto('/panel/settings');
-  await expect(page.getByText('این بخش فقط برای root است.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'برند و سایت' })).toBeVisible();
+
+  await signIn(page, 'agent1');
+  await page.goto('/panel/settings');
+  await expect(page.getByText('این بخش فقط برای مدیر ارشد است.')).toBeVisible();
+  // and the API says the same thing, so the page is not the only guard
+  const refused = await page.request.get('/api/settings/site');
+  expect(refused.status()).toBe(403);
 });
 
 test('root sees the form and a live preview', async ({ page }) => {

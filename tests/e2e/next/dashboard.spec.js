@@ -52,7 +52,10 @@ test('a super admin sets the monthly target', async ({ page }) => {
   await dialog.getByLabel(/کمیسیون/).fill('2500');
   await dialog.getByRole('button', { name: 'ذخیره' }).click();
   await expect(page.getByText('هدف ماه ذخیره شد').first()).toBeVisible();
-  await expect(page.getByText(/از ۱۵/)).toBeVisible();
+  // the saved target shows in more than one place on a phone (the gauge's own
+  // label and the card beside it), which is fine — the point is that it is on
+  // the page at all, so take the first rather than demanding it be unique
+  await expect(page.getByText(/از ۱۵/).first()).toBeVisible();
 });
 
 test('the dark theme passes the same accessibility check', async ({ page }) => {
