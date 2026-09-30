@@ -35,7 +35,17 @@ test.describe('scraper', () => {
   test('an agent without the scraper permission has no link to this section', async ({ page }) => {
     await signIn(page, 'agent1');
     await page.goto('/panel');
-    await expect(page.getByRole('link', { name: 'اسکرپر' })).toHaveCount(0);
+    // An absence means something only once the menu is drawn: checked before
+    // the session loads, it passed on an empty page. On a phone the menu is
+    // a sheet behind the header's button.
+    await expect(page.getByRole('button', { name: 'اعلان‌ها' })).toBeVisible();
+    const open = page.getByRole('button', { name: 'باز کردن منو' });
+    if (await open.isVisible()) await open.click();
+    const menu = page.getByRole('navigation', { name: 'بخش‌های پنل' });
+    await expect(menu.getByRole('link', { name: 'لیست املاک', exact: true })).toBeVisible();
+    // exact, and in the menu: the desktop logo is a link named
+    // «… CRM املاک و اسکرپر دیوار», which a plain substring match counts
+    await expect(menu.getByRole('link', { name: 'اسکرپر', exact: true })).toHaveCount(0);
   });
 
   test('city + category drive the estimate, and «فیلترهای بیشتر» opens itself once a filter is set', async ({ page }) => {
