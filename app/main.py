@@ -190,6 +190,7 @@ def _loops():
     from app.services.forwarder_watch import watch_loop as forwarder_watch
     from app.services.apk_mirror import mirror_loop
     from app.services.scrape_scheduler import scheduler_loop
+    from app.services.divar_filters import refresh_loop as divar_filters_refresh
     from app.crm.match_engine import engine_loop
     from app.crm.price_watch import watch_loop as price_watch
     from app.crm.digest import digest_loop
@@ -228,6 +229,10 @@ def _loops():
         ("apk_mirror", mirror_loop, settings.apk_mirror_hours * h + 1 * h, _PERIODIC),
         # Saved scrapes fire at their hour, as their owner — into the queue.
         ("scrape_scheduler", scheduler_loop, 10 * m, _PERIODIC),
+        # Divar's filter form per category, read at most once a day, 15 s a
+        # page (#27): its five-minute start, an hour's sleep and a read of
+        # every category page, with room to spare.
+        ("divar_filters", divar_filters_refresh, 2 * h, _PERIODIC),
         # New listings scored against the customers' criteria; the fits land
         # on the call queue and in the Telegram chat.
         ("match_engine", engine_loop, 30 * m, _PERIODIC),

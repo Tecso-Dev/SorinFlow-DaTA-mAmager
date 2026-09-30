@@ -677,9 +677,14 @@ async def runtime():
                             detail="Redis در دسترس نیست — وضعیت پردازه‌ها خوانده نشد") from e
     procs.sort(key=lambda p: (p.get("role") or "", p.get("host") or ""))
     loops.sort(key=lambda loop: loop["name"])
+    # Where the scraper's per-category filters come from, and what the last
+    # live read of Divar found different from the committed schema (#27): a
+    # filter Divar dropped would cost runs their second page again.
+    from app.services import divar_filters
     return {
         "processes": procs,
         "loops": loops,
         "queue_length": queue_length,
         "running": [{"job_id": j, "worker": w} for j, w in sorted(claims.items())],
+        "divar_filter_schema": await divar_filters.state(),
     }

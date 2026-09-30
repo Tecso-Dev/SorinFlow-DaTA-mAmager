@@ -203,7 +203,7 @@ class TestTheAdsOwnTitleIsNotTheVerdict:
 
     def test_the_breadcrumb_is_what_decides(self):
         src = self._src()
-        verdict = src[src.index("if kind_unconfirmed:"):src.index("if category_unconfirmed:")]
+        verdict = src[src.index("if kind_unconfirmed:"):src.index("if category_known:\n")]
         assert "category_name" in verdict and "property_type" in verdict
         assert 'self._last_detail_error = "ملک نبود"' in verdict, "a car is still dropped"
         assert "keeping it" in verdict, "no breadcrumb keeps the listing the caller asked for"

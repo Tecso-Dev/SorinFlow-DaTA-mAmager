@@ -1,0 +1,2696 @@
+{
+  "_about": "Divar's search filters per category. Written by scripts/fetch_divar_filters.py; options null = not known yet.",
+  "categories": {
+    "buy-apartment": {
+      "family": "buy",
+      "filters": [
+        {
+          "key": "balcony",
+          "title": "بالکن",
+          "type": "boolean"
+        },
+        {
+          "key": "building-age",
+          "title": "سن بنا",
+          "type": "number_range",
+          "unit": "سال"
+        },
+        {
+          "key": "building_direction",
+          "options": [
+            {
+              "title": "شرقی",
+              "value": "east"
+            },
+            {
+              "title": "غربی",
+              "value": "west"
+            },
+            {
+              "title": "شمالی",
+              "value": "north"
+            },
+            {
+              "title": "جنوبی",
+              "value": "south"
+            }
+          ],
+          "title": "جهت ساختمان",
+          "type": "repeated_string"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "cooling_system",
+          "options": null,
+          "title": "سرمایش",
+          "type": "repeated_string"
+        },
+        {
+          "key": "deed_type",
+          "options": [
+            {
+              "title": "تک‌برگ",
+              "value": "single_page"
+            },
+            {
+              "title": "منگوله‌دار",
+              "value": "multi_page"
+            },
+            {
+              "title": "قولنامه‌ای",
+              "value": "written_agreement"
+            },
+            {
+              "title": "سایر",
+              "value": "other"
+            }
+          ],
+          "title": "نوع سند",
+          "type": "repeated_string"
+        },
+        {
+          "key": "elevator",
+          "title": "آسانسور",
+          "type": "boolean"
+        },
+        {
+          "key": "floor",
+          "title": "طبقه",
+          "type": "number_range"
+        },
+        {
+          "key": "floor_type",
+          "options": null,
+          "title": "جنس کف",
+          "type": "repeated_string"
+        },
+        {
+          "key": "floors_count",
+          "title": "تعداد طبقات",
+          "type": "number_range"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "heating_system",
+          "options": null,
+          "title": "گرمایش",
+          "type": "repeated_string"
+        },
+        {
+          "key": "parking",
+          "title": "پارکینگ",
+          "type": "boolean"
+        },
+        {
+          "key": "price",
+          "title": "قیمت کل",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "price_per_square",
+          "title": "قیمت هر متر",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "rebuilt",
+          "title": "بازسازی‌شده",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        },
+        {
+          "key": "toilet",
+          "options": [
+            {
+              "title": "ایرانی",
+              "value": "squat"
+            },
+            {
+              "title": "فرنگی",
+              "value": "seat"
+            },
+            {
+              "title": "ایرانی و فرنگی",
+              "value": "squat_seat"
+            }
+          ],
+          "title": "سرویس بهداشتی",
+          "type": "str"
+        },
+        {
+          "key": "unit_per_floor",
+          "title": "تعداد واحد در هر طبقه",
+          "type": "number_range"
+        },
+        {
+          "key": "warehouse",
+          "title": "انباری",
+          "type": "boolean"
+        },
+        {
+          "key": "warm_water_provider",
+          "options": null,
+          "title": "تأمین‌کنندهٔ آب گرم",
+          "type": "repeated_string"
+        }
+      ],
+      "token": "apartment-sell"
+    },
+    "buy-commercial-property": {
+      "family": "buy",
+      "filters": [
+        {
+          "key": "bizzDeed",
+          "title": "سند اداری",
+          "type": "boolean"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "price",
+          "title": "قیمت کل",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "price_per_square",
+          "title": "قیمت هر متر",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "commercial-sell"
+    },
+    "buy-industrial-agricultural-property": {
+      "family": "buy",
+      "filters": [
+        {
+          "key": "bizzDeed",
+          "title": "سند اداری",
+          "type": "boolean"
+        },
+        {
+          "key": "building-age",
+          "title": "سن بنا",
+          "type": "number_range",
+          "unit": "سال"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "price",
+          "title": "قیمت کل",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "price_per_square",
+          "title": "قیمت هر متر",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "industry-agriculture-business-sell"
+    },
+    "buy-office": {
+      "family": "buy",
+      "filters": [
+        {
+          "key": "bizzDeed",
+          "title": "سند اداری",
+          "type": "boolean"
+        },
+        {
+          "key": "building-age",
+          "title": "سن بنا",
+          "type": "number_range",
+          "unit": "سال"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "elevator",
+          "title": "آسانسور",
+          "type": "boolean"
+        },
+        {
+          "key": "floor",
+          "title": "طبقه",
+          "type": "number_range"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "parking",
+          "title": "پارکینگ",
+          "type": "boolean"
+        },
+        {
+          "key": "price",
+          "title": "قیمت کل",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "price_per_square",
+          "title": "قیمت هر متر",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        },
+        {
+          "key": "warehouse",
+          "title": "انباری",
+          "type": "boolean"
+        }
+      ],
+      "token": "office-sell"
+    },
+    "buy-old-house": {
+      "family": "buy",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "parking",
+          "title": "پارکینگ",
+          "type": "boolean"
+        },
+        {
+          "key": "price",
+          "title": "قیمت کل",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "price_per_square",
+          "title": "قیمت هر متر",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "plot-old"
+    },
+    "buy-residential": {
+      "family": "buy",
+      "filters": [
+        {
+          "key": "balcony",
+          "title": "بالکن",
+          "type": "boolean"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "parking",
+          "title": "پارکینگ",
+          "type": "boolean"
+        },
+        {
+          "key": "price",
+          "title": "قیمت کل",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "price_per_square",
+          "title": "قیمت هر متر",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        },
+        {
+          "key": "warehouse",
+          "title": "انباری",
+          "type": "boolean"
+        }
+      ],
+      "token": "residential-sell"
+    },
+    "buy-store": {
+      "family": "buy",
+      "filters": [
+        {
+          "key": "bizzDeed",
+          "title": "سند اداری",
+          "type": "boolean"
+        },
+        {
+          "key": "building-age",
+          "title": "سن بنا",
+          "type": "number_range",
+          "unit": "سال"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "price",
+          "title": "قیمت کل",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "price_per_square",
+          "title": "قیمت هر متر",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "shop-sell"
+    },
+    "buy-villa": {
+      "family": "buy",
+      "filters": [
+        {
+          "key": "balcony",
+          "title": "بالکن",
+          "type": "boolean"
+        },
+        {
+          "key": "building-age",
+          "title": "سن بنا",
+          "type": "number_range",
+          "unit": "سال"
+        },
+        {
+          "key": "building_direction",
+          "options": [
+            {
+              "title": "شرقی",
+              "value": "east"
+            },
+            {
+              "title": "غربی",
+              "value": "west"
+            },
+            {
+              "title": "شمالی",
+              "value": "north"
+            },
+            {
+              "title": "جنوبی",
+              "value": "south"
+            }
+          ],
+          "title": "جهت ساختمان",
+          "type": "repeated_string"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "cooling_system",
+          "options": null,
+          "title": "سرمایش",
+          "type": "repeated_string"
+        },
+        {
+          "key": "deed_type",
+          "options": [
+            {
+              "title": "تک‌برگ",
+              "value": "single_page"
+            },
+            {
+              "title": "منگوله‌دار",
+              "value": "multi_page"
+            },
+            {
+              "title": "قولنامه‌ای",
+              "value": "written_agreement"
+            },
+            {
+              "title": "سایر",
+              "value": "other"
+            }
+          ],
+          "title": "نوع سند",
+          "type": "repeated_string"
+        },
+        {
+          "key": "floor_type",
+          "options": null,
+          "title": "جنس کف",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "heating_system",
+          "options": null,
+          "title": "گرمایش",
+          "type": "repeated_string"
+        },
+        {
+          "key": "parking",
+          "title": "پارکینگ",
+          "type": "boolean"
+        },
+        {
+          "key": "price",
+          "title": "قیمت کل",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "price_per_square",
+          "title": "قیمت هر متر",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "rebuilt",
+          "title": "بازسازی‌شده",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        },
+        {
+          "key": "toilet",
+          "options": [
+            {
+              "title": "ایرانی",
+              "value": "squat"
+            },
+            {
+              "title": "فرنگی",
+              "value": "seat"
+            },
+            {
+              "title": "ایرانی و فرنگی",
+              "value": "squat_seat"
+            }
+          ],
+          "title": "سرویس بهداشتی",
+          "type": "str"
+        },
+        {
+          "key": "warehouse",
+          "title": "انباری",
+          "type": "boolean"
+        },
+        {
+          "key": "warm_water_provider",
+          "options": null,
+          "title": "تأمین‌کنندهٔ آب گرم",
+          "type": "repeated_string"
+        }
+      ],
+      "token": "house-villa-sell"
+    },
+    "contribution-construction": {
+      "family": "other",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        }
+      ],
+      "token": "partnership"
+    },
+    "pre-sell-home": {
+      "family": "buy",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        }
+      ],
+      "token": "presell"
+    },
+    "real-estate": {
+      "family": "all",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        }
+      ],
+      "token": "real-estate"
+    },
+    "real-estate-services": {
+      "family": "service",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        }
+      ],
+      "token": "real-estate-services"
+    },
+    "rent-apartment": {
+      "family": "rent",
+      "filters": [
+        {
+          "key": "balcony",
+          "title": "بالکن",
+          "type": "boolean"
+        },
+        {
+          "key": "building-age",
+          "title": "سن بنا",
+          "type": "number_range",
+          "unit": "سال"
+        },
+        {
+          "key": "building_direction",
+          "options": [
+            {
+              "title": "شرقی",
+              "value": "east"
+            },
+            {
+              "title": "غربی",
+              "value": "west"
+            },
+            {
+              "title": "شمالی",
+              "value": "north"
+            },
+            {
+              "title": "جنوبی",
+              "value": "south"
+            }
+          ],
+          "title": "جهت ساختمان",
+          "type": "repeated_string"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "cooling_system",
+          "options": null,
+          "title": "سرمایش",
+          "type": "repeated_string"
+        },
+        {
+          "key": "credit",
+          "title": "ودیعه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "elevator",
+          "title": "آسانسور",
+          "type": "boolean"
+        },
+        {
+          "key": "floor",
+          "title": "طبقه",
+          "type": "number_range"
+        },
+        {
+          "key": "floor_type",
+          "options": null,
+          "title": "جنس کف",
+          "type": "repeated_string"
+        },
+        {
+          "key": "floors_count",
+          "title": "تعداد طبقات",
+          "type": "number_range"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "heating_system",
+          "options": null,
+          "title": "گرمایش",
+          "type": "repeated_string"
+        },
+        {
+          "key": "parking",
+          "title": "پارکینگ",
+          "type": "boolean"
+        },
+        {
+          "key": "rebuilt",
+          "title": "بازسازی‌شده",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rent",
+          "title": "اجارهٔ ماهانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        },
+        {
+          "key": "toilet",
+          "options": [
+            {
+              "title": "ایرانی",
+              "value": "squat"
+            },
+            {
+              "title": "فرنگی",
+              "value": "seat"
+            },
+            {
+              "title": "ایرانی و فرنگی",
+              "value": "squat_seat"
+            }
+          ],
+          "title": "سرویس بهداشتی",
+          "type": "str"
+        },
+        {
+          "key": "unit_per_floor",
+          "title": "تعداد واحد در هر طبقه",
+          "type": "number_range"
+        },
+        {
+          "key": "warehouse",
+          "title": "انباری",
+          "type": "boolean"
+        },
+        {
+          "key": "warm_water_provider",
+          "options": null,
+          "title": "تأمین‌کنندهٔ آب گرم",
+          "type": "repeated_string"
+        }
+      ],
+      "token": "apartment-rent"
+    },
+    "rent-commercial-property": {
+      "family": "rent",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "credit",
+          "title": "ودیعه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rent",
+          "title": "اجارهٔ ماهانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "commercial-rent"
+    },
+    "rent-industrial-agricultural-property": {
+      "family": "rent",
+      "filters": [
+        {
+          "key": "building-age",
+          "title": "سن بنا",
+          "type": "number_range",
+          "unit": "سال"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "credit",
+          "title": "ودیعه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rent",
+          "title": "اجارهٔ ماهانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "industry-agriculture-business-rent"
+    },
+    "rent-office": {
+      "family": "rent",
+      "filters": [
+        {
+          "key": "building-age",
+          "title": "سن بنا",
+          "type": "number_range",
+          "unit": "سال"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "credit",
+          "title": "ودیعه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "elevator",
+          "title": "آسانسور",
+          "type": "boolean"
+        },
+        {
+          "key": "floor",
+          "title": "طبقه",
+          "type": "number_range"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "parking",
+          "title": "پارکینگ",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rent",
+          "title": "اجارهٔ ماهانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        },
+        {
+          "key": "warehouse",
+          "title": "انباری",
+          "type": "boolean"
+        }
+      ],
+      "token": "office-rent"
+    },
+    "rent-residential": {
+      "family": "rent",
+      "filters": [
+        {
+          "key": "balcony",
+          "title": "بالکن",
+          "type": "boolean"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "credit",
+          "title": "ودیعه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "parking",
+          "title": "پارکینگ",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rent",
+          "title": "اجارهٔ ماهانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        },
+        {
+          "key": "warehouse",
+          "title": "انباری",
+          "type": "boolean"
+        }
+      ],
+      "token": "residential-rent"
+    },
+    "rent-store": {
+      "family": "rent",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "credit",
+          "title": "ودیعه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rent",
+          "title": "اجارهٔ ماهانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "shop-rent"
+    },
+    "rent-temporary": {
+      "family": "temporary",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "daily_rent",
+          "title": "اجارهٔ روزانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "person_capacity",
+          "title": "ظرفیت",
+          "type": "number_range",
+          "unit": "نفر"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "temporary-rent"
+    },
+    "rent-temporary-suite-apartment": {
+      "family": "temporary",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "daily_rent",
+          "title": "اجارهٔ روزانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "person_capacity",
+          "title": "ظرفیت",
+          "type": "number_range",
+          "unit": "نفر"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "suite-apartment"
+    },
+    "rent-temporary-villa": {
+      "family": "temporary",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "daily_rent",
+          "title": "اجارهٔ روزانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "person_capacity",
+          "title": "ظرفیت",
+          "type": "number_range",
+          "unit": "نفر"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "villa"
+    },
+    "rent-temporary-workspace": {
+      "family": "temporary",
+      "filters": [
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "daily_rent",
+          "title": "اجارهٔ روزانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "person_capacity",
+          "title": "ظرفیت",
+          "type": "number_range",
+          "unit": "نفر"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        }
+      ],
+      "token": "workspace"
+    },
+    "rent-villa": {
+      "family": "rent",
+      "filters": [
+        {
+          "key": "balcony",
+          "title": "بالکن",
+          "type": "boolean"
+        },
+        {
+          "key": "building-age",
+          "title": "سن بنا",
+          "type": "number_range",
+          "unit": "سال"
+        },
+        {
+          "key": "building_direction",
+          "options": [
+            {
+              "title": "شرقی",
+              "value": "east"
+            },
+            {
+              "title": "غربی",
+              "value": "west"
+            },
+            {
+              "title": "شمالی",
+              "value": "north"
+            },
+            {
+              "title": "جنوبی",
+              "value": "south"
+            }
+          ],
+          "title": "جهت ساختمان",
+          "type": "repeated_string"
+        },
+        {
+          "key": "business-type",
+          "options": [
+            {
+              "title": "شخصی",
+              "value": "personal"
+            },
+            {
+              "title": "مشاور املاک",
+              "value": "real-estate-business"
+            }
+          ],
+          "title": "آگهی‌دهنده",
+          "type": "repeated_string"
+        },
+        {
+          "key": "cooling_system",
+          "options": null,
+          "title": "سرمایش",
+          "type": "repeated_string"
+        },
+        {
+          "key": "credit",
+          "title": "ودیعه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "floor_type",
+          "options": null,
+          "title": "جنس کف",
+          "type": "repeated_string"
+        },
+        {
+          "key": "has-photo",
+          "title": "عکس‌دار",
+          "type": "boolean"
+        },
+        {
+          "key": "has-video",
+          "title": "ویدئودار",
+          "type": "boolean"
+        },
+        {
+          "key": "heating_system",
+          "options": null,
+          "title": "گرمایش",
+          "type": "repeated_string"
+        },
+        {
+          "key": "parking",
+          "title": "پارکینگ",
+          "type": "boolean"
+        },
+        {
+          "key": "rebuilt",
+          "title": "بازسازی‌شده",
+          "type": "boolean"
+        },
+        {
+          "key": "recent_ads",
+          "options": [
+            {
+              "title": "۳ ساعت اخیر",
+              "value": "3h"
+            },
+            {
+              "title": "۱۲ ساعت اخیر",
+              "value": "12h"
+            },
+            {
+              "title": "یک روز اخیر",
+              "value": "1d"
+            },
+            {
+              "title": "۳ روز اخیر",
+              "value": "3d"
+            },
+            {
+              "title": "۷ روز اخیر",
+              "value": "7d"
+            }
+          ],
+          "title": "آگهی‌های اخیر",
+          "type": "str"
+        },
+        {
+          "key": "rent",
+          "title": "اجارهٔ ماهانه",
+          "type": "number_range",
+          "unit": "تومان"
+        },
+        {
+          "key": "rooms",
+          "options": [
+            {
+              "title": "بدون اتاق",
+              "value": "بدون اتاق"
+            },
+            {
+              "title": "یک",
+              "value": "یک"
+            },
+            {
+              "title": "دو",
+              "value": "دو"
+            },
+            {
+              "title": "سه",
+              "value": "سه"
+            },
+            {
+              "title": "چهار",
+              "value": "چهار"
+            },
+            {
+              "title": "بیشتر",
+              "value": "بیشتر"
+            }
+          ],
+          "title": "تعداد اتاق",
+          "type": "repeated_string"
+        },
+        {
+          "key": "size",
+          "title": "متراژ",
+          "type": "number_range",
+          "unit": "متر مربع"
+        },
+        {
+          "key": "toilet",
+          "options": [
+            {
+              "title": "ایرانی",
+              "value": "squat"
+            },
+            {
+              "title": "فرنگی",
+              "value": "seat"
+            },
+            {
+              "title": "ایرانی و فرنگی",
+              "value": "squat_seat"
+            }
+          ],
+          "title": "سرویس بهداشتی",
+          "type": "str"
+        },
+        {
+          "key": "warehouse",
+          "title": "انباری",
+          "type": "boolean"
+        },
+        {
+          "key": "warm_water_provider",
+          "options": null,
+          "title": "تأمین‌کنندهٔ آب گرم",
+          "type": "repeated_string"
+        }
+      ],
+      "token": "house-villa-rent"
+    }
+  },
+  "read_on": "1405-07-07",
+  "source": "issue-27-table"
+}

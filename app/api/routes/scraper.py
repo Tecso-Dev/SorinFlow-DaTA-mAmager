@@ -4,7 +4,7 @@ SorinFlow Divar Scraper - Scraper API Routes
 import re
 import json
 import time
-from fastapi import Request, APIRouter, Depends, HTTPException
+from fastapi import Request, APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, false, delete, update
 from typing import Optional, List, cast
@@ -72,6 +72,38 @@ async def _fail_run(session, job_id: str, error: str, *, reason: Optional[str] =
     return changed is not None
 
 
+async def _close_retry(session, job_id: str, retry: dict, line: str) -> bool:
+    """A «تلاش دوباره» that could not run (#58): the row goes back to the
+    status it had, with `line` in front of its finish line — unless it was
+    stopped meanwhile. True when the row was changed."""
+    try:
+        await session.rollback()
+    except Exception:
+        pass
+    job = (await session.execute(select(ScrapingJob).where(
+        ScrapingJob.job_id == uuid.UUID(str(job_id))))).scalar_one_or_none()
+    if job is None:
+        return False
+    cfg = dict(job.config or {})
+    base = cfg.get("finish_before_retry", (retry or {}).get("prev_finish"))
+    cfg.pop("retry", None)
+    cfg["finish_before_retry"] = base
+    reason = f"{line}؛ {base}" if base else line
+    changed = (await session.execute(
+        update(ScrapingJob)
+        .where(ScrapingJob.job_id == job.job_id,
+               ScrapingJob.status.in_(("pending", "running", "paused")))
+        .values(status=(retry or {}).get("prev_status") or "completed",
+                finish_reason=reason[:300], completed_at=datetime.now(), config=cfg)
+        .returning(ScrapingJob.id)
+        .execution_options(synchronize_session=False))).scalar_one_or_none()
+    await session.commit()
+    if changed is not None:
+        from app.services import job_log as _jl
+        await _jl.record(job_id, _jl.ERROR, line, level="error")
+    return changed is not None
+
+
 async def run_scraping_job(
     job_id: str,
     city: str,
@@ -103,12 +135,18 @@ async def run_scraping_job(
     rotate_every: Optional[int] = None,
     owner_user_id: Optional[int] = None,
     urls: Optional[List[str]] = None,
+    divar_filters: Optional[dict] = None,
+    retry: Optional[dict] = None,
 ):
     """Background task to run scraping job.
 
     owner_user_id scopes the Divar account pool: a run started by one user
     rotates only through that user's own sessions. Without it, «rotation»
     meant logging somebody else's number in and spending their reveals.
+
+    `retry` (config.retry, #58) makes this pass «تلاش دوباره»: the run's own
+    left-out listings, tried again on the same row (retry_unscraped), on any
+    of the owner's numbers rather than the one the run first chose.
     """
     # Import here to avoid circular imports and ensure fresh event loop
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -183,7 +221,9 @@ async def run_scraping_job(
                                  **_sw)
             except Exception as _e:
                 logger.warning(f"[session] pre-run sweep skipped: {_e}")
-            initialized = await scraper.initialize(phone_number=divar_phone)
+            # A retry takes any of the owner's numbers: the one the run first
+            # chose may be off or spent by now, and the pool is the owner's either way.
+            initialized = await scraper.initialize(phone_number=None if retry else divar_phone)
             
             if not initialized:
                 # «continuing anyway» meant continuing with no page: the run
@@ -198,6 +238,10 @@ async def run_scraping_job(
                 from app.services import job_log as _jl
                 if not getattr(scraper, "_init_logged", False):
                     await _jl.record(job_id, _jl.ERROR, msg, level="error")
+                if retry:
+                    # The run itself is as it was; only this retry did not start.
+                    await _close_retry(session, job_id, retry, f"تلاش دوباره شروع نشد: {msg}")
+                    return
                 if not await _fail_run(session, job_id, msg, reason=msg):
                     logger.info(f"[{job_id}] stopped from outside while starting — left as it is")
                 logger.warning(f"[{job_id}] not started: {msg}")
@@ -205,6 +249,24 @@ async def run_scraping_job(
             
             logger.info(f"[{job_id}] Starting main scraping task")
             
+            if retry:
+                logger.info(f"[{job_id}] Retrying {len(retry.get('items') or [])} left-out listing(s) in place")
+                await scraper.retry_unscraped(
+                    job_id=job_id, city=city, category=category, retry=retry,
+                    download_images=download_images, urls=urls, divar_filters=divar_filters,
+                    min_price=min_price, max_price=max_price,
+                    min_deposit=min_deposit, max_deposit=max_deposit,
+                    min_rent=min_rent, max_rent=max_rent,
+                    min_price_per_meter=min_price_per_meter,
+                    max_price_per_meter=max_price_per_meter,
+                    min_area=min_area, max_area=max_area,
+                    min_rooms=min_rooms, max_rooms=max_rooms,
+                    has_images=has_images, has_elevator=has_elevator,
+                    has_parking=has_parking, has_storage=has_storage,
+                    has_balcony=has_balcony, advertiser_type=advertiser_type,
+                    max_age_hours=max_age_hours, posted_date=posted_date)
+                return
+
             # This is the main work
             result = await scraper.start_scraping_job(
                 job_id=job_id,
@@ -234,6 +296,7 @@ async def run_scraping_job(
                 posted_date=posted_date,
                 rotate_every=rotate_every,
                 urls=urls,
+                divar_filters=divar_filters,
             )
             
             logger.info(f"[{job_id}] Job completed: {result.new_items} new, {result.failed_items} failed, Status={result.status}")
@@ -245,7 +308,10 @@ async def run_scraping_job(
             # the panel can show, unless the run left one of its own, and
             # never over a cancel.
             try:
-                if await _fail_run(session, job_id, str(e), reason=crash_reason(e), keep_reason=True):
+                if retry:
+                    await _close_retry(session, job_id, retry,
+                                       f"تلاش دوباره با خطا متوقف شد: {crash_reason(e)}")
+                elif await _fail_run(session, job_id, str(e), reason=crash_reason(e), keep_reason=True):
                     logger.info(f"[{job_id}] Updated job status to failed in database")
             except Exception as db_e:
                 logger.error(f"[{job_id}] Could not update job in database: {db_e}")
@@ -298,6 +364,31 @@ async def start_scraping_job(
     return await _launch_job(job_config, db, current_user)
 
 
+async def _run_as_owner(db, owner, current_user, action: str):
+    """Who a run started again from its row runs as — «ادامه» and «تلاش
+    دوباره» alike: its owner, whose numbers it uses, like a schedule. Only
+    the owner, root or super_admin may start it; an owner no longer active,
+    or whose own mobile is not verified, cannot have a run started for them.
+    When root pressed «ادامه» on a colleague's run it used to run as root —
+    with root's numbers, and as root's run from then on."""
+    if owner and current_user and current_user.id != owner \
+            and (current_user.role or "") not in ("root", "super_admin"):
+        raise HTTPException(status_code=403, detail="این اسکرپ را کاربر دیگری شروع کرده است")
+    run_as = current_user
+    if owner and current_user and current_user.id != owner:
+        run_as = (await db.execute(select(User).where(User.id == owner))).scalar_one_or_none()
+        if run_as is None or not run_as.is_active:
+            raise HTTPException(status_code=409,
+                                detail=f"صاحب این اسکرپ دیگر فعال نیست — {action} ممکن نیست")
+        # The route checked the caller's number; the run is the owner's.
+        from app.auth.dependencies import phone_gate_reason
+        why = await phone_gate_reason(run_as, db)
+        if why:
+            raise HTTPException(status_code=409,
+                                detail=f"شمارهٔ موبایل صاحب این اسکرپ تأیید نشده است — {why}")
+    return run_as
+
+
 @router.post("/jobs/{job_id}/resume", response_model=ScrapingJobResponse, dependencies=[Depends(require_verified_phone)])
 async def resume_scraping_job(
     job_id: str,
@@ -332,25 +423,7 @@ async def resume_scraping_job(
 
     cfg = dict(job.config)
     owner = cfg.pop("owner_user_id", None)
-    if owner and current_user and current_user.id != owner \
-            and (current_user.role or "") not in ("root", "super_admin"):
-        raise HTTPException(status_code=403, detail="این اسکرپ را کاربر دیگری شروع کرده است")
-
-    # The continuation runs AS the run's owner, like a schedule does. When
-    # root pressed «ادامه» on a colleague's run it relaunched as root — with
-    # root's numbers, and as root's run from then on.
-    run_as = current_user
-    if owner and current_user and current_user.id != owner:
-        run_as = (await db.execute(select(User).where(User.id == owner))).scalar_one_or_none()
-        if run_as is None or not run_as.is_active:
-            raise HTTPException(status_code=409,
-                                detail="صاحب این اسکرپ دیگر فعال نیست — ادامه ممکن نیست")
-        # The route checked the caller's number; the run is the owner's.
-        from app.auth.dependencies import phone_gate_reason
-        why = await phone_gate_reason(run_as, db)
-        if why:
-            raise HTTPException(status_code=409,
-                                detail=f"شمارهٔ موبایل صاحب این اسکرپ تأیید نشده است — {why}")
+    run_as = await _run_as_owner(db, owner, current_user, "ادامه")
 
     try:
         config = ScrapingJobCreate(**{k: v for k, v in cfg.items()
@@ -368,6 +441,119 @@ async def resume_scraping_job(
         f"ادامهٔ اسکرپ {str(job.job_id)[:8]} — آگهی‌های ذخیره‌شدهٔ آن رد می‌شوند",
         resumed_from=str(job.job_id))
     return resp
+
+
+class RetryUnscrapedRequest(BaseModel):
+    # One bucket of the run's list («بدون شماره»), or these listings; neither
+    # is every listing the list holds.
+    reason: Optional[str] = Field(None, max_length=64)
+    divar_ids: Optional[List[str]] = Field(None, max_length=500)
+
+
+# At most this many listings go back in one «تلاش دوباره»: each can cost a
+# reveal, the same cap an explicit list of URLs has.
+RETRY_MAX = 500
+
+
+@router.post("/jobs/{job_id}/retry", dependencies=[Depends(require_verified_phone)])
+async def retry_unscraped(
+    job_id: str,
+    body: Optional[RetryUnscrapedRequest] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """«تلاش دوباره»: the listings this run left out, tried again INSIDE this
+    run (#58).
+
+    «بازاسکرپ» and «اسکرپ تکی» opened a new row for this, and the next run
+    of the same city and category retried numberless listings as its own —
+    so the counters, the log and the list that changed were never the ones
+    of the run that left them. Here the same row goes back in the queue
+    (pending, with config.retry naming the listings and the status it had)
+    and a worker runs them on it: its counters, its log and its list change,
+    and the table has no new row. The owner's numbers are used, whoever
+    presses it; the queue's concurrency cap applies as to any run.
+    """
+    from app.services import job_log, scrape_queue, skipped_listings
+    from app.scraper import otp_store
+
+    body = body or RetryUnscrapedRequest(reason=None, divar_ids=None)
+    job_uuid = await _job_uuid_from(job_id, db)
+    job = (await db.execute(
+        select(ScrapingJob).where(ScrapingJob.job_id == job_uuid))).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status in ("running", "paused", "pending"):
+        raise HTTPException(status_code=409,
+                            detail="این اسکرپ هنوز در حال اجراست — بعد از پایانش «تلاش دوباره» را بزنید")
+    if not job.config:
+        raise HTTPException(
+            status_code=409,
+            detail="این اسکرپ پیش از ذخیره‌شدن تنظیمات اجرا شده و «تلاش دوباره» در آن ممکن نیست")
+    cfg = dict(job.config)
+    await _run_as_owner(db, cfg.get("owner_user_id"), current_user, "تلاش دوباره")
+    try:
+        ScrapingJobCreate(**{k: v for k, v in cfg.items() if k in ScrapingJobCreate.model_fields})
+    except ValidationError:
+        raise HTTPException(status_code=409,
+                            detail="تنظیمات ذخیره‌شدهٔ این اسکرپ دیگر خوانا نیست و «تلاش دوباره» ممکن نیست") from None
+
+    rows = await skipped_listings.for_job(db, job_uuid, reason=body.reason)
+    wanted = {str(d) for d in body.divar_ids} if body.divar_ids else None
+    items, seen = [], set()
+    for r in rows:
+        if r.divar_id in seen or (wanted is not None and r.divar_id not in wanted):
+            continue
+        # «همه» or a bucket leaves out what a retry cannot change — the poster
+        # takes chat only, Divar deleted it. Named one by one, they are tried.
+        if wanted is None and r.reason in skipped_listings.BULK_NEVER:
+            continue
+        seen.add(r.divar_id)
+        items.append({"divar_id": r.divar_id, "url": r.url, "title": r.title,
+                      "reason": r.reason, "detail": r.detail})
+    if not items:
+        raise HTTPException(status_code=409, detail="آگهیِ اسکرپ‌نشده‌ای برای تلاش دوباره در این اسکرپ نیست")
+    items = items[:RETRY_MAX]
+
+    running = (await db.execute(
+        select(ScrapingJob.id).where(ScrapingJob.status == "running"))).scalars().all()
+    if len(running) >= 3:
+        raise HTTPException(status_code=429,
+                            detail="Too many running jobs. Please wait for existing jobs to complete.")
+
+    from datetime import timezone as _tz
+    # The run's own finish line, before any retry wrote in front of it: an
+    # earlier retry's line (a cancelled one too) must not become the base.
+    old = cfg.get("retry") if isinstance(cfg.get("retry"), dict) else {}
+    base = (cfg["finish_before_retry"] if "finish_before_retry" in cfg
+            else old.get("prev_finish") if old else job.finish_reason)
+    retry = {"items": items, "at": datetime.now(_tz.utc).isoformat(timespec="seconds"),
+             "by": current_user.id if current_user else None,
+             "prev_status": job.status, "prev_finish": base}
+    # Only from the status just read: a second press, or a resume, that got
+    # there first wins.
+    moved = (await db.execute(
+        update(ScrapingJob)
+        .where(ScrapingJob.id == job.id, ScrapingJob.status == job.status)
+        .values(status="pending", completed_at=None, finish_reason=None,
+                config={**cfg, "retry": retry})
+        .returning(ScrapingJob.id)
+        .execution_options(synchronize_session=False))).scalar_one_or_none()
+    await db.commit()
+    if moved is None:
+        raise HTTPException(status_code=409, detail="وضعیت این اسکرپ همین حالا عوض شد — دوباره امتحان کنید")
+
+    jid = str(job_uuid)
+    await otp_store.reset_cancel(jid)
+    await job_log.record(jid, job_log.START,
+                         f"«تلاش دوباره» برای {len(items)} آگهیِ اسکرپ‌نشدهٔ همین اسکرپ در صف قرار گرفت",
+                         retry=len(items), reason=body.reason)
+    try:
+        await scrape_queue.enqueue(jid)
+    except Exception as e:
+        logger.warning(f"[queue] could not queue the retry of {jid} ({type(e).__name__}: {e}) — "
+                       "it stays pending and the worker's sweep queues it when Redis is back")
+    return {"job_id": jid, "status": "pending", "count": len(items)}
 
 
 async def _launch_job(
@@ -942,6 +1128,8 @@ async def get_job_skipped(
             "title": r.title,
             "reason": r.reason,
             "reason_label": labels.get(r.reason, r.reason),
+            # left out of «تلاش دوباره» on everything or a bucket (#58)
+            "retryable_in_bulk": r.reason not in skipped_listings.BULK_NEVER,
             "detail": r.detail,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         } for r in rows],
@@ -1023,13 +1211,37 @@ async def cancel_scraping_job(
     # was read above, and a run that finished in between had its ending
     # written over with «cancelled».
     was, pk = job.status, job.id
-    cancelled = (await db.execute(
-        update(ScrapingJob)
-        .where(ScrapingJob.id == pk, ScrapingJob.status.in_(("pending", "running", "paused")))
-        .values(status="cancelled", completed_at=datetime.now())
-        .returning(ScrapingJob.id)
-        .execution_options(synchronize_session=False))).scalar_one_or_none()
+    values: dict = {"status": "cancelled", "completed_at": datetime.now()}
+    cancelled = None
+    # A «تلاش دوباره» (#58): the cancel ends the retry, not the run — it goes
+    # back to the status it had, «تلاش دوباره لغو شد» in front of its old
+    # finish line, so a finished run does not turn into a cancelled one that
+    # offers «ادامه». config.retry comes off here only while no worker has
+    # the row (pending): a running retry is writing its own config, and
+    # takes the key off itself when it sees it was stopped.
+    from app.services import job_retry
+    ended = job_retry.ended(job.config, job_retry.CANCELLED)
+    if ended is not None:
+        values = {"status": ended["status"], "finish_reason": ended["finish_reason"],
+                  "completed_at": datetime.now()}
+        if was == "pending":
+            cancelled = (await db.execute(
+                update(ScrapingJob)
+                .where(ScrapingJob.id == pk, ScrapingJob.status == "pending")
+                .values(**values, config=ended["config"])
+                .returning(ScrapingJob.id)
+                .execution_options(synchronize_session=False))).scalar_one_or_none()
+    if cancelled is None:
+        cancelled = (await db.execute(
+            update(ScrapingJob)
+            .where(ScrapingJob.id == pk, ScrapingJob.status.in_(("pending", "running", "paused")))
+            .values(**values)
+            .returning(ScrapingJob.id)
+            .execution_options(synchronize_session=False))).scalar_one_or_none()
     await db.commit()
+    if cancelled is not None and ended is not None:
+        from app.services import job_log
+        await job_log.record(job_id, job_log.FINISH, ended["finish_reason"], level="warning")
     if cancelled is None:
         now = (await db.execute(
             select(ScrapingJob.status).where(ScrapingJob.id == pk))).scalar_one_or_none() or "—"
@@ -1190,34 +1402,56 @@ async def estimate_matching_posts(
     has_elevator: Optional[bool] = None,
     has_parking: Optional[bool] = None,
     has_storage: Optional[bool] = None,
+    has_balcony: Optional[bool] = None,
     min_price_per_meter: Optional[int] = None,
     max_price_per_meter: Optional[int] = None,
+    posted_date: Optional[str] = None,
+    max_age_hours: Optional[int] = None,
+    divar_filters: Optional[str] = Query(None, max_length=4000),
 ):
     """How many ads Divar has for these filters, before scraping any of them.
 
     The same number Divar prints above its own results. Costs one request,
     where finding out by scraping costs opening every ad in the city.
-    """
-    from app.services import divar_count as dc
 
-    form = dc.build_form_data(
+    Asked with exactly the form a run of these filters would search with
+    (#27): the category's own filters, nothing it lacks. What was left out is
+    said in Persian — `not_applied` does nothing for this category,
+    `applied_after_scrape` is checked by the scraper after opening each ad,
+    and `notes` has one sentence for each.
+    """
+    import json as _json
+    from app.services import divar_count as dc
+    from app.services import divar_filters as df
+
+    extra = None
+    if divar_filters:
+        try:
+            extra = _json.loads(divar_filters)
+        except ValueError:
+            extra = None
+        if not isinstance(extra, dict):
+            raise HTTPException(status_code=422, detail="فیلترهای دیوار خوانده نشد")
+    await df.current()
+    plan = dc.plan_filters(
         category,
         advertiser_type=advertiser_type, has_images=has_images,
         min_price=min_price, max_price=max_price,
         min_deposit=min_deposit, max_deposit=max_deposit,
         min_rent=min_rent, max_rent=max_rent,
         min_area=min_area, max_area=max_area,
-    )
-    count, error = await dc.fetch_post_count(city, form)
-    # Filters Divar will not narrow on are still applied by the scraper after
-    # it opens each ad, so the real yield is at most this number.
-    ignored = dc.unsupported_filters(
         min_rooms=min_rooms, max_rooms=max_rooms,
-        has_elevator=has_elevator, has_parking=has_parking, has_storage=has_storage,
+        has_elevator=has_elevator, has_parking=has_parking,
+        has_storage=has_storage, has_balcony=has_balcony,
         min_price_per_meter=min_price_per_meter, max_price_per_meter=max_price_per_meter,
+        posted_date=posted_date, max_age_hours=max_age_hours,
+        divar_filters=extra,
     )
-    return {"count": count, "error": error, "applied_by_divar": sorted(form),
-            "applied_after_scrape": ignored}
+    count, error = await dc.fetch_post_count(city, plan.form)
+    return {"count": count, "error": error, "applied_by_divar": sorted(plan.form),
+            "applied_after_scrape": plan.after_scrape,
+            "not_applied": plan.not_applied, "notes": plan.notes,
+            "recent_ads": plan.recent_ads}
 
 
 @lookup_router.get("/cities")
@@ -1231,11 +1465,21 @@ async def get_available_cities():
 
 @lookup_router.get("/categories")
 async def get_available_categories():
-    """Get list of available categories for scraping"""
-    return [
-        {"slug": slug, "name": info["name"], "type": info["type"]}
-        for slug, info in CATEGORIES.items()
-    ]
+    """The categories the scraper offers, each with the filters Divar has for
+    it (#27): key, type, Persian title, options and unit, in the order the
+    scrape form shows them. `options` null is a choice whose options are not
+    known yet — the form leaves it out until a live read of Divar fills it.
+    `family` and its Persian `family_name` are what the panel groups its
+    category selects by (#56)."""
+    from app.services import divar_filters as df
+    schema = await df.current()
+    out = []
+    for slug, info in CATEGORIES.items():
+        family = (df.category(slug, schema) or {}).get("family")
+        out.append({"slug": slug, "name": info["name"], "type": info["type"],
+                    "family": family, "family_name": df.family_name(family),
+                    "filters": df.form_filters(slug, schema)})
+    return out
 
 
 from pydantic import BaseModel
@@ -1346,8 +1590,10 @@ async def parse_divar_link(body: DivarLinkRequest):
     can be seen and corrected before anything runs. A link that quietly became
     a running scrape would hide whichever half of it did not carry over.
     """
+    from app.services import divar_filters as df
     from app.services.divar_link import parse_search_url
 
+    await df.current()          # the category's filters, live if Divar was read today
     got = parse_search_url(body.url)
     if got.get("error"):
         raise HTTPException(status_code=422, detail=got["error"])

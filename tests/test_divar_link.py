@@ -69,7 +69,8 @@ class TestEveryRangeDivarWrites:
         assert (f["min_price"], f["max_price"]) == (1000000000, 2000000000)
 
     def test_rent(self):
-        f = self.base("rent=5000000-9000000")
+        """On a rental — buy-apartment has no rent filter at Divar (#27)."""
+        f = parse_search_url("https://divar.ir/s/tehran/rent-apartment?rent=5000000-9000000")["filters"]
         assert (f["min_rent"], f["max_rent"]) == (5000000, 9000000)
 
     def test_area(self):
@@ -104,6 +105,7 @@ class TestItIsTheInverseOfWhatWeSend:
     def test_a_round_trip_survives(self):
         from app.services.divar_count import build_search_query
         sent = build_search_query(
+            "rent-apartment",
             advertiser_type="personal", has_images=True,
             min_price=None, max_price=None,
             min_deposit=790000000, max_deposit=810000000,
@@ -292,3 +294,64 @@ class TestDivarsTrailingComma:
             "https://divar.ir/s/urmia/rent-residential?bbox=44.6%2C37.1%2C45.6%2C37.7&business-type=personal%2C")
         assert "محدودهٔ نقشه" in got["ignored"]
         assert got["filters"]["advertiser_type"] == "personal"
+
+
+class TestEveryKeyTheCategoryHasComesIn:
+    """#27: a link brings every filter its category has, and names the ones
+    the category does not have instead of carrying them into a run that
+    Divar would refuse from the second page on."""
+
+    def get(self, path_qs):
+        return parse_search_url(f"https://divar.ir/s/tehran/{path_qs}")
+
+    def test_the_amenity_switches(self):
+        f = self.get("buy-apartment?elevator=true&parking=true&warehouse=true&balcony=true")["filters"]
+        assert f == {"has_elevator": True, "has_parking": True, "has_storage": True, "has_balcony": True}
+
+    def test_price_per_square(self):
+        f = self.get("buy-apartment?price_per_square=40000000-90000000")["filters"]
+        assert (f["min_price_per_meter"], f["max_price_per_meter"]) == (40000000, 90000000)
+
+    def test_rooms_in_divars_words(self):
+        f = self.get("buy-apartment?rooms=%D8%AF%D9%88%2C%D8%B3%D9%87%2C")["filters"]  # دو,سه,
+        assert (f["min_rooms"], f["max_rooms"]) == (2, 3)
+
+    def test_rooms_up_to_bistar_have_no_top(self):
+        f = self.get("buy-apartment?rooms=%DA%86%D9%87%D8%A7%D8%B1,%D8%A8%DB%8C%D8%B4%D8%AA%D8%B1")["filters"]  # چهار,بیشتر
+        assert f["min_rooms"] == 4 and "max_rooms" not in f
+
+    def test_the_rest_under_divars_own_names(self):
+        got = self.get("buy-apartment?building-age=-5&floor=3-&deed_type=single_page%2C"
+                       "&building_direction=north,south&toilet=seat&rebuilt=true"
+                       "&has-video=true&recent_ads=3d")
+        assert got["filters"]["divar_filters"] == {
+            "building-age": {"max": 5}, "floor": {"min": 3}, "deed_type": ["single_page"],
+            "building_direction": ["north", "south"], "toilet": "seat", "rebuilt": True,
+            "has-video": True, "recent_ads": "3d"}
+        assert got["ignored"] == []
+
+    def test_short_term(self):
+        got = self.get("rent-temporary?daily_rent=-2000000&person_capacity=4-")
+        assert got["filters"]["divar_filters"] == {"daily_rent": {"max": 2000000},
+                                                   "person_capacity": {"min": 4}}
+
+    def test_a_key_the_category_lacks_is_named_not_carried(self):
+        got = self.get("buy-apartment?credit=1-5&rent=1-2&price=1-9")
+        assert "min_deposit" not in got["filters"] and "min_rent" not in got["filters"]
+        assert got["filters"]["min_price"] == 1
+        assert "ودیعه (دستهٔ «خرید آپارتمان» این فیلتر را ندارد)" in got["ignored"]
+
+    def test_an_option_divar_does_not_have_is_named(self):
+        got = self.get("buy-apartment?deed_type=single_page,gold")
+        assert got["filters"]["divar_filters"] == {"deed_type": ["single_page"]}
+        assert any("نوع سند" in x for x in got["ignored"])
+
+    def test_what_it_reads_the_plan_sends_back(self):
+        """Link → form → plan: the same keys go back to Divar."""
+        from app.services.divar_count import build_search_query
+        link = ("buy-apartment?building-age=-5&elevator=true&price=1000-9000"
+                "&rooms=%D8%AF%D9%88&deed_type=single_page")
+        f = self.get(link)["filters"]
+        q = build_search_query("buy-apartment", **f)
+        assert set(p.split("=")[0] for p in q.split("&")) == {
+            "building-age", "elevator", "price", "rooms", "deed_type"}

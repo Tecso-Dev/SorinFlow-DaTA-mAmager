@@ -1,9 +1,10 @@
 """
 SorinFlow Divar Scraper - Pydantic Schemas
 """
+import json
 import re
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from datetime import datetime
 
 # /crm/upload-image names every file uuid4().hex + ".jpg" — 32 lowercase hex
@@ -166,6 +167,22 @@ class ScrapingJobCreate(BaseModel):
     # Switch to the next saved Divar account every N listings (0 = never,
     # None = use the server default)
     rotate_every: Optional[int] = None
+    # Divar's other filters for the category, by Divar's own key (#27):
+    # {"building-age": {"max": 5}, "deed_type": ["single_page"], "rebuilt": true}.
+    # Checked against the category's schema when the run is planned
+    # (divar_count.plan_filters); one the category does not have is not sent.
+    divar_filters: Optional[Dict[str, Any]] = None
+
+    @field_validator("divar_filters")
+    @classmethod
+    def _small_divar_filters(cls, v):
+        if v is None:
+            return v
+        if len(v) > 40 or any(len(str(k)) > 60 for k in v):
+            raise ValueError("too many Divar filters")
+        if len(json.dumps(v, ensure_ascii=False, default=str)) > 4000:
+            raise ValueError("Divar filters too large")
+        return v
 
 
 class ScrapingJobResponse(BaseModel):

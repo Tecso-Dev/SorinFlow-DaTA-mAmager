@@ -36,10 +36,13 @@ class TestTheDropIsNamed:
         assert "self._last_category_drop" in DETAIL
 
     def test_it_names_what_divar_called_the_ad(self):
-        """The breadcrumb leaf is Divar's own word for the category, which is
-        the thing the reader needs in order to judge the drop."""
+        """The crumb that placed the ad is Divar's own word for the category,
+        which is the thing the reader needs in order to judge the drop
+        (#57: the crumb that names a category, not whatever came last —
+        tests/test_divar_categories.py checks the words on a real page)."""
         i = DETAIL.index("self._last_category_drop")
-        assert "leaf" in DETAIL[i:i + 200]
+        assert "divar_categories.place(all_crumbs)[1]" in DETAIL[i - 400:i]
+        assert "named" in DETAIL[i:i + 200]
         assert "source_title or decoded_url" in DETAIL[i:i + 200]
 
     def test_it_is_recorded_before_the_listing_is_abandoned(self):

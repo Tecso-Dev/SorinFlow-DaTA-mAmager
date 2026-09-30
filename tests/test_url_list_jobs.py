@@ -142,35 +142,40 @@ class TestThePanel:
         assert "ملک با موفقیت اسکرپ شد" not in block
 
     def test_the_bulk_button_exists(self):
-        assert "rescrapeAllSkipped()" in APP_JS
-        assert "بازاسکرپ همه" in APP_JS
+        assert "retryAllSkipped()" in APP_JS
+        assert "تلاش دوباره (${rescrapeCandidates().length})" in APP_JS
 
-    def test_it_sends_what_is_shown(self):
-        i = APP_JS.index("async function rescrapeAllSkipped()")
+    def test_it_retries_what_is_shown_inside_the_run(self):
+        """#58: the bucket on screen, or everything, in the same run — not a
+        /rescrape job (tests/js/skipped_panel.mjs runs it)."""
+        i = APP_JS.index("async function retryAllSkipped()")
         block = APP_JS[i:i + 1800]
-        assert "visibleSkipped()" in block and "'/scraper/rescrape'" in block
+        assert "rescrapeCandidates()" in block and "_skippedFilter" in block
+        assert "'/scraper/rescrape'" not in block
 
     def test_the_button_counts_exactly_what_is_on_screen(self):
-        """«همه» over eight rows says (8): the number is the list, filter or
-        not. Chat-only rows are not quietly dropped — that verdict has been
-        wrong before."""
+        """The number is the list on screen, filter or not — less the rows a
+        retry cannot change, which the server marks (retryable_in_bulk, #58
+        review) rather than the panel naming reasons. Each still has its own
+        button (tests/js/skipped_panel.mjs)."""
         i = APP_JS.index("function rescrapeCandidates()")
-        body = APP_JS[i:APP_JS.index("}", i)]
-        assert "return visibleSkipped();" in body
+        body = APP_JS[i:APP_JS.index("\n}", i)]
+        assert "visibleSkipped()" in body and "retryable_in_bulk !== false" in body
         assert "chat_only" not in body
 
     def test_the_button_s_number_and_the_action_read_the_same_set(self):
         """«(8)» over a list of four was the two being computed separately."""
-        assert "بازاسکرپ همه (${rescrapeCandidates().length})" in APP_JS
-        i = APP_JS.index("async function rescrapeAllSkipped()")
-        assert "rescrapeCandidates().map(r => r.url)" in APP_JS[i:i + 400]
-        assert "_skippedRows.length" not in APP_JS[APP_JS.index("بازاسکرپ همه ("):][:200]
+        assert "تلاش دوباره (${rescrapeCandidates().length})" in APP_JS
+        i = APP_JS.index("async function retryAllSkipped()")
+        assert "rescrapeCandidates().length" in APP_JS[i:i + 400]
+        assert "_skippedRows.length" not in APP_JS[APP_JS.index("تلاش دوباره (${"):][:200]
 
     def test_an_empty_set_disables_the_button(self):
-        i = APP_JS.index("بازاسکرپ همه (")
+        i = APP_JS.index("تلاش دوباره (${")
         assert "rescrapeCandidates().length ? '' : 'disabled'" in APP_JS[i - 400:i]
 
     def test_it_asks_first_and_says_the_cost(self):
-        i = APP_JS.index("async function rescrapeAllSkipped()")
+        i = APP_JS.index("async function retryAllSkipped()")
         block = APP_JS[i:i + 1800]
-        assert "askConfirm(" in block and "افشا خرج می‌شود" in block
+        assert "askConfirm(" in block and "افشای شماره خرج شود" in block
+        assert "تسک تازه‌ای باز نمی‌شود" in block

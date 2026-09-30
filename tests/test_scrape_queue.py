@@ -164,7 +164,9 @@ class TestNothingIsLostOnTheWay:
         """By name now: a field added to the form but not to the run fails
         here, not as a TypeError in a worker at 08:00."""
         params = set(RUN_SIGNATURE.parameters)
-        assert set(ScrapingJobCreate.model_fields) | {"job_id", "db_url", "owner_user_id"} == params
+        # `retry` is the queue's, not the form's: «تلاش دوباره» on the same row (#58).
+        assert set(ScrapingJobCreate.model_fields) | {"job_id", "db_url", "owner_user_id",
+                                                      "retry"} == params
 
     @pytest.mark.parametrize("cfg,owner", [
         (dict(city="urmia", category="rent-apartment", max_items=40, download_images=False,
@@ -173,7 +175,8 @@ class TestNothingIsLostOnTheWay:
               min_price_per_meter=10, max_price_per_meter=20, min_area=60, max_area=120,
               min_rooms=1, max_rooms=3, has_images=True, has_elevator=False, has_parking=True,
               has_storage=None, has_balcony=True, advertiser_type="personal",
-              max_age_hours=24, rotate_every=25), 7),
+              max_age_hours=24, rotate_every=25,
+              divar_filters={"building-age": {"max": 5}, "rebuilt": True}), 7),
         (dict(city="—", category="بازاسکرپ", download_images=True, posted_date="2026-09-20",
               urls=["https://divar.ir/v/a/AbCd1234", "not a listing", "https://divar.ir/v/b/EfGh5678"],
               max_items=2), None),
@@ -191,6 +194,8 @@ class TestNothingIsLostOnTheWay:
         # _launch_job cleaned the URL list on the object itself, before the
         # old call read it — the expectation reads it after, the same way
         expected = _old_call(resp.job_id, job_config, owner)
+        # and what the old call never had: Divar's other filters (#27)
+        expected["divar_filters"] = job_config.divar_filters
         consumer = asyncio.create_task(sq.consume())
         await _until(lambda: runs)
         consumer.cancel()

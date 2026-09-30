@@ -25,6 +25,7 @@ from app.models.proxy import Proxy
 from app.scraper.stealth import (StealthConfig, open_browser, apply_device, Device,
                                  close_context, context_alive)
 from app.scraper.auth import DivarAuth
+from app.scraper import divar_categories
 from app.scraper.contact_extractor import ContactExtractor
 from app.services import skipped_listings
 
@@ -219,58 +220,6 @@ class DivarScraper:
     # always had, and the one a pool topped up mid-run stops at too (#30).
     POOL_CEILING = 1500
 
-    # Maps our category slug → substrings expected in the Divar detail-page URL.
-    # Divar builds URLs from the listing *title*, not the category name, so we
-    # use property-type nouns (آپارتمان، خانه …) rather than action-prefix combos
-    # (خرید-خانه) which almost never appear in real listing URLs.
-    CATEGORY_URL_PATTERNS: Dict[str, List[str]] = {
-        # Apartment: title may use آپارتمان, واحد (unit), or مسکن (housing)
-        # e.g. اجاره-واحد-۱۲۵-متر / واحد-۱۱۰-متری / اجاره-مسکن / اجاره-تک-واحدی
-        #
-        # …or none of those. «۸۵ متری، ۲ خوابه، طبقه سوم» is an ordinary way to
-        # title an apartment and names no property type at all, so the list
-        # above rejected it. These candidates arrive from a search Divar itself
-        # filtered by category, so the check here is only a guard against the
-        # promoted and related ads Divar injects into a result page — and a job
-        # ad or a plot of land does not advertise «۲ خوابه». The residential
-        # lists below have trusted exactly these signals for the same reason;
-        # the apartment lists were simply never given them.
-        'rent-apartment': ['اجاره-آپارتمان', 'اجاره-اپارتمان', 'کرایه-آپارتمان',
-                           'آپارتمان', 'اپارتمان', 'واحد', 'اجاره-مسکن',
-                           'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
-        'buy-apartment':  ['آپارتمان', 'اپارتمان', 'واحد',
-                           'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
-
-        # Residential (broad): title is the property type alone — no buy/rent prefix
-        # Strong residential signals (سرویس/سویس/خوابه/طبقه/نوساز) accept units
-        # whose title omits the property type, while land/گاردن listings — which
-        # never carry these — still fall through and get dropped.
-        'rent-residential': ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'اجاره-مسکن', 'ساختمان', 'دوبلکس', 'منزل', 'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
-        'buy-residential':  ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'کلنگی', 'ساختمان', 'دوبلکس', 'منزل', 'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
-
-        # Villa
-        'rent-villa': ['ویلا', 'باغ-ویلا'],
-        'buy-villa':  ['ویلا', 'باغ-ویلا'],
-
-        # Old house
-        'buy-old-house': ['کلنگی', 'خانه-کلنگی'],
-
-        # Commercial
-        'rent-commercial-property': ['اجاره-اداری', 'اجاره-تجاری', 'مغازه', 'اداری', 'تجاری'],
-        'rent-office':  ['دفتر', 'اداری'],
-        'rent-store':   ['مغازه', 'فروشگاه'],
-        'buy-commercial-property':  ['مغازه', 'اداری', 'تجاری'],
-        'buy-office':   ['دفتر', 'اداری'],
-        'buy-store':    ['مغازه', 'فروشگاه'],
-
-        # Industrial / Agricultural
-        'buy-industrial-agricultural-property':  ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین', 'سوله', 'انبار', 'باغ', 'مزرعه'],
-        'rent-industrial-agricultural-property': ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین', 'سوله', 'انبار', 'باغ', 'مزرعه'],
-
-        # Temporary rental
-        'rent-temporary': ['اجاره-کوتاه', 'اجاره-روزانه', 'اجاره-موقت', 'روزانه', 'کوتاه-مدت', 'سوئیت', 'اقامتگاه', 'بوم-گردی'],
-    }
-    
     def __init__(
         self,
         db_session: AsyncSession,
@@ -343,7 +292,7 @@ class DivarScraper:
         # an event, and reading it off self.current_job means an ORM attribute
         # access — which, on a row expired by an earlier commit, is a lazy
         # refresh in the middle of tearing a browser down.
-        self._job_id_str = None
+        self._job_id_str: Optional[str] = None
         # The run's filters, in the shape a divar.ir URL wants. Set when a job
         # starts; the collector appends them so Divar narrows the feed itself
         # instead of us reading an unfiltered one and discarding most of it.
@@ -2426,29 +2375,6 @@ class DivarScraper:
                 return f"advertiser_type {actual_type} != {adv}"
         return None
 
-    @staticmethod
-    def _category_matches(text: str, patterns) -> bool:
-        """Does this text carry one of the category's words?
-
-        Divar writes the same phrase two ways — «اجاره-آپارتمان» in a URL slug
-        and «اجاره آپارتمان» in a title — and the pattern lists were written
-        for slugs. So «اجاره-مسکن» could never match a real ad titled «اجاره
-        مسکن مهر کوثر»: the hyphen was doing the rejecting, not the words.
-        Both sides collapse to single spaces before comparing — and to one
-        spelling: Divar writes «کوتاه‌مدت» with a zero-width non-joiner where the
-        list has a space, and Arabic «ي» and «ك» turn up in titles.
-        """
-        if not text:
-            return False
-
-        def flatten(t: str) -> str:
-            t = (t.replace("-", " ").replace("_", " ").replace("\u200c", " ")
-                 .replace("ي", "ی").replace("ك", "ک"))
-            return " ".join(t.split())
-
-        flat = flatten(text)
-        return any(flatten(p) in flat for p in patterns)
-
     # What an ad's own words look like when it is real estate. Used twice: as
     # a hint on the URL, and as the verdict on Divar's breadcrumb.
     REAL_ESTATE_URL_KEYWORDS = [
@@ -2472,12 +2398,11 @@ class DivarScraper:
     ) -> Optional[Dict[str, Any]]:
         """Scrape detailed information from a property page.
 
-        target_category: if provided, the final URL (or the search-result title)
-        must match the expected patterns for that category (prevents off-category
-        listings from being saved).
-        source_title: the listing title captured from the category-filtered
-        search results, used as a fallback category signal when Divar serves a
-        bare /v/<token> URL with no descriptive slug.
+        target_category: the category the run searched. Divar's own breadcrumb
+        on the page is the only thing that can say the listing is elsewhere
+        (app/scraper/divar_categories.py), and then it returns False.
+        source_title: the listing title captured from the search results, for
+        the log line of a listing left out.
         """
         self._last_detail_error = None
         try:
@@ -2507,57 +2432,20 @@ class DivarScraper:
             from urllib.parse import unquote
             decoded_url = unquote(actual_url)
 
-            # ── Category-specific URL check (tight) ──────────────────────────
-            category_unconfirmed = False
+            # ── The run's category: Divar's own breadcrumb decides, below ──
+            #
+            # The run searched Divar with this category's token, so Divar has
+            # already filed the listing there. Words of ours in its URL, its
+            # title or the tab's title («کلنگی», «دفتر», «صنعتی») used to decide
+            # whether to believe that, and every word a list lacked — a plot
+            # titled «زمین ۲۰۰ متری», a workshop, a short-term villa — sent the
+            # listing to a keyword test of its breadcrumb's last crumb, which a
+            # neighbourhood or Divar's short menu name failed too (#57). Only
+            # the breadcrumb, read as a place in Divar's tree, can say it is
+            # elsewhere; nothing is asked of the URL or the title any more.
+            category_known = divar_categories.known(target_category)
             kind_unconfirmed = False
-            patterns = self.CATEGORY_URL_PATTERNS.get(target_category or "", ())
-            # When a target category is known, we require the redirected URL to
-            # contain at least one of the expected substrings for that category.
-            # This blocks job ads, factory listings, etc. that share keywords
-            # with real-estate (e.g. "دفتری" matching "دفتر").
-            if patterns:
-                # Listing URLs are built as bare /v/<token>; Divar only adds a
-                # descriptive slug for some of them on redirect, so the URL alone
-                # carries no category signal for the rest. Fall back to the title
-                # from the (already category-filtered) search result so bare-token
-                # listings aren't all dropped — reject only when NEITHER matches.
-                haystack = f"{decoded_url} {source_title or ''}"
-                page_title = ""
-                if not self._category_matches(haystack, patterns):
-                    # Neither the URL nor the search-result title says what this
-                    # is — which is not the same as saying it is the wrong
-                    # thing. Divar's own page title does say («اجاره آپارتمان ۸۵
-                    # متری در …»), and we are already standing on the page, so
-                    # ask it before throwing the listing away. Only asked when
-                    # the cheap signals came up empty, so the common case pays
-                    # nothing for it.
-                    try:
-                        page_title = (await self.page.title()) or ""
-                    except Exception as e:
-                        logger.debug(f"could not read the page title: {e}")
-                    haystack = f"{haystack} {page_title}"
-                if not self._category_matches(haystack, patterns):
-                    # Nothing here says what this is — and that is not the same
-                    # as saying it is the wrong thing.
-                    #
-                    # Dropping on it cost one run seventeen listings, and the
-                    # panel's own list of them showed all seventeen were real
-                    # Urmia apartment rentals: «گلشهر ۲ تمام رهن», «اجاره رهن
-                    # ۱۴۵متر», «۲۰۰ متر بر دانشکده». None names a property type
-                    # because ads written by people often do not, and the page
-                    # title was «سایت دیوار» because React had not replaced it
-                    # yet at domcontentloaded.
-                    #
-                    # Divar's own breadcrumb does say, authoritatively, and the
-                    # parse below already reads it. So do not decide here on an
-                    # absence — carry the doubt to where the answer is.
-                    logger.info(
-                        f"Category unconfirmed for '{target_category}' "
-                        f"(URL: {decoded_url}, title: {source_title!r}, "
-                        f"page title: {page_title!r}) — deferring to the breadcrumb"
-                    )
-                    category_unconfirmed = True
-            else:
+            if not category_known:
                 # Fallback broad check when no category is known — «اسکرپ تکی»
                 # and «بازاسکرپ», where the caller names the URL and there is
                 # no search category to match against.
@@ -2751,21 +2639,35 @@ class DivarScraper:
             # category; stripping its leading transaction word gives the property
             # type, and the transaction word itself is the authoritative
             # buy/rent signal.
+            all_crumbs: List[str] = []
+            where: Optional[str] = None
             try:
                 import re as _re
-                crumbs = [a.get_text(strip=True) for a in soup.select('a.kt-breadcrumbs__action')]
-                crumbs = [c for c in crumbs if c and c != 'املاک']
+                all_crumbs = [a.get_text(strip=True) for a in soup.select('a.kt-breadcrumbs__action')]
+                all_crumbs = [c for c in all_crumbs if c]
+                # Where Divar filed it: the deepest crumb that names one of its
+                # categories. The crumbs after it (a neighbourhood, a finer
+                # sub-category) and before it (the city) are not categories.
+                where, said = divar_categories.place(all_crumbs)
+                crumbs = [c for c in all_crumbs if c != 'املاک']
                 if crumbs:
-                    leaf = crumbs[-1]
+                    leaf = said if where not in (None, divar_categories.ROOT) else crumbs[-1]
                     property_data.setdefault('category_name', leaf)
                     ptype = _re.sub(r'^(پیش[‌ ]?فروش|فروش|اجارهٔ|اجاره|رهن|خرید)\s+', '', leaf).strip()
                     if ptype and ptype != leaf:
                         property_data.setdefault('property_type', ptype)
-                    joined = ' '.join(crumbs)
-                    if 'اجاره' in joined or 'رهن' in joined:
-                        property_data['listing_type'] = 'rent'
-                    elif 'فروش' in joined or 'خرید' in joined:
-                        property_data['listing_type'] = 'buy'
+                    kind = divar_categories.listing_type(where)
+                    if kind is None:
+                        # A breadcrumb we cannot place: its own words, as
+                        # before — the crumbs after «املاک», not the city's.
+                        after = all_crumbs[all_crumbs.index('املاک') + 1:] if 'املاک' in all_crumbs else crumbs
+                        joined = ' '.join(after)
+                        if 'اجاره' in joined or 'رهن' in joined:
+                            kind = 'rent'
+                        elif 'فروش' in joined or 'خرید' in joined:
+                            kind = 'buy'
+                    if kind:
+                        property_data['listing_type'] = kind
             except Exception:
                 pass
 
@@ -2794,21 +2696,19 @@ class DivarScraper:
                     f"No breadcrumb for {property_data.get('divar_id')} — keeping it; "
                     f"the caller named this URL")
 
-            if category_unconfirmed:
-                leaf = property_data.get("category_name") or ""
-                if leaf and not self._category_matches(leaf, patterns):
+            if category_known:
+                keep, where, why = divar_categories.judge(all_crumbs, target_category)
+                if not keep:
+                    # In Divar's own words: the crumb that placed it, or the
+                    # end of a breadcrumb that is not real estate at all.
+                    named = (divar_categories.place(all_crumbs)[1]
+                             or " › ".join(all_crumbs[-2:]))
                     logger.info(
-                        f"Skipping off-category listing for '{target_category}' "
-                        f"— Divar's breadcrumb says {leaf!r}")
-                    self._last_category_drop = f"{leaf} — {source_title or decoded_url}"[:80]
+                        f"Skipping off-category listing for '{target_category}' — {why} "
+                        f"(breadcrumb: {' › '.join(all_crumbs)!r})")
+                    self._last_category_drop = f"{named} — {source_title or decoded_url}"[:80]
                     return False  # sentinel: category skip — not a scrape error
-                # No breadcrumb either. Keep it: this listing came out of a
-                # search Divar itself filtered by category, and that is better
-                # evidence than a word we could not find.
-                if not leaf:
-                    logger.info(
-                        f"No breadcrumb for {property_data.get('divar_id')} — keeping it; "
-                        f"Divar's own category filter is the better evidence")
+                logger.info(f"{property_data.get('divar_id')}: {why}")
 
             # Infer listing_type (buy/rent) from the parsed price fields when the
             # breadcrumb didn't supply it (e.g. job category missing).
@@ -4608,11 +4508,6 @@ class DivarScraper:
             logger.error(f"Failed to check property existence: {e}")
             return False
 
-    # At most this many numberless listings are retried per run, on top of
-    # the run's own candidates: each one costs a reveal, and reveals are what
-    # bring Divar's code prompts. A run asked for fewer takes fewer.
-    PHONE_RETRIES_PER_RUN = 20
-
     @staticmethod
     def _set_counts(job, **counts) -> None:
         """Write the run's counters on its row. The one place the models'
@@ -4620,42 +4515,6 @@ class DivarScraper:
         that moves a counter."""
         for name, value in counts.items():
             setattr(job, name, value)
-
-    async def _with_phone_retries(self, job, pool: List[Dict[str, Any]],
-                                  max_items: Optional[int]):
-        """The pool with the numberless listings owed a retry put first.
-
-        Owed: saved without a number by an earlier run of this city and
-        category started by the same person — the account budget spent on
-        them is that person's — while still stored and still numberless
-        (skipped_listings.awaiting_phone). Returns (pool, their ids). Never
-        raises: a retry that cannot be looked up must not cost the run.
-        """
-        try:
-            cap = min(self.PHONE_RETRIES_PER_RUN, max_items) if max_items else self.PHONE_RETRIES_PER_RUN
-            owed = await skipped_listings.awaiting_phone(
-                self.db_session, city_id=job.city_id, category_id=job.category_id,
-                owner_user_id=(job.config or {}).get("owner_user_id"), limit=cap)
-        except Exception as e:
-            logger.warning(f"[retry] numberless listings not looked up: {e}")
-            try:
-                await self.db_session.rollback()
-            except Exception:
-                pass
-            return pool, set()
-        if not owed:
-            return pool, set()
-        ids = {o["divar_id"] for o in owed}
-        first = [{"divar_id": o["divar_id"], "title": o.get("title"),
-                  "url": o.get("url") or f"https://divar.ir/v/{o['divar_id']}"} for o in owed]
-        logger.info(f"[retry] {len(first)} listing(s) saved without a number earlier — trying them first")
-        from app.services import job_log
-        await job_log.record(
-            job.job_id, job_log.PAGE,
-            f"{len(first)} آگهیِ بدون شماره از اجراهای قبلیِ همین شهر و دسته دوباره "
-            "برای شماره امتحان می‌شود — اول از همه، و بدون فیلترهای این اجرا",
-            retries=len(first))
-        return first + [lst for lst in pool if lst["divar_id"] not in ids], ids
 
     async def save_property(self, property_data: Dict[str, Any]) -> Optional[Property]:
         """Save property to database, surviving a dropped connection.
@@ -4854,6 +4713,7 @@ class DivarScraper:
         posted_date: Optional[str] = None,
         rotate_every: Optional[int] = None,
         urls: Optional[List[str]] = None,
+        divar_filters: Optional[Dict[str, Any]] = None,
     ) -> ScrapingJob:
         """Start a complete scraping job for a city and category.
 
@@ -4950,8 +4810,24 @@ class DivarScraper:
                 'has_parking': has_parking, 'has_storage': has_storage,
                 'has_balcony': has_balcony, 'advertiser_type': advertiser_type,
                 'max_age_hours': max_age_hours, 'posted_date': posted_date,
+                'divar_filters': divar_filters or None,
             }.items() if v is not None}
             logger.info(f"Starting scraping job for {city}/{category} | filters={active_filters}")
+            # Every filter as the form holds it, for plan_filters (#27).
+            _filter_kw: Dict[str, Any] = dict(
+                advertiser_type=advertiser_type, has_images=has_images,
+                min_price=min_price, max_price=max_price,
+                min_deposit=min_deposit, max_deposit=max_deposit,
+                min_rent=min_rent, max_rent=max_rent,
+                min_price_per_meter=min_price_per_meter, max_price_per_meter=max_price_per_meter,
+                min_area=min_area, max_area=max_area,
+                min_rooms=min_rooms, max_rooms=max_rooms,
+                has_elevator=has_elevator, has_parking=has_parking,
+                has_storage=has_storage, has_balcony=has_balcony,
+                posted_date=posted_date, max_age_hours=max_age_hours,
+                divar_filters=divar_filters,
+            )
+            _plan = None
 
             # ── Collect listings ────────────────────────────────────────────────
             # max_items is the number of *kept* (post-filter) listings the user
@@ -4979,40 +4855,43 @@ class DivarScraper:
                 # more was the wait, not the safety.
                 collect_target = min(max(max_items * 2 + 24, 60), 1500)
 
-            # Hand Divar the filters it can apply itself, before the feed is
-            # loaded. Everything it will not narrow on (rooms, amenities) is
-            # still checked per listing after the ad is opened.
+            # Hand Divar every filter the category has, before the feed is
+            # loaded — and nothing it does not: one filter too many and Divar
+            # refuses the search from its second page on (#27). The category's
+            # form comes from Divar itself (app/services/divar_filters.py);
+            # what it leaves out is said in the log and checked per listing
+            # after the ad is opened.
             try:
-                from app.services.divar_count import build_search_query
-                self._search_query = build_search_query(
-                    advertiser_type=advertiser_type, has_images=has_images,
-                    min_price=min_price, max_price=max_price,
-                    min_deposit=min_deposit, max_deposit=max_deposit,
-                    min_rent=min_rent, max_rent=max_rent,
-                    min_area=min_area, max_area=max_area,
-                )
+                from app.services import divar_count as _dc
+                from app.services import divar_filters as _df
+                await _df.current()
+                _plan = _dc.plan_filters(category, **_filter_kw)
+                self._search_query = _plan.query
                 # The same filters in the shape the search API takes, for the
                 # collection that no longer needs a browser.
-                from app.services.divar_count import build_form_data as _bfd
-                self._search_form = _bfd(
-                    category,
-                    advertiser_type=advertiser_type, has_images=has_images,
-                    min_price=min_price, max_price=max_price,
-                    min_deposit=min_deposit, max_deposit=max_deposit,
-                    min_rent=min_rent, max_rent=max_rent,
-                    min_area=min_area, max_area=max_area,
-                )
-                if self._search_query:
+                self._search_form = _plan.form
+                # An explicit list searches nothing, so there is nothing to say.
+                if not urls and self._search_query:
                     logger.info(f"[collect] Divar-side filters: {self._search_query}")
                     await job_log.record(
                         job.job_id, job_log.PAGE,
                         f"فیلترها به خود دیوار داده شد: {self._search_query}",
                         query=self._search_query)
+                if not urls and _plan.recent_ads and posted_date:
+                    await job_log.record(
+                        job.job_id, job_log.PAGE,
+                        f"تاریخ انتشار به دیوار به‌صورت «آگهی‌های اخیر: {_plan.recent_ads}» "
+                        "داده شد تا فهرست کوتاه‌تر شود؛ روز دقیق را اسکرپر خودش بررسی می‌کند",
+                        recent_ads=_plan.recent_ads)
+                for _note in ([] if urls else _plan.notes):
+                    logger.info(f"[collect] filter not sent: {_note}")
+                    await job_log.record(job.job_id, job_log.PAGE, _note, level="warning")
             except Exception as e:
                 # A filter we cannot express is not a reason to abandon the run;
                 # it just means the local pass does more work, as before.
                 logger.warning(f"[collect] could not build the Divar query: {e}")
                 self._search_query = ""
+                _plan = None
 
             if urls:
                 # An explicit list: no search, no collection, no count. The
@@ -5128,14 +5007,9 @@ class DivarScraper:
                 if urls:
                     raise StopAsyncIteration   # caught below: nothing to ask
                 from app.services import divar_count as dc
-                _form = dc.build_form_data(
-                    category,
-                    advertiser_type=advertiser_type, has_images=has_images,
-                    min_price=min_price, max_price=max_price,
-                    min_deposit=min_deposit, max_deposit=max_deposit,
-                    min_rent=min_rent, max_rent=max_rent,
-                    min_area=min_area, max_area=max_area,
-                )
+                # The very form the collection searched with, so the two
+                # numbers answer the same question.
+                _form = _plan.form if _plan is not None else dc.build_form_data(category, **_filter_kw)
                 _divar_total, _count_err = await dc.fetch_post_count(city, _form)
                 if _divar_total is not None:
                     job.divar_count = int(_divar_total)
@@ -5155,21 +5029,11 @@ class DivarScraper:
                 # Advisory. It must never cost a run.
                 logger.warning(f"[count] could not ask Divar for its total: {e}")
 
-            # Listings earlier runs of this city and category saved without a
-            # phone number. Their skipped rows promise that the next run tries
-            # again, and that was only ever true when Divar's feed happened to
-            # hand the same listing over again — never, for a daily run of
-            # another day (#32). They go first, so a run that meets its target
-            # early still reaches them, and no filter of this run drops them
-            # (see _skip below): the run that saved them already judged them.
-            retry_ids: set = set()
-            if not urls:
-                all_listings, retry_ids = await self._with_phone_retries(
-                    job, all_listings, max_items)
-                # Already in the pool: a top-up page that brings one of them
-                # again must not add it twice — a second reveal on the owner's
-                # number, and a second «بدون شماره» row off its three tries.
-                seen_ids |= retry_ids
+            # The pool is Divar's list for these filters and nothing else
+            # (#57). Numberless listings an earlier run left used to go in
+            # first; their retry belongs to the run that left them now,
+            # inside it («تلاش دوباره», #58), so its counters and its list
+            # are the ones that change.
 
             # «کل» is this run's own pool: what the loop walks (#29).
             #
@@ -5228,6 +5092,15 @@ class DivarScraper:
                 'has_images': has_images,
                 'target_day': target_day, 'max_age_hours': max_age_hours,
             }
+            # What Divar already filtered is not checked again, and neither is
+            # a filter that means nothing for this category (a deposit on a
+            # sale). A filter Divar does not have for it stays here — the
+            # safety net for what Divar lets through. Not for an explicit
+            # list: nothing was searched, so Divar filtered nothing.
+            if _plan is not None and not urls:
+                for _name in _plan.local_off:
+                    if _name in _pre_filters:
+                        _pre_filters[_name] = None
             
             # Scrape each property detail
             examined = 0
@@ -5237,8 +5110,6 @@ class DivarScraper:
             # its log, its finish line and its table column each called that
             # one number something different (#32).
             duplicates = 0
-            # Numberless listings owed a retry that got their number this time.
-            recovered = 0
             # Read once: after a rollback `job` is expired, and reading an
             # expired attribute is a lazy load outside the greenlet.
             _job_uuid = job.job_id
@@ -5266,10 +5137,6 @@ class DivarScraper:
                     # go?».
                     examined += 1
                     _counted = True
-                    # A numberless listing an earlier run saved (see
-                    # _with_phone_retries): no filter of this run applies.
-                    _retry = listing['divar_id'] in retry_ids
-
                     # The last candidate, and the target still unmet: page on
                     # into Divar's search now, so the walk carries on into
                     # what comes next instead of ending «آگهی بیشتری پیدا نشد»
@@ -5329,7 +5196,7 @@ class DivarScraper:
                     detail = await self.scrape_property_detail(
                         listing['url'], target_category=category,
                         source_title=listing.get('title'),
-                        wants_contact=None if _retry else lambda pd: self.pre_contact_skip(
+                        wants_contact=lambda pd: self.pre_contact_skip(
                             pd, _listing_type, _pre_filters),
                     )
                     # A cancel that landed while the ad was open — as often as
@@ -5366,13 +5233,6 @@ class DivarScraper:
                         _why: Dict[str, str] = {}
 
                         def _skip(reason: str) -> bool:
-                            if _retry:  # noqa: B023 — called in this same iteration
-                                # Owed a number by an earlier run, which kept
-                                # it under its own filters. A daily run's date
-                                # filter would otherwise drop yesterday's
-                                # listing every time, before the reveal.
-                                logger.info(f"{did}: {reason} — not applied to a phone retry")  # noqa: B023
-                                return False
                             logger.info(f"Skipping {did}: {reason}")
                             bucket = reason.split()[0] if reason else "other"
                             skip_tally[bucket] = skip_tally.get(bucket, 0) + 1
@@ -5512,14 +5372,10 @@ class DivarScraper:
                             # got a number from every listing that had one —
                             # report nineteen failures.
                             _ch = property_data.get("contact_channel")
-                            # What happens to it next, said as it is (#32). A
-                            # search run's numberless listings are owed a retry
-                            # by the next run of its city and category
-                            # (_with_phone_retries); an explicit list has
-                            # neither, so nothing picks it up by itself.
-                            _next = (f"اجرای بعدیِ همین کاربر در همین شهر و دسته دوباره "
-                                     f"امتحانش می‌کند (تا {skipped_listings.PHONE_ATTEMPTS} بار)"
-                                     if not urls else "با «بازاسکرپ» دوباره امتحانش کنید")
+                            # What happens to it next, said as it is (#32):
+                            # «تلاش دوباره» in this run's own list opens it
+                            # again inside this run (#58).
+                            _next = skipped_listings.RETRY_HINT
                             if _ch == "needs_identity":
                                 # Ours, not the poster's, and temporary: the
                                 # listing is retried once the account is
@@ -5565,8 +5421,6 @@ class DivarScraper:
                             # new against 28 rows actually created; job 102,
                             # 50 against 43.
                             job.updated_items += 1
-                            if _retry:
-                                recovered += 1
                         else:
                             # save_property rolled back the shared session, which
                             # expires `job`. Refreshing re-reads it so the counter
@@ -5856,12 +5710,6 @@ class DivarScraper:
                     f"{duplicates} آگهی تکراری بود — از قبل با شماره در پایگاه داده بود "
                     "و دوباره باز نشد",
                     duplicates=duplicates)
-            if retry_ids:
-                await job_log.record(
-                    job.job_id, job_log.PAGE,
-                    f"از {len(retry_ids)} آگهیِ بدون شمارهٔ اجراهای قبل، {recovered} شماره گرفت",
-                    retries=len(retry_ids), recovered=recovered)
-
             # Every candidate, accounted for.
             #
             # Asked «۱۱۳ آگهی هست ولی ۸۲ تا اسکرپ شد — کدام غلط است؟», neither
@@ -5901,7 +5749,6 @@ class DivarScraper:
                     "duplicate": duplicates, "failed": dict(fail_tally),
                     "skipped": dict(skip_tally), "gone": gone,
                     "unreached": max(_unreached, 0),
-                    "retried": len(retry_ids), "recovered": recovered,
                 }}
                 await self.db_session.commit()
             await job_log.record(
@@ -5959,4 +5806,317 @@ class DivarScraper:
                 new=job.new_items, updated=job.updated_items)
         
         return job
-    
+
+    # ── «تلاش دوباره»: a run's own left-out listings, inside that run (#58) ──
+    #
+    # A listing a run could not finish — saved without a number, a page that
+    # would not open, one a filter or the category check left out — used to
+    # be retried as a NEW run («بازاسکرپ», «اسکرپ تکی»), or by the next run
+    # of the same city and category, so the counters, the log and the list
+    # that changed were never the ones of the run that left it. Now the run
+    # row is put back in the queue with the listings to try (config.retry,
+    # written by POST /api/scraper/jobs/{id}/retry) and this walks them on
+    # the same row: each listing's old outcome is taken off the run's
+    # counters and list and its new one put on, and the row ends with the
+    # status it had, its finish line saying what the retry did.
+
+    # The Persian tally key each skipped-row reason was counted under in the
+    # run's config.outcome, where the key is not the reason itself.
+    _FAILED_KEY_OF = {"no_phone": "بدون شماره", "needs_identity": "نیاز به تأیید هویت"}
+
+    @staticmethod
+    def _outcome_move(job, outcome: Dict[str, Any], reason: Optional[str],
+                      detail: Optional[str], sign: int) -> None:
+        """Add (sign +1) or take off (-1) one listing's outcome — a skipped
+        row's reason and detail — on the run's counters and config.outcome."""
+        def bump(group: str, key: str) -> None:
+            d = dict(outcome.get(group) or {})
+            d[key] = max(int(d.get(key) or 0) + sign, 0)
+            if not d[key]:
+                d.pop(key)
+            outcome[group] = d
+
+        if reason in ("no_phone", "needs_identity", "failed"):
+            DivarScraper._set_counts(job, failed_items=max(int(job.failed_items or 0) + sign, 0))
+            bump("failed", DivarScraper._FAILED_KEY_OF.get(reason) or detail or "نامعلوم")
+        elif reason == "deleted":
+            outcome["gone"] = max(int(outcome.get("gone") or 0) + sign, 0)
+        elif reason:
+            bump("skipped", reason)
+
+    async def retry_unscraped(
+        self, *, job_id: str, city: str, category: str, retry: Dict[str, Any],
+        download_images: bool = True, urls: Optional[List[str]] = None,
+        divar_filters: Optional[Dict[str, Any]] = None, **filters: Any,
+    ) -> Optional[ScrapingJob]:
+        """Try `retry["items"]` again inside run `job_id` — the listings its own
+        list offered — with the run's own category and filters, and leave the
+        row as it was but for what the retry changed. Never a new row."""
+        from app.services import divar_count as _dc
+        from app.services import divar_filters as _df
+        from app.services import job_log
+
+        job = (await self.db_session.execute(
+            select(ScrapingJob).where(ScrapingJob.job_id == uuid.UUID(str(job_id)))
+        )).scalar_one_or_none()
+        if job is None:
+            raise ValueError(f"Job {job_id} not found")
+        self.current_job = job
+        started = await self._move_status("running", only_from=("pending",))
+        await self.db_session.commit()
+        if not started:
+            logger.info(f"Job {job_id} was {job.status} before its retry started — not running it")
+            return job
+        self._job_id_str = str(job.job_id)
+        self._note_account(job)
+        await self._persist_active_session()
+
+        items = [i for i in (retry or {}).get("items") or [] if i.get("divar_id")]
+        prev_status = (retry or {}).get("prev_status") or "completed"
+        await job_log.record(
+            job.job_id, job_log.START,
+            f"تلاش دوباره برای {len(items)} آگهیِ اسکرپ‌نشدهٔ همین اسکرپ — در همین اسکرپ، "
+            "با شماره‌های دیوارِ صاحب آن و فیلترهای خودش",
+            retry=len(items))
+
+        # The run's own filters, as its search had them: what Divar filtered
+        # is not checked again, what it could not is.
+        target_day = None
+        if filters.get("posted_date"):
+            try:
+                target_day = datetime.fromisoformat(str(filters["posted_date"])).date()
+            except ValueError:
+                target_day = None
+        pre: Dict[str, Any] = {k: filters.get(k) for k in (
+            "advertiser_type", "min_price", "max_price", "min_deposit", "max_deposit",
+            "min_rent", "max_rent", "min_price_per_meter", "max_price_per_meter",
+            "min_area", "max_area", "min_rooms", "max_rooms", "has_elevator",
+            "has_parking", "has_storage", "has_balcony", "has_images", "max_age_hours")}
+        pre["target_day"] = target_day
+        if not urls:
+            try:
+                await _df.current()
+                kw = {k: filters.get(k) for k in (
+                    "advertiser_type", "has_images", "min_price", "max_price", "min_deposit",
+                    "max_deposit", "min_rent", "max_rent", "min_price_per_meter",
+                    "max_price_per_meter", "min_area", "max_area", "min_rooms", "max_rooms",
+                    "has_elevator", "has_parking", "has_storage", "has_balcony",
+                    "posted_date", "max_age_hours")}
+                for name in _dc.plan_filters(category, divar_filters=divar_filters, **kw).local_off:
+                    if name in pre:
+                        pre[name] = None
+            except Exception as e:
+                logger.warning(f"[retry] the run's filter plan could not be rebuilt: {e}")
+        listing_type = CATEGORIES.get(category, {}).get("type", "unknown")
+
+        cfg = dict(job.config or {})
+        outcome: Dict[str, Any] = {k: (dict(v) if isinstance(v, dict) else v)
+                                   for k, v in (cfg.get("outcome") or {}).items()}
+        got = still = already = fresh = 0
+        tried = 0
+        now_left: Dict[str, int] = {}
+
+        from sqlalchemy import delete as _delete
+        from app.models.scraping_job import SkippedListing
+
+        async def rows_of(item: Dict[str, Any], did: str) -> list:
+            """This run's rows for the listing, read before it is opened: a
+            save that gets the number clears them (_number_recovered), and
+            every one of them was counted, so every one is taken off."""
+            got = (await self.db_session.execute(
+                select(SkippedListing.reason, SkippedListing.detail)
+                .where(SkippedListing.job_id == job.job_id, SkippedListing.divar_id == did))).all()
+            await self.db_session.commit()
+            return [tuple(r) for r in got] or [(item.get("reason"), item.get("detail"))]
+
+        async def settle(item, old_rows: list, reason: Optional[str], detail: Optional[str],
+                         title: Optional[str]) -> None:
+            """The listing's old outcome off, its new one on, in ONE
+            transaction on the run's session: its rows in this run's list
+            deleted — every one, and every one taken off the counters, since a
+            listing can have been written down twice — its new row added, and
+            the counters and config.outcome written with them. A retry cut
+            short leaves every listing it did not reach as it was."""
+            did = str(item["divar_id"])
+            for old_reason, old_detail in old_rows:
+                self._outcome_move(job, outcome, old_reason, old_detail, -1)
+            await self.db_session.execute(_delete(SkippedListing).where(
+                SkippedListing.job_id == job.job_id, SkippedListing.divar_id == did))
+            if reason is not None:
+                self._outcome_move(job, outcome, reason, detail, +1)
+                now_left[reason] = now_left.get(reason, 0) + 1
+                self.db_session.add(SkippedListing(
+                    job_id=job.job_id, divar_id=did[:32],
+                    url=(item.get("url") or f"https://divar.ir/v/{did}")[:400],
+                    title=(title or item.get("title") or None) and str(title or item.get("title"))[:300],
+                    reason=str(reason)[:64], detail=(detail or None) and str(detail)[:300]))
+            self._set_counts(job, config={**(job.config or {}), "outcome": dict(outcome)})
+            await self.db_session.commit()
+
+        async def stopped() -> ScrapingJob:
+            """Stopped from outside mid-retry. A cancel ends the retry, not the
+            run (job_retry): the API already put the row back to the status it
+            had; a «cancelled» written by anything else is put back here. The
+            request comes off the row either way."""
+            from sqlalchemy import update as _update
+            from app.services import job_retry
+            logger.info(f"Job {job_id} was stopped during its retry")
+            ended = job_retry.ended(job.config, job_retry.CANCELLED)
+            if ended is not None:
+                await self.db_session.execute(
+                    _update(ScrapingJob)
+                    .where(ScrapingJob.id == self._job_pk(), ScrapingJob.status == "cancelled")
+                    .values(status=ended["status"], finish_reason=ended["finish_reason"])
+                    .execution_options(synchronize_session=False))
+                self._set_counts(job, config=ended["config"])
+            await self.db_session.commit()
+            return job
+
+        try:
+            for item in items:
+                if await self._cancelled_now():
+                    return await stopped()
+                did = str(item["divar_id"])
+                url = item.get("url") or f"https://divar.ir/v/{did}"
+                tried += 1
+                old_rows = await rows_of(item, did)
+                if await self._stored_with_number(did):
+                    # Another run, or a single scrape, has it with its number
+                    # now. Not a chat-only row: that one is opened again, it
+                    # was named for a second look.
+                    already += 1
+                    outcome["duplicate"] = int(outcome.get("duplicate") or 0) + 1
+                    await settle(item, old_rows, None, None, None)
+                    continue
+                await self.db_session.commit()
+                owed = item.get("reason") in skipped_listings.AWAITING_PHONE
+                detail = await self.scrape_property_detail(
+                    url, target_category=category, source_title=item.get("title"),
+                    wants_contact=None if owed else (
+                        lambda pd: self.pre_contact_skip(pd, listing_type, pre)))
+                if not (detail and detail.get("phone_number")) and await self._cancelled_now():
+                    return await stopped()
+
+                if detail is False:
+                    what = getattr(self, "_last_category_drop", None)
+                    await settle(item, old_rows, "category", what, None)
+                elif detail is None:
+                    why = getattr(self, "_last_detail_error", None) or "نامعلوم"
+                    if why == self.GONE_FROM_DIVAR:
+                        await settle(item, old_rows, "deleted",
+                                     "دیوار می‌گوید این آگهی حذف شده یا دیگر وجود ندارد", None)
+                    else:
+                        await settle(item, old_rows, "failed", why, None)
+                else:
+                    property_data = {**{"divar_id": did, "url": url, "title": item.get("title")},
+                                     **detail}
+                    if CITIES.get(city):
+                        property_data["city_name"] = CITIES[city].get("name", city)
+                    if CATEGORIES.get(category):
+                        property_data["category_name"] = CATEGORIES[category].get("name", category)
+                    if listing_type != "unknown" or not property_data.get("listing_type"):
+                        property_data["listing_type"] = listing_type
+                    why = None if owed else (
+                        self.local_filter_skip(detail, listing_type, pre)
+                        or self._date_skip(detail.get("posted_at"), target_day,
+                                           pre.get("max_age_hours")))
+                    if why:
+                        await settle(item, old_rows, why.split()[0], why, property_data.get("title"))
+                        continue
+                    if download_images and property_data.get("images"):
+                        local = await self.download_images(property_data["images"], did)
+                        if local:
+                            property_data["images"] = local
+                            property_data["thumbnail_url"] = local[0]
+                            property_data["images_downloaded"] = True
+                    from app.services import advertiser_signals
+                    advertiser_signals.annotate(property_data)
+                    self._grade_property(property_data)
+                    saved = await self.save_property(property_data)
+                    if getattr(self, "_last_save_rolled_back", False):
+                        await self.db_session.refresh(job)
+                    phone = property_data.get("phone_number")
+                    if saved and self._phone_required and not phone:
+                        still += 1
+                        ch = property_data.get("contact_channel")
+                        if ch == "needs_identity":
+                            await settle(item, old_rows, "needs_identity",
+                                         f"دیوار از این حساب تأیید هویت خواسته — {skipped_listings.RETRY_HINT}",
+                                         property_data.get("title"))
+                        elif ch == "chat_only":
+                            await settle(item, old_rows, "chat_only",
+                                         "آگهی‌دهنده فقط از راه چت دیوار تماس می‌گیرد — شماره‌ای برای گرفتن نیست",
+                                         property_data.get("title"))
+                        else:
+                            await settle(item, old_rows, "no_phone",
+                                         f"ذخیره شد ولی شمارهٔ تماس گرفته نشد — {skipped_listings.RETRY_HINT}",
+                                         property_data.get("title"))
+                    elif saved:
+                        got += 1
+                        # Stored before — as a listing saved without its
+                        # number usually is — it is «بروز», not «تازه»: #32's
+                        # words, and the finish line says which were which.
+                        if getattr(self, "_last_save_created", True):
+                            fresh += 1
+                            self._set_counts(job, new_items=int(job.new_items or 0) + 1)
+                        else:
+                            self._set_counts(job, updated_items=int(job.updated_items or 0) + 1)
+                        await settle(item, old_rows, None, None, None)
+                    else:
+                        err = getattr(self, "_last_save_error", None)
+                        await settle(item, old_rows, "failed", f"ذخیره نشد — {err}" if err else "ذخیره نشد",
+                                     property_data.get("title"))
+                await self.maybe_rotate_account()
+                self._note_account(job)
+                await self.db_session.commit()
+                await self._human_like_delay(stop_on_cancel=True)
+        except Exception as e:
+            logger.error(f"[retry] job {job_id}: {type(e).__name__}: {e}")
+            try:
+                await self.db_session.rollback()
+                await self.db_session.refresh(job)
+            except Exception:
+                pass
+            line = f"تلاش دوباره با خطا متوقف شد ({type(e).__name__}) — {tried} از {len(items)} آگهی امتحان شد"
+            await self._end_retry(job, prev_status, line)
+            await job_log.record(job.job_id, job_log.ERROR, line, level="error",
+                                 error_type=type(e).__name__)
+            return job
+
+        left = "، ".join(f"{n} {self._FILTER_LABELS_FA.get(r, r)}" for r, n in
+                         sorted(now_left.items(), key=lambda kv: -kv[1]))
+        line = (f"تلاش دوباره: از {len(items)} آگهی، {got} ذخیره شد"
+                + (f" ({fresh} تازه، {got - fresh} بروز)" if got else "")
+                + (f"، {already} تا حالا از قبل با شماره بود" if already else "")
+                + (f"؛ هنوز اسکرپ‌نشده: {left}" if left else ""))
+        await self._end_retry(job, prev_status, line)
+        await self._persist_active_session()
+        await job_log.record(
+            job.job_id, job_log.FINISH, line,
+            level="info" if not now_left else "warning",
+            retried=len(items), saved=got, without_number=still, already=already,
+            left=dict(now_left) or None, status=job.status)
+        return job
+
+    async def _stored_with_number(self, divar_id: str) -> bool:
+        """Stored with a phone number — not merely stored, and not chat-only,
+        which property_exists also calls «held»."""
+        phone = (await self.db_session.execute(
+            select(Property.phone_number).where(Property.divar_id == divar_id))).scalar_one_or_none()
+        return bool((phone or "").strip())
+
+    async def _end_retry(self, job, prev_status: str, line: str) -> None:
+        """The row as it was before the retry — its status, its finish line
+        with what the retry did in front — unless it was stopped meanwhile."""
+        cfg = dict(job.config or {})
+        base = cfg.get("finish_before_retry", (cfg.get("retry") or {}).get("prev_finish"))
+        cfg.pop("retry", None)
+        cfg["finish_before_retry"] = base
+        history = list(cfg.get("retries") or [])[-9:]
+        history.append({"at": datetime.now().isoformat(timespec="seconds"), "line": line[:300]})
+        cfg["retries"] = history
+        self._set_counts(job, config=cfg)
+        if await self._finish_status(prev_status):
+            reason = f"{line}؛ {base}" if base else line
+            self._set_counts(job, finish_reason=reason[:300], completed_at=datetime.now())
+        await self.db_session.commit()

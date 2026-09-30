@@ -16,9 +16,10 @@ those two numbers.
 
 And «ذخیره شد ولی شمارهٔ تماس گرفته نشد — در اجرای بعدی دوباره تلاش می‌شود»
 was a promise nothing kept: the next run only reached such a listing if
-Divar's feed happened to hand it over again, and a daily run for another
-day never did. The next run of the same city and category, by the same
-person, now opens it first.
+Divar's feed happened to hand it over again. The next run of the same city
+and category then opened it first — as its own candidate, on its own row.
+Since #57/#58 the next run's pool is Divar's list and nothing else, and
+the listing is tried again inside the run that left it («تلاش دوباره»).
 
 Real loop, real Postgres, browser replaced (tests/_scrape_harness.py).
 """
@@ -100,9 +101,15 @@ class TestOneMeaningEach:
         assert "1 تکراری" in view.reason_line and "1 بروز" in view.reason_line
 
 
-class TestANumberlessListingIsRetriedByTheNextRun:
-    """First run: saved without a number. Second run of the same city and
-    category: Divar's feed no longer has it — and it is opened anyway."""
+class TestANumberlessListingBelongsToTheRunThatLeftIt:
+    """First run: saved without a number. It used to be the next run's too:
+    the next run of the same city and category put it first in its own pool,
+    so that run's «کل» was more than Divar's list (#57) and its counters and
+    list changed instead of the run that left it (#58). Now the next run's
+    pool is Divar's list and nothing else, and the listing is tried again
+    inside the run that left it («تلاش دوباره», tests/test_retry_in_place.py).
+    If Divar's feed hands it over again, the next run still opens it: a
+    stored listing without a number is a gap, not a duplicate."""
 
     async def _first(self, db, **cfg):
         lost = h.token()
@@ -111,13 +118,14 @@ class TestANumberlessListingIsRetriedByTheNextRun:
         assert job.failed_items == 1 and job.new_items == 0
         return lost
 
-    async def test_the_first_run_says_what_will_happen(self, db):
+    async def test_the_first_run_says_what_to_do(self, db):
         lost = await self._first(db)
         (row,) = await h.skipped_rows(db, divar_id=lost)
         assert row.reason == "no_phone"
-        assert "همین شهر و دسته" in row.detail, row.detail
+        assert "تلاش دوباره" in row.detail and "همین اسکرپ" in row.detail, row.detail
+        assert "اجرای بعدی" not in row.detail and "همین شهر و دسته" not in row.detail
 
-    async def test_the_next_run_opens_it_and_gets_the_number(self, db):
+    async def test_the_next_run_does_not_take_it_into_its_pool(self, db):
         lost = await self._first(db)
         other = h.token()
         job_id = await h.new_job(db, max_items=3)
@@ -125,36 +133,31 @@ class TestANumberlessListingIsRetriedByTheNextRun:
             "feed": [other],
             "pages": {lost: h.page(lost, phone=h.PHONE.format(401)),
                       other: h.page(other, phone=h.PHONE.format(402))}})
-        assert lost in s.opened, "the listing was never tried again"
-        assert (await h.property_row(db, lost)).phone_number == h.PHONE.format(401)
-        assert (job.new_items, job.updated_items) == (1, 1)
-        assert await h.skipped_rows(db, divar_id=lost) == [], \
-            "recovered, so it is no longer on anyone's list"
+        assert s.opened == [other], "another run's listing was put in this run's pool"
+        assert job.total_items == 1 and (job.new_items, job.updated_items) == (1, 0)
+        lines = await h.log_lines(db, job_id)
+        assert not any("اجراهای قبل" in m for m in lines), lines
+        (row,) = await h.skipped_rows(db, divar_id=lost)
+        assert row.reason == "no_phone", "the first run's list lost it"
 
-    async def test_a_day_run_for_another_day_still_retries_it(self, db):
-        """The daily schedule: its date filter would drop yesterday's listing
-        before the reveal. A retry is judged by the run that saved it."""
+    async def test_a_day_run_does_not_reveal_it_either(self, db):
         lost = await self._first(db)
         day = (datetime.now(TEHRAN) - timedelta(days=3)).date()
         job_id = await h.new_job(db, posted_date=day.isoformat())
         job, s = await h.run(db, job_id, {
             "feed": [], "pages": {lost: h.page(lost, phone=h.PHONE.format(403))}})
-        assert lost in s.revealed
-        assert job.updated_items == 1
-        assert (await h.property_row(db, lost)).phone_number == h.PHONE.format(403)
+        assert lost not in s.revealed and job.updated_items == 0
 
-    async def test_the_run_log_says_it_is_retrying(self, db):
+    async def test_when_divar_lists_it_again_the_next_run_fills_the_gap(self, db):
         lost = await self._first(db)
         job_id = await h.new_job(db, max_items=3)
-        await h.run(db, job_id, {"feed": [], "pages": {lost: h.page(lost, phone=h.PHONE.format(404))}})
-        lines = await h.log_lines(db, job_id)
-        assert any("بدون شماره" in m and "دوباره" in m and m.startswith("1 ") for m in lines), lines
-
-    async def test_another_category_does_not_touch_it(self, db):
-        lost = await self._first(db)
-        job_id = await h.new_job(db, max_items=3, category="buy-apartment")
-        _, s = await h.run(db, job_id, {"feed": [], "pages": {}})
-        assert lost not in s.opened
+        job, s = await h.run(db, job_id, {
+            "feed": [lost], "pages": {lost: h.page(lost, phone=h.PHONE.format(404))}})
+        assert s.opened == [lost]
+        assert (job.new_items, job.updated_items) == (0, 1)
+        assert (await h.property_row(db, lost)).phone_number == h.PHONE.format(404)
+        assert await h.skipped_rows(db, divar_id=lost) == [], \
+            "recovered, so it is no longer on anyone's list"
 
     async def test_another_persons_run_does_not_spend_its_reveals_on_it(self, db):
         lost = await self._first(db)
@@ -162,36 +165,12 @@ class TestANumberlessListingIsRetriedByTheNextRun:
         _, s = await h.run(db, job_id, {"feed": [], "pages": {}})
         assert lost not in s.opened
 
-    async def test_three_misses_and_it_is_left_alone(self, db):
-        """A number that never shows (a hidden or virtual one) must not cost a
-        reveal on every run forever."""
-        lost = await self._first(db)
-        for _ in range(2):
-            job_id = await h.new_job(db, max_items=3)
-            _, s = await h.run(db, job_id, {"feed": [], "pages": {lost: h.page(lost)}})
-            assert lost in s.opened
-        job_id = await h.new_job(db, max_items=3)
-        _, s = await h.run(db, job_id, {"feed": [], "pages": {lost: h.page(lost)}})
-        assert lost not in s.opened
-        assert len(await h.skipped_rows(db, divar_id=lost)) == 3
-
-    async def test_a_chat_only_listing_is_not_retried(self, db):
+    async def test_a_chat_only_listing_is_not_opened_again(self, db):
         """The poster hid the number; no run will ever find one."""
         quiet_one = h.token()
         job_id = await h.new_job(db, max_items=3)
         await h.run(db, job_id, {"feed": [quiet_one],
                                  "pages": {quiet_one: h.page(quiet_one, channel="chat_only")}})
         job_id = await h.new_job(db, max_items=3)
-        _, s = await h.run(db, job_id, {"feed": [], "pages": {}})
+        _, s = await h.run(db, job_id, {"feed": [quiet_one], "pages": {}})
         assert quiet_one not in s.opened
-
-    async def test_a_listing_deleted_from_the_table_is_not_brought_back(self, db):
-        lost = await self._first(db)
-        from sqlalchemy import delete
-        from app.models.property import Property
-        async with db() as s:
-            await s.execute(delete(Property).where(Property.divar_id == lost))
-            await s.commit()
-        job_id = await h.new_job(db, max_items=3)
-        job, s = await h.run(db, job_id, {"feed": [], "pages": {lost: h.page(lost, phone=h.PHONE.format(405))}})
-        assert lost not in s.opened and job.new_items == 0

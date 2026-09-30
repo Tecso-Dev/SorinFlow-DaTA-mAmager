@@ -33,7 +33,7 @@ from app import database
 from app.config import get_settings
 from app.models.scraping_job import ScrapingJob
 from app.schemas import ScrapingJobCreate
-from app.services import job_log
+from app.services import job_log, job_retry
 from app.services.supervisor import HOST, beat, supervise
 
 settings = get_settings()
@@ -106,8 +106,29 @@ def job_kwargs(job) -> dict:
     fields = ScrapingJobCreate(**{k: v for k, v in cfg.items()
                                   if k in ScrapingJobCreate.model_fields}).model_dump()
     fields["divar_phone"] = fields["divar_phone"] or None      # «» always went on as None
-    return {**fields, "job_id": str(job.job_id), "db_url": settings.database_url,
-            "owner_user_id": cfg.get("owner_user_id")}
+    out = {**fields, "job_id": str(job.job_id), "db_url": settings.database_url,
+           "owner_user_id": cfg.get("owner_user_id")}
+    # «تلاش دوباره» (#58): the same row back in the queue, with the listings
+    # its own list offered — run in place, never as a new row.
+    if isinstance(cfg.get("retry"), dict):
+        out["retry"] = cfg["retry"]
+    return out
+
+
+def queued_at(created_at, config) -> Any:
+    """When the row last went into the queue: its creation, or the moment a
+    «تلاش دوباره» put it back (#58). The sweep's clocks run from this — a
+    week-old run retried a minute ago is not a day-old pending row."""
+    at = ((config or {}).get("retry") or {}).get("at") if isinstance(config, dict) else None
+    if at:
+        try:
+            moment = datetime.fromisoformat(str(at))
+            if created_at is not None and created_at.tzinfo and moment.tzinfo is None:
+                moment = moment.replace(tzinfo=created_at.tzinfo)
+            return moment
+        except ValueError:
+            pass
+    return created_at
 
 
 async def _cas(r, job_id: str, keep: bool) -> bool:
@@ -220,6 +241,31 @@ def _unreadable_fields(err: Exception) -> str:
     return f" ({'، '.join(fields[:5])})" if fields else ""
 
 
+async def _end_retries(db, job_ids, statuses, line: str) -> List[Any]:
+    """Rows among `job_ids` (still in one of `statuses`) that are in a
+    «تلاش دوباره» (#58): each ends the retry, not the run — the status it had,
+    `line` in front of its old finish line, config.retry off — in one
+    conditional UPDATE per row. Returns their ids; the caller's bulk UPDATE
+    leaves them out and the caller commits."""
+    rows = (await db.execute(
+        select(ScrapingJob.job_id, ScrapingJob.config)
+        .where(ScrapingJob.job_id.in_(list(job_ids)), ScrapingJob.status.in_(statuses)))).all()
+    done: List[Any] = []
+    for jid, cfg in rows:
+        values = job_retry.ended(cfg, line)
+        if values is None:
+            continue
+        got = (await db.execute(
+            update(ScrapingJob)
+            .where(ScrapingJob.job_id == jid, ScrapingJob.status.in_(statuses))
+            .values(**values, completed_at=datetime.now())
+            .returning(ScrapingJob.job_id)
+            .execution_options(synchronize_session=False))).scalars().first()
+        if got is not None:
+            done.append(got)
+    return done
+
+
 async def _fail_unreadable(job_id: str, err: Exception) -> bool:
     """Close out a pending row whose config no longer builds a run: failed,
     in words, in its own log — the same shape as the other stops here. Only
@@ -228,6 +274,10 @@ async def _fail_unreadable(job_id: str, err: Exception) -> bool:
     logger.error(f"[queue] {job_id[:8]}: its config cannot be read "
                  f"({type(err).__name__}: {err}) — marked failed")
     async with database.async_session_maker() as db:
+        if await _end_retries(db, [uuid.UUID(job_id)], ("pending",), job_retry.UNREADABLE):
+            await db.commit()
+            await job_log.record(job_id, job_log.ERROR, job_retry.UNREADABLE, level="error")
+            return True
         done = (await db.execute(
             update(ScrapingJob)
             .where(ScrapingJob.job_id == uuid.UUID(job_id), ScrapingJob.status == "pending")
@@ -298,14 +348,17 @@ async def release_orphans(job_ids) -> int:
     in the run's own log. Only rows still running or paused — one that
     finished a moment ago keeps its real ending."""
     async with database.async_session_maker() as db:
+        retried = await _end_retries(db, job_ids, ("running", "paused"), job_retry.ORPHANED)
         released = (await db.execute(
             update(ScrapingJob)
-            .where(ScrapingJob.job_id.in_(list(job_ids)),
+            .where(ScrapingJob.job_id.in_(list(set(job_ids).difference(retried))),
                    ScrapingJob.status.in_(("running", "paused")))
             .values(status="failed", completed_at=datetime.now(), finish_reason=ORPHAN_REASON)
             .returning(ScrapingJob.job_id)
             .execution_options(synchronize_session=False))).scalars().all()
         await db.commit()
+    for job_id in retried:
+        await job_log.record(job_id, job_log.ERROR, job_retry.ORPHANED, level="error")
     if released:
         logger.warning(f"{len(released)} scraping job(s) were left running by a "
                        "process that is gone and have been marked failed")
@@ -316,7 +369,7 @@ async def release_orphans(job_ids) -> int:
     # That happened twice, both times during an unrelated deploy.
     for job_id in released:
         await job_log.record(job_id, job_log.ERROR, ORPHAN_LOG, level="error")
-    return len(released)
+    return len(released) + len(retried)
 
 
 async def _fail_stale_pending(job_ids) -> int:
@@ -327,9 +380,10 @@ async def _fail_stale_pending(job_ids) -> int:
     stop does. Same shape as release_orphans, for pending rows instead of
     running/paused ones."""
     async with database.async_session_maker() as db:
+        retried = await _end_retries(db, job_ids, ("pending",), job_retry.STALE)
         failed = (await db.execute(
             update(ScrapingJob)
-            .where(ScrapingJob.job_id.in_(list(job_ids)),
+            .where(ScrapingJob.job_id.in_(list(set(job_ids).difference(retried))),
                    ScrapingJob.status == "pending")
             .values(status="failed", completed_at=datetime.now(), finish_reason=STALE_PENDING_REASON)
             .returning(ScrapingJob.job_id)
@@ -340,7 +394,9 @@ async def _fail_stale_pending(job_ids) -> int:
                        "taking them and have been marked failed")
     for job_id in failed:
         await job_log.record(job_id, job_log.ERROR, STALE_PENDING_LOG, level="error")
-    return len(failed)
+    for job_id in retried:
+        await job_log.record(job_id, job_log.ERROR, job_retry.STALE, level="error")
+    return len(failed) + len(retried)
 
 
 async def sweep() -> dict:
@@ -357,11 +413,13 @@ async def sweep() -> dict:
     r: Any = await database.get_redis()
     async with database.async_session_maker() as db:
         rows = (await db.execute(
-            select(ScrapingJob.job_id, ScrapingJob.status, ScrapingJob.created_at)
+            select(ScrapingJob.job_id, ScrapingJob.status, ScrapingJob.created_at,
+                   ScrapingJob.config)
             .where(ScrapingJob.status.in_(("pending", "running", "paused")))
             .order_by(ScrapingJob.id))).all()
     orphans, stale_pending, requeued = [], [], 0
-    for job_id, status, created_at in rows:
+    for job_id, status, created_at, config in rows:
+        created_at = queued_at(created_at, config)
         jid = str(job_id)
         if jid in _running or await r.exists(CLAIM.format(jid)):
             continue

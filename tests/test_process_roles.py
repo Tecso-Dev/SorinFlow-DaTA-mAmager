@@ -28,7 +28,7 @@ from app.services import scrape_queue, supervisor  # noqa: E402
 PERIODIC = {"reminders", "backup", "lease_expiry", "audit_retention", "divar_session",
             "proxy_pool", "forwarder_watch", "apk_mirror", "scrape_scheduler", "match_engine",
             "price_watch", "digest", "listing_reader", "embeddings", "photo_tagger",
-            "assistant", "gcp_exporter"}
+            "assistant", "gcp_exporter", "divar_filters"}
 
 
 @pytest.fixture

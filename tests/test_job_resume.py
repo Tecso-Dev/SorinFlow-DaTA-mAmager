@@ -66,7 +66,8 @@ class TestStartAndResumeShareOneLauncher:
         # as the run's owner — root pressing «ادامه» on a colleague's run
         # must not relaunch it on root's numbers
         assert "_launch_job(config, db, run_as" in src
-        assert "run_as = current_user" in src
+        assert "run_as = await _run_as_owner(db, owner, current_user" in src
+        assert "run_as = current_user" in inspect.getsource(sr._run_as_owner)
 
     def test_the_launcher_still_makes_the_ownership_check(self):
         src = inspect.getsource(sr._launch_job)
@@ -96,12 +97,12 @@ class TestResume:
         assert "تنظیماتش ذخیره نشده" in src
 
     def test_somebody_elses_run_is_refused(self):
-        src = inspect.getsource(sr.resume_scraping_job)
-        assert "کاربر دیگری شروع کرده" in src
+        # one check for «ادامه» and «تلاش دوباره» (#58)
+        assert "_run_as_owner(" in inspect.getsource(sr.resume_scraping_job)
+        assert "کاربر دیگری شروع کرده" in inspect.getsource(sr._run_as_owner)
 
     def test_an_admin_may_resume_anyones(self):
-        src = inspect.getsource(sr.resume_scraping_job)
-        assert '("root", "super_admin")' in src
+        assert '("root", "super_admin")' in inspect.getsource(sr._run_as_owner)
 
     def test_only_known_fields_are_replayed(self):
         """A key added to the stored config later must not crash an older

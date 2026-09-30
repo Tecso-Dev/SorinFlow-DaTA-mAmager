@@ -52,18 +52,16 @@ class TestEachRowCanBeActedOn:
         assert 'target="_blank"' in APP_JS[i:i + 200]
         assert 'rel="noopener"' in APP_JS[i:i + 200]
 
-    def test_a_single_rescrape_is_one_click(self):
-        assert "rescrapeSkipped(" in APP_JS
+    def test_a_retry_of_one_is_one_click(self):
+        assert "retrySkippedListing(${jsArg(r.divar_id)})" in APP_JS
 
-    def test_it_fills_the_single_scrape_box_and_runs_it(self):
-        i = APP_JS.index("function rescrapeSkipped(")
-        block = APP_JS[i:i + 700]
-        assert "getElementById('single-url')" in block
-        assert "scrapeSingle()" in block
-
-    def test_it_closes_the_modal_first(self):
-        i = APP_JS.index("function rescrapeSkipped(")
-        assert "modal.hide()" in APP_JS[i:i + 700]
+    def test_it_stays_in_the_run_that_left_it(self):
+        """#58: it used to fill the single-scrape box and run that — a new row
+        in the jobs table. tests/js/skipped_panel.mjs runs it."""
+        i = APP_JS.index("async function retrySkippedListing(")
+        block = APP_JS[i:i + 300]
+        assert "_retryInPlace(" in block
+        assert "scrapeSingle()" not in block and "single-url" not in block
 
     def test_the_reason_is_shown_in_persian(self):
         assert "r.reason_label" in APP_JS

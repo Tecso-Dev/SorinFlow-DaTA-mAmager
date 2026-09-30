@@ -205,6 +205,9 @@ class Settings(BaseSettings):
     # The forwarder APK the panel offers, mirrored from GitHub (apk_mirror.py).
     downloads_path: str = "/app/data/downloads"
     apk_mirror_hours: float = Field(default=6, validation_alias=AliasChoices("APK_MIRROR_HOURS", "apk_mirror_hours"))
+    # How often Divar's filter form per category is read live
+    # (app/services/divar_filters.py, #27); 0 = never, the committed schema only.
+    divar_filter_schema_hours: float = Field(default=24, validation_alias=AliasChoices("DIVAR_FILTER_SCHEMA_HOURS", "divar_filter_schema_hours"))
     # Saved scrapes fire themselves at their hour (scrape_scheduler.py).
     scrape_scheduler: bool = Field(default=True, validation_alias=AliasChoices("SCRAPE_SCHEDULER", "scrape_scheduler"))
     # New listings are scored against every customer's criteria as they arrive

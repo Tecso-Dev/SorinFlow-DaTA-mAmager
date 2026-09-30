@@ -6,8 +6,10 @@
 // runs the app with SCRAPE_WORKER_ENABLED=false, so the run «شروع» queues
 // stays pending until the test cancels it: no Chromium, no search.
 //
-// The fields that belong to one category and not another are not tested
-// here: that behaviour waits on #27.
+// The form is built from each category's own Divar filters (#27): the last
+// test switches categories — a sale, a rental, a short-term let, a service —
+// and checks that only that category's fields show and that a field which
+// stops applying is emptied, not just hidden.
 const { test, expect } = require('@playwright/test');
 const { loginAs } = require('../fixtures/auth');
 const { checkA11y } = require('../fixtures/a11y');
@@ -31,6 +33,10 @@ async function openTheForm(page, request) {
   await expect(page.locator('#section-scraper')).toBeVisible();
   // the pickers are filled from /scraper/cities and /scraper/categories
   await expect(page.locator('#scraper-category option[value="rent-apartment"]')).toHaveCount(1);
+  // …grouped by family: rent under «اجاره», buy under «خرید» (#56)
+  await expect(page.locator('#scraper-category optgroup[label="اجاره"] option[value="rent-apartment"]')).toHaveCount(1);
+  await expect(page.locator('#scraper-category optgroup[label="خرید"] option[value="buy-old-house"]')).toHaveCount(1);
+  await expect(page.locator('#jobs-filter-category optgroup[label="اجاره"] option')).not.toHaveCount(0);
   await page.waitForFunction(() => typeof document.getElementById('scraper-city-picker')?._setCityValue === 'function');
   return asked;
 }
@@ -108,6 +114,74 @@ test.describe('scrape form', () => {
       headers: { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('sf_token'))}` },
     });
     expect((await row.json()).status).toBe('cancelled');
+  });
+
+  test('switching the category shows only its Divar filters and empties the rest (#27, #34)', async ({ page, request }) => {
+    const asked = await openTheForm(page, request);
+    await pickCityAndCategory(page);                         // rent-apartment
+    await page.locator('#scraper-more > summary').click();
+    const shown = key => page.locator(`#scraper-form [data-filter-key="${key}"], #scraper-extra-filters [data-extra-key="${key}"]`);
+
+    // a rental: deposit and monthly rent, and Divar's own apartment filters
+    await expect(shown('credit')).toBeVisible();
+    await expect(shown('price')).toBeHidden();
+    await expect(shown('building-age')).toBeVisible();
+    await expect(shown('deed_type')).toHaveCount(0);          // a sale's filter
+    await expect(shown('cooling_system')).toHaveCount(0);     // options not known yet: not offered
+    await page.locator('#scraper-min-deposit').fill('100000000');
+    await page.locator('#scraper-f-building-age-max').fill('5');
+    await page.locator('#scraper-has-elevator').check();
+
+    // a sale: the deposit is hidden AND emptied, the building age carries over
+    await page.locator('#scraper-category').selectOption('buy-apartment');
+    await expect(shown('credit')).toBeHidden();
+    await expect(page.locator('#scraper-min-deposit')).toHaveValue('');
+    await expect(shown('price')).toBeVisible();
+    await expect(shown('deed_type')).toBeVisible();
+    await expect(page.locator('#scraper-f-building-age-max')).toHaveValue('5');
+    await expect(page.locator('#scraper-has-elevator')).toBeChecked();
+
+    await page.locator('#scraper-estimate-btn').click();
+    await expect(page.locator('#scraper-estimate')).toContainText('۳۴۲');
+    const last = asked[asked.length - 1];
+    expect(last.get('category')).toBe('buy-apartment');
+    expect(last.get('min_deposit')).toBeNull();
+    expect(JSON.parse(last.get('divar_filters'))).toEqual({ 'building-age': { max: 5 } });
+
+    // a shop for rent: no lift, no building age at Divar — gone and empty
+    await page.locator('#scraper-category').selectOption('rent-store');
+    await expect(shown('elevator')).toBeHidden();
+    await expect(page.locator('#scraper-has-elevator')).not.toBeChecked();
+    await expect(shown('building-age')).toHaveCount(0);
+    await page.locator('#scraper-category').selectOption('rent-apartment');
+    await expect(page.locator('#scraper-f-building-age-max')).toHaveValue('');
+
+    // short-term: daily rent and capacity instead of deposit and rent
+    await page.locator('#scraper-category').selectOption('rent-temporary');
+    await expect(shown('daily_rent')).toBeVisible();
+    await expect(shown('person_capacity')).toBeVisible();
+    await expect(shown('credit')).toBeHidden();
+    await expect(shown('rent')).toBeHidden();
+
+    // services: only what every category has
+    await page.locator('#scraper-category').selectOption('real-estate-services');
+    for (const key of ['price', 'credit', 'size', 'rooms', 'parking']) await expect(shown(key)).toBeHidden();
+    await expect(shown('business-type')).toBeVisible();
+    await expect(shown('recent_ads')).toBeVisible();
+  });
+
+  test('a Divar link fills the category\'s own filters and names what it lacks (#27)', async ({ page, request }) => {
+    await openTheForm(page, request);
+    await page.locator('#scraper-link').fill(
+      'https://divar.ir/s/urmia/buy-apartment?deed_type=single_page%2C&elevator=true&credit=100-500&building-age=-10');
+    await page.locator('#scraper-link-btn').click();
+    await expect(page.locator('#scraper-link-note')).toContainText('فرم پر شد');
+    await expect(page.locator('#scraper-category')).toHaveValue('buy-apartment');
+    await expect(page.locator('#scraper-has-elevator')).toBeChecked();
+    await expect(page.locator('#scraper-extra-filters [data-extra-key="deed_type"] input[value="single_page"]')).toBeChecked();
+    await expect(page.locator('#scraper-f-building-age-max')).toHaveValue('10');
+    await expect(page.locator('#scraper-link-note')).toContainText('ودیعه');
+    await expect(page.locator('#scraper-min-deposit')).toHaveValue('');
   });
 
   test('accessibility: the open form has no new serious or critical findings', async ({ page, request }) => {

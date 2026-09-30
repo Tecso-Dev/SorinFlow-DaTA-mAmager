@@ -1160,41 +1160,42 @@ class TestDivarDoesTheFilteringItCanDo:
 
     def test_the_query_is_built_before_collection(self):
         src = _run_src()
-        q = src.index("build_search_query(")
+        q = src.index("plan_filters(category")
         c = src.index("all_listings = await self._collect_listings_robust(")
         assert q < c, "the filters are built after the feed has been read"
 
-    @pytest.mark.parametrize("kwargs,expected", [
-        ({"max_deposit": 100_000_000}, "credit=-100000000"),
-        ({"min_deposit": 5_000_000, "max_deposit": 100_000_000},
+    @pytest.mark.parametrize("category,kwargs,expected", [
+        ("rent-apartment", {"max_deposit": 100_000_000}, "credit=-100000000"),
+        ("rent-apartment", {"min_deposit": 5_000_000, "max_deposit": 100_000_000},
          "credit=5000000-100000000"),
-        ({"min_price": 1_000_000_000}, "price=1000000000-"),
-        ({"max_area": 90}, "size=-90"),
-        ({"advertiser_type": "personal"}, "business-type=personal"),
-        ({"has_images": True}, "has-photo=true"),
+        ("buy-apartment", {"min_price": 1_000_000_000}, "price=1000000000-"),
+        ("buy-apartment", {"max_area": 90}, "size=-90"),
+        ("rent-apartment", {"advertiser_type": "personal"}, "business-type=personal"),
+        ("buy-residential", {"has_images": True}, "has-photo=true"),
+        ("buy-apartment", {"has_elevator": True}, "elevator=true"),
     ])
-    def test_each_filter_divar_honours_is_expressed(self, kwargs, expected):
+    def test_each_filter_divar_honours_is_expressed(self, category, kwargs, expected):
+        """The query is built for the category now (#27): a filter it does not
+        have is what makes Divar refuse the second page."""
         from app.services.divar_count import build_search_query
-        assert expected in build_search_query(**kwargs)
+        assert expected in build_search_query(category, **kwargs)
 
     def test_no_filters_means_no_query_string(self):
         """An empty query must not produce a trailing «?»."""
         from app.services.divar_count import build_search_query
-        assert build_search_query() == ""
+        assert build_search_query("buy-apartment") == ""
 
-    def test_filters_divar_ignores_are_still_applied_locally(self):
-        """Rooms and amenities are not in the URL, so the per-listing pass must
-        still check them — build_form_data leaves them out for the same
-        reason."""
+    def test_filters_the_category_lacks_are_still_applied_locally(self):
+        """buy-residential has no rooms filter: not in the URL, so the
+        per-listing pass must still check them."""
         from app.services.divar_count import build_search_query
-        q = build_search_query(min_rooms=2) if False else build_search_query()
-        assert "rooms" not in q
+        assert "rooms" not in build_search_query("buy-residential", min_rooms=2)
         src = _run_src()
         assert "min_rooms" in src, "the local pass no longer checks rooms"
 
     def test_a_query_that_cannot_be_built_does_not_stop_the_run(self):
         src = _run_src()
-        i = src.index("build_search_query(")
+        i = src.index("plan_filters(category")
         # bounded by the except's own body rather than a character count —
         # the block grew when the API form was added beside the query string
         assert "except Exception" in src[i:src.index('self._search_query = ""', i)]
