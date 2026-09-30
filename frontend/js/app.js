@@ -3281,16 +3281,33 @@ async function loadCities() {
     }
 }
 
+/* The categories as <optgroup>s, one per family (#56): rent under «اجاره»,
+ * buy under «خرید», short-term and services under their own. Which group a
+ * category goes in is its `family` from /scraper/categories and the group's
+ * title the server's `family_name` — nothing here names a category. Groups
+ * and options keep the server's order. `option` renders one category. */
+function categoryOptionsHtml(categories, option) {
+    const groups = new Map();
+    for (const cat of categories) {
+        const key = cat.family || '';
+        if (!groups.has(key)) {
+            groups.set(key, { label: cat.family_name || cat.family || 'سایر', items: [] });
+        }
+        groups.get(key).items.push(cat);
+    }
+    return [...groups.values()].map(g =>
+        `<optgroup label="${esc(g.label)}">${g.items.map(option).join('')}</optgroup>`).join('');
+}
+
 async function loadCategories() {
     try {
         const _catResp = await apiCall('/scraper/categories');
         const categories = Array.isArray(_catResp) ? _catResp : (_catResp?.items || []);
 
         const select = document.getElementById('scraper-category');
-        categories.forEach(cat => {
-            _scraperCategories[cat.slug] = cat;
-            select.innerHTML += `<option value="${esc(cat.slug)}">${esc(cat.name)}</option>`;
-        });
+        categories.forEach(cat => { _scraperCategories[cat.slug] = cat; });
+        select.innerHTML += categoryOptionsHtml(categories,
+            cat => `<option value="${esc(cat.slug)}">${esc(cat.name)}</option>`);
         onScraperCategoryChange();
 
         // Same categories drive the properties-list and CRM-leads filters;
@@ -3299,9 +3316,8 @@ async function loadCategories() {
         ['filter-category', 'crm-filter-category', 'jobs-filter-category'].forEach(id => {
             const sel = document.getElementById(id);
             if (!sel) return;
-            categories.forEach(cat => {
-                sel.innerHTML += `<option value="${cat.name}" data-type="${cat.type}">${cat.name}</option>`;
-            });
+            sel.innerHTML += categoryOptionsHtml(categories,
+                cat => `<option value="${esc(cat.name)}" data-type="${esc(cat.type)}">${esc(cat.name)}</option>`);
         });
     } catch (error) {
         console.error('Failed to load categories:', error);

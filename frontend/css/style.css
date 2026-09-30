@@ -900,6 +900,8 @@ input:autofill, textarea:autofill {
   background: var(--input-bg-focus);
 }
 .form-select option { background: var(--surface); color: var(--text); }
+/* the category selects' «خرید» / «اجاره» groups (#56) */
+.form-select optgroup { background: var(--surface); color: var(--text-muted); font-style: normal; font-weight: 700; }
 .form-control-sm, .form-select-sm { padding: .35rem .7rem; font-size: .8rem; }
 .form-control-lg { padding: .72rem 1rem; font-size: 1rem; }
 .form-check-input {
