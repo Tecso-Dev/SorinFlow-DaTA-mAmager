@@ -112,11 +112,11 @@ def worker(monkeypatch):
         return {"alive": 0, "dead": 0, "unknown": 0}
     monkeypatch.setattr("app.services.divar_session.sweep", _sweep)
 
-    def run(job_id, pages, feed=()):
+    def run(job_id, pages, feed=(), on_open=None):
         made = []
 
         def build(db_session, proxy_enabled=False, headless=True):
-            made.append(h.FakeScraper(db_session, pages=pages, feed=feed))
+            made.append(h.FakeScraper(db_session, pages=pages, feed=feed, on_open=on_open))
             return made[-1]
         monkeypatch.setattr(sr, "DivarScraper", build)
 
@@ -126,6 +126,8 @@ def worker(monkeypatch):
             await sr.run_scraping_job(**kwargs)
             return kwargs
         made_kwargs = _db(_go)
+        if not made:
+            return None           # the row was not pending: nothing ran
         made[0].kwargs = made_kwargs
         return made[0]
     return run
@@ -243,7 +245,8 @@ class TestTheRetryIsTheSameRow:
         worker(job_id, {lost: h.page(lost, phone=h.PHONE.format(705))})
         row = _listed(client, person, job_id)
         assert row["status"] == "partial", "a retry made a cut-short run look complete"
-        assert row["finish_reason"] == "تلاش دوباره: از 1 آگهی، 1 ذخیره شد؛ دیوار صفحهٔ ۲ را رد کرد"
+        assert row["finish_reason"] == \
+            "تلاش دوباره: از 1 آگهی، 1 ذخیره شد (0 تازه، 1 بروز)؛ دیوار صفحهٔ ۲ را رد کرد"
         # a second retry does not stack the first one's line
         client.post(f"/api/scraper/jobs/{job_id}/retry", json={}, headers=person["auth"])
         worker(job_id, {})
@@ -325,3 +328,119 @@ class TestTheQueueKeepsIt:
         assert queued_at(made, {"retry": {"at": at}}) == datetime.fromisoformat(at)
         assert queued_at(made, {}) == made
         assert queued_at(made, {"retry": {"at": "garbage"}}) == made
+
+
+class TestCancellingARetryEndsTheRetryNotTheRun:
+    """Review of #58: a cancel pressed on a retry left a finished run
+    «لغو‌شده» with no finish line, and offered «ادامه» — a whole new scrape."""
+
+    def test_before_it_starts(self, client, person, worker):
+        job_id, lost, broken, _ = _first_run(client, person, worker, {})
+        client.post(f"/api/scraper/jobs/{job_id}/retry", json={}, headers=person["auth"])
+        r = client.post(f"/api/scraper/jobs/{job_id}/cancel", headers=person["auth"])
+        assert r.status_code == 200, r.text
+        row = _listed(client, person, job_id)
+        assert row["status"] == "completed", row["status"]
+        assert row["finish_reason"].startswith("تلاش دوباره لغو شد"), row["finish_reason"]
+        assert row["can_resume"] is False, "a cancelled retry offers a whole new scrape"
+        assert row["completed_at"]
+        assert worker(job_id, {lost: h.page(lost, phone=h.PHONE.format(711))}) is None
+        # a retry after it does not stack the cancelled one's line
+        client.post(f"/api/scraper/jobs/{job_id}/retry", json={}, headers=person["auth"])
+        worker(job_id, {lost: h.page(lost, phone=h.PHONE.format(712))})
+        row = _listed(client, person, job_id)
+        assert "لغو" not in row["finish_reason"], row["finish_reason"]
+
+    def test_while_it_runs(self, client, person, worker):
+        job_id, lost, broken, _ = _first_run(client, person, worker, {})
+        client.post(f"/api/scraper/jobs/{job_id}/retry", json={}, headers=person["auth"])
+
+        async def cancel_on_first(_tok):
+            if not getattr(cancel_on_first, "done", False):
+                cancel_on_first.done = True
+                r = client.post(f"/api/scraper/jobs/{job_id}/cancel", headers=person["auth"])
+                assert r.status_code == 200, r.text
+        s = worker(job_id, {lost: h.page(lost, phone=h.PHONE.format(713)),
+                            broken: h.page(broken, phone=h.PHONE.format(714))},
+                   on_open=cancel_on_first)
+        assert len(s.opened) == 1, "the retry went on after the cancel"
+        row = _db(lambda m: h.job_row(m, job_id))
+        assert row.status == "completed" and "retry" not in row.config
+        assert row.finish_reason.startswith("تلاش دوباره لغو شد")
+
+
+class TestWhatARetryCannotChangeIsLeftOut:
+    """Review of #58: «همه» retried chat-only listings, found them stored and
+    counted them «از قبل با شماره بود» — and forgot their rows."""
+
+    def test_all_leaves_chat_only_out(self, client, person, worker, monkeypatch):
+        from app.services import scrape_queue
+
+        async def enqueue(_job_id):
+            return None
+        quiet = h.token()
+        lost, broken, fine = h.token(), h.token(), h.token()
+        r = client.post("/api/scraper/start", json={"city": h.CITY, "category": h.CATEGORY,
+                                                    "max_items": 10, "download_images": False},
+                        headers=person["auth"])
+        job_id = r.json()["job_id"]
+        worker(job_id, {lost: h.page(lost), broken: h.BROKEN, quiet: h.page(quiet, channel="chat_only"),
+                        fine: h.page(fine, phone=h.PHONE.format(721))}, feed=[lost, broken, quiet, fine])
+        items = _skipped(client, person, job_id)["items"]
+        bulk = {i["divar_id"]: i["retryable_in_bulk"] for i in items}
+        assert bulk == {lost: True, broken: True, quiet: False}, bulk
+        monkeypatch.setattr(scrape_queue, "enqueue", enqueue)
+        r = client.post(f"/api/scraper/jobs/{job_id}/retry", json={}, headers=person["auth"])
+        assert r.json()["count"] == 2
+        r = client.post(f"/api/scraper/jobs/{job_id}/retry", json={"reason": "chat_only"},
+                        headers=person["auth"])
+        assert r.status_code == 409, "a bucket a retry cannot change was queued"
+
+    def test_named_it_is_opened_again_not_counted_as_held(self, client, person, worker):
+        quiet = h.token()
+        lost, broken, fine = h.token(), h.token(), h.token()
+        r = client.post("/api/scraper/start", json={"city": h.CITY, "category": h.CATEGORY,
+                                                    "max_items": 10, "download_images": False},
+                        headers=person["auth"])
+        job_id = r.json()["job_id"]
+        worker(job_id, {lost: h.page(lost), broken: h.BROKEN, quiet: h.page(quiet, channel="chat_only"),
+                        fine: h.page(fine, phone=h.PHONE.format(722))}, feed=[lost, broken, quiet, fine])
+        r = client.post(f"/api/scraper/jobs/{job_id}/retry", json={"divar_ids": [quiet]},
+                        headers=person["auth"])
+        assert r.status_code == 200, r.text
+        s = worker(job_id, {quiet: h.page(quiet, channel="chat_only")})
+        assert s.opened == [quiet], "a stored chat-only listing was taken for one held with its number"
+        row = _listed(client, person, job_id)
+        assert "با شماره بود" not in row["finish_reason"], row["finish_reason"]
+        items = _skipped(client, person, job_id)["items"]
+        assert [(i["divar_id"], i["reason"]) for i in items if i["divar_id"] == quiet] == [(quiet, "chat_only")]
+
+
+class TestEveryRowOfAListingIsTakenOff:
+    def test_two_rows_two_counts(self, client, person, worker):
+        """Review of #58: a listing with two rows in one run had both rows
+        deleted and one count taken off."""
+        from app.models.scraping_job import ScrapingJob, SkippedListing
+        from sqlalchemy import select
+        job_id, lost, broken, _ = _first_run(client, person, worker, {})
+
+        async def _twice(maker):
+            async with maker() as s:
+                job = (await s.execute(select(ScrapingJob).where(
+                    ScrapingJob.job_id == uuid.UUID(job_id)))).scalar_one()
+                s.add(SkippedListing(job_id=job.job_id, divar_id=broken, url=h.url_of(broken),
+                                     reason="failed", detail="صفحه باز نشد"))
+                job.failed_items = (job.failed_items or 0) + 1
+                out = dict(job.config["outcome"])
+                failed = dict(out.get("failed") or {})
+                failed["صفحه باز نشد"] = failed.get("صفحه باز نشد", 0) + 1
+                out["failed"] = failed
+                job.config = {**job.config, "outcome": out}
+                await s.commit()
+        _db(_twice)
+        client.post(f"/api/scraper/jobs/{job_id}/retry", json={}, headers=person["auth"])
+        worker(job_id, {lost: h.page(lost, phone=h.PHONE.format(731)),
+                        broken: h.page(broken, phone=h.PHONE.format(732))})
+        row = _db(lambda m: h.job_row(m, job_id))
+        assert row.failed_items == 0, row.failed_items
+        assert not (row.config["outcome"].get("failed") or {}), row.config["outcome"]

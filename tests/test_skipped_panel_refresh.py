@@ -25,4 +25,4 @@ def test_the_skipped_window_runs_under_node():
     result = subprocess.run([node, str(SCRIPT)], cwd=ROOT, capture_output=True, text=True,
                             timeout=30, env={**os.environ})
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    assert "10 checks passed" in result.stdout, result.stdout
+    assert "12 checks passed" in result.stdout, result.stdout

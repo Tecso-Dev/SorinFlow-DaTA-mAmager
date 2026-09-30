@@ -47,6 +47,7 @@ function world(answers) {
         },
     };
     const calls = [], toasts = [], timers = new Map();
+    const hooks = { askConfirm: async () => true };
     let nextTimer = 1, jobsLoaded = 0;
     const api = {
         calls,
@@ -71,7 +72,7 @@ function world(answers) {
         setInterval(fn, ms) { const id = nextTimer++; timers.set(id, { fn, ms }); return id; },
         clearInterval(id) { timers.delete(id); },
         apiCall: api.apiCall,
-        askConfirm: async () => true,
+        askConfirm: (...a) => hooks.askConfirm(...a),
         showToast: (...a) => toasts.push(a),
         loadJobs: () => { jobsLoaded++; },
         scrapeSingle: () => { throw new Error('the single-scrape box opens a new row'); },
@@ -84,7 +85,7 @@ function world(answers) {
         ${lets}
         ${FNS.map(extractFunction).join('\n')}
         return { ${FNS.join(', ')} };`)(...names.map(n => env[n]));
-    return { el, listeners, calls, toasts, timers, fns, jobs: () => jobsLoaded };
+    return { el, listeners, calls, toasts, timers, fns, hooks, jobs: () => jobsLoaded };
 }
 
 const LIST = {
@@ -194,6 +195,33 @@ let passed = 0;
     await w.fns.showSkipped('j-1');
     await w.fns.retryAllSkipped();
     assert.deepEqual(JSON.parse(w.calls.find(c => c.method === 'POST').body), {});
+    passed++;
+}
+{   // the bucket is the one on screen when «تلاش دوباره» was pressed: a refresh
+    // that lands while the confirmation is open and drops the bucket (all of
+    // it was retried elsewhere) must not turn the request into «everything»
+    let n = 0;
+    const w = world((url) => (url.endsWith('/retry') ? { job_id: 'j-1', status: 'pending', count: 2 }
+        : (++n === 1 ? LIST : { ...LIST, items: [LIST.items[2]],
+                                by_reason: { category: { label: 'خارج از دسته‌بندی', count: 1 } } })));
+    await w.fns.showSkipped('j-1');
+    w.fns.filterSkipped('no_phone');
+    w.hooks.askConfirm = async () => { await [...w.timers.values()][0].fn(); return true; };
+    await w.fns.retryAllSkipped();
+    const post = w.calls.find(c => c.method === 'POST');
+    assert.deepEqual(JSON.parse(post.body), { reason: 'no_phone' }, 'a one-bucket retry was sent as «everything»');
+    passed++;
+}
+{   // rows a retry cannot change (chat-only, gone from Divar) are not in «all»,
+    // but each keeps its own button
+    const rows = { ...LIST, items: [...LIST.items,
+        { divar_id: 'ddd4', url: 'https://divar.ir/v/ddd4', title: 'چهار', reason: 'chat_only',
+          reason_label: 'فقط چت دیوار', retryable_in_bulk: false }] };
+    const w = world(rows);
+    await w.fns.showSkipped('j-1');
+    assert.ok(w.el['skipped-summary'].innerHTML.includes('تلاش دوباره (3)'), w.el['skipped-summary'].innerHTML);
+    assert.ok(w.el['skipped-body'].innerHTML.includes('retrySkippedListing(&quot;ddd4&quot;)'),
+              'its own button is gone');
     passed++;
 }
 {   // a refusal (the run is still going) is said, and nothing else happens
