@@ -83,6 +83,9 @@ test.describe('scrape form', () => {
     const goOn = page.locator('#continue-scraping-btn');
     if (await goOn.waitFor({ state: 'visible', timeout: 3000 }).then(() => true, () => false)) {
       await goOn.click();
+      // Bootstrap drops a hide() asked for mid-animation; a dialog left open
+      // here sits over the jobs table and swallows the «لغو» click below.
+      await expect(page.locator('#cookieWarningModal')).toBeHidden();
     }
     const resp = await started;
     expect(resp.status()).toBe(200);
