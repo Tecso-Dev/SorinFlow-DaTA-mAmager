@@ -13,6 +13,8 @@ import os
 import sys
 import uuid
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("SECRET_KEY", "0123456789abcdef0123456789abcdef")
 os.environ.setdefault("LOGS_PATH", "/tmp")
@@ -25,6 +27,14 @@ from app.models.scraping_job import ScrapingJob  # noqa: E402
 from app.services import scrape_queue as sq  # noqa: E402
 
 BEFORE = "آگهی بیشتری پیدا نشد — 3 از 10 درخواستی"
+
+
+@pytest.fixture(autouse=True)
+async def schema():
+    """The tables, on the Postgres test database (tests/_scrape_harness.py)."""
+    eng, _ = await h.open_db()
+    await eng.dispose()
+    yield
 
 
 async def _row(status, *, retry=True, config=None):

@@ -33,7 +33,7 @@ from app import database
 from app.config import get_settings
 from app.models.scraping_job import ScrapingJob
 from app.schemas import ScrapingJobCreate
-from app.services import job_log
+from app.services import job_log, job_retry
 from app.services.supervisor import HOST, beat, supervise
 
 settings = get_settings()
@@ -241,6 +241,31 @@ def _unreadable_fields(err: Exception) -> str:
     return f" ({'، '.join(fields[:5])})" if fields else ""
 
 
+async def _end_retries(db, job_ids, statuses, line: str) -> List[Any]:
+    """Rows among `job_ids` (still in one of `statuses`) that are in a
+    «تلاش دوباره» (#58): each ends the retry, not the run — the status it had,
+    `line` in front of its old finish line, config.retry off — in one
+    conditional UPDATE per row. Returns their ids; the caller's bulk UPDATE
+    leaves them out and the caller commits."""
+    rows = (await db.execute(
+        select(ScrapingJob.job_id, ScrapingJob.config)
+        .where(ScrapingJob.job_id.in_(list(job_ids)), ScrapingJob.status.in_(statuses)))).all()
+    done: List[Any] = []
+    for jid, cfg in rows:
+        values = job_retry.ended(cfg, line)
+        if values is None:
+            continue
+        got = (await db.execute(
+            update(ScrapingJob)
+            .where(ScrapingJob.job_id == jid, ScrapingJob.status.in_(statuses))
+            .values(**values, completed_at=datetime.now())
+            .returning(ScrapingJob.job_id)
+            .execution_options(synchronize_session=False))).scalars().first()
+        if got is not None:
+            done.append(got)
+    return done
+
+
 async def _fail_unreadable(job_id: str, err: Exception) -> bool:
     """Close out a pending row whose config no longer builds a run: failed,
     in words, in its own log — the same shape as the other stops here. Only
@@ -249,6 +274,10 @@ async def _fail_unreadable(job_id: str, err: Exception) -> bool:
     logger.error(f"[queue] {job_id[:8]}: its config cannot be read "
                  f"({type(err).__name__}: {err}) — marked failed")
     async with database.async_session_maker() as db:
+        if await _end_retries(db, [uuid.UUID(job_id)], ("pending",), job_retry.UNREADABLE):
+            await db.commit()
+            await job_log.record(job_id, job_log.ERROR, job_retry.UNREADABLE, level="error")
+            return True
         done = (await db.execute(
             update(ScrapingJob)
             .where(ScrapingJob.job_id == uuid.UUID(job_id), ScrapingJob.status == "pending")
@@ -319,14 +348,17 @@ async def release_orphans(job_ids) -> int:
     in the run's own log. Only rows still running or paused — one that
     finished a moment ago keeps its real ending."""
     async with database.async_session_maker() as db:
+        retried = await _end_retries(db, job_ids, ("running", "paused"), job_retry.ORPHANED)
         released = (await db.execute(
             update(ScrapingJob)
-            .where(ScrapingJob.job_id.in_(list(job_ids)),
+            .where(ScrapingJob.job_id.in_([j for j in job_ids if j not in retried]),
                    ScrapingJob.status.in_(("running", "paused")))
             .values(status="failed", completed_at=datetime.now(), finish_reason=ORPHAN_REASON)
             .returning(ScrapingJob.job_id)
             .execution_options(synchronize_session=False))).scalars().all()
         await db.commit()
+    for job_id in retried:
+        await job_log.record(job_id, job_log.ERROR, job_retry.ORPHANED, level="error")
     if released:
         logger.warning(f"{len(released)} scraping job(s) were left running by a "
                        "process that is gone and have been marked failed")
@@ -337,7 +369,7 @@ async def release_orphans(job_ids) -> int:
     # That happened twice, both times during an unrelated deploy.
     for job_id in released:
         await job_log.record(job_id, job_log.ERROR, ORPHAN_LOG, level="error")
-    return len(released)
+    return len(released) + len(retried)
 
 
 async def _fail_stale_pending(job_ids) -> int:
@@ -348,9 +380,10 @@ async def _fail_stale_pending(job_ids) -> int:
     stop does. Same shape as release_orphans, for pending rows instead of
     running/paused ones."""
     async with database.async_session_maker() as db:
+        retried = await _end_retries(db, job_ids, ("pending",), job_retry.STALE)
         failed = (await db.execute(
             update(ScrapingJob)
-            .where(ScrapingJob.job_id.in_(list(job_ids)),
+            .where(ScrapingJob.job_id.in_([j for j in job_ids if j not in retried]),
                    ScrapingJob.status == "pending")
             .values(status="failed", completed_at=datetime.now(), finish_reason=STALE_PENDING_REASON)
             .returning(ScrapingJob.job_id)
@@ -361,7 +394,9 @@ async def _fail_stale_pending(job_ids) -> int:
                        "taking them and have been marked failed")
     for job_id in failed:
         await job_log.record(job_id, job_log.ERROR, STALE_PENDING_LOG, level="error")
-    return len(failed)
+    for job_id in retried:
+        await job_log.record(job_id, job_log.ERROR, job_retry.STALE, level="error")
+    return len(failed) + len(retried)
 
 
 async def sweep() -> dict:
