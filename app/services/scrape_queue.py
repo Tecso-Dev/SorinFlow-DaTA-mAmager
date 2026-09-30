@@ -106,8 +106,29 @@ def job_kwargs(job) -> dict:
     fields = ScrapingJobCreate(**{k: v for k, v in cfg.items()
                                   if k in ScrapingJobCreate.model_fields}).model_dump()
     fields["divar_phone"] = fields["divar_phone"] or None      # «» always went on as None
-    return {**fields, "job_id": str(job.job_id), "db_url": settings.database_url,
-            "owner_user_id": cfg.get("owner_user_id")}
+    out = {**fields, "job_id": str(job.job_id), "db_url": settings.database_url,
+           "owner_user_id": cfg.get("owner_user_id")}
+    # «تلاش دوباره» (#58): the same row back in the queue, with the listings
+    # its own list offered — run in place, never as a new row.
+    if isinstance(cfg.get("retry"), dict):
+        out["retry"] = cfg["retry"]
+    return out
+
+
+def queued_at(created_at, config) -> Any:
+    """When the row last went into the queue: its creation, or the moment a
+    «تلاش دوباره» put it back (#58). The sweep's clocks run from this — a
+    week-old run retried a minute ago is not a day-old pending row."""
+    at = ((config or {}).get("retry") or {}).get("at") if isinstance(config, dict) else None
+    if at:
+        try:
+            moment = datetime.fromisoformat(str(at))
+            if created_at is not None and created_at.tzinfo and moment.tzinfo is None:
+                moment = moment.replace(tzinfo=created_at.tzinfo)
+            return moment
+        except ValueError:
+            pass
+    return created_at
 
 
 async def _cas(r, job_id: str, keep: bool) -> bool:
@@ -357,11 +378,13 @@ async def sweep() -> dict:
     r: Any = await database.get_redis()
     async with database.async_session_maker() as db:
         rows = (await db.execute(
-            select(ScrapingJob.job_id, ScrapingJob.status, ScrapingJob.created_at)
+            select(ScrapingJob.job_id, ScrapingJob.status, ScrapingJob.created_at,
+                   ScrapingJob.config)
             .where(ScrapingJob.status.in_(("pending", "running", "paused")))
             .order_by(ScrapingJob.id))).all()
     orphans, stale_pending, requeued = [], [], 0
-    for job_id, status, created_at in rows:
+    for job_id, status, created_at, config in rows:
+        created_at = queued_at(created_at, config)
         jid = str(job_id)
         if jid in _running or await r.exists(CLAIM.format(jid)):
             continue

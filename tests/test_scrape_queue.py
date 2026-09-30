@@ -159,7 +159,9 @@ class TestNothingIsLostOnTheWay:
         """By name now: a field added to the form but not to the run fails
         here, not as a TypeError in a worker at 08:00."""
         params = set(RUN_SIGNATURE.parameters)
-        assert set(ScrapingJobCreate.model_fields) | {"job_id", "db_url", "owner_user_id"} == params
+        # `retry` is the queue's, not the form's: «تلاش دوباره» on the same row (#58).
+        assert set(ScrapingJobCreate.model_fields) | {"job_id", "db_url", "owner_user_id",
+                                                      "retry"} == params
 
     @pytest.mark.parametrize("cfg,owner", [
         (dict(city="urmia", category="rent-apartment", max_items=40, download_images=False,

@@ -5806,3 +5806,269 @@ class DivarScraper:
                 new=job.new_items, updated=job.updated_items)
         
         return job
+
+    # ── «تلاش دوباره»: a run's own left-out listings, inside that run (#58) ──
+    #
+    # A listing a run could not finish — saved without a number, a page that
+    # would not open, one a filter or the category check left out — used to
+    # be retried as a NEW run («بازاسکرپ», «اسکرپ تکی»), or by the next run
+    # of the same city and category, so the counters, the log and the list
+    # that changed were never the ones of the run that left it. Now the run
+    # row is put back in the queue with the listings to try (config.retry,
+    # written by POST /api/scraper/jobs/{id}/retry) and this walks them on
+    # the same row: each listing's old outcome is taken off the run's
+    # counters and list and its new one put on, and the row ends with the
+    # status it had, its finish line saying what the retry did.
+
+    # The Persian tally key each skipped-row reason was counted under in the
+    # run's config.outcome, where the key is not the reason itself.
+    _FAILED_KEY_OF = {"no_phone": "بدون شماره", "needs_identity": "نیاز به تأیید هویت"}
+
+    @staticmethod
+    def _outcome_move(job, outcome: Dict[str, Any], reason: Optional[str],
+                      detail: Optional[str], sign: int) -> None:
+        """Add (sign +1) or take off (-1) one listing's outcome — a skipped
+        row's reason and detail — on the run's counters and config.outcome."""
+        def bump(group: str, key: str) -> None:
+            d = dict(outcome.get(group) or {})
+            d[key] = max(int(d.get(key) or 0) + sign, 0)
+            if not d[key]:
+                d.pop(key)
+            outcome[group] = d
+
+        if reason in ("no_phone", "needs_identity", "failed"):
+            DivarScraper._set_counts(job, failed_items=max(int(job.failed_items or 0) + sign, 0))
+            bump("failed", DivarScraper._FAILED_KEY_OF.get(reason) or detail or "نامعلوم")
+        elif reason == "deleted":
+            outcome["gone"] = max(int(outcome.get("gone") or 0) + sign, 0)
+        elif reason:
+            bump("skipped", reason)
+
+    async def retry_unscraped(
+        self, *, job_id: str, city: str, category: str, retry: Dict[str, Any],
+        download_images: bool = True, urls: Optional[List[str]] = None,
+        divar_filters: Optional[Dict[str, Any]] = None, **filters: Any,
+    ) -> Optional[ScrapingJob]:
+        """Try `retry["items"]` again inside run `job_id` — the listings its own
+        list offered — with the run's own category and filters, and leave the
+        row as it was but for what the retry changed. Never a new row."""
+        from app.services import divar_count as _dc
+        from app.services import divar_filters as _df
+        from app.services import job_log
+
+        job = (await self.db_session.execute(
+            select(ScrapingJob).where(ScrapingJob.job_id == uuid.UUID(str(job_id)))
+        )).scalar_one_or_none()
+        if job is None:
+            raise ValueError(f"Job {job_id} not found")
+        self.current_job = job
+        started = await self._move_status("running", only_from=("pending",))
+        await self.db_session.commit()
+        if not started:
+            logger.info(f"Job {job_id} was {job.status} before its retry started — not running it")
+            return job
+        self._job_id_str = str(job.job_id)
+        self._note_account(job)
+        await self._persist_active_session()
+
+        items = [i for i in (retry or {}).get("items") or [] if i.get("divar_id")]
+        prev_status = (retry or {}).get("prev_status") or "completed"
+        await job_log.record(
+            job.job_id, job_log.START,
+            f"تلاش دوباره برای {len(items)} آگهیِ اسکرپ‌نشدهٔ همین اسکرپ — در همین اسکرپ، "
+            "با شماره‌های دیوارِ صاحب آن و فیلترهای خودش",
+            retry=len(items))
+
+        # The run's own filters, as its search had them: what Divar filtered
+        # is not checked again, what it could not is.
+        target_day = None
+        if filters.get("posted_date"):
+            try:
+                target_day = datetime.fromisoformat(str(filters["posted_date"])).date()
+            except ValueError:
+                target_day = None
+        pre: Dict[str, Any] = {k: filters.get(k) for k in (
+            "advertiser_type", "min_price", "max_price", "min_deposit", "max_deposit",
+            "min_rent", "max_rent", "min_price_per_meter", "max_price_per_meter",
+            "min_area", "max_area", "min_rooms", "max_rooms", "has_elevator",
+            "has_parking", "has_storage", "has_balcony", "has_images", "max_age_hours")}
+        pre["target_day"] = target_day
+        if not urls:
+            try:
+                await _df.current()
+                kw = {k: filters.get(k) for k in (
+                    "advertiser_type", "has_images", "min_price", "max_price", "min_deposit",
+                    "max_deposit", "min_rent", "max_rent", "min_price_per_meter",
+                    "max_price_per_meter", "min_area", "max_area", "min_rooms", "max_rooms",
+                    "has_elevator", "has_parking", "has_storage", "has_balcony",
+                    "posted_date", "max_age_hours")}
+                for name in _dc.plan_filters(category, divar_filters=divar_filters, **kw).local_off:
+                    if name in pre:
+                        pre[name] = None
+            except Exception as e:
+                logger.warning(f"[retry] the run's filter plan could not be rebuilt: {e}")
+        listing_type = CATEGORIES.get(category, {}).get("type", "unknown")
+
+        cfg = dict(job.config or {})
+        outcome: Dict[str, Any] = {k: (dict(v) if isinstance(v, dict) else v)
+                                   for k, v in (cfg.get("outcome") or {}).items()}
+        got = still = already = 0
+        tried = 0
+        now_left: Dict[str, int] = {}
+
+        async def settle(item, reason: Optional[str], detail: Optional[str],
+                         title: Optional[str]) -> None:
+            """The listing's old outcome off, its new one on — both at once,
+            so a retry cut short leaves every listing it did not reach as it was."""
+            await skipped_listings.forget(job.job_id, item["divar_id"])
+            self._outcome_move(job, outcome, item.get("reason"), item.get("detail"), -1)
+            if reason is not None:
+                self._outcome_move(job, outcome, reason, detail, +1)
+                now_left[reason] = now_left.get(reason, 0) + 1
+                await skipped_listings.record(
+                    job.job_id, divar_id=item["divar_id"], url=item.get("url"),
+                    title=title or item.get("title"), reason=reason, detail=detail)
+            self._set_counts(job, config={**(job.config or {}), "outcome": dict(outcome)})
+            await self.db_session.commit()
+
+        async def stopped() -> ScrapingJob:
+            """Stopped from outside mid-retry: the cancel's status and line
+            stand; only the request is taken off the row."""
+            logger.info(f"Job {job_id} was stopped during its retry")
+            self._set_counts(job, config={k: v for k, v in (job.config or {}).items() if k != "retry"})
+            await self.db_session.commit()
+            return job
+
+        try:
+            for item in items:
+                if await self._cancelled_now():
+                    return await stopped()
+                did = str(item["divar_id"])
+                url = item.get("url") or f"https://divar.ir/v/{did}"
+                tried += 1
+                if await self.property_exists(did):
+                    # Another run, or a single scrape, has it with its number now.
+                    already += 1
+                    outcome["duplicate"] = int(outcome.get("duplicate") or 0) + 1
+                    await settle(item, None, None, None)
+                    continue
+                await self.db_session.commit()
+                owed = item.get("reason") in skipped_listings.AWAITING_PHONE
+                detail = await self.scrape_property_detail(
+                    url, target_category=category, source_title=item.get("title"),
+                    wants_contact=None if owed else (
+                        lambda pd: self.pre_contact_skip(pd, listing_type, pre)))
+                if not (detail and detail.get("phone_number")) and await self._cancelled_now():
+                    return await stopped()
+
+                if detail is False:
+                    what = getattr(self, "_last_category_drop", None)
+                    await settle(item, "category", what, None)
+                elif detail is None:
+                    why = getattr(self, "_last_detail_error", None) or "نامعلوم"
+                    if why == self.GONE_FROM_DIVAR:
+                        await settle(item, "deleted",
+                                     "دیوار می‌گوید این آگهی حذف شده یا دیگر وجود ندارد", None)
+                    else:
+                        await settle(item, "failed", why, None)
+                else:
+                    property_data = {**{"divar_id": did, "url": url, "title": item.get("title")},
+                                     **detail}
+                    if CITIES.get(city):
+                        property_data["city_name"] = CITIES[city].get("name", city)
+                    if CATEGORIES.get(category):
+                        property_data["category_name"] = CATEGORIES[category].get("name", category)
+                    if listing_type != "unknown" or not property_data.get("listing_type"):
+                        property_data["listing_type"] = listing_type
+                    why = None if owed else (
+                        self.local_filter_skip(detail, listing_type, pre)
+                        or self._date_skip(detail.get("posted_at"), target_day,
+                                           pre.get("max_age_hours")))
+                    if why:
+                        await settle(item, why.split()[0], why, property_data.get("title"))
+                        continue
+                    if download_images and property_data.get("images"):
+                        local = await self.download_images(property_data["images"], did)
+                        if local:
+                            property_data["images"] = local
+                            property_data["thumbnail_url"] = local[0]
+                            property_data["images_downloaded"] = True
+                    from app.services import advertiser_signals
+                    advertiser_signals.annotate(property_data)
+                    self._grade_property(property_data)
+                    saved = await self.save_property(property_data)
+                    if getattr(self, "_last_save_rolled_back", False):
+                        await self.db_session.refresh(job)
+                    phone = property_data.get("phone_number")
+                    if saved and self._phone_required and not phone:
+                        still += 1
+                        ch = property_data.get("contact_channel")
+                        if ch == "needs_identity":
+                            await settle(item, "needs_identity",
+                                         f"دیوار از این حساب تأیید هویت خواسته — {skipped_listings.RETRY_HINT}",
+                                         property_data.get("title"))
+                        elif ch == "chat_only":
+                            await settle(item, "chat_only",
+                                         "آگهی‌دهنده فقط از راه چت دیوار تماس می‌گیرد — شماره‌ای برای گرفتن نیست",
+                                         property_data.get("title"))
+                        else:
+                            await settle(item, "no_phone",
+                                         f"ذخیره شد ولی شمارهٔ تماس گرفته نشد — {skipped_listings.RETRY_HINT}",
+                                         property_data.get("title"))
+                    elif saved:
+                        got += 1
+                        if getattr(self, "_last_save_created", True):
+                            self._set_counts(job, new_items=int(job.new_items or 0) + 1)
+                        else:
+                            self._set_counts(job, updated_items=int(job.updated_items or 0) + 1)
+                        await settle(item, None, None, None)
+                    else:
+                        err = getattr(self, "_last_save_error", None)
+                        await settle(item, "failed", f"ذخیره نشد — {err}" if err else "ذخیره نشد",
+                                     property_data.get("title"))
+                await self.maybe_rotate_account()
+                self._note_account(job)
+                await self.db_session.commit()
+                await self._human_like_delay(stop_on_cancel=True)
+        except Exception as e:
+            logger.error(f"[retry] job {job_id}: {type(e).__name__}: {e}")
+            try:
+                await self.db_session.rollback()
+                await self.db_session.refresh(job)
+            except Exception:
+                pass
+            line = f"تلاش دوباره با خطا متوقف شد ({type(e).__name__}) — {tried} از {len(items)} آگهی امتحان شد"
+            await self._end_retry(job, prev_status, line)
+            await job_log.record(job.job_id, job_log.ERROR, line, level="error",
+                                 error_type=type(e).__name__)
+            return job
+
+        left = "، ".join(f"{n} {self._FILTER_LABELS_FA.get(r, r)}" for r, n in
+                         sorted(now_left.items(), key=lambda kv: -kv[1]))
+        line = (f"تلاش دوباره: از {len(items)} آگهی، {got} ذخیره شد"
+                + (f"، {already} تا حالا از قبل با شماره بود" if already else "")
+                + (f"؛ هنوز اسکرپ‌نشده: {left}" if left else ""))
+        await self._end_retry(job, prev_status, line)
+        await self._persist_active_session()
+        await job_log.record(
+            job.job_id, job_log.FINISH, line,
+            level="info" if not now_left else "warning",
+            retried=len(items), saved=got, without_number=still, already=already,
+            left=dict(now_left) or None, status=job.status)
+        return job
+
+    async def _end_retry(self, job, prev_status: str, line: str) -> None:
+        """The row as it was before the retry — its status, its finish line
+        with what the retry did in front — unless it was stopped meanwhile."""
+        cfg = dict(job.config or {})
+        base = cfg.get("finish_before_retry", (cfg.get("retry") or {}).get("prev_finish"))
+        cfg.pop("retry", None)
+        cfg["finish_before_retry"] = base
+        history = list(cfg.get("retries") or [])[-9:]
+        history.append({"at": datetime.now().isoformat(timespec="seconds"), "line": line[:300]})
+        cfg["retries"] = history
+        self._set_counts(job, config=cfg)
+        if await self._finish_status(prev_status):
+            reason = f"{line}؛ {base}" if base else line
+            self._set_counts(job, finish_reason=reason[:300], completed_at=datetime.now())
+        await self.db_session.commit()
