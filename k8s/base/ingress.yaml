@@ -83,10 +83,115 @@ spec:
                 name: worker
                 port:
                   number: 8000
-          - path: /
+          # ── what stays on the backend ──
+          #
+          # Everything not named here goes to web (the last rule), so this
+          # list is exhaustive on purpose: a path left out of it does not
+          # fall back to the backend, it 404s out of Next.
+          #
+          # Ingress picks the LONGEST matching path, not the first one in the
+          # file, so these outrank the catch-all wherever they overlap.
+          - path: /api
             pathType: Prefix
             backend:
               service:
                 name: backend
                 port:
                   number: 8000
+          # The old panel, kept reachable for two weeks after the switchover
+          # so anyone mid-task can finish there. Its manifest and icons are
+          # relative, so they ride along under this prefix; its <link rel=icon>
+          # is not — hence /favicon.svg below.
+          - path: /dashboard
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          # Property photos, the forwarder APK and the mail hero images: three
+          # StaticFiles mounts in app/main.py, and nothing Next knows about.
+          - path: /images
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /downloads
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /email-assets
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          # Probes, the way back in during maintenance, the crawler file Next
+          # has no route for, and the icon the old panel and the API's own
+          # error pages link to absolutely.
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /ready
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /maintenance-access
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /llms.txt
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          # The retired Kavenegar push worker. It answers with a worker that
+          # unregisters itself, for browsers that still have the old one
+          # installed at scope "/" — routed to the new site it would 404 and
+          # leave that registration in place. Remove with the route.
+          - path: /kvn-push-sw.js
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /favicon.svg
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          # ── everything else is the new site (web.yaml) ──
+          #
+          # The landing page, the customer portal, the new panel and its
+          # /_next assets, robots.txt, sitemap.xml, og.png, favicon.ico, the
+          # PWA icons, the service worker and the per-scope manifests. This is
+          # the switchover: before it, / was the old landing page on the
+          # backend and only /panel and /_next came here.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 3000

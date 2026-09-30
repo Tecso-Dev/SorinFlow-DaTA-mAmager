@@ -1,0 +1,178 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-estedad), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-estedad), ui-sans-serif, system-ui, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-viz-low: var(--viz-low);
+  --color-viz-high: var(--viz-high);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* «شب نیلی»: black and indigo with soft glows in the dark theme, the same
+   indigo on cool white in the light one. Every page reads these tokens and
+   nothing else; the design choice lives only in this file. */
+:root {
+  --radius: 0.875rem;
+  --background: #f5f6fb;
+  --foreground: #0e1022;
+  --card: #ffffff;
+  --card-foreground: #0e1022;
+  --popover: #ffffff;
+  --popover-foreground: #0e1022;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --secondary: #eef0f8;
+  --secondary-foreground: #1d2140;
+  --muted: #eef0f7;
+  --muted-foreground: #5a6378;
+  --accent: #eceefb;
+  --accent-foreground: #1d2140;
+  /* dark enough for 11px text on their own 12% tint (WCAG AA 4.5:1) */
+  --destructive: #b91c1c;
+  --success: #166534;
+  --warning: #b45309;
+  --info: #0369a1;
+  --border: #e3e6f0;
+  --input: #dfe3ee;
+  --ring: #6366f1;
+  --chart-1: #6366f1;
+  --chart-2: #8b5cf6;
+  --chart-3: #06b6d4;
+  --chart-4: #ec4899;
+  --chart-5: #10b981;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1d2140;
+  --sidebar-primary: #4f46e5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef0fb;
+  --sidebar-accent-foreground: #1d2140;
+  --sidebar-border: #e6e8f2;
+  --sidebar-ring: #6366f1;
+  --glow-1: rgb(99 102 241 / 0.10);
+  --glow-2: rgb(139 92 246 / 0.08);
+  /* price-coded 3D views: cheaper → dearer */
+  --viz-low: #6366f1;
+  --viz-high: #ec4899;
+}
+
+.dark {
+  --background: #05050a;
+  --foreground: #eef1f8;
+  --card: #0c0c14;
+  --card-foreground: #eef1f8;
+  --popover: #10101a;
+  --popover-foreground: #eef1f8;
+  /* Light indigo with dark ink — the other way round from the light theme.
+     #5d60ef is a fine button colour but only 3.5:1 as text on a dark surface,
+     under AA, and the panel uses the brand as text in dozens of places.
+     Inverting it fixes both ends at once: ink on the button is 11.2:1 where
+     white gave 4.8:1, and the text form is 8.4:1. */
+  --primary: #a5b4fc;
+  --primary-foreground: #0c0c14;
+  --secondary: #161622;
+  --secondary-foreground: #e4e7f2;
+  --muted: #13131d;
+  --muted-foreground: #8f9ab0;
+  --accent: #181828;
+  --accent-foreground: #eef1f8;
+  --destructive: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --info: #38bdf8;
+  --border: rgb(255 255 255 / 0.07);
+  --input: rgb(255 255 255 / 0.10);
+  --ring: #6366f1;
+  --chart-1: #818cf8;
+  --chart-2: #a78bfa;
+  --chart-3: #22d3ee;
+  --chart-4: #f472b6;
+  --chart-5: #34d399;
+  --sidebar: #08080e;
+  --sidebar-foreground: #c9d0de;
+  --sidebar-primary: #6366f1;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgb(99 102 241 / 0.12);
+  --sidebar-accent-foreground: #eef1f8;
+  --sidebar-border: rgb(255 255 255 / 0.06);
+  --sidebar-ring: #6366f1;
+  --glow-1: rgb(99 102 241 / 0.16);
+  --glow-2: rgb(139 92 246 / 0.12);
+}
+
+/* --destructive as TEXT in the dark theme.
+ *
+ * #ef4444 is right as a filled button and measures 4.4:1 as text on its own
+ * 12% tint — just under AA. Unlike --primary it is not inverted: a red button
+ * carries a meaning a pale red one does not, so only its text form is lifted.
+ * Nobody could see any of this until the cards stopped being gradients,
+ * because a contrast checker cannot evaluate text over an image.
+ *
+ * .text-destructive-foreground is a different class token and is not matched.
+ */
+.dark .text-destructive { color: #fca5a5; }
+
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  /* Persian digits keep one width in tables and counters. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

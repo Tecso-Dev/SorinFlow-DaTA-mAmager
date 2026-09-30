@@ -1,3 +1,18 @@
+# ── the new panel (frontend-next): built here, served by the `web` Deployment
+# from this same image (node /app/web/server.js), so one image tag still
+# describes one release and the deploy pipeline stays as it is.
+FROM node:22-bookworm-slim AS web
+WORKDIR /web
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY frontend-next/package.json frontend-next/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend-next/ ./
+# No BACKEND_INTERNAL_URL at build time: rewrites stay off and Traefik routes
+# /api to the backend (next.config.ts).
+RUN npx next build && \
+    cp -r .next/static .next/standalone/.next/static && \
+    if [ -d public ]; then cp -r public .next/standalone/public; fi
+
 FROM mcr.microsoft.com/playwright/python:v1.41.0-jammy
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -19,6 +34,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY . .
+
+# The panel's standalone server and the one node binary it needs (the base
+# image's own Node belongs to its Playwright driver and is older).
+COPY --from=web /usr/local/bin/node /usr/local/bin/node
+COPY --from=web /web/.next/standalone /app/web
 
 # The commit this image was built from — deploy.yml passes it as a build-arg
 # so /health can report it. Declared after COPY so a changed commit (every

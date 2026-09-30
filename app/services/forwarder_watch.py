@@ -66,13 +66,15 @@ def _fa_diagnosis(state: str) -> tuple:
     return ("وضعیت فرستندهٔ پیامک درست نیست.", "تنظیمات دستگاه را در پنل بررسی کنید.")
 
 
-async def _email(to: str, subject: str, body: str) -> bool:
+async def _email(to: str, subject: str, body: str, db=None) -> bool:
     try:
         from app.services import email_service, email_templates
+        from app.services.site_settings import read_site
+        site_cfg = await read_site(db) if db is not None else None
+        cta_url = f"https://{(settings.domain or 'sorinflow.com')}/dashboard/"
         subj, html, text = email_templates.notification(
-            subject, body, cta_label="باز کردن پنل",
-            cta_url=f"https://{(settings.domain or 'sorinflow.com')}/dashboard/")
-        res = await email_service.send(to, subj, html, text)
+            subject, body, cta_label="باز کردن پنل", cta_url=cta_url, site=site_cfg)
+        res = await email_service.send(to, subj, html, text, db=db)
         return bool(res.get("success"))
     except Exception as e:
         logger.warning(f"[forwarder-watch] could not email {to}: {e}")
@@ -101,7 +103,7 @@ async def warn_owner(device: ForwarderDevice, health: dict, db) -> bool:
         "تا وقتی این درست نشود، اسکرپر برای هر کد تأیید منتظر می‌ماند و "
         "شمارهٔ تماس آگهی‌ها گرفته نمی‌شود."
     )
-    ok = await _email(to, "فرستندهٔ پیامک کار نمی‌کند", body)
+    ok = await _email(to, "فرستندهٔ پیامک کار نمی‌کند", body, db=db)
     if ok:
         device.warned_at = datetime.now(timezone.utc)
         await db.commit()

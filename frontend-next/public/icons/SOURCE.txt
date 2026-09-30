@@ -1,0 +1,4 @@
+Rendered from frontend-next/src/components/brand/icons/mark.svg — the chosen mark «ی»
+(the tapered infinity ribbon), exported from /brand-preview/icon so it is the very
+same drawing the pages render. To redo it after a logo change: export the mark again,
+then `NODE_PATH=../tests/e2e/node_modules node scripts/render-icons.mjs src/components/brand/icons/mark.svg`.

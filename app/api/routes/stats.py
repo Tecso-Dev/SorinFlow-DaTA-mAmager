@@ -3,7 +3,9 @@ SorinFlow Divar Scraper - Statistics API Routes
 """
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, Optional
+
+from pydantic import BaseModel, Field
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
@@ -464,3 +466,186 @@ async def get_property_trends(
         trends.append({"date": date_str, "total": total, "with_phone": with_phone})
 
     return {"trends": trends}
+
+
+@router.get("/overview")
+async def dashboard_overview(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    days: Annotated[int, Query(ge=7, le=90)] = 30,
+):
+    """Everything the new panel's dashboard draws, from one moment.
+
+    Office-wide: listings, leads, the funnel, deals and the neighbourhoods,
+    as on the old dashboard. Per person (visibility.activity_visible_to and
+    team_visible_to): calls, the call hours and the team table — root and
+    super_admin see the whole office, everybody else only themselves.
+    """
+    from app.api.routes.crm import _queue_query
+    from app.auth.visibility import (actor, activity_visible_to, customers_visible_to,
+                                     team_visible_to)
+    from app.crm.call_queue import OUTCOMES
+    from app.models.crm_models import ActivityLog, CalendarEvent, Customer, Deal
+    from app.models.lead import Lead
+    from app.services import dashboard_overview as ov
+
+    now = datetime.now(timezone.utc)
+    today = ov.today_tehran(now)
+    start = ov.day_start_utc(today - timedelta(days=days - 1))       # this window
+    prev_start = ov.day_start_utc(today - timedelta(days=2 * days - 1))  # the one before
+    today_start = ov.day_start_utc(today)
+    yday_start = ov.day_start_utc(today - timedelta(days=1))
+    naive = db.bind.dialect.name != "postgresql"
+
+    def b(ts: datetime) -> datetime:
+        # sqlite stores naive UTC (see _tehran_today_and_utc_cutoff)
+        return ts.replace(tzinfo=None) if naive else ts
+
+    async def scalar(q) -> int:
+        return int((await db.execute(q)).scalar() or 0)
+
+    # ── listings and leads, office-wide ─────────────────────────────────
+    prop_stamps = (await db.execute(select(Property.created_at).where(
+        Property.created_at >= b(start)))).scalars().all()
+    lead_rows = (await db.execute(select(Lead.created_at, Lead.status).where(
+        Lead.created_at >= b(prev_start)))).all()
+    status_counts: dict[str, int] = {}
+    for st, n in (await db.execute(select(Lead.status, func.count(Lead.id)).group_by(Lead.status))).all():
+        status_counts[st or "new"] = status_counts.get(st or "new", 0) + int(n)
+
+    def _in(ts, lo, hi=None):
+        t = ov.tehran(ts) if ts else None
+        return t is not None and t >= lo and (hi is None or t < hi)
+
+    leads_now = [r for r in lead_rows if _in(r.created_at, start)]
+    leads_before = [r for r in lead_rows if _in(r.created_at, prev_start, start)]
+    won_now = sum(1 for r in leads_now if r.status in ov.WON_STATUSES)
+    won_before = sum(1 for r in leads_before if r.status in ov.WON_STATUSES)
+
+    # ── deals, office-wide (a deal has no owner) ─────────────────────────
+    deal_when = func.coalesce(Deal.contract_date, Deal.close_date, Deal.created_at)
+    deal_rows = (await db.execute(select(deal_when, Deal.deal_type, Deal.commission).where(
+        Deal.status.in_(ov.DEAL_DONE), deal_when >= b(ov.day_start_utc(today - timedelta(days=185)))))).all()
+    deals_now = [r for r in deal_rows if _in(r[0], start)]
+    deals_before = [r for r in deal_rows if _in(r[0], prev_start, start)]
+
+    # ── calls, visits and wins: per person ──────────────────────────────
+    call_rows = (await db.execute(activity_visible_to(
+        select(ActivityLog.actor, ActivityLog.detail, ActivityLog.created_at).where(
+            ActivityLog.action == "call", ActivityLog.created_at >= b(prev_start)), current_user))).all()
+    calls_now = [r for r in call_rows if _in(r.created_at, start)]
+    calls_today = sum(1 for r in call_rows if _in(r.created_at, today_start))
+    calls_yday = sum(1 for r in call_rows if _in(r.created_at, yday_start, today_start))
+    win_rows = (await db.execute(activity_visible_to(
+        select(ActivityLog.actor, ActivityLog.detail).where(
+            ActivityLog.action == "status_change", ActivityLog.created_at >= b(start)), current_user))).all()
+    wins = [a for a, d in win_rows if ov.status_reached(d) in ov.WON_STATUSES]
+    visit_rows = (await db.execute(select(
+        func.coalesce(func.nullif(CalendarEvent.assigned_to, ""), CalendarEvent.created_by)).where(
+            CalendarEvent.event_type == "visit", CalendarEvent.start_at >= b(start),
+            CalendarEvent.start_at < b(today_start + timedelta(days=1))))).scalars().all()
+
+    people = [{"name": actor(u), "role": u.role, "presence": u.presence or "available", "id": u.id}
+              for u in (await db.execute(team_visible_to(select(User), current_user))).scalars().all()]
+    calls_due = await scalar(select(func.count()).select_from(_queue_query(current_user).subquery()))
+    hot = await scalar(customers_visible_to(
+        select(func.count(Customer.id)).where(Customer.temperature == "hot"), current_user))
+
+    # ── neighbourhoods of the busiest city, this window against the last ─
+    top_city = (await db.execute(
+        select(Property.city_name).where(Property.created_at >= b(start), Property.city_name.isnot(None))
+        .group_by(Property.city_name).order_by(func.count(Property.id).desc()).limit(1))).scalar()
+    districts = []
+    if top_city:
+        in_now = Property.created_at >= b(start)
+        ppm = func.nullif(Property.price_per_meter, 0)
+        rows = (await db.execute(
+            select(Property.district,
+                   func.count(Property.id).filter(in_now),
+                   func.avg(ppm).filter(in_now),
+                   func.avg(ppm).filter(Property.created_at < b(start)))
+            .where(Property.city_name == top_city, Property.created_at >= b(prev_start),
+                   Property.district.isnot(None), Property.district != "")
+            .group_by(Property.district)
+            .order_by(func.count(Property.id).filter(in_now).desc()).limit(6))).all()
+        districts = [{"name": d, "count": int(c or 0),
+                      "ppm": int(a) if a is not None else None,
+                      "delta": ov.pct_change(float(a) if a is not None else None,
+                                             float(p) if p is not None else None)}
+                     for d, c, a, p in rows if c]
+
+    source_pairs = (await db.execute(
+        select(Customer.source, func.count(Customer.id)).group_by(Customer.source))).all()
+    month_start = ov.jalali_month_start(today)
+    month_deals = [r for r in deal_rows if _in(r[0], ov.day_start_utc(month_start))]
+    from app.models.app_setting import AppSetting
+    target = ov.parse_target((await db.execute(
+        select(AppSetting.value).where(AppSetting.key == ov.TARGET_KEY))).scalar())
+
+    lead_days = ov.daily((r.created_at for r in leads_now), days, now)
+    prop_days = ov.daily(prop_stamps, days, now)
+    deal_days = ov.daily((r[0] for r in deals_now), days, now)
+    commission = 0
+    for _when, _kind, fee in deals_now:
+        commission += int(fee or 0)
+
+    return {
+        "generated_at": now.isoformat(),
+        "days": days,
+        "scope": "office" if current_user.role in ("root", "super_admin") else "self",
+        "kpis": {
+            "listings_today": prop_days.get(today.isoformat(), 0),
+            "listings_yesterday": prop_days.get((today - timedelta(days=1)).isoformat(), 0),
+            "leads_open": sum(int(status_counts.get(s, 0) or 0) for s in ov.OPEN_STATUSES),
+            "leads_new": len(leads_now), "leads_new_before": len(leads_before),
+            "hot_customers": hot,
+            "calls_today": calls_today, "calls_yesterday": calls_yday, "calls_due": calls_due,
+            "deals": len(deals_now), "deals_before": len(deals_before), "commission": commission,
+            "conversion": ov.ratio(won_now, len(leads_now)),
+            "conversion_before": ov.ratio(won_before, len(leads_before)),
+        },
+        "trend": [{"date": d, "listings": prop_days[d], "leads": lead_days[d], "deals": deal_days[d]}
+                  for d in prop_days],
+        "funnel": ov.funnel(status_counts),
+        "call_grid": {"hours": ov.GRID_HOURS, "rows": ov.call_grid(r.created_at for r in calls_now)},
+        "team": ov.team(people, ((r.actor, r.detail) for r in calls_now), wins, visit_rows, OUTCOMES),
+        "deals_by_month": ov.deals_by_month((r[0], r[1]) for r in deal_rows),
+        "districts": {"city": top_city, "items": districts},
+        "sources": ov.sources((src, int(n)) for src, n in source_pairs),
+        "target": {
+            "month_start": month_start.isoformat(),
+            "deals": len(month_deals),
+            "commission": sum(int(r[2] or 0) for r in month_deals),
+            "deals_target": target["deals"],
+            "commission_target": target["commission"],
+            "can_edit": current_user.role in ("root", "super_admin"),
+        },
+    }
+
+
+class MonthlyTarget(BaseModel):
+    deals: Optional[int] = Field(None, ge=0, le=100_000)
+    commission: Optional[int] = Field(None, ge=0, le=10**15)
+
+
+@router.put("/target")
+async def set_monthly_target(
+    data: MonthlyTarget,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """The office's monthly goal the dashboard measures against (root and
+    super_admin). Kept in app_settings, so it needs no table of its own."""
+    import json
+    from app.models.app_setting import AppSetting
+    from app.services import audit
+    from app.services.dashboard_overview import TARGET_KEY
+    if current_user.role not in ("root", "super_admin"):
+        raise HTTPException(status_code=403, detail="هدف ماه را فقط مدیر ارشد تعیین می‌کند")
+    value = json.dumps({"deals": data.deals or None, "commission": data.commission or None})
+    await db.merge(AppSetting(key=TARGET_KEY, value=value, updated_by=current_user.username))
+    await db.commit()
+    await audit.record("dashboard_target_set", actor=current_user, target_type="setting",
+                       summary="هدف ماه داشبورد تغییر کرد", detail={"key": TARGET_KEY,
+                       "deals": data.deals, "commission": data.commission})
+    return {"deals": data.deals or None, "commission": data.commission or None}

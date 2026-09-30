@@ -9,7 +9,12 @@ const { defineConfig, devices } = require('@playwright/test');
 // A server already running (started by hand, or by a previous webServer)
 // answers here instead of us spawning our own — set E2E_BASE_URL to point
 // at one, e.g. while iterating on a single spec.
-const baseURL = process.env.E2E_BASE_URL || 'http://127.0.0.1:8111';
+// E2E_PORT is what scripts/e2e_up.sh actually binds to, so it has to be read
+// here too: setting it alone started the server on one port and left
+// Playwright polling 8111 until it gave up, 120 s later, with a healthy
+// server running the whole time. playwright.next.config.js already derives
+// its ports this way, and a second checkout on one machine needs both.
+const baseURL = process.env.E2E_BASE_URL || `http://127.0.0.1:${process.env.E2E_PORT || '8111'}`;
 
 module.exports = defineConfig({
   testDir: './specs',

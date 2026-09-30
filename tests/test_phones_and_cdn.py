@@ -52,7 +52,14 @@ class TestNoCdn:
 
     def test_the_image_ships_the_vendor_directory(self):
         ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
-        assert "vendor" not in ignore and "frontend" not in ignore
+        # line by line: frontend-next/node_modules/ is rightly ignored and is
+        # not the old panel's frontend/ (a plain substring check refused it)
+        rules = [r.strip().rstrip("/") for r in ignore.splitlines()
+                 if r.strip() and not r.lstrip().startswith("#")]
+        for rule in rules:
+            assert "vendor" not in rule, f".dockerignore drops the vendored files: {rule}"
+            assert rule not in ("frontend", "frontend/*", "frontend/**") and not rule.startswith("frontend/"), \
+                f".dockerignore drops the old panel: {rule}"
 
 
 class TestErrorsComeHome:

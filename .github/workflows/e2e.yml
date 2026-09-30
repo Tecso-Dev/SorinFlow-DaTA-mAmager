@@ -24,7 +24,7 @@ jobs:
     # asks apt for jammy's package names (libasound2 …), which noble no longer
     # has — and jammy is what the production image is built on anyway.
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     services:
       postgres:
@@ -75,13 +75,16 @@ jobs:
       - name: Install Node test dependencies
         run: npm ci --prefix tests/e2e
 
-      - name: Install Playwright's Chromium
-        # The panel's own browser, not the scraper's: @playwright/test is kept
-        # current, while the Python side stays on the Chromium build the
+      - name: Install Playwright's Chromium and WebKit
+        # The panel's own browsers, not the scraper's: @playwright/test is
+        # kept current, while the Python side stays on the Chromium build the
         # scraper was tuned on (the production image ships that one
-        # preinstalled). --with-deps also installs the OS libraries Ubuntu
-        # needs for it.
-        run: npx --prefix tests/e2e playwright install --with-deps chromium
+        # preinstalled). Chromium runs the old suite and the new panel's
+        # desktop/Android projects below; WebKit is the new panel's iPhone
+        # project (E2E_WEBKIT=1) — both installed together so a later step
+        # cannot silently skip one. --with-deps also installs the OS
+        # libraries Ubuntu needs for them.
+        run: npx --prefix tests/e2e playwright install --with-deps chromium webkit
 
       - name: Generate a random SECRET_KEY for this run
         run: echo "SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> "$GITHUB_ENV"
@@ -99,10 +102,24 @@ jobs:
         # with no baseURL and no webServer (every test «Invalid URL»).
         run: npx --prefix tests/e2e playwright test --config tests/e2e/playwright.config.js
 
+      - name: Install the new panel's dependencies
+        run: npm ci --prefix frontend-next
+
+      - name: Run the new panel's e2e + accessibility suite (desktop, Android, iPhone)
+        # A production build of frontend-next forwarding /api to the same
+        # backend setup (scripts/e2e_next_up.sh); the iPhone project on WebKit.
+        env:
+          DATABASE_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_e2e_local
+          REDIS_URL: redis://localhost:6379/12
+          E2E_WEBKIT: "1"
+        run: npx --prefix tests/e2e playwright test --config tests/e2e/playwright.next.config.js
+
       - name: Upload the Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: tests/e2e/playwright-report/
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/playwright-report-next/
           retention-days: 14

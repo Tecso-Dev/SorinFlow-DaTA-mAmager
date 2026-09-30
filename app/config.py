@@ -2,12 +2,57 @@
 SorinFlow Divar Scraper - Application Configuration
 """
 from pydantic_settings import BaseSettings
-from pydantic import Field, AliasChoices
+from pydantic import Field, AliasChoices, model_validator
 from typing import List, Literal
 from functools import lru_cache
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _blank_means_unset(cls, data):
+        """An empty value is "not configured", not "the number is nothing".
+
+        Setting a key to "" is the natural way to say a knob is off — the k8s
+        manifests even mark several of them `optional: true` — but for the 49
+        int/float/bool settings here pydantic reads "" as a malformed number
+        and Settings() raises at import. Every pod then crash-loops, including
+        the migrate Job, on a traceback that names the type error and not the
+        knob. A blank SMTP_PORT in a secret took the whole rehearsal cluster
+        down exactly this way.
+
+        String fields keep their empty values: for those "" is a real setting
+        (a blank TELEGRAM_BOT_TOKEN means no bot), so only the fields that
+        cannot hold one are dropped back to their default.
+        """
+        if not isinstance(data, dict):
+            return data
+        by_alias = {}
+        for name, f in cls.model_fields.items():
+            by_alias[name] = f
+            alias = f.validation_alias
+            for a in getattr(alias, "choices", []) or ([alias] if alias else []):
+                if isinstance(a, str):
+                    by_alias[a] = f
+        out, dropped = {}, []
+        for k, v in data.items():
+            f = by_alias.get(k) or by_alias.get(k.lower())
+            if isinstance(v, str) and not v.strip() and f is not None and f.annotation is not str:
+                dropped.append(k)
+                continue  # let the field's own default stand
+            out[k] = v
+        if dropped:
+            # Say so. A blank DB_MIGRATE_ON_BOOT now restores migrate-on-boot
+            # (the default is True) instead of crash-looping — quieter, and
+            # therefore worth a line that names exactly which keys were
+            # ignored and what they fell back to.
+            from loguru import logger
+            logger.warning(
+                "ignoring blank values, using defaults: %s",
+                ", ".join(f"{k}={getattr(by_alias[k.lower()] if k.lower() in by_alias else by_alias[k], 'default', '?')!r}"
+                          for k in sorted(dropped)))
+        return out
 
     # App Info
     app_name: str = "SorinFlow Divar Scraper"
@@ -274,6 +319,12 @@ class Settings(BaseSettings):
     auth_sms_provider: str = Field(default="kavenegar", validation_alias=AliasChoices("AUTH_SMS_PROVIDER", "auth_sms_provider"))
     # Verification code: length, lifetime, resend cooldown, and how many wrong
     # guesses a single code tolerates before it is burned.
+    # Signups per client IP per hour (app/services/verification.py's
+    # IP_SIGNUP_LIMIT) before "too many requests from this device". A real
+    # visitor never hits this; local/e2e testing does, since every browser
+    # project in the same suite run registers through the same loopback
+    # address (see AUTH_IP_SIGNUP_LIMIT in scripts/e2e_up.sh).
+    auth_ip_signup_limit: int = Field(default=5, validation_alias=AliasChoices("AUTH_IP_SIGNUP_LIMIT", "auth_ip_signup_limit"))
     auth_code_length: int = Field(default=5, validation_alias=AliasChoices("AUTH_CODE_LENGTH", "auth_code_length"))
     auth_code_ttl_seconds: int = Field(default=180, validation_alias=AliasChoices("AUTH_CODE_TTL_SECONDS", "auth_code_ttl_seconds"))
     auth_code_resend_cooldown: int = Field(default=90, validation_alias=AliasChoices("AUTH_CODE_RESEND_COOLDOWN", "auth_code_resend_cooldown"))

@@ -15,7 +15,7 @@ POST /{id}/password      — reset password (super_admin)
 POST /{id}/totp/disable  — force-disable 2FA (super_admin)
 """
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, or_, func
@@ -34,6 +34,7 @@ from app.auth.jwt import (
     TOKEN_SMS_PENDING,
 )
 from app.auth.dependencies import get_current_user, _role_dep
+from app.auth.session_cookie import reissue
 from app.auth.permissions import (
     PERMISSIONS, ALL_PERMISSIONS, ROLE_ROOT, ASSIGNABLE_BY_SUPER_ADMIN,
     DEFAULT_ADMIN_PERMISSIONS, STAFF_ROLES, normalize_permissions, user_permissions,
@@ -739,7 +740,9 @@ def _me_response(user: User) -> UserResponse:
 @router.patch("/me")
 async def update_me(data: ProfileUpdate,
                     current_user: User = Depends(get_current_user),
-                    db: AsyncSession = Depends(get_db)):
+                    db: AsyncSession = Depends(get_db),  # noqa: B008
+                    # None only when called directly (tests); FastAPI needs the bare type to inject
+                    request: Request = None, response: Response = None):  # type: ignore[assignment]
     """Edit my own profile. A changed username comes back with a fresh token,
     because the token names the user by username and the old one would stop
     resolving on the very next request."""
@@ -777,15 +780,17 @@ async def update_me(data: ProfileUpdate,
         current_user.links = _clean_links(data.links)
     await db.commit()
     await db.refresh(current_user)
+    token = create_access_token(access_claims(current_user)) if renamed else None
     return {"user": _me_response(current_user),
-            "access_token": create_access_token(access_claims(current_user)) if renamed else None}
+            "access_token": reissue(request, response, token) if token else None}
 
 
 @router.post("/me/password")
 async def change_my_password(data: PasswordChangeRequest,
                              current_user: User = Depends(get_current_user),
                              db: AsyncSession = Depends(get_db),
-                             request: Request = None):
+                             # None only when called directly (tests); FastAPI needs the bare type to inject
+                    request: Request = None, response: Response = None):  # type: ignore[assignment]
     """Change my password. Every other device is signed out: token_version
     moves, and a token minted before it is refused from then on. This
     device gets a fresh token in the response so it stays in."""
@@ -820,7 +825,7 @@ async def change_my_password(data: PasswordChangeRequest,
                        request=request)
     return {"success": True,
             "message": "رمز عوض شد و دستگاه‌های دیگر از حساب خارج شدند",
-            "access_token": create_access_token(access_claims(current_user))}
+            "access_token": reissue(request, response, create_access_token(access_claims(current_user)))}
 
 
 def _pending_email_key(user: User) -> str:
@@ -1496,6 +1501,7 @@ async def request_verification(user_id: int,
     from app.config import get_settings
     from app.database import get_redis
     from app.services import email_service, email_templates
+    from app.services.site_settings import read_site
     from app.services.sms_service import send_sms
 
     target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
@@ -1524,12 +1530,13 @@ async def request_verification(user_id: int,
 
     if need_email:
         try:
+            site_cfg = await read_site(db)
             what = "ایمیل" + (" و شمارهٔ موبایل" if need_phone else "")
             subj, html, text = email_templates.notification(
                 f"لطفاً {what} خود را تأیید کنید",
-                f"{who} از شما خواسته {what} خود را در سورین‌فلو تأیید کنید. "
+                f"{who} از شما خواسته {what} خود را در {site_cfg['brandName']} تأیید کنید. "
                 "وارد پنل شوید، به «پروفایل» بروید و کنار هر مورد «ارسال کد» را بزنید.",
-                cta_label="باز کردن پروفایل", cta_url=profile_url)
+                cta_label="باز کردن پروفایل", cta_url=profile_url, site=site_cfg)
             res = await email_service.send(target.email, subj, html, text, db=db)
             sent["email"] = bool(res.get("success"))
         except Exception as e:

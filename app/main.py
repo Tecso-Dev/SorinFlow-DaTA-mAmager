@@ -391,6 +391,10 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+    # Moving docs_url does not move this one: FastAPI keeps its default
+    # /docs/oauth2-redirect, which is outside /api and so outside everything
+    # the Ingress sends here after the phase-4 switchover.
+    swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
     lifespan=lifespan
 )
 
@@ -464,13 +468,16 @@ async def _maintenance_allows(request: Request) -> bool:
         if bypass and request.cookies.get(mt.BYPASS_COOKIE) == bypass:
             return True
 
-        token = request.headers.get("Authorization", "")
-        if token.startswith("Bearer "):
+        # The old panel's bearer header, or the new panel's session cookie.
+        from app.auth.session_cookie import session_token
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:] if auth.startswith("Bearer ") else session_token(request)
+        if token:
             try:
                 from app.auth.jwt import decode_token, is_access_token
                 from app.models.user import User
                 from sqlalchemy import select
-                payload = decode_token(token[7:])
+                payload = decode_token(token)
                 # A token issued before the TOTP step is not a login yet, so it
                 # must not open a site that has been deliberately closed.
                 username = payload.get("sub") if is_access_token(payload) else None
@@ -548,17 +555,18 @@ async def api_key_middleware(request: Request, call_next):
                     "/api/public/auth/register", "/api/public/auth/verify",
                     "/api/public/auth/resend", "/api/public/auth/login",
                     "/api/public/auth/status",
+                    # The portal's own cookie login (app/api/routes/public_auth.py):
+                    # unauthenticated by nature, like the bearer login above it.
+                    # No matching logout entry needed — the portal reuses the
+                    # panel's own POST /api/session/logout, already public and
+                    # role-agnostic (it just clears whatever cookie is there).
+                    "/api/public/auth/session/login",
                     # حالت تعمیر: this middleware runs outside the maintenance
                     # one, so anything it rejects never reaches that logic at
                     # all — including the link meant to get back in. The POST
                     # to /api/maintenance is still super_admin-only by its own
                     # dependency; it is only exempt from the API-key check.
                     "/api/maintenance", "/maintenance-access",
-                    # Fetched by the browser with no credentials of any kind,
-                    # and by Kavenegar's own connection check. Left out, it
-                    # 401s in production and works locally — the same way the
-                    # login endpoints did.
-                    "/kvn-push-sw.js",
                     # The phone-side SMS forwarder. Signs every POST with a
                     # shared secret (HMAC in X-Signature) and carries neither a
                     # bearer nor the API key — it is a phone, not the panel.
@@ -566,23 +574,48 @@ async def api_key_middleware(request: Request, call_next):
                     # API-key gate from 401ing it in production the way it did
                     # the login endpoints.
                     "/api/scraper/otp-inbound", "/api/scraper/forwarder-heartbeat",
+                    # The retired push worker: fetched with no credential at
+                    # all, by browsers that still have the old one installed.
+                    "/kvn-push-sw.js",
                     # What a crawler fetches before it fetches anything else,
                     # with no credential of any kind — and the same trap as the
                     # login endpoints: locally API_KEY is empty so these worked,
                     # while in production a search engine asking for the crawl
                     # rules got 401 JSON and therefore no rules at all.
-                    "/robots.txt", "/sitemap.xml", "/llms.txt", "/og.png"}
+                    "/robots.txt", "/sitemap.xml", "/llms.txt", "/og.png",
+                    # The new panel's cookie login (app/api/routes/session.py):
+                    # unauthenticated by nature, like the /api/users/token group.
+                    # GET /api/session is not here — a real call to it carries
+                    # the session cookie, which the check below accepts.
+                    "/api/session/login", "/api/session/verify-totp",
+                    "/api/session/verify-email", "/api/session/logout",
+                    # The brand and contact details the login screen, the
+                    # landing page and the Next.js server read before anyone
+                    # has signed in. Left out, production silently fell back to
+                    # the defaults and never showed what root had saved.
+                    "/api/public/site"}
     is_dashboard = (request.url.path.startswith("/dashboard")
                     or request.url.path.startswith("/images")
                     # the APK is fetched by a phone that has nothing to
                     # authenticate with yet — installing the app is step one
                     or request.url.path.startswith("/downloads")
+                    # the hero images email_templates.py links to — fetched by
+                    # a mail client, which carries neither a bearer nor a
+                    # cookie, let alone the API key
+                    or request.url.path.startswith("/email-assets")
                     or request.url.path == "/portal")
     is_public = request.url.path in public_paths or is_dashboard
 
     is_preflight = request.method == "OPTIONS"
     has_bearer = request.headers.get("Authorization", "").startswith("Bearer ")
-    if not is_public and not is_preflight and not has_bearer and settings.api_key:
+    # The new panel's session cookie stands where the old panel's Bearer does:
+    # the browser sends no API key either way, and the real check (token,
+    # token_version, CSRF on writes) happens in get_current_user. Without this
+    # every cookie request was a 401 in production, where API_KEY is set, and
+    # never locally, where it is empty.
+    from app.auth.session_cookie import session_token
+    has_session = session_token(request) is not None
+    if not is_public and not is_preflight and not has_bearer and not has_session and settings.api_key:
         provided = (
             request.headers.get("X-API-Key")
             or request.query_params.get("api_key")
@@ -608,15 +641,15 @@ async def api_key_middleware(request: Request, call_next):
 
 # Content-Security-Policy-Report-Only: observe first, enforce later. Built
 # from what the pages actually load (frontend/index.html, portal.html,
-# landing.html, app.js, portal.js, sw.js, kvn-push-sw.js), not an aspirational
+# landing.html, app.js, portal.js, sw.js), not an aspirational
 # policy that would just flood /api/public/csp-report with expected noise:
 #   script-src/style-src 'unsafe-inline' — the panel is ~300 onclick=/onchange=
 #     attributes plus a handful of inline <script> blocks; a real nonce-based
 #     policy is a bigger rewrite than this phase does. 'unsafe-eval' — app.js's
 #     command-palette runs `eval(it.run)` for one built-in action.
-#   https://cdn.jsdelivr.net — landing.html's three.js. https://cdn.kavenegar.com
-#     — the push SDK <script> in landing.html/portal.html, and kvn-push-sw.js's
-#     own importScripts() of Kavenegar's service-worker script.
+#   https://cdn.jsdelivr.net — landing.html's three.js. (Kavenegar's web push
+#     is gone: its SDK <script>, its service worker and both of its CSP hosts
+#     were removed with the feature.)
 #   img-src data:/blob: — the QR codes drawn for TOTP/forwarder setup
 #     (vendor/qrcode.min.js) and CSV/JSON export links (URL.createObjectURL).
 #   https://*.divarcdn.com — property photos not yet downloaded to data-pvc
@@ -627,11 +660,11 @@ async def api_key_middleware(request: Request, call_next):
 # target="_blank">, never embedded, which CSP does not govern at all.
 _CSP_REPORT_ONLY = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.kavenegar.com; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: blob: https://*.divarcdn.com; "
     "font-src 'self'; "
-    "connect-src 'self' https://cdn.kavenegar.com; "
+    "connect-src 'self'; "
     "worker-src 'self'; "
     "frame-ancestors 'self'; "
     "base-uri 'self'; "
@@ -1236,6 +1269,32 @@ def _site_root(request: Request) -> str:
     return f"{request.url.scheme}://{request.url.netloc}".rstrip("/")
 
 
+@app.api_route("/kvn-push-sw.js", methods=["GET", "HEAD"], include_in_schema=False)
+async def retired_push_service_worker():
+    """A worker whose only job is to remove itself.
+
+    Kavenegar's web push is gone, but a service worker outlives the page that
+    registered it: returning visitors still have one installed at scope "/",
+    and its whole body was an importScripts() of that CDN. Deleting the route
+    would have left them a registration whose script 404s — which Chrome
+    eventually drops, but other browsers may keep, still holding that scope
+    over the new site.
+
+    So the path keeps answering, with a worker that unregisters itself the
+    moment the browser fetches it and reloads the open tabs so nothing is
+    served by the old one. Remove this once the fleet has turned over.
+    """
+    return Response(
+        "self.addEventListener('install', () => self.skipWaiting());\n"
+        "self.addEventListener('activate', (e) => e.waitUntil(\n"
+        "  self.registration.unregister()\n"
+        "    .then(() => self.clients.matchAll({ type: 'window' }))\n"
+        "    .then((cs) => cs.forEach((c) => c.navigate(c.url)))));\n",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-store"},
+    )
+
+
 @app.get("/robots.txt", include_in_schema=False)
 async def robots_txt(request: Request):
     root = _site_root(request)
@@ -1316,33 +1375,6 @@ async def portal_page():
         return HTMLResponse(page.read_text(encoding="utf-8"),
                             headers={"Cache-Control": "no-cache, must-revalidate"})
     return HTMLResponse("portal not found", status_code=404)
-
-
-# GET and HEAD. FastAPI's @app.get registers GET alone, so a HEAD — which
-# is what a checker reaching for "does this file exist" often sends — came
-# back 405, on a file that serves perfectly over GET.
-@app.api_route("/kvn-push-sw.js", methods=["GET", "HEAD"], include_in_schema=False)
-async def kavenegar_push_service_worker():
-    """Kavenegar's web-push service worker, served from the ORIGIN ROOT.
-
-    A service worker can only control pages at or below its own path, so this
-    one has to answer at /kvn-push-sw.js — mounting it under /dashboard would
-    scope it to the panel and Kavenegar's «بررسی اتصال» would not find it.
-
-    Service-Worker-Allowed is sent explicitly: without it a browser refuses any
-    registration asking for a scope broader than the script's own directory,
-    which is the failure people hit when the file is served correctly and the
-    registration still will not take.
-    """
-    return FileResponse(
-        "frontend/kvn-push-sw.js",
-        media_type="application/javascript",
-        headers={"Service-Worker-Allowed": "/",
-                 # The SDK it imports is versioned upstream; caching this
-                 # one-line shim for a day is enough and keeps a stale worker
-                 # from outliving a change here.
-                 "Cache-Control": "public, max-age=86400"},
-    )
 
 
 @app.get("/favicon.svg", include_in_schema=False)
@@ -1438,6 +1470,14 @@ try:
     app.mount("/images", StaticFiles(directory=settings.images_path), name="images")
 except Exception as e:
     logger.warning(f"images directory not mountable, skipping: {e}")
+try:
+    # The email hero PNGs (app/services/email_templates.py), committed to the
+    # repo and rendered by scripts/render_email_heroes.py — not user data, so
+    # this one lives under app/ rather than settings.images_path.
+    app.mount("/email-assets", StaticFiles(directory="app/static/email_assets"),
+             name="email-assets")
+except Exception as e:
+    logger.warning(f"email-assets directory not mountable, skipping: {e}")
 try:
     # The forwarder APK. Its own mount and its own media type: a browser on the
     # phone offered application/octet-stream may refuse to install it.

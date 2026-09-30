@@ -21,3 +21,7 @@ scripts/
 *.md
 .dockerignore
 .gitignore
+frontend-next/node_modules/
+frontend-next/.next/
+tests/e2e/node_modules/
+.claude/

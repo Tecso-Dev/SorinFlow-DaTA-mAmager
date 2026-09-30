@@ -37,6 +37,10 @@ logs/
 data/cookies/
 data/images/
 data/debug/
+# app/services/backup_service.py writes whole-database dumps here; on a
+# machine with real customer data, one `git add -A` would put one in a
+# public repository
+data/backups/
 
 # Debug screenshots
 debug_*.png
@@ -70,6 +74,7 @@ docker-compose.override.yml
 
 # Claude
 .claude/settings.local.json
+.claude/worktrees/
 
 # Kubernetes secrets (never commit)
 k8s/01-secrets.yaml
@@ -102,6 +107,7 @@ k8s/*secret*.yaml
 data/cookies/
 data/images/
 data/debug/
+data/backups/
 debug_*.png
 graphify-out/
 docker-compose.override.yml
@@ -116,4 +122,5 @@ _*.db
 tests/e2e/node_modules/
 tests/e2e/test-results/
 tests/e2e/playwright-report/
+tests/e2e/playwright-report-next/
 tests/e2e/blob-report/

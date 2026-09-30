@@ -6,12 +6,10 @@ const { loginAs } = require('../fixtures/auth');
 
 // Console/page-error noise this box does not control. Each entry needs a
 // reason — an empty match here is a real bug, not something to allowlist.
-const ALLOWED_CONSOLE_ERRORS = [
-  // frontend/landing.html loads Kavenegar's page-view widget from
-  // cdn.kavenegar.com; a sandboxed/offline runner can't reach it, and that
-  // has nothing to do with the panel under test.
-  { pattern: /cdn\.kavenegar\.com/, reason: 'external SMS-panel widget on the landing page' },
-];
+// Kavenegar's page-view widget used to be the one entry here; the web push
+// it belonged to was removed, so nothing on these pages reaches a third-party
+// host any more and every console error is the panel's own.
+const ALLOWED_CONSOLE_ERRORS = [];
 
 function trackErrors(page) {
   const errors = [];

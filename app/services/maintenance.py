@@ -188,6 +188,10 @@ OPEN_PREFIXES = (
     # Kubernetes reads this; closing it makes the kubelet kill the pod and the
     # site goes down for real instead of showing a notice.
     "/api/users/token",     # the way back in — login and the TOTP step
+    "/api/session"  # no trailing slash: bare GET /api/session is how the
+    # panel asks who it is talking to, and closing it left an ordinary admin
+    # staring at a loading skeleton instead of the maintenance page,        # the same login for the new panel (cookie session)
+    "/api/public/site",     # the brand the maintenance and login pages show
     "/api/maintenance",     # status, and the off-switch, which must never be
                             # unreachable; the POST is still super_admin-only
     "/maintenance-access",  # the bypass link would be blocked by the very
