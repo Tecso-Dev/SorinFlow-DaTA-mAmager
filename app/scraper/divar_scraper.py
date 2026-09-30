@@ -292,7 +292,7 @@ class DivarScraper:
         # an event, and reading it off self.current_job means an ORM attribute
         # access — which, on a row expired by an earlier commit, is a lazy
         # refresh in the middle of tearing a browser down.
-        self._job_id_str = None
+        self._job_id_str: Optional[str] = None
         # The run's filters, in the shape a divar.ir URL wants. Set when a job
         # starts; the collector appends them so Divar narrows the feed itself
         # instead of us reading an unfiltered one and discarding most of it.
@@ -4508,11 +4508,6 @@ class DivarScraper:
             logger.error(f"Failed to check property existence: {e}")
             return False
 
-    # At most this many numberless listings are retried per run, on top of
-    # the run's own candidates: each one costs a reveal, and reveals are what
-    # bring Divar's code prompts. A run asked for fewer takes fewer.
-    PHONE_RETRIES_PER_RUN = 20
-
     @staticmethod
     def _set_counts(job, **counts) -> None:
         """Write the run's counters on its row. The one place the models'
@@ -4520,42 +4515,6 @@ class DivarScraper:
         that moves a counter."""
         for name, value in counts.items():
             setattr(job, name, value)
-
-    async def _with_phone_retries(self, job, pool: List[Dict[str, Any]],
-                                  max_items: Optional[int]):
-        """The pool with the numberless listings owed a retry put first.
-
-        Owed: saved without a number by an earlier run of this city and
-        category started by the same person — the account budget spent on
-        them is that person's — while still stored and still numberless
-        (skipped_listings.awaiting_phone). Returns (pool, their ids). Never
-        raises: a retry that cannot be looked up must not cost the run.
-        """
-        try:
-            cap = min(self.PHONE_RETRIES_PER_RUN, max_items) if max_items else self.PHONE_RETRIES_PER_RUN
-            owed = await skipped_listings.awaiting_phone(
-                self.db_session, city_id=job.city_id, category_id=job.category_id,
-                owner_user_id=(job.config or {}).get("owner_user_id"), limit=cap)
-        except Exception as e:
-            logger.warning(f"[retry] numberless listings not looked up: {e}")
-            try:
-                await self.db_session.rollback()
-            except Exception:
-                pass
-            return pool, set()
-        if not owed:
-            return pool, set()
-        ids = {o["divar_id"] for o in owed}
-        first = [{"divar_id": o["divar_id"], "title": o.get("title"),
-                  "url": o.get("url") or f"https://divar.ir/v/{o['divar_id']}"} for o in owed]
-        logger.info(f"[retry] {len(first)} listing(s) saved without a number earlier — trying them first")
-        from app.services import job_log
-        await job_log.record(
-            job.job_id, job_log.PAGE,
-            f"{len(first)} آگهیِ بدون شماره از اجراهای قبلیِ همین شهر و دسته دوباره "
-            "برای شماره امتحان می‌شود — اول از همه، و بدون فیلترهای این اجرا",
-            retries=len(first))
-        return first + [lst for lst in pool if lst["divar_id"] not in ids], ids
 
     async def save_property(self, property_data: Dict[str, Any]) -> Optional[Property]:
         """Save property to database, surviving a dropped connection.
@@ -5070,21 +5029,11 @@ class DivarScraper:
                 # Advisory. It must never cost a run.
                 logger.warning(f"[count] could not ask Divar for its total: {e}")
 
-            # Listings earlier runs of this city and category saved without a
-            # phone number. Their skipped rows promise that the next run tries
-            # again, and that was only ever true when Divar's feed happened to
-            # hand the same listing over again — never, for a daily run of
-            # another day (#32). They go first, so a run that meets its target
-            # early still reaches them, and no filter of this run drops them
-            # (see _skip below): the run that saved them already judged them.
-            retry_ids: set = set()
-            if not urls:
-                all_listings, retry_ids = await self._with_phone_retries(
-                    job, all_listings, max_items)
-                # Already in the pool: a top-up page that brings one of them
-                # again must not add it twice — a second reveal on the owner's
-                # number, and a second «بدون شماره» row off its three tries.
-                seen_ids |= retry_ids
+            # The pool is Divar's list for these filters and nothing else
+            # (#57). Numberless listings an earlier run left used to go in
+            # first; their retry belongs to the run that left them now,
+            # inside it («تلاش دوباره», #58), so its counters and its list
+            # are the ones that change.
 
             # «کل» is this run's own pool: what the loop walks (#29).
             #
@@ -5161,8 +5110,6 @@ class DivarScraper:
             # its log, its finish line and its table column each called that
             # one number something different (#32).
             duplicates = 0
-            # Numberless listings owed a retry that got their number this time.
-            recovered = 0
             # Read once: after a rollback `job` is expired, and reading an
             # expired attribute is a lazy load outside the greenlet.
             _job_uuid = job.job_id
@@ -5190,10 +5137,6 @@ class DivarScraper:
                     # go?».
                     examined += 1
                     _counted = True
-                    # A numberless listing an earlier run saved (see
-                    # _with_phone_retries): no filter of this run applies.
-                    _retry = listing['divar_id'] in retry_ids
-
                     # The last candidate, and the target still unmet: page on
                     # into Divar's search now, so the walk carries on into
                     # what comes next instead of ending «آگهی بیشتری پیدا نشد»
@@ -5253,7 +5196,7 @@ class DivarScraper:
                     detail = await self.scrape_property_detail(
                         listing['url'], target_category=category,
                         source_title=listing.get('title'),
-                        wants_contact=None if _retry else lambda pd: self.pre_contact_skip(
+                        wants_contact=lambda pd: self.pre_contact_skip(
                             pd, _listing_type, _pre_filters),
                     )
                     # A cancel that landed while the ad was open — as often as
@@ -5290,13 +5233,6 @@ class DivarScraper:
                         _why: Dict[str, str] = {}
 
                         def _skip(reason: str) -> bool:
-                            if _retry:  # noqa: B023 — called in this same iteration
-                                # Owed a number by an earlier run, which kept
-                                # it under its own filters. A daily run's date
-                                # filter would otherwise drop yesterday's
-                                # listing every time, before the reveal.
-                                logger.info(f"{did}: {reason} — not applied to a phone retry")  # noqa: B023
-                                return False
                             logger.info(f"Skipping {did}: {reason}")
                             bucket = reason.split()[0] if reason else "other"
                             skip_tally[bucket] = skip_tally.get(bucket, 0) + 1
@@ -5436,14 +5372,10 @@ class DivarScraper:
                             # got a number from every listing that had one —
                             # report nineteen failures.
                             _ch = property_data.get("contact_channel")
-                            # What happens to it next, said as it is (#32). A
-                            # search run's numberless listings are owed a retry
-                            # by the next run of its city and category
-                            # (_with_phone_retries); an explicit list has
-                            # neither, so nothing picks it up by itself.
-                            _next = (f"اجرای بعدیِ همین کاربر در همین شهر و دسته دوباره "
-                                     f"امتحانش می‌کند (تا {skipped_listings.PHONE_ATTEMPTS} بار)"
-                                     if not urls else "با «بازاسکرپ» دوباره امتحانش کنید")
+                            # What happens to it next, said as it is (#32):
+                            # «تلاش دوباره» in this run's own list opens it
+                            # again inside this run (#58).
+                            _next = skipped_listings.RETRY_HINT
                             if _ch == "needs_identity":
                                 # Ours, not the poster's, and temporary: the
                                 # listing is retried once the account is
@@ -5489,8 +5421,6 @@ class DivarScraper:
                             # new against 28 rows actually created; job 102,
                             # 50 against 43.
                             job.updated_items += 1
-                            if _retry:
-                                recovered += 1
                         else:
                             # save_property rolled back the shared session, which
                             # expires `job`. Refreshing re-reads it so the counter
@@ -5780,12 +5710,6 @@ class DivarScraper:
                     f"{duplicates} آگهی تکراری بود — از قبل با شماره در پایگاه داده بود "
                     "و دوباره باز نشد",
                     duplicates=duplicates)
-            if retry_ids:
-                await job_log.record(
-                    job.job_id, job_log.PAGE,
-                    f"از {len(retry_ids)} آگهیِ بدون شمارهٔ اجراهای قبل، {recovered} شماره گرفت",
-                    retries=len(retry_ids), recovered=recovered)
-
             # Every candidate, accounted for.
             #
             # Asked «۱۱۳ آگهی هست ولی ۸۲ تا اسکرپ شد — کدام غلط است؟», neither
@@ -5825,7 +5749,6 @@ class DivarScraper:
                     "duplicate": duplicates, "failed": dict(fail_tally),
                     "skipped": dict(skip_tally), "gone": gone,
                     "unreached": max(_unreached, 0),
-                    "retried": len(retry_ids), "recovered": recovered,
                 }}
                 await self.db_session.commit()
             await job_log.record(
@@ -5883,4 +5806,3 @@ class DivarScraper:
                 new=job.new_items, updated=job.updated_items)
         
         return job
-    

@@ -178,7 +178,8 @@ class TestSingleScrape:
         (skip,) = _db(lambda m: h.skipped_rows(m, job_id=job_id))
         assert skip.reason == "no_phone"
         # nothing retries an explicit list by itself, so it must not promise that
-        assert "بازاسکرپ" in skip.detail and "اجرای بعدی" not in skip.detail
+        # «تلاش دوباره» in the run's own list tries it again in the same run (#58)
+        assert "تلاش دوباره" in skip.detail and "اجرای بعدی" not in skip.detail
 
     def test_not_a_listing_link_is_refused(self, client, person):
         r = client.post("/api/scraper/scrape-single", json={"url": "https://divar.ir/s/urmia"},

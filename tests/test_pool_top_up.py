@@ -160,23 +160,20 @@ class TestWhatTheTopUpLeavesOnTheRow:
         assert job.total_items == pool
         assert job.scraped_items <= job.total_items
 
-    async def test_a_listing_owed_a_retry_is_not_opened_twice(self, run, monkeypatch):
-        """A numberless listing from an earlier run goes first; when a top-up
-        page brings it again it must not be added a second time — that is a
-        second reveal on the owner's number."""
-        from app.services import skipped_listings
-        owed = tokens("bg", 1)[0]          # it is on page 4, which the top-up reads
-
-        async def awaiting_phone(*_a, **_k):
-            return [{"divar_id": owed, "title": "آگهی بدون شماره",
-                     "url": f"https://divar.ir/v/{owed}"}]
-        monkeypatch.setattr(skipped_listings, "awaiting_phone", awaiting_phone)
+    async def test_a_listing_a_top_up_page_brings_again_is_not_opened_twice(self, run):
+        """Divar repeats an ad further down — a promoted one — and the top-up
+        must not add it a second time: a second reveal on the owner's number
+        and one more candidate than Divar has (#57). (It used to be tested with
+        a numberless listing from an earlier run put first in the pool; the
+        pool is Divar's list only now, #58.)"""
+        again = tokens("so", 1)[0]          # page 1's first ad, again on page 4
+        feed = SMALL_FIRST[:3] + [page(4, [again] + tokens("bg", 24))] + SMALL_FIRST[4:]
         opened = []
-        real = lift_by_token
 
         def detail(url):
             opened.append(url)
-            return real(url)
-        job, _, _ = await run(SMALL_FIRST, category="rent-residential", max_items=10,
+            return lift_by_token(url)
+        job, _, _ = await run(feed, category="rent-residential", max_items=10,
                               has_elevator=True, held=False, detail=detail)
-        assert opened.count(f"https://divar.ir/v/{owed}") == 1, opened[:5]
+        assert opened.count(f"https://divar.ir/v/{again}") == 1, opened[:5]
+        assert len(opened) == len(set(opened))

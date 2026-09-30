@@ -64,7 +64,7 @@ async def record(job_id, *, divar_id: str, url: Optional[str] = None,
         return False
 
 
-async def for_job(db, job_id, limit: int = 1000, reason: str = None):
+async def for_job(db, job_id, limit: int = 1000, reason: Optional[str] = None):
     """What one run skipped, in the order it met them."""
     from app.models.scraping_job import SkippedListing
 
@@ -138,69 +138,11 @@ async def resolve(divar_id: str) -> int:
 
 
 # The two ways a listing is saved without a number that a later visit can
-# fix. chat_only is the poster's choice and never changes, so it is not here.
+# fix. The run already kept these under its filters, so a retry inside it
+# does not judge them again. chat_only is the poster's choice.
 AWAITING_PHONE = ("no_phone", "needs_identity")
-# A number that never shows — a hidden or a virtual one — must not cost a
-# reveal on every run for a month. Three visits, counting the first.
-PHONE_ATTEMPTS = 3
 
-
-async def awaiting_phone(db, *, city_id, category_id, owner_user_id=None,
-                         limit: int = 20, attempts: int = PHONE_ATTEMPTS) -> list:
-    """The listings the next run of this city and category owes a retry.
-
-    Saved without a phone number by an earlier run of the same city and
-    category started by the same person — the account budget a retry spends
-    is theirs — newest first, as [{divar_id, url, title}]. Only while the
-    listing is still stored, still has no number and is not chat-only; not
-    once Divar has said it is gone; and not after `attempts` visits, where
-    every skipped row for the listing counts, whichever run wrote it.
-
-    A read on the caller's session; the caller commits.
-    """
-    from app.models.property import Property
-    from app.models.scraping_job import ScrapingJob, SkippedListing
-
-    if city_id is None or category_id is None or limit <= 0:
-        return []
-    rows = (await db.execute(
-        select(SkippedListing.divar_id, SkippedListing.url, SkippedListing.title,
-               ScrapingJob.config)
-        .join(ScrapingJob, ScrapingJob.job_id == SkippedListing.job_id)
-        .where(SkippedListing.reason.in_(AWAITING_PHONE),
-               ScrapingJob.city_id == city_id,
-               ScrapingJob.category_id == category_id)
-        .order_by(SkippedListing.id.desc())
-    )).all()
-    owed: dict = {}
-    for divar_id, url, title, cfg in rows:
-        if divar_id in owed or (cfg or {}).get("owner_user_id") != owner_user_id:
-            continue
-        owed[divar_id] = {"divar_id": divar_id, "url": url, "title": title}
-    if not owed:
-        return []
-
-    ids = list(owed)
-    visits: dict = {}
-    for divar_id, reason in (await db.execute(
-            select(SkippedListing.divar_id, SkippedListing.reason)
-            .where(SkippedListing.divar_id.in_(ids)))).all():
-        visits.setdefault(divar_id, []).append(reason)
-    held = {d: (phone, channel) for d, phone, channel in (await db.execute(
-        select(Property.divar_id, Property.phone_number, Property.contact_channel)
-        .where(Property.divar_id.in_(ids)))).all()}
-
-    out = []
-    for d in ids:
-        if d not in held:
-            continue            # removed from the table by hand: not ours to bring back
-        phone, channel = held[d]
-        if (phone or "").strip() or channel == "chat_only":
-            continue
-        seen = visits.get(d, [])
-        if "deleted" in seen or len(seen) >= attempts:
-            continue
-        out.append(owed[d])
-        if len(out) >= limit:
-            break
-    return out
+# What a run's list tells a person to do with a listing it could not finish:
+# try it again inside that same run (#58), not wait for some other run.
+RETRY_HINT = ("با «تلاش دوباره» در فهرست آگهی‌های اسکرپ‌نشدهٔ همین اسکرپ، "
+              "در همین اسکرپ دوباره امتحانش کنید")
