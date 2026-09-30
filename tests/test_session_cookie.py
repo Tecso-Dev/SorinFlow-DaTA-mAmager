@@ -163,6 +163,60 @@ def test_a_portal_visitor_gets_no_panel_session(office):
     office(steps)
 
 
+def test_a_portal_visitor_is_refused_by_the_session_route_too(office):
+    """The panel and the portal share one cookie name at Path=/, so a customer
+    who signed in at the portal arrives at the panel with a valid cookie. Every
+    staff API refuses them by role, but GET /api/session answered 200 and the
+    panel shell — which redirects only on 401 — drew its whole chrome around a
+    customer's name. No data crossed; it was still a page they have no business
+    being on."""
+    from types import SimpleNamespace
+    from app.auth.jwt import access_claims, create_access_token
+
+    async def steps(c):
+        # the cookie a portal login leaves behind, minted the same way
+        visitor = SimpleNamespace(username="customer", role="visitor", token_version=0)
+        token = create_access_token(access_claims(visitor))
+        c.cookies.set("sf_session", token)
+        r = await c.get("/api/session")
+        assert r.status_code == 403, r.text
+        assert "پورتال" in r.json()["detail"]
+    office(steps)
+
+
+def test_logout_puts_the_token_out_of_use_not_just_out_of_the_browser(office):
+    """Deleting the cookie only takes the token out of that one browser.
+    Anyone who had already captured it could keep using it — for a day with
+    «مرا به خاطر بسپار» — which is the whole reason to press «خروج» on a
+    shared computer."""
+    async def steps(c):
+        await c.post("/api/session/login", json={"username": "agent", "password": PW, "remember": True})
+        stolen = c.cookies.get("sf_session")
+        assert stolen
+        assert (await c.post("/api/session/logout")).status_code == 200
+        # replay the raw value, the way a captured cookie would be replayed
+        c.cookies.set("sf_session", stolen)
+        assert (await c.get("/api/session")).status_code == 401
+    office(steps)
+
+
+def test_one_logout_does_not_sign_out_the_other_device(office):
+    """Revocation is per token, not per account: the office has people with
+    the panel open on a phone and a desktop, and logging out of one is not a
+    password change."""
+    async def steps(c):
+        await c.post("/api/session/login", json={"username": "agent", "password": PW})
+        phone = c.cookies.get("sf_session")
+        await c.post("/api/session/login", json={"username": "agent", "password": PW})
+        desktop = c.cookies.get("sf_session")
+        assert phone != desktop, "two logins must not mint the same token"
+        c.cookies.set("sf_session", phone)
+        await c.post("/api/session/logout")
+        c.cookies.set("sf_session", desktop)
+        assert (await c.get("/api/session")).status_code == 200
+    office(steps)
+
+
 def test_wrong_password_sets_nothing(office):
     async def steps(c):
         r = await c.post("/api/session/login", json={"username": "agent", "password": "nope"})

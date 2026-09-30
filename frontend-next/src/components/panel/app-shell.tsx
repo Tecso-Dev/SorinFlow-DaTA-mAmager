@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, onApiError } from "@/lib/api";
+import { api, ApiError, onApiError } from "@/lib/api";
 import { can, displayName, ROLE_LABEL, SESSION_KEY, useSession, type User } from "@/lib/session";
 import type { SiteConfig } from "@/lib/site";
 import { toast } from "@/components/toaster";
@@ -263,6 +263,28 @@ function ShellSkeleton() {
   );
 }
 
+/** A page that says why it cannot go further and offers one way out.
+ *
+ *  The shell used to render its loading skeleton for every session error, so
+ *  a customer who reached a panel URL, and an ordinary admin during
+ *  maintenance, both sat on a page that never finished loading. */
+function SessionDeadEnd({ href, cta, message }: { href: string; cta: string; message: string }) {
+  return (
+    <div className="grid min-h-dvh place-items-center bg-background px-6 text-center">
+      <div className="flex max-w-sm flex-col items-center gap-5">
+        <LogoMark size={56} />
+        <p className="leading-8 text-muted-foreground">{message}</p>
+        <a
+          href={href}
+          className="rounded-full bg-primary px-6 py-3 text-sm font-extrabold text-primary-foreground outline-none transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {cta}
+        </a>
+      </div>
+    </div>
+  );
+}
+
 export function AppShell({ site, children }: { site: ShellSite; children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -297,7 +319,17 @@ export function AppShell({ site, children }: { site: ShellSite; children: React.
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  if (session.isPending || session.isError) return <ShellSkeleton />;
+  // isError, not just 401: a customer's portal cookie is valid, so /api/session
+  // answers 403 rather than 401 for them, and a plain admin gets 503 while the
+  // site is closed for maintenance. Both used to land on this skeleton and
+  // stay there — a page that never finishes loading and never says why.
+  if (session.isPending) return <ShellSkeleton />;
+  if (session.isError) {
+    const status = session.error instanceof ApiError ? session.error.status : 0;
+    if (status === 403) return <SessionDeadEnd href="/portal" cta="رفتن به پورتال مشتریان" message={session.error instanceof ApiError ? session.error.message : ""} />;
+    if (status === 503) return <SessionDeadEnd href="/panel/login" cta="تلاش دوباره" message="سامانه در حال به‌روزرسانی است؛ چند دقیقهٔ دیگر دوباره امتحان کنید." />;
+    return <SessionDeadEnd href="/panel/login" cta="ورود دوباره" message="نشست شما در دسترس نیست." />;
+  }
   const user = session.data.user;
 
   return (

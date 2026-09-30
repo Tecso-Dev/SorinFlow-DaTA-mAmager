@@ -122,11 +122,25 @@ class TestTheWebPushIsGone:
             assert "cdn.kavenegar.com" not in Path(page).read_text(encoding="utf-8"), \
                 f"{page} still loads a third-party script from Kavenegar's CDN"
 
-    def test_the_service_worker_is_gone_from_the_tree_and_from_the_routes(self):
+    def test_the_service_worker_file_is_gone_and_its_path_only_unregisters(self):
+        """The file is gone, but the path still answers — with a worker whose
+        only job is to remove itself. A service worker outlives the page that
+        registered it, so returning visitors still have the old one installed
+        at scope "/", and a 404 there leaves that registration in place in
+        more than one browser."""
         from pathlib import Path
+        from starlette.testclient import TestClient
+        import app.main as m
         assert not Path("frontend/kvn-push-sw.js").exists(), "the push service worker file is back"
-        src = Path("app/main.py").read_text(encoding="utf-8")
-        assert "kvn-push-sw" not in src, "app/main.py still serves the push service worker"
+        # the body it actually serves, not what the source says about it
+        r = TestClient(m.app).get("/kvn-push-sw.js")
+        assert r.status_code == 200
+        body = r.text
+        assert "unregister()" in body, "the retired worker does not unregister itself"
+        assert "importScripts" not in body and "kavenegar" not in body.lower(), \
+            "the retired worker still reaches for the CDN"
+        assert r.headers.get("cache-control") == "no-store", \
+            "a cached tombstone would outlive its own purpose"
 
     def test_the_csp_no_longer_allows_that_cdn(self):
         """A leftover host in the policy is not harmless: it is standing

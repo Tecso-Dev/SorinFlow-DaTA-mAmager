@@ -190,6 +190,9 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           LOGS_PATH: /tmp
           IMAGES_PATH: /tmp
+          # without it the /downloads mount silently skips, and
+          # tests/test_ingress_routes.py then cannot see that path at all
+          DOWNLOADS_PATH: /tmp
         run: pytest tests/ -q --cov=app --cov-report=xml --cov-report=term:skip-covered
 
       - name: Upload coverage report
@@ -215,4 +218,7 @@ jobs:
           PG_TEST_URL: postgresql+asyncpg://sorinflow:ci-only-password@localhost:5432/sorinflow_test
           LOGS_PATH: /tmp
           IMAGES_PATH: /tmp
+          # without it the /downloads mount silently skips, and
+          # tests/test_ingress_routes.py then cannot see that path at all
+          DOWNLOADS_PATH: /tmp
         run: pytest tests/test_pg_migration.py -q

@@ -1,6 +1,7 @@
 """
 SorinFlow — JWT helpers + password hashing
 """
+import secrets
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 import bcrypt as _bcrypt
@@ -46,6 +47,13 @@ def create_access_token(data: dict, expires_minutes: int = None,
         "iat": now,
         "exp": now + timedelta(minutes=minutes),
         "typ": token_type,
+        # A token of its own, per login. `iat` has second resolution and the
+        # rest of the claims are the same for one account, so two logins in
+        # the same second used to mint the byte-identical token — two devices
+        # holding one credential, and logging out of either one revoking both
+        # (see session_cookie.revoke, which is keyed on the token). Nothing
+        # reads this claim; it exists so that every session is distinct.
+        "jti": secrets.token_hex(8),
     }
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 

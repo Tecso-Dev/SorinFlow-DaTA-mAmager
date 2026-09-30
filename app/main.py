@@ -574,6 +574,9 @@ async def api_key_middleware(request: Request, call_next):
                     # API-key gate from 401ing it in production the way it did
                     # the login endpoints.
                     "/api/scraper/otp-inbound", "/api/scraper/forwarder-heartbeat",
+                    # The retired push worker: fetched with no credential at
+                    # all, by browsers that still have the old one installed.
+                    "/kvn-push-sw.js",
                     # What a crawler fetches before it fetches anything else,
                     # with no credential of any kind — and the same trap as the
                     # login endpoints: locally API_KEY is empty so these worked,
@@ -1264,6 +1267,32 @@ def _site_root(request: Request) -> str:
     """The origin this request actually arrived on, so the links are right
     whichever hostname the site is reached by."""
     return f"{request.url.scheme}://{request.url.netloc}".rstrip("/")
+
+
+@app.api_route("/kvn-push-sw.js", methods=["GET", "HEAD"], include_in_schema=False)
+async def retired_push_service_worker():
+    """A worker whose only job is to remove itself.
+
+    Kavenegar's web push is gone, but a service worker outlives the page that
+    registered it: returning visitors still have one installed at scope "/",
+    and its whole body was an importScripts() of that CDN. Deleting the route
+    would have left them a registration whose script 404s — which Chrome
+    eventually drops, but other browsers may keep, still holding that scope
+    over the new site.
+
+    So the path keeps answering, with a worker that unregisters itself the
+    moment the browser fetches it and reloads the open tabs so nothing is
+    served by the old one. Remove this once the fleet has turned over.
+    """
+    return Response(
+        "self.addEventListener('install', () => self.skipWaiting());\n"
+        "self.addEventListener('activate', (e) => e.waitUntil(\n"
+        "  self.registration.unregister()\n"
+        "    .then(() => self.clients.matchAll({ type: 'window' }))\n"
+        "    .then((cs) => cs.forEach((c) => c.navigate(c.url)))));\n",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-store"},
+    )
 
 
 @app.get("/robots.txt", include_in_schema=False)

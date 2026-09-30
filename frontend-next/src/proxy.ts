@@ -15,7 +15,11 @@ export function proxy(request: NextRequest) {
   }
 
   // Optimistic gate only: no session cookie at all → the login page. Whether
-  // the cookie is still valid is the backend's call on every API request.
+  // the cookie is still valid — and whose it is — is the backend's call. The
+  // portal and the panel share one cookie name at Path=/, so a customer's
+  // cookie passes this check; GET /api/session refuses them by role and the
+  // shell sends them to the portal. Do not try to read the role here: this
+  // runs before any verification and would be deciding on an unchecked JWT.
   // /panel/offline is exempt too: public/sw.js serves it with no network at
   // all, so it must never redirect anywhere, session or not.
   const isOfflinePage = pathname === "/panel/offline" || pathname === "/portal/offline";

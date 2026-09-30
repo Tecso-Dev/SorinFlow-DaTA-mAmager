@@ -163,6 +163,17 @@ spec:
                 name: backend
                 port:
                   number: 8000
+          # The retired Kavenegar push worker. It answers with a worker that
+          # unregisters itself, for browsers that still have the old one
+          # installed at scope "/" — routed to the new site it would 404 and
+          # leave that registration in place. Remove with the route.
+          - path: /kvn-push-sw.js
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
           - path: /favicon.svg
             pathType: Exact
             backend:

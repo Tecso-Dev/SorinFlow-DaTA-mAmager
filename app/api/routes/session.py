@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.routes import users as users_routes
 from app.auth.dependencies import _user_from_token, get_current_user
 from app.auth.permissions import user_permissions
-from app.auth.session_cookie import clear_session, csrf_for, session_token, set_session
+from app.auth.session_cookie import clear_session, csrf_for, revoke, session_token, set_session
 from app.database import get_db
 from app.models.user import User
 from app.schemas import EmailCodeVerifyRequest, TokenResponse, TotpLoginRequest, UserResponse
@@ -94,12 +94,37 @@ async def session_verify_email(data: SessionEmail, request: Request, response: R
 
 @router.get("")
 async def session_read(request: Request, current_user: CurrentUser):
+    """Who the panel is talking to.
+
+    The panel and the portal share one cookie name at Path=/, so a customer
+    who signed in at the portal arrives here with a perfectly valid cookie.
+    Every staff API refuses them by role, but this route answered 200 and the
+    panel shell — which only redirects on 401 — drew its whole chrome around
+    a customer's name. No data crossed; it was still a page they have no
+    business being on. The login path already refuses them (_finish above);
+    this closes the one door that did not."""
+    if current_user.role == "visitor":
+        raise HTTPException(status_code=403, detail="این حساب برای پورتال مشتریان است؛ از صفحهٔ پورتال وارد شوید.")
     token: Optional[str] = session_token(request)
+    # The CSRF token in the body assumes only our own origin can read it. That
+    # holds because CORS is closed (app/main.py: cors_origins is empty and
+    # credentials are refused under "*"). Naming a real origin in CORS_ORIGINS
+    # would let that origin read this body — and with allow_headers=["*"] also
+    # send its own Authorization header, which skips CSRF entirely. Do not set
+    # it without moving the token out of the body.
     return {"user": _user_body(current_user), "csrf_token": csrf_for(token) if token else None}
 
 
 @router.post("/logout")
 async def session_logout(request: Request, response: Response):
-    """Clears the cookies. Needs no session, so a stale one can always be cleared."""
+    """Ends the session: the token is revoked, then the cookies are cleared.
+
+    Needs no session of its own, so a stale one can always be cleared. The
+    revocation is what makes «خروج» mean something on a shared computer —
+    clearing the cookie alone left the token usable by anyone who had already
+    captured it, for up to a day with «مرا به خاطر بسپار»."""
+    token = session_token(request)
+    if token:
+        await revoke(token)
     clear_session(request, response)
     return {"ok": True}

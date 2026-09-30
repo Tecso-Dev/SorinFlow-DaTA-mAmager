@@ -58,9 +58,17 @@ async def _token_of(request: Request, bearer: Optional[str]) -> Optional[str]:
     """
     if bearer:
         return bearer
-    from app.auth.session_cookie import session_token, csrf_ok
+    from app.auth.session_cookie import session_token, csrf_ok, is_revoked
     token = session_token(request)
-    if token and request.method not in ("GET", "HEAD", "OPTIONS") and not csrf_ok(request, token):
+    if not token:
+        return None
+    # A logged-out token is not this browser's any more, whatever the cookie
+    # says. Checked only on the cookie path: a bearer is never sent by the
+    # browser on its own, and the old panel has no logout endpoint to revoke
+    # through. See session_cookie.revoke().
+    if await is_revoked(token):
+        return None
+    if request.method not in ("GET", "HEAD", "OPTIONS") and not csrf_ok(request, token):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail={"code": "csrf", "message": "نشست این صفحه تأیید نشد؛ صفحه را دوباره باز کنید"})
     return token

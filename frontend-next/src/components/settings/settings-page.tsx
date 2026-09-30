@@ -168,7 +168,11 @@ export function SettingsPage() {
   const q = useQuery({
     queryKey: QKEY,
     queryFn: () => api<{ site: SiteConfig; defaults: SiteConfig }>("/settings/site"),
-    enabled: can(user, { roles: ["root"] }),
+    // root AND super_admin, matching what app/api/routes/site.py enforces.
+    // The UI used to say "root only" while the backend happily served a
+    // super_admin — a hidden page they could reach by typing the URL, which
+    // is exactly the disagreement CLAUDE.md asks us not to have.
+    enabled: can(user, { roles: ["root", "super_admin"] }),
   });
 
   return (
@@ -183,8 +187,8 @@ export function SettingsPage() {
         <ListSkeleton rows={3} />
       ) : session.isError ? (
         <ErrorNote error={session.error} illustration={<IsoAlert />} />
-      ) : !can(user, { roles: ["root"] }) ? (
-        <Empty illustration={<Lottie animationData={shieldLottie} className="max-w-[100px]" />}>این بخش فقط برای root است.</Empty>
+      ) : !can(user, { roles: ["root", "super_admin"] }) ? (
+        <Empty illustration={<Lottie animationData={shieldLottie} className="max-w-[100px]" />}>این بخش فقط برای مدیر ارشد است.</Empty>
       ) : q.isPending ? (
         <ListSkeleton rows={6} />
       ) : q.isError ? (

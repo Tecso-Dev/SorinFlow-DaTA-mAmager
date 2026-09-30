@@ -18,8 +18,14 @@ const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export function csrfToken(): string | undefined {
   if (typeof document === "undefined") return undefined;
-  const m = document.cookie.match(/(?:^|;\s*)(?:__Host-)?sf_csrf=([^;]+)/);
-  return m ? decodeURIComponent(m[1]) : undefined;
+  // __Host- first, always. A plain `sf_csrf` can be set by any host under the
+  // domain (the prefix is what forbids that), and it would sit in the jar
+  // beside the real one — first by cookie order if it was planted before
+  // login. The page would then send a token that never matches and every
+  // write would 403: not forgeable, but a stranger could switch the panel off.
+  const csrf = (name: string) => document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`))?.[1];
+  const token = csrf("__Host-sf_csrf") ?? csrf("sf_csrf");
+  return token ? decodeURIComponent(token) : undefined;
 }
 
 type Listener = (e: ApiError) => void;

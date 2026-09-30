@@ -495,12 +495,20 @@ class UserResponse(BaseModel):
     presence: str = "available"
     avatar_url: Optional[str] = None
 
+    @field_validator("permissions", mode="before")
+    @classmethod
+    def _null_permissions_reads_as_empty(cls, v):
+        """The column is nullable — User.permissions has a Python-side default
+        only — so a row written outside the ORM can hold JSON null. Pydantic
+        then sees an explicit None against a required list and raises, which
+        turns that one account's login into a 500 instead of a refusal."""
+        return [] if v is None else v
+
     class Config:
         from_attributes = True
 
 
 PRESENCE_VALUES = ("available", "busy", "away")
-
 
 class ProfileLinks(BaseModel):
     website: Optional[str] = Field(None, max_length=200)

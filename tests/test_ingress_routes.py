@@ -59,7 +59,13 @@ def _service_for(path: str) -> str | None:
 
 
 def _api_root_paths():
-    """Every root-level path the app answers: its routes plus its mounts."""
+    """Every root-level path the app answers **in this process**.
+
+    The four StaticFiles mounts register inside a try/except that only warns,
+    so a mount whose directory is missing is simply absent here — /downloads
+    went unchecked on CI for exactly that reason until DOWNLOADS_PATH was set
+    there. Routes with path parameters are skipped: the Ingress matches by
+    prefix and those all live under one."""
     import app.main as m
     out = set()
     for route in m.app.routes:
@@ -97,6 +103,14 @@ def test_the_old_panel_and_the_file_mounts_stay_on_the_api():
     the three mounts are files Next has never heard of."""
     for p in ("/dashboard/", "/dashboard/index.html", "/images/a.jpg",
               "/downloads/forwarder.apk", "/email-assets/hero-auth.png"):
+        assert _service_for(p) == "backend", p
+
+
+def test_a_public_path_still_reaches_the_api_with_a_trailing_slash():
+    """A person typing sorinflow.com/health/ or a monitor configured with a
+    trailing slash must not be handed the new site's 404. Prefix rules cover
+    their own subtree; the Exact ones do not, which is the trap."""
+    for p in ("/api/", "/dashboard", "/images", "/email-assets/"):
         assert _service_for(p) == "backend", p
 
 

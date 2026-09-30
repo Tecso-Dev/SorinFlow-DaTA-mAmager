@@ -35,12 +35,23 @@ class Settings(BaseSettings):
             for a in getattr(alias, "choices", []) or ([alias] if alias else []):
                 if isinstance(a, str):
                     by_alias[a] = f
-        out = {}
+        out, dropped = {}, []
         for k, v in data.items():
             f = by_alias.get(k) or by_alias.get(k.lower())
             if isinstance(v, str) and not v.strip() and f is not None and f.annotation is not str:
+                dropped.append(k)
                 continue  # let the field's own default stand
             out[k] = v
+        if dropped:
+            # Say so. A blank DB_MIGRATE_ON_BOOT now restores migrate-on-boot
+            # (the default is True) instead of crash-looping — quieter, and
+            # therefore worth a line that names exactly which keys were
+            # ignored and what they fell back to.
+            import logging
+            logging.getLogger("sorinflow.config").warning(
+                "ignoring blank values, using defaults: %s",
+                ", ".join(f"{k}={getattr(by_alias[k.lower()] if k.lower() in by_alias else by_alias[k], 'default', '?')!r}"
+                          for k in sorted(dropped)))
         return out
 
     # App Info

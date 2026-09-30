@@ -15,10 +15,13 @@ each scheme reads only its own names.
 """
 import hashlib
 import hmac
+import time
 from typing import Optional
 
 from fastapi import Request, Response
+from loguru import logger
 
+from app.auth.jwt import decode_token
 from app.config import get_settings
 
 SESSION_NAME = "sf_session"
@@ -102,3 +105,57 @@ def reissue(request: Optional[Request], response: Optional[Response], token: str
 def clear_session(request: Request, response: Response) -> None:
     for name in _names(request):
         response.delete_cookie(name, path="/", secure=_secure(request), samesite="lax")
+
+
+# ── revoking one session ──────────────────────────────────────────────────
+#
+# Deleting the cookie only takes the token out of that one browser. The token
+# itself stayed valid for its full life — up to a day with «مرا به خاطر
+# بسپار» — so anyone who had already captured it could keep using it after
+# the person pressed «خروج» and walked away. That is the whole reason to
+# press it on a shared computer.
+#
+# token_version is the revocation the codebase already has, but it signs out
+# every device at once; a password change means that, a logout does not. So
+# one logged-out token goes on a list of its own, keyed by a hash of the
+# token (never the token) and expiring with it, so the list can only ever
+# hold sessions that are still inside their own lifetime.
+
+_REVOKED = "session:revoked:"
+
+
+def _key(token: str) -> str:
+    return _REVOKED + hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def revoke(token: str) -> None:
+    """Put one token out of use for whatever is left of its life."""
+    try:
+        payload = decode_token(token)
+        ttl = int(payload.get("exp", 0)) - int(time.time())
+    except Exception:
+        return
+    if ttl <= 0:
+        return  # already expired; nothing to remember
+    try:
+        from app.database import get_redis  # imported here so a test's fake Redis is the one used
+        r = await get_redis()
+        await r.setex(_key(token), ttl + 60, "1")
+    except Exception as e:  # pragma: no cover - a Redis outage must not block logout
+        logger.warning("could not record a logout, the token stays valid until it expires: %s", e)
+
+
+async def is_revoked(token: str) -> bool:
+    """Was this token logged out?
+
+    Fails OPEN on purpose: if Redis is unreachable this answers False and the
+    token keeps working. The alternative — refusing every request while Redis
+    is down — turns a cache outage into a total outage, and the thing being
+    protected against already needs the attacker to hold a stolen cookie.
+    """
+    try:
+        from app.database import get_redis
+        r = await get_redis()
+        return bool(await r.get(_key(token)))
+    except Exception:
+        return False

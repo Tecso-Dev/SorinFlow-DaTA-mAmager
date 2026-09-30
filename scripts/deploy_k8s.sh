@@ -442,15 +442,36 @@ done
 [ "$code" = 200 ] \
   || verify_fail "https://${DOMAIN}:${VERIFY_PORT}/health returned '${code:-nothing}' through Traefik via ${hosts} (the allow-traefik-to-app NetworkPolicy, or Traefik itself, is broken)"
 
-# The new panel the same way: its login page through Traefik (allow-traefik-to-web).
-code=""
-for h in $hosts; do
-  code="$(curl -sk --max-time 10 --resolve "${DOMAIN}:${VERIFY_PORT}:${h}" \
-    -o /dev/null -w '%{http_code}' "https://${DOMAIN}:${VERIFY_PORT}/panel/login" || true)"
-  [ "$code" = 200 ] && break
-done
-[ "$code" = 200 ] \
-  || verify_fail "https://${DOMAIN}:${VERIFY_PORT}/panel/login returned '${code:-nothing}' through Traefik via ${hosts} (the allow-traefik-to-web NetworkPolicy, or the web pod, is broken)"
+# Then one path per Ingress rule that the phase-4 switchover created or kept.
+# `/` is the new site and the API keeps a named list, so a path left out of
+# that list does not fall back — it 404s out of Next, in production, on
+# something that works in every local run. Checking only /health and
+# /panel/login would have passed a deploy that had lost /dashboard or /api.
+#
+#   /panel/login  the new panel   → web   (also proves allow-traefik-to-web)
+#   /             the landing     → web
+#   /portal       the customers   → web
+#   /robots.txt   an SEO file     → web
+#   /dashboard/   the OLD panel, which stays reachable for two weeks → backend
+#   /api/public/site  the API under its own prefix → backend
+#   /favicon.svg  an Exact rule the old panel links to absolutely → backend
+probe() {
+  code=""
+  for h in $hosts; do
+    code="$(curl -sk --max-time 10 --resolve "${DOMAIN}:${VERIFY_PORT}:${h}" \
+      -o /dev/null -w '%{http_code}' "https://${DOMAIN}:${VERIFY_PORT}${1}" || true)"
+    [ "$code" = 200 ] && break
+  done
+  [ "$code" = 200 ] \
+    || verify_fail "https://${DOMAIN}:${VERIFY_PORT}${1} returned '${code:-nothing}' through Traefik via ${hosts} — ${2}"
+}
+probe /panel/login "the allow-traefik-to-web NetworkPolicy, or the web pod, is broken"
+probe /           "the landing page is not reaching the web pod"
+probe /portal     "the customer portal is not reaching the web pod"
+probe /robots.txt "the SEO files are not reaching the web pod"
+probe /dashboard/ "the OLD panel is unreachable — anyone mid-task there is locked out"
+probe /api/public/site "the API is unreachable through its own Ingress prefix"
+probe /favicon.svg "an Exact backend rule is not routing (the old panel and the error pages link to it)"
 
 # A Ready pod that is not on its way out: right after a rollout the old pods
 # are still in their preStop pause, and checking from one of those failed a
