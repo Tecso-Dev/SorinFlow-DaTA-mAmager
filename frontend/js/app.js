@@ -14501,13 +14501,14 @@ function visibleSkipped() {
         : _skippedRows;
 }
 
-/* What «تلاش دوباره» would try right now: exactly the rows on screen.
- * The button's number and the action both read this, so they cannot
- * disagree — «(8)» over a list of four was the two being computed
- * separately. Chat-only rows are included too: that verdict has been
- * wrong before, and a second look is the only way to find out. */
+/* What «تلاش دوباره» would try right now: the rows on screen, less those a
+ * retry cannot change (chat-only, gone from Divar — the server says which,
+ * retryable_in_bulk). The button's number and the action both read this, so
+ * they cannot disagree — «(8)» over a list of four was the two being
+ * computed separately. A chat-only row can still be tried by its own
+ * button: that verdict has been wrong before. */
 function rescrapeCandidates() {
-    return visibleSkipped();
+    return visibleSkipped().filter(r => r.retryable_in_bulk !== false);
 }
 
 function renderSkippedRows() {
@@ -14549,6 +14550,9 @@ async function retrySkippedListing(divarId) {
  * شماره» it retries the numberless ones and leaves the rest alone. */
 // eslint-disable-next-line no-unused-vars -- called from the summary's own onclick
 async function retryAllSkipped() {
+    // What is on screen NOW: the minute's refresh can drop the bucket while
+    // the confirmation is open, and a one-bucket retry must not become «all».
+    const bucket = _skippedFilter;
     const n = rescrapeCandidates().length;
     if (!n) { showToast('خبری نیست', 'چیزی برای تلاش دوباره نمایش داده نمی‌شود', 'warning'); return; }
     const ok = await askConfirm({
@@ -14558,7 +14562,7 @@ async function retryAllSkipped() {
         okLabel: `شروع (${n})`,
     });
     if (!ok) return;
-    await _retryInPlace(_skippedFilter ? { reason: _skippedFilter } : {});
+    await _retryInPlace(bucket ? { reason: bucket } : {});
 }
 
 async function _retryInPlace(body) {

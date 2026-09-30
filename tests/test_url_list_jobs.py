@@ -154,12 +154,13 @@ class TestThePanel:
         assert "'/scraper/rescrape'" not in block
 
     def test_the_button_counts_exactly_what_is_on_screen(self):
-        """«همه» over eight rows says (8): the number is the list, filter or
-        not. Chat-only rows are not quietly dropped — that verdict has been
-        wrong before."""
+        """The number is the list on screen, filter or not — less the rows a
+        retry cannot change, which the server marks (retryable_in_bulk, #58
+        review) rather than the panel naming reasons. Each still has its own
+        button (tests/js/skipped_panel.mjs)."""
         i = APP_JS.index("function rescrapeCandidates()")
-        body = APP_JS[i:APP_JS.index("}", i)]
-        assert "return visibleSkipped();" in body
+        body = APP_JS[i:APP_JS.index("\n}", i)]
+        assert "visibleSkipped()" in body and "retryable_in_bulk !== false" in body
         assert "chat_only" not in body
 
     def test_the_button_s_number_and_the_action_read_the_same_set(self):
