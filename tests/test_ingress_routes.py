@@ -31,11 +31,55 @@ INGRESS = Path(__file__).resolve().parent.parent / "k8s" / "base" / "ingress.yam
 HANDED_OVER = {"/", "/portal", "/robots.txt", "/sitemap.xml", "/og.png", "/favicon.ico"}
 
 
+HTTPS_INGRESSES = ("sorinflow-ingress-https", "sorinflow-ingress-web")
+
+
+def _https_ingresses():
+    docs = {d["metadata"]["name"]: d for d in yaml.safe_load_all(INGRESS.read_text(encoding="utf-8"))
+            if isinstance(d, dict) and d.get("kind") == "Ingress"}
+    for name in HTTPS_INGRESSES:
+        assert name in docs, f"no {name} in k8s/base/ingress.yaml"
+    return [docs[n] for n in HTTPS_INGRESSES]
+
+
 def _https_rules():
-    for doc in yaml.safe_load_all(INGRESS.read_text(encoding="utf-8")):
-        if isinstance(doc, dict) and doc.get("metadata", {}).get("name") == "sorinflow-ingress-https":
-            return doc["spec"]["rules"][0]["http"]["paths"]
-    raise AssertionError("no sorinflow-ingress-https in k8s/base/ingress.yaml")
+    """Every https path, whichever of the two Ingresses holds it."""
+    return [p for ing in _https_ingresses() for p in ing["spec"]["rules"][0]["http"]["paths"]]
+
+
+def _traefik_routers():
+    """The routers Traefik builds from the https Ingresses, ranked the way
+    Traefik ranks them — which is not the Ingress spec's way. Each path
+    becomes the rule `Host(`h`) && Path(`p`)` (Exact) or
+    `Host(`h`) && PathPrefix(`p`)` (Prefix), and a router's priority is its
+    Ingress's router.priority annotation or, without one, the length of that
+    rule text."""
+    out = []
+    for ing in _https_ingresses():
+        pinned = (ing["metadata"].get("annotations") or {}).get(
+            "traefik.ingress.kubernetes.io/router.priority")
+        rule = ing["spec"]["rules"][0]
+        for p in rule["http"]["paths"]:
+            matcher = "Path" if p["pathType"] == "Exact" else "PathPrefix"
+            text = f"Host(`{rule['host']}`) && {matcher}(`{p['path']}`)"
+            out.append({"exact": p["pathType"] == "Exact", "path": p["path"],
+                        "priority": int(pinned) if pinned else len(text),
+                        "service": p["backend"]["service"]["name"], "rule": text})
+    return out
+
+
+def _traefik_service_for(path: str) -> str:
+    """Which service Traefik sends `path` to. A tie between two different
+    services is a coin toss in production, so it fails here."""
+    matching = [r for r in _traefik_routers()
+                if (path == r["path"] if r["exact"] else path.startswith(r["path"]))]
+    assert matching, f"no router matches {path}"
+    top = max(r["priority"] for r in matching)
+    winners = {r["service"] for r in matching if r["priority"] == top}
+    assert len(winners) == 1, (
+        f"{path}: routers tie at priority {top} and go to different services: "
+        + ", ".join(r["rule"] for r in matching if r["priority"] == top))
+    return winners.pop()
 
 
 def _service_for(path: str) -> str | None:
@@ -85,6 +129,26 @@ def test_every_root_path_the_api_serves_is_routed_to_it():
     )
 
 
+def test_traefik_sends_every_api_root_path_to_the_api():
+    """What production actually does with the paths above. The phase 4 deploy
+    stopped on exactly this: with the catch-all beside them, PathPrefix(`/`)
+    tied with Path(`/health`) at 15 characters and beat Path(`/ready`), so
+    the deploy's own check got Next's 404 for /health."""
+    served = {p for p in _api_root_paths() if p not in HANDED_OVER} | {"/health", "/ready"}
+    wrong = sorted(p for p in served if _traefik_service_for(p) != "backend")
+    assert not wrong, f"Traefik sends these to the new site: {wrong}"
+
+
+def test_traefik_sends_the_root_and_the_panel_to_the_new_site():
+    for p in ("/", "/panel", "/panel/crm", "/portal", "/_next/static/x.js", "/sw.js"):
+        assert _traefik_service_for(p) == "web", p
+
+
+def test_traefik_sends_the_divar_login_routes_to_the_worker():
+    for p in ("/api/auth/login", "/api/auth/verify", "/api/auth/refresh"):
+        assert _traefik_service_for(p) == "worker", p
+
+
 def test_the_divar_login_routes_still_go_to_the_worker():
     """They need the worker's Chromium and its cookie jar; the api pods have
     neither (k8s/base/worker.yaml)."""
@@ -121,7 +185,8 @@ def test_a_prefix_rule_does_not_capture_a_longer_word():
     assert _service_for("/apiary") == "web"
 
 
-@pytest.mark.parametrize("name", ["sorinflow-ingress-http", "sorinflow-ingress-https"])
+@pytest.mark.parametrize("name", ["sorinflow-ingress-http", "sorinflow-ingress-https",
+                                  "sorinflow-ingress-web"])
 def test_the_staging_overlay_can_still_find_the_host_it_patches(name):
     """k8s/overlays/staging/kustomization.yaml replaces /spec/rules/0/host by
     index; a second rule added above would send staging's traffic to the
@@ -133,3 +198,46 @@ def test_the_staging_overlay_can_still_find_the_host_it_patches(name):
             assert rules[0]["host"] == "sorinflow.com"
             return
     raise AssertionError(f"{name} is missing from k8s/base/ingress.yaml")
+
+
+def _script_function(script: str, name: str) -> str:
+    import re
+    m = re.search(r"^%s\(\) \{\n.*?\n\}\n" % re.escape(name), script, re.M | re.S)
+    assert m, f"{name}() not found in scripts/deploy_k8s.sh"
+    return m.group(0)
+
+
+@pytest.mark.parametrize("overlay", ["production", "staging"])
+def test_the_deploy_applies_the_catch_all_ingress_before_the_others(overlay):
+    """scripts/deploy_k8s.sh's own helpers (extracted verbatim) over a real
+    render: the Ingress holding `/` at router.priority "1" comes first, every
+    Ingress comes out exactly once and unchanged. In name order, https lost
+    `/` before web existed and the site answered 404 for two seconds on the
+    deploy that moved it (k3d rehearsal)."""
+    import re
+    import shutil
+    import subprocess
+
+    root = INGRESS.parent.parent.parent
+    script = (root / "scripts" / "deploy_k8s.sh").read_text(encoding="utf-8")
+    assert 'ingresses_catch_all_first < "$RENDERED"' in script
+    catch_all = re.search(r"^CATCH_ALL=.*$", script, re.M)
+    assert catch_all, "CATCH_ALL not found in scripts/deploy_k8s.sh"
+    helpers = "".join(_script_function(script, n) for n in ("select_doc", "reject_doc")) \
+        + catch_all.group(0) + "\n" + _script_function(script, "ingresses_catch_all_first")
+
+    kubectl = shutil.which("kubectl")
+    if not kubectl:
+        pytest.skip("kubectl not on PATH — present locally and on GitHub runners")
+    rendered = subprocess.run([kubectl, "kustomize", f"k8s/overlays/{overlay}"],
+                              cwd=root, capture_output=True, text=True, timeout=30)
+    assert rendered.returncode == 0, rendered.stderr
+    out = subprocess.run(["bash", "-c", helpers + "ingresses_catch_all_first"],
+                         input=rendered.stdout, capture_output=True, text=True, timeout=10)
+    assert out.returncode == 0, out.stderr
+
+    ordered = [d for d in yaml.safe_load_all(out.stdout) if d]
+    given = [d for d in yaml.safe_load_all(rendered.stdout) if isinstance(d, dict) and d.get("kind") == "Ingress"]
+    assert [d["metadata"]["name"] for d in ordered][0] == "sorinflow-ingress-web"
+    assert sorted(ordered, key=lambda d: d["metadata"]["name"]) == \
+        sorted(given, key=lambda d: d["metadata"]["name"])

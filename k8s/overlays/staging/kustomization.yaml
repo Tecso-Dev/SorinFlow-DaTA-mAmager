@@ -100,6 +100,11 @@ patches:
       - op: replace
         path: /spec/rules/0/host
         value: staging.sorinflow.com
+  - target: { kind: Ingress, name: sorinflow-ingress-web }
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: staging.sorinflow.com
 
   # Links in an email or SMS sent from staging must point back at staging —
   # not at the production domain, which happened to be the shared default.

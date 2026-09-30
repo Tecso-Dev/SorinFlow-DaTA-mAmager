@@ -24,7 +24,9 @@ jobs:
     # asks apt for jammy's package names (libasound2 …), which noble no longer
     # has — and jammy is what the production image is built on anyway.
     runs-on: ubuntu-22.04
-    timeout-minutes: 35
+    # A green run takes about 32 minutes, most of it the new panel's three
+    # projects; 35 left no room for one retry of the browser install below.
+    timeout-minutes: 50
 
     services:
       postgres:
@@ -84,7 +86,25 @@ jobs:
         # project (E2E_WEBKIT=1) — both installed together so a later step
         # cannot silently skip one. --with-deps also installs the OS
         # libraries Ubuntu needs for them.
-        run: npx --prefix tests/e2e playwright install --with-deps chromium webkit
+        #
+        # apt has no overall limit of its own: one run sat 34 minutes on the
+        # runner's Azure Ubuntu mirror, which had stopped answering, until the
+        # job's timeout cancelled it. apt now drops a silent mirror after 30 s,
+        # each try is capped at 5 minutes (a good one takes about 2), and a
+        # stuck try's apt is ended before the next one takes the dpkg lock.
+        timeout-minutes: 18
+        run: |
+          echo 'Acquire::http::Timeout "30"; Acquire::https::Timeout "30"; Acquire::Retries "3";' \
+            | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts > /dev/null
+          for try in 1 2 3; do
+            if timeout --kill-after=15 300 npx --prefix tests/e2e playwright install --with-deps chromium webkit; then
+              exit 0
+            fi
+            echo "::warning::playwright install, try $try of 3, failed or ran past 5 minutes"
+            sudo pkill -x apt-get || true
+            sleep 10
+          done
+          exit 1
 
       - name: Generate a random SECRET_KEY for this run
         run: echo "SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')" >> "$GITHUB_ENV"

@@ -85,12 +85,13 @@ spec:
                   number: 8000
           # ── what stays on the backend ──
           #
-          # Everything not named here goes to web (the last rule), so this
-          # list is exhaustive on purpose: a path left out of it does not
-          # fall back to the backend, it 404s out of Next.
+          # Everything not named here goes to web (sorinflow-ingress-web
+          # below), so this list is exhaustive on purpose: a path left out of
+          # it does not fall back to the backend, it 404s out of Next.
           #
-          # Ingress picks the LONGEST matching path, not the first one in the
-          # file, so these outrank the catch-all wherever they overlap.
+          # These outrank the catch-all because it sits in its own Ingress at
+          # priority 1 — not because they are longer or Exact: Traefik ranks
+          # by rule length, see sorinflow-ingress-web.
           - path: /api
             pathType: Prefix
             backend:
@@ -181,13 +182,42 @@ spec:
                 name: backend
                 port:
                   number: 8000
-          # ── everything else is the new site (web.yaml) ──
-          #
-          # The landing page, the customer portal, the new panel and its
-          # /_next assets, robots.txt, sitemap.xml, og.png, favicon.ico, the
-          # PWA icons, the service worker and the per-scope manifests. This is
-          # the switchover: before it, / was the old landing page on the
-          # backend and only /panel and /_next came here.
+---
+# ── everything else is the new site (web.yaml) ──
+#
+# The landing page, the customer portal, the new panel and its /_next assets,
+# robots.txt, sitemap.xml, og.png, favicon.ico, the PWA icons, the service
+# worker and the per-scope manifests. This is the switchover: before it, / was
+# the old landing page on the backend and only /panel and /_next came here.
+#
+# Its own Ingress, at the lowest priority, and not a path in the one above:
+# Traefik does not rank an Ingress's paths the way the Ingress spec does
+# (Exact first, then the longest Prefix). Each path becomes a router whose
+# rule is `Host(...) && Path(...)` or `Host(...) && PathPrefix(...)`, and
+# routers are ranked by the LENGTH of that rule text. PathPrefix(`/`) is 15
+# characters, as long as Path(`/health`) and longer than Path(`/ready`), so
+# with the catch-all beside them /health tied with the new site and /ready
+# lost to it: the phase 4 deploy's own check got Next's 404 for /health and
+# stopped. The router.priority annotation applies to a whole Ingress, so the
+# catch-all sits alone here at priority 1, below every rule of the Ingress
+# above (the shortest, Host + Path, is far longer than 1).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sorinflow-ingress-web
+  labels:
+    app.kubernetes.io/component: ingress
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.priority: "1"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: sorinflow.com
+      http:
+        paths:
           - path: /
             pathType: Prefix
             backend:
