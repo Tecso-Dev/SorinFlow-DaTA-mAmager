@@ -137,33 +137,15 @@ async def resolve(divar_id: str) -> int:
         return 0
 
 
-async def forget(job_id, divar_id: str) -> int:
-    """Drop this run's rows for one listing — it has just been tried again
-    inside the same run (#58), and what that attempt wrote in their place is
-    the listing's account now. Other runs' rows are theirs and stay.
-
-    Own session, never raises — the same rules as record().
-    """
-    if job_id is None or not divar_id:
-        return 0
-    from app.models.scraping_job import SkippedListing
-
-    try:
-        async with async_session_maker() as db:
-            res = await db.execute(
-                delete(SkippedListing).where(SkippedListing.job_id == job_id,
-                                             SkippedListing.divar_id == str(divar_id)))
-            await db.commit()
-            return res.rowcount or 0
-    except Exception as e:
-        logger.warning(f"[skipped] could not forget {divar_id} for {job_id}: {type(e).__name__}: {e}")
-        return 0
-
-
 # The two ways a listing is saved without a number that a later visit can
 # fix. The run already kept these under its filters, so a retry inside it
 # does not judge them again. chat_only is the poster's choice.
 AWAITING_PHONE = ("no_phone", "needs_identity")
+
+# What a retry cannot change: the poster takes contact through chat only, or
+# Divar has deleted the listing. «تلاش دوباره» on everything or on a bucket
+# leaves them out; named one by one, they are tried (#58).
+BULK_NEVER = ("chat_only", "deleted")
 
 # What a run's list tells a person to do with a listing it could not finish:
 # try it again inside that same run (#58), not wait for some other run.

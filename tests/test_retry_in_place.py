@@ -213,7 +213,8 @@ class TestTheRetryIsTheSameRow:
         assert any(m.startswith("«تلاش دوباره» برای 2 آگهیِ اسکرپ‌نشدهٔ همین اسکرپ در صف") for m in lines), lines
         assert any(m.startswith("تلاش دوباره برای 2 آگهیِ اسکرپ‌نشدهٔ همین اسکرپ — در همین اسکرپ")
                    for m in lines), lines
-        assert any(m.startswith("تلاش دوباره: از 2 آگهی، 1 ذخیره شد؛ هنوز اسکرپ‌نشده: 1 ") for m in lines), lines
+        assert any(m.startswith("تلاش دوباره: از 2 آگهی، 1 ذخیره شد (0 تازه، 1 بروز)؛ هنوز اسکرپ‌نشده: 1 ")
+                   for m in lines), lines
 
     def test_one_still_without_a_number_is_one_row_on_the_list_not_two(self, client, person, worker):
         job_id, lost, broken, _ = _first_run(client, person, worker, {})

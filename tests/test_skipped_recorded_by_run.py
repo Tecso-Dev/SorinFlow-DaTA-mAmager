@@ -72,9 +72,10 @@ class TestAllThreeRoutesAreCovered:
         # temporary — the listing is retried once the account is verified.
         # Nine since 2026-09-25: the ninth is «deleted on Divar», split out
         # of «failed» because nothing failed and a retry finds it just as gone.
-        # Ten since #58: «تلاش دوباره» (retry_unscraped) writes each retried
-        # listing's new outcome through one call of its own.
-        assert SCRAPER.count("skipped_listings.record(") == 10
+        # «تلاش دوباره» (retry_unscraped, #58) writes a retried listing's new
+        # row on the run's own session, in one transaction with its counters,
+        # not through record().
+        assert SCRAPER.count("skipped_listings.record(") == 9
 
     async def test_a_duplicate_is_not_recorded_as_unsaved(self, monkeypatch):
         """It was saved — on an earlier run. Read off a real run

@@ -5912,30 +5912,63 @@ class DivarScraper:
         cfg = dict(job.config or {})
         outcome: Dict[str, Any] = {k: (dict(v) if isinstance(v, dict) else v)
                                    for k, v in (cfg.get("outcome") or {}).items()}
-        got = still = already = 0
+        got = still = already = fresh = 0
         tried = 0
         now_left: Dict[str, int] = {}
 
-        async def settle(item, reason: Optional[str], detail: Optional[str],
+        from sqlalchemy import delete as _delete
+        from app.models.scraping_job import SkippedListing
+
+        async def rows_of(item: Dict[str, Any], did: str) -> list:
+            """This run's rows for the listing, read before it is opened: a
+            save that gets the number clears them (_number_recovered), and
+            every one of them was counted, so every one is taken off."""
+            got = (await self.db_session.execute(
+                select(SkippedListing.reason, SkippedListing.detail)
+                .where(SkippedListing.job_id == job.job_id, SkippedListing.divar_id == did))).all()
+            await self.db_session.commit()
+            return [tuple(r) for r in got] or [(item.get("reason"), item.get("detail"))]
+
+        async def settle(item, old_rows: list, reason: Optional[str], detail: Optional[str],
                          title: Optional[str]) -> None:
-            """The listing's old outcome off, its new one on — both at once,
-            so a retry cut short leaves every listing it did not reach as it was."""
-            await skipped_listings.forget(job.job_id, item["divar_id"])
-            self._outcome_move(job, outcome, item.get("reason"), item.get("detail"), -1)
+            """The listing's old outcome off, its new one on, in ONE
+            transaction on the run's session: its rows in this run's list
+            deleted — every one, and every one taken off the counters, since a
+            listing can have been written down twice — its new row added, and
+            the counters and config.outcome written with them. A retry cut
+            short leaves every listing it did not reach as it was."""
+            did = str(item["divar_id"])
+            for old_reason, old_detail in old_rows:
+                self._outcome_move(job, outcome, old_reason, old_detail, -1)
+            await self.db_session.execute(_delete(SkippedListing).where(
+                SkippedListing.job_id == job.job_id, SkippedListing.divar_id == did))
             if reason is not None:
                 self._outcome_move(job, outcome, reason, detail, +1)
                 now_left[reason] = now_left.get(reason, 0) + 1
-                await skipped_listings.record(
-                    job.job_id, divar_id=item["divar_id"], url=item.get("url"),
-                    title=title or item.get("title"), reason=reason, detail=detail)
+                self.db_session.add(SkippedListing(
+                    job_id=job.job_id, divar_id=did[:32],
+                    url=(item.get("url") or f"https://divar.ir/v/{did}")[:400],
+                    title=(title or item.get("title") or None) and str(title or item.get("title"))[:300],
+                    reason=str(reason)[:64], detail=(detail or None) and str(detail)[:300]))
             self._set_counts(job, config={**(job.config or {}), "outcome": dict(outcome)})
             await self.db_session.commit()
 
         async def stopped() -> ScrapingJob:
-            """Stopped from outside mid-retry: the cancel's status and line
-            stand; only the request is taken off the row."""
+            """Stopped from outside mid-retry. A cancel ends the retry, not the
+            run (job_retry): the API already put the row back to the status it
+            had; a «cancelled» written by anything else is put back here. The
+            request comes off the row either way."""
+            from sqlalchemy import update as _update
+            from app.services import job_retry
             logger.info(f"Job {job_id} was stopped during its retry")
-            self._set_counts(job, config={k: v for k, v in (job.config or {}).items() if k != "retry"})
+            ended = job_retry.ended(job.config, job_retry.CANCELLED)
+            if ended is not None:
+                await self.db_session.execute(
+                    _update(ScrapingJob)
+                    .where(ScrapingJob.id == self._job_pk(), ScrapingJob.status == "cancelled")
+                    .values(status=ended["status"], finish_reason=ended["finish_reason"])
+                    .execution_options(synchronize_session=False))
+                self._set_counts(job, config=ended["config"])
             await self.db_session.commit()
             return job
 
@@ -5946,11 +5979,14 @@ class DivarScraper:
                 did = str(item["divar_id"])
                 url = item.get("url") or f"https://divar.ir/v/{did}"
                 tried += 1
-                if await self.property_exists(did):
-                    # Another run, or a single scrape, has it with its number now.
+                old_rows = await rows_of(item, did)
+                if await self._stored_with_number(did):
+                    # Another run, or a single scrape, has it with its number
+                    # now. Not a chat-only row: that one is opened again, it
+                    # was named for a second look.
                     already += 1
                     outcome["duplicate"] = int(outcome.get("duplicate") or 0) + 1
-                    await settle(item, None, None, None)
+                    await settle(item, old_rows, None, None, None)
                     continue
                 await self.db_session.commit()
                 owed = item.get("reason") in skipped_listings.AWAITING_PHONE
@@ -5963,14 +5999,14 @@ class DivarScraper:
 
                 if detail is False:
                     what = getattr(self, "_last_category_drop", None)
-                    await settle(item, "category", what, None)
+                    await settle(item, old_rows, "category", what, None)
                 elif detail is None:
                     why = getattr(self, "_last_detail_error", None) or "نامعلوم"
                     if why == self.GONE_FROM_DIVAR:
-                        await settle(item, "deleted",
+                        await settle(item, old_rows, "deleted",
                                      "دیوار می‌گوید این آگهی حذف شده یا دیگر وجود ندارد", None)
                     else:
-                        await settle(item, "failed", why, None)
+                        await settle(item, old_rows, "failed", why, None)
                 else:
                     property_data = {**{"divar_id": did, "url": url, "title": item.get("title")},
                                      **detail}
@@ -5985,7 +6021,7 @@ class DivarScraper:
                         or self._date_skip(detail.get("posted_at"), target_day,
                                            pre.get("max_age_hours")))
                     if why:
-                        await settle(item, why.split()[0], why, property_data.get("title"))
+                        await settle(item, old_rows, why.split()[0], why, property_data.get("title"))
                         continue
                     if download_images and property_data.get("images"):
                         local = await self.download_images(property_data["images"], did)
@@ -6004,27 +6040,31 @@ class DivarScraper:
                         still += 1
                         ch = property_data.get("contact_channel")
                         if ch == "needs_identity":
-                            await settle(item, "needs_identity",
+                            await settle(item, old_rows, "needs_identity",
                                          f"دیوار از این حساب تأیید هویت خواسته — {skipped_listings.RETRY_HINT}",
                                          property_data.get("title"))
                         elif ch == "chat_only":
-                            await settle(item, "chat_only",
+                            await settle(item, old_rows, "chat_only",
                                          "آگهی‌دهنده فقط از راه چت دیوار تماس می‌گیرد — شماره‌ای برای گرفتن نیست",
                                          property_data.get("title"))
                         else:
-                            await settle(item, "no_phone",
+                            await settle(item, old_rows, "no_phone",
                                          f"ذخیره شد ولی شمارهٔ تماس گرفته نشد — {skipped_listings.RETRY_HINT}",
                                          property_data.get("title"))
                     elif saved:
                         got += 1
+                        # Stored before — as a listing saved without its
+                        # number usually is — it is «بروز», not «تازه»: #32's
+                        # words, and the finish line says which were which.
                         if getattr(self, "_last_save_created", True):
+                            fresh += 1
                             self._set_counts(job, new_items=int(job.new_items or 0) + 1)
                         else:
                             self._set_counts(job, updated_items=int(job.updated_items or 0) + 1)
-                        await settle(item, None, None, None)
+                        await settle(item, old_rows, None, None, None)
                     else:
                         err = getattr(self, "_last_save_error", None)
-                        await settle(item, "failed", f"ذخیره نشد — {err}" if err else "ذخیره نشد",
+                        await settle(item, old_rows, "failed", f"ذخیره نشد — {err}" if err else "ذخیره نشد",
                                      property_data.get("title"))
                 await self.maybe_rotate_account()
                 self._note_account(job)
@@ -6046,6 +6086,7 @@ class DivarScraper:
         left = "، ".join(f"{n} {self._FILTER_LABELS_FA.get(r, r)}" for r, n in
                          sorted(now_left.items(), key=lambda kv: -kv[1]))
         line = (f"تلاش دوباره: از {len(items)} آگهی، {got} ذخیره شد"
+                + (f" ({fresh} تازه، {got - fresh} بروز)" if got else "")
                 + (f"، {already} تا حالا از قبل با شماره بود" if already else "")
                 + (f"؛ هنوز اسکرپ‌نشده: {left}" if left else ""))
         await self._end_retry(job, prev_status, line)
@@ -6056,6 +6097,13 @@ class DivarScraper:
             retried=len(items), saved=got, without_number=still, already=already,
             left=dict(now_left) or None, status=job.status)
         return job
+
+    async def _stored_with_number(self, divar_id: str) -> bool:
+        """Stored with a phone number — not merely stored, and not chat-only,
+        which property_exists also calls «held»."""
+        phone = (await self.db_session.execute(
+            select(Property.phone_number).where(Property.divar_id == divar_id))).scalar_one_or_none()
+        return bool((phone or "").strip())
 
     async def _end_retry(self, job, prev_status: str, line: str) -> None:
         """The row as it was before the retry — its status, its finish line

@@ -504,6 +504,10 @@ async def retry_unscraped(
     for r in rows:
         if r.divar_id in seen or (wanted is not None and r.divar_id not in wanted):
             continue
+        # «همه» or a bucket leaves out what a retry cannot change — the poster
+        # takes chat only, Divar deleted it. Named one by one, they are tried.
+        if wanted is None and r.reason in skipped_listings.BULK_NEVER:
+            continue
         seen.add(r.divar_id)
         items.append({"divar_id": r.divar_id, "url": r.url, "title": r.title,
                       "reason": r.reason, "detail": r.detail})
@@ -518,9 +522,14 @@ async def retry_unscraped(
                             detail="Too many running jobs. Please wait for existing jobs to complete.")
 
     from datetime import timezone as _tz
+    # The run's own finish line, before any retry wrote in front of it: an
+    # earlier retry's line (a cancelled one too) must not become the base.
+    old = cfg.get("retry") if isinstance(cfg.get("retry"), dict) else {}
+    base = (cfg["finish_before_retry"] if "finish_before_retry" in cfg
+            else old.get("prev_finish") if old else job.finish_reason)
     retry = {"items": items, "at": datetime.now(_tz.utc).isoformat(timespec="seconds"),
              "by": current_user.id if current_user else None,
-             "prev_status": job.status, "prev_finish": job.finish_reason}
+             "prev_status": job.status, "prev_finish": base}
     # Only from the status just read: a second press, or a resume, that got
     # there first wins.
     moved = (await db.execute(
@@ -1119,6 +1128,8 @@ async def get_job_skipped(
             "title": r.title,
             "reason": r.reason,
             "reason_label": labels.get(r.reason, r.reason),
+            # left out of «تلاش دوباره» on everything or a bucket (#58)
+            "retryable_in_bulk": r.reason not in skipped_listings.BULK_NEVER,
             "detail": r.detail,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         } for r in rows],
@@ -1200,13 +1211,37 @@ async def cancel_scraping_job(
     # was read above, and a run that finished in between had its ending
     # written over with «cancelled».
     was, pk = job.status, job.id
-    cancelled = (await db.execute(
-        update(ScrapingJob)
-        .where(ScrapingJob.id == pk, ScrapingJob.status.in_(("pending", "running", "paused")))
-        .values(status="cancelled", completed_at=datetime.now())
-        .returning(ScrapingJob.id)
-        .execution_options(synchronize_session=False))).scalar_one_or_none()
+    values: dict = {"status": "cancelled", "completed_at": datetime.now()}
+    cancelled = None
+    # A «تلاش دوباره» (#58): the cancel ends the retry, not the run — it goes
+    # back to the status it had, «تلاش دوباره لغو شد» in front of its old
+    # finish line, so a finished run does not turn into a cancelled one that
+    # offers «ادامه». config.retry comes off here only while no worker has
+    # the row (pending): a running retry is writing its own config, and
+    # takes the key off itself when it sees it was stopped.
+    from app.services import job_retry
+    ended = job_retry.ended(job.config, job_retry.CANCELLED)
+    if ended is not None:
+        values = {"status": ended["status"], "finish_reason": ended["finish_reason"],
+                  "completed_at": datetime.now()}
+        if was == "pending":
+            cancelled = (await db.execute(
+                update(ScrapingJob)
+                .where(ScrapingJob.id == pk, ScrapingJob.status == "pending")
+                .values(**values, config=ended["config"])
+                .returning(ScrapingJob.id)
+                .execution_options(synchronize_session=False))).scalar_one_or_none()
+    if cancelled is None:
+        cancelled = (await db.execute(
+            update(ScrapingJob)
+            .where(ScrapingJob.id == pk, ScrapingJob.status.in_(("pending", "running", "paused")))
+            .values(**values)
+            .returning(ScrapingJob.id)
+            .execution_options(synchronize_session=False))).scalar_one_or_none()
     await db.commit()
+    if cancelled is not None and ended is not None:
+        from app.services import job_log
+        await job_log.record(job_id, job_log.FINISH, ended["finish_reason"], level="warning")
     if cancelled is None:
         now = (await db.execute(
             select(ScrapingJob.status).where(ScrapingJob.id == pk))).scalar_one_or_none() or "—"
