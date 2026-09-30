@@ -88,6 +88,20 @@ jobs:
         working-directory: frontend-next
         run: npm ci
 
+      - name: Production build
+        # First, not last. Next writes PageProps, LayoutProps and the image
+        # module declarations into .next/types as part of the build, and
+        # tsc cannot type-check the app without them — on a clean checkout it
+        # fails with a page of "Cannot find name 'LayoutProps'". It passed
+        # locally only because a previous build had left .next behind.
+        #
+        # No BACKEND_INTERNAL_URL on purpose: that is what the image is built
+        # without, so this is the build the cluster actually runs. The site
+        # config it fetches at build time falls back to the env defaults when
+        # nothing answers (frontend-next/src/lib/site.ts).
+        working-directory: frontend-next
+        run: npm run build
+
       - name: Types
         working-directory: frontend-next
         run: npx tsc --noEmit
@@ -95,14 +109,6 @@ jobs:
       - name: Lint
         working-directory: frontend-next
         run: npm run lint
-
-      - name: Production build
-        # No BACKEND_INTERNAL_URL on purpose: that is what the image is built
-        # without, so this is the build the cluster actually runs. The site
-        # config it fetches at build time falls back to the env defaults when
-        # nothing answers (frontend-next/src/lib/site.ts).
-        working-directory: frontend-next
-        run: npm run build
 
   # Nothing reaches the registry until the suite is green. Without this gate a
   # parser regression or a broken auth dependency shipped straight to the
