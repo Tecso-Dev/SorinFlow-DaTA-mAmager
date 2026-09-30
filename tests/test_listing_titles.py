@@ -83,8 +83,12 @@ class TestTheHarvestOrderThatCausedIt:
 
 
 class TestWhyItMattered:
-    def test_the_category_check_reads_the_search_title(self):
-        assert "haystack = f\"{decoded_url} {source_title or ''}\"" in SCRAPER
+    def test_the_search_title_names_a_listing_left_out(self):
+        """Since #57 the title no longer decides the category — Divar's
+        breadcrumb does (tests/test_divar_categories.py) — so a listing with no
+        title is never dropped for it. It still names the one that is left out."""
+        assert "source_title or decoded_url" in SCRAPER
+        assert "haystack" not in SCRAPER, "a word in the title is judging the category again"
 
     def test_the_title_reaches_it_from_the_listing(self):
         assert "source_title=listing.get('title')" in SCRAPER

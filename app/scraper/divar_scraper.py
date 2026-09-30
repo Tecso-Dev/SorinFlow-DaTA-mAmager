@@ -25,6 +25,7 @@ from app.models.proxy import Proxy
 from app.scraper.stealth import (StealthConfig, open_browser, apply_device, Device,
                                  close_context, context_alive)
 from app.scraper.auth import DivarAuth
+from app.scraper import divar_categories
 from app.scraper.contact_extractor import ContactExtractor
 from app.services import skipped_listings
 
@@ -219,58 +220,6 @@ class DivarScraper:
     # always had, and the one a pool topped up mid-run stops at too (#30).
     POOL_CEILING = 1500
 
-    # Maps our category slug → substrings expected in the Divar detail-page URL.
-    # Divar builds URLs from the listing *title*, not the category name, so we
-    # use property-type nouns (آپارتمان، خانه …) rather than action-prefix combos
-    # (خرید-خانه) which almost never appear in real listing URLs.
-    CATEGORY_URL_PATTERNS: Dict[str, List[str]] = {
-        # Apartment: title may use آپارتمان, واحد (unit), or مسکن (housing)
-        # e.g. اجاره-واحد-۱۲۵-متر / واحد-۱۱۰-متری / اجاره-مسکن / اجاره-تک-واحدی
-        #
-        # …or none of those. «۸۵ متری، ۲ خوابه، طبقه سوم» is an ordinary way to
-        # title an apartment and names no property type at all, so the list
-        # above rejected it. These candidates arrive from a search Divar itself
-        # filtered by category, so the check here is only a guard against the
-        # promoted and related ads Divar injects into a result page — and a job
-        # ad or a plot of land does not advertise «۲ خوابه». The residential
-        # lists below have trusted exactly these signals for the same reason;
-        # the apartment lists were simply never given them.
-        'rent-apartment': ['اجاره-آپارتمان', 'اجاره-اپارتمان', 'کرایه-آپارتمان',
-                           'آپارتمان', 'اپارتمان', 'واحد', 'اجاره-مسکن',
-                           'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
-        'buy-apartment':  ['آپارتمان', 'اپارتمان', 'واحد',
-                           'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
-
-        # Residential (broad): title is the property type alone — no buy/rent prefix
-        # Strong residential signals (سرویس/سویس/خوابه/طبقه/نوساز) accept units
-        # whose title omits the property type, while land/گاردن listings — which
-        # never carry these — still fall through and get dropped.
-        'rent-residential': ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'اجاره-مسکن', 'ساختمان', 'دوبلکس', 'منزل', 'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
-        'buy-residential':  ['آپارتمان', 'اپارتمان', 'خانه', 'ویلا', 'مسکونی', 'واحد', 'سوئیت', 'کلنگی', 'ساختمان', 'دوبلکس', 'منزل', 'سرویس', 'سویس', 'خوابه', 'طبقه', 'نوساز'],
-
-        # Villa
-        'rent-villa': ['ویلا', 'باغ-ویلا'],
-        'buy-villa':  ['ویلا', 'باغ-ویلا'],
-
-        # Old house
-        'buy-old-house': ['کلنگی', 'خانه-کلنگی'],
-
-        # Commercial
-        'rent-commercial-property': ['اجاره-اداری', 'اجاره-تجاری', 'مغازه', 'اداری', 'تجاری'],
-        'rent-office':  ['دفتر', 'اداری'],
-        'rent-store':   ['مغازه', 'فروشگاه'],
-        'buy-commercial-property':  ['مغازه', 'اداری', 'تجاری'],
-        'buy-office':   ['دفتر', 'اداری'],
-        'buy-store':    ['مغازه', 'فروشگاه'],
-
-        # Industrial / Agricultural
-        'buy-industrial-agricultural-property':  ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین', 'سوله', 'انبار', 'باغ', 'مزرعه'],
-        'rent-industrial-agricultural-property': ['صنعتی', 'کشاورزی', 'کارخانه', 'کارگاه', 'زمین', 'سوله', 'انبار', 'باغ', 'مزرعه'],
-
-        # Temporary rental
-        'rent-temporary': ['اجاره-کوتاه', 'اجاره-روزانه', 'اجاره-موقت', 'روزانه', 'کوتاه-مدت', 'سوئیت', 'اقامتگاه', 'بوم-گردی'],
-    }
-    
     def __init__(
         self,
         db_session: AsyncSession,
@@ -2426,29 +2375,6 @@ class DivarScraper:
                 return f"advertiser_type {actual_type} != {adv}"
         return None
 
-    @staticmethod
-    def _category_matches(text: str, patterns) -> bool:
-        """Does this text carry one of the category's words?
-
-        Divar writes the same phrase two ways — «اجاره-آپارتمان» in a URL slug
-        and «اجاره آپارتمان» in a title — and the pattern lists were written
-        for slugs. So «اجاره-مسکن» could never match a real ad titled «اجاره
-        مسکن مهر کوثر»: the hyphen was doing the rejecting, not the words.
-        Both sides collapse to single spaces before comparing — and to one
-        spelling: Divar writes «کوتاه‌مدت» with a zero-width non-joiner where the
-        list has a space, and Arabic «ي» and «ك» turn up in titles.
-        """
-        if not text:
-            return False
-
-        def flatten(t: str) -> str:
-            t = (t.replace("-", " ").replace("_", " ").replace("\u200c", " ")
-                 .replace("ي", "ی").replace("ك", "ک"))
-            return " ".join(t.split())
-
-        flat = flatten(text)
-        return any(flatten(p) in flat for p in patterns)
-
     # What an ad's own words look like when it is real estate. Used twice: as
     # a hint on the URL, and as the verdict on Divar's breadcrumb.
     REAL_ESTATE_URL_KEYWORDS = [
@@ -2472,12 +2398,11 @@ class DivarScraper:
     ) -> Optional[Dict[str, Any]]:
         """Scrape detailed information from a property page.
 
-        target_category: if provided, the final URL (or the search-result title)
-        must match the expected patterns for that category (prevents off-category
-        listings from being saved).
-        source_title: the listing title captured from the category-filtered
-        search results, used as a fallback category signal when Divar serves a
-        bare /v/<token> URL with no descriptive slug.
+        target_category: the category the run searched. Divar's own breadcrumb
+        on the page is the only thing that can say the listing is elsewhere
+        (app/scraper/divar_categories.py), and then it returns False.
+        source_title: the listing title captured from the search results, for
+        the log line of a listing left out.
         """
         self._last_detail_error = None
         try:
@@ -2507,57 +2432,20 @@ class DivarScraper:
             from urllib.parse import unquote
             decoded_url = unquote(actual_url)
 
-            # ── Category-specific URL check (tight) ──────────────────────────
-            category_unconfirmed = False
+            # ── The run's category: Divar's own breadcrumb decides, below ──
+            #
+            # The run searched Divar with this category's token, so Divar has
+            # already filed the listing there. Words of ours in its URL, its
+            # title or the tab's title («کلنگی», «دفتر», «صنعتی») used to decide
+            # whether to believe that, and every word a list lacked — a plot
+            # titled «زمین ۲۰۰ متری», a workshop, a short-term villa — sent the
+            # listing to a keyword test of its breadcrumb's last crumb, which a
+            # neighbourhood or Divar's short menu name failed too (#57). Only
+            # the breadcrumb, read as a place in Divar's tree, can say it is
+            # elsewhere; nothing is asked of the URL or the title any more.
+            category_known = divar_categories.known(target_category)
             kind_unconfirmed = False
-            patterns = self.CATEGORY_URL_PATTERNS.get(target_category or "", ())
-            # When a target category is known, we require the redirected URL to
-            # contain at least one of the expected substrings for that category.
-            # This blocks job ads, factory listings, etc. that share keywords
-            # with real-estate (e.g. "دفتری" matching "دفتر").
-            if patterns:
-                # Listing URLs are built as bare /v/<token>; Divar only adds a
-                # descriptive slug for some of them on redirect, so the URL alone
-                # carries no category signal for the rest. Fall back to the title
-                # from the (already category-filtered) search result so bare-token
-                # listings aren't all dropped — reject only when NEITHER matches.
-                haystack = f"{decoded_url} {source_title or ''}"
-                page_title = ""
-                if not self._category_matches(haystack, patterns):
-                    # Neither the URL nor the search-result title says what this
-                    # is — which is not the same as saying it is the wrong
-                    # thing. Divar's own page title does say («اجاره آپارتمان ۸۵
-                    # متری در …»), and we are already standing on the page, so
-                    # ask it before throwing the listing away. Only asked when
-                    # the cheap signals came up empty, so the common case pays
-                    # nothing for it.
-                    try:
-                        page_title = (await self.page.title()) or ""
-                    except Exception as e:
-                        logger.debug(f"could not read the page title: {e}")
-                    haystack = f"{haystack} {page_title}"
-                if not self._category_matches(haystack, patterns):
-                    # Nothing here says what this is — and that is not the same
-                    # as saying it is the wrong thing.
-                    #
-                    # Dropping on it cost one run seventeen listings, and the
-                    # panel's own list of them showed all seventeen were real
-                    # Urmia apartment rentals: «گلشهر ۲ تمام رهن», «اجاره رهن
-                    # ۱۴۵متر», «۲۰۰ متر بر دانشکده». None names a property type
-                    # because ads written by people often do not, and the page
-                    # title was «سایت دیوار» because React had not replaced it
-                    # yet at domcontentloaded.
-                    #
-                    # Divar's own breadcrumb does say, authoritatively, and the
-                    # parse below already reads it. So do not decide here on an
-                    # absence — carry the doubt to where the answer is.
-                    logger.info(
-                        f"Category unconfirmed for '{target_category}' "
-                        f"(URL: {decoded_url}, title: {source_title!r}, "
-                        f"page title: {page_title!r}) — deferring to the breadcrumb"
-                    )
-                    category_unconfirmed = True
-            else:
+            if not category_known:
                 # Fallback broad check when no category is known — «اسکرپ تکی»
                 # and «بازاسکرپ», where the caller names the URL and there is
                 # no search category to match against.
@@ -2751,21 +2639,35 @@ class DivarScraper:
             # category; stripping its leading transaction word gives the property
             # type, and the transaction word itself is the authoritative
             # buy/rent signal.
+            all_crumbs: List[str] = []
+            where: Optional[str] = None
             try:
                 import re as _re
-                crumbs = [a.get_text(strip=True) for a in soup.select('a.kt-breadcrumbs__action')]
-                crumbs = [c for c in crumbs if c and c != 'املاک']
+                all_crumbs = [a.get_text(strip=True) for a in soup.select('a.kt-breadcrumbs__action')]
+                all_crumbs = [c for c in all_crumbs if c]
+                # Where Divar filed it: the deepest crumb that names one of its
+                # categories. The crumbs after it (a neighbourhood, a finer
+                # sub-category) and before it (the city) are not categories.
+                where, said = divar_categories.place(all_crumbs)
+                crumbs = [c for c in all_crumbs if c != 'املاک']
                 if crumbs:
-                    leaf = crumbs[-1]
+                    leaf = said if where not in (None, divar_categories.ROOT) else crumbs[-1]
                     property_data.setdefault('category_name', leaf)
                     ptype = _re.sub(r'^(پیش[‌ ]?فروش|فروش|اجارهٔ|اجاره|رهن|خرید)\s+', '', leaf).strip()
                     if ptype and ptype != leaf:
                         property_data.setdefault('property_type', ptype)
-                    joined = ' '.join(crumbs)
-                    if 'اجاره' in joined or 'رهن' in joined:
-                        property_data['listing_type'] = 'rent'
-                    elif 'فروش' in joined or 'خرید' in joined:
-                        property_data['listing_type'] = 'buy'
+                    kind = divar_categories.listing_type(where)
+                    if kind is None:
+                        # A breadcrumb we cannot place: its own words, as
+                        # before — the crumbs after «املاک», not the city's.
+                        after = all_crumbs[all_crumbs.index('املاک') + 1:] if 'املاک' in all_crumbs else crumbs
+                        joined = ' '.join(after)
+                        if 'اجاره' in joined or 'رهن' in joined:
+                            kind = 'rent'
+                        elif 'فروش' in joined or 'خرید' in joined:
+                            kind = 'buy'
+                    if kind:
+                        property_data['listing_type'] = kind
             except Exception:
                 pass
 
@@ -2794,21 +2696,19 @@ class DivarScraper:
                     f"No breadcrumb for {property_data.get('divar_id')} — keeping it; "
                     f"the caller named this URL")
 
-            if category_unconfirmed:
-                leaf = property_data.get("category_name") or ""
-                if leaf and not self._category_matches(leaf, patterns):
+            if category_known:
+                keep, where, why = divar_categories.judge(all_crumbs, target_category)
+                if not keep:
+                    # In Divar's own words: the crumb that placed it, or the
+                    # end of a breadcrumb that is not real estate at all.
+                    named = (divar_categories.place(all_crumbs)[1]
+                             or " › ".join(all_crumbs[-2:]))
                     logger.info(
-                        f"Skipping off-category listing for '{target_category}' "
-                        f"— Divar's breadcrumb says {leaf!r}")
-                    self._last_category_drop = f"{leaf} — {source_title or decoded_url}"[:80]
+                        f"Skipping off-category listing for '{target_category}' — {why} "
+                        f"(breadcrumb: {' › '.join(all_crumbs)!r})")
+                    self._last_category_drop = f"{named} — {source_title or decoded_url}"[:80]
                     return False  # sentinel: category skip — not a scrape error
-                # No breadcrumb either. Keep it: this listing came out of a
-                # search Divar itself filtered by category, and that is better
-                # evidence than a word we could not find.
-                if not leaf:
-                    logger.info(
-                        f"No breadcrumb for {property_data.get('divar_id')} — keeping it; "
-                        f"Divar's own category filter is the better evidence")
+                logger.info(f"{property_data.get('divar_id')}: {why}")
 
             # Infer listing_type (buy/rent) from the parsed price fields when the
             # breadcrumb didn't supply it (e.g. job category missing).
