@@ -138,6 +138,26 @@
   --glow-2: rgb(139 92 246 / 0.12);
 }
 
+/* Brand colours as TEXT in the dark theme.
+ *
+ * --primary (#5d60ef) and --destructive (#ef4444) are chosen for what they
+ * look like as a filled button, and they are right for that: white on either
+ * one is legible, and both are the brand. As *text* on a dark surface they
+ * are 3.5:1 and 4.4:1 — under WCAG AA, and one of the places --primary lands
+ * is 11px. Nobody could see that until the cards stopped being gradients,
+ * because a contrast checker cannot evaluate text over an image.
+ *
+ * So the text form gets a lighter tone and the filled form is left exactly as
+ * it was: every button keeps its colour, and only the places where the brand
+ * is ink change. A fuller answer — a lighter --primary in dark with dark ink
+ * on its buttons — restyles every primary button, which is Sobhan's call.
+ *
+ * .text-primary-foreground is a different class token and is not matched.
+ */
+.dark .text-primary { color: #a5b4fc; }
+.dark .text-destructive { color: #fca5a5; }
+
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

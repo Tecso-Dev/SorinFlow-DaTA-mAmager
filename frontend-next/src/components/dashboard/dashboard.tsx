@@ -83,7 +83,7 @@ function Delta({ value, unit = "٪" }: { value: number | null; unit?: string }) 
     <span
       className={cn(
         "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular",
-        up ? "bg-success/12 text-success" : "bg-destructive/12 text-destructive dark:text-red-300",
+        up ? "bg-success/12 text-success" : "bg-destructive/12 text-destructive",
       )}
     >
       {/* charts run right-to-left here, so a rising arrow points up-left */}
@@ -249,7 +249,7 @@ function kpisOf(ov: Overview): Kpi[] {
       key: "conversion", label: "نرخ تبدیل لید", value: k.conversion, digits: 1, unit: "٪",
       delta: k.conversion !== null && k.conversion_before !== null
         ? Math.round((k.conversion - k.conversion_before) * 10) / 10 : null,
-      deltaUnit: " واحد", hint: `لید به قرارداد، ${days} روز`, Icon: Target, tint: "text-primary dark:text-indigo-300 bg-primary/12",
+      deltaUnit: " واحد", hint: `لید به قرارداد، ${days} روز`, Icon: Target, tint: "text-primary bg-primary/12",
     },
   ];
 }
@@ -408,8 +408,8 @@ function FunnelPanel({ ov }: { ov: Overview }) {
 
 const OUTCOME: Record<string, { label: string; cls: string; Icon: React.ComponentType<{ className?: string }> }> = {
   answered: { label: "جواب داد", cls: "text-success bg-success/12", Icon: Check },
-  no_answer: { label: "جواب نداد", cls: "text-destructive dark:text-red-300 bg-destructive/12", Icon: PhoneMissed },
-  busy: { label: "مشغول بود", cls: "text-destructive dark:text-red-300 bg-destructive/12", Icon: PhoneMissed },
+  no_answer: { label: "جواب نداد", cls: "text-destructive bg-destructive/12", Icon: PhoneMissed },
+  busy: { label: "مشغول بود", cls: "text-destructive bg-destructive/12", Icon: PhoneMissed },
   callback: { label: "تماس دوباره", cls: "text-warning bg-warning/15", Icon: Clock },
 };
 const DUE = { label: "نوبت تماس", cls: "text-warning bg-warning/15", Icon: Clock };
@@ -557,7 +557,7 @@ function AgendaPanel({ q }: { q: ReturnType<typeof useSide<Upcoming>> }) {
                   <Icon className="size-4" />
                 </div>
                 <div className="min-w-0 pt-0.5">
-                  <div className="text-[11px] font-semibold text-primary tabular dark:text-indigo-300">{when}</div>
+                  <div className="text-[11px] font-semibold text-primary tabular">{when}</div>
                   <div className="text-sm font-semibold">{a.title}</div>
                   <div className="truncate text-xs text-muted-foreground">
                     {[a.customer_name || a.owner_name, a.assigned_to].filter(Boolean).join(" · ") || a.type_label}
