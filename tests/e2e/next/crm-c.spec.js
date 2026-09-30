@@ -231,16 +231,22 @@ test.describe('کمد و زونکن', () => {
     await expect(page.getByText(/روی ۲ فایل انجام شد/).first()).toBeVisible();
 
     // edit the first file (a plain role+name query, not a class selector —
-    // the sidebar's own nav links share the card's "group relative" classes)
+    // the sidebar's own nav links share the card's "group relative" classes).
+    //
+    // No `force`: the cards enter with a staggered animation now, and a
+    // forced click skips the stability check, so it could land where a card
+    // used to be and silently do nothing — which is how this failed once on
+    // desktop. Letting Playwright wait is both slower and honest; the overlay
+    // that made force necessary (Tilt's glare) is `invisible` off-hover.
     const main = page.getByRole('main');
-    await main.getByRole('button', { name: 'ویرایش فایل' }).first().click({ force: true });
+    await main.getByRole('button', { name: 'ویرایش فایل' }).first().click();
     dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('heading', { name: 'ویرایش فایل' })).toBeVisible();
     await expect(dialog.getByLabel('عنوان')).not.toHaveValue('');
     await page.keyboard.press('Escape');
 
     // share the same file
-    await main.getByRole('button', { name: 'اشتراک‌گذاری' }).first().click({ force: true });
+    await main.getByRole('button', { name: 'اشتراک‌گذاری' }).first().click();
     dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('link', { name: 'واتس‌اپ' })).toHaveAttribute('href', /wa\.me/);
     await expect(dialog.getByRole('link', { name: 'تلگرام' })).toHaveAttribute('href', /t\.me/);
