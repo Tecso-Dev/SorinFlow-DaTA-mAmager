@@ -255,6 +255,12 @@ test.describe('کمد و زونکن', () => {
     // cleanup: delete the test binder, then the test cabinet
     await openTreeIfSheeted(page);
     const binRow = tree(page).getByText(binName, { exact: true }).locator('../..');
+    // The tree is a long list inside a Sheet on a phone, and the row we want
+    // was created several steps ago. Wait for it and bring it into view before
+    // reaching for its menu: the row's own button was what timed out here, on
+    // a row that simply had not been scrolled to yet.
+    await binRow.waitFor({ state: 'visible', timeout: 15_000 });
+    await binRow.scrollIntoViewIfNeeded();
     await binRow.getByRole('button', { name: 'عملیات زونکن' }).click();
     await page.getByRole('menuitem', { name: 'حذف', exact: true }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'حذف', exact: true }).click();

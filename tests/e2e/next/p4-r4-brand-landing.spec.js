@@ -108,6 +108,10 @@ test('robots.txt and sitemap.xml point search engines at the landing page only',
 });
 
 test('the logo gallery shows every concept, marks the one in use, and is not indexed', async ({ page }) => {
+  // Ten concepts of hand-drawn SVG is a lot for axe to walk, and WebKit is the
+  // slowest at it; the page itself loads fine. The default 60s is not enough
+  // on this one page.
+  test.setTimeout(150_000);
   const problems = watchProblems(page);
   const s = await site(page);
   await page.goto('/brand-preview');
@@ -197,7 +201,16 @@ test('each rail pins itself and slides sideways, and drops the pin for a reduced
     await page.waitForTimeout(400);
     const start = await at();
     await page.evaluate((y) => window.scrollTo(0, y), box.top + box.h * 0.5);
-    await page.waitForTimeout(400);
+    // wait for the row to stop moving rather than guessing at a duration: it
+    // travels through a spring now, and 400ms caught it mid-flight on WebKit
+    await track.evaluate(async (t) => {
+      const x = () => new DOMMatrixReadOnly(getComputedStyle(t).transform).m41;
+      for (let same = 0, i = 0; same < 3 && i < 120; i++) {
+        const before = x();
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        same = Math.abs(x() - before) < 0.5 ? same + 1 : 0;
+      }
+    });
     // RTL: the first panel sits at the right, so the row travels to the right
     expect(await at(), `#${id} did not slide the right way`).toBeGreaterThan(start + 50);
     // and the strip stays put while it does

@@ -25,6 +25,13 @@ async function api(page, session, method, path, data) {
 }
 
 test('devices load, add shows the one-time secret, the six-step guide, QR reveal/auto-hide, rotate, edit SIM, delete, codes log filters', async ({ page }) => {
+  // The longest test here: add a device, read its one-time secret, walk the
+  // six-step guide, reveal the QR and wait it out, rotate the key, edit the
+  // SIM, delete the device, then filter the codes log — about fifteen round
+  // trips. On WebKit the sum of them passes 60s, so the last steps timed out
+  // on a run where nothing was wrong. Verified by running it at 180s: it
+  // passes, and passes again, at the same speed.
+  test.setTimeout(150_000);
   const problems = watchProblems(page);
   await signIn(page, 'owner');
   // Installed before navigating (Playwright's own guidance): the virtual
@@ -78,6 +85,11 @@ test('devices load, add shows the one-time secret, the six-step guide, QR reveal
   await page.clock.runFor(31_000); // > FW_QR_REVEAL_SECONDS (30s)
   await expect(qr).toHaveCount(0);
   await expect(shield).toBeVisible();
+  // Real time from here on. The clock was installed for that one jump, and a
+  // frozen clock means requestAnimationFrame never fires — so Playwright's own
+  // "scroll into view" step before a click waits for a frame that will not
+  // come, and every click after this point times out instead of happening.
+  await page.clock.resume();
 
   // check connection: labelled as "last heard from the phone", not a live ping
   await expect(guide.getByText(/این یک ping زنده به گوشی نیست/)).toBeVisible();
