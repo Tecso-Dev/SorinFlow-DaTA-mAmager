@@ -1258,15 +1258,18 @@ async def get_available_categories():
     """The categories the scraper offers, each with the filters Divar has for
     it (#27): key, type, Persian title, options and unit, in the order the
     scrape form shows them. `options` null is a choice whose options are not
-    known yet — the form leaves it out until a live read of Divar fills it."""
+    known yet — the form leaves it out until a live read of Divar fills it.
+    `family` and its Persian `family_name` are what the panel groups its
+    category selects by (#56)."""
     from app.services import divar_filters as df
     schema = await df.current()
-    return [
-        {"slug": slug, "name": info["name"], "type": info["type"],
-         "family": (df.category(slug, schema) or {}).get("family"),
-         "filters": df.form_filters(slug, schema)}
-        for slug, info in CATEGORIES.items()
-    ]
+    out = []
+    for slug, info in CATEGORIES.items():
+        family = (df.category(slug, schema) or {}).get("family")
+        out.append({"slug": slug, "name": info["name"], "type": info["type"],
+                    "family": family, "family_name": df.family_name(family),
+                    "filters": df.form_filters(slug, schema)})
+    return out
 
 
 from pydantic import BaseModel

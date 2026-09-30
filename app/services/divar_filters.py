@@ -88,6 +88,26 @@ def _committed_cached() -> Dict[str, Any]:
     return committed()
 
 
+# Each family's name in the panel, whose category selects group by it (#56):
+# rent under «اجاره», buy under «خرید». Which family a category is in is the
+# schema's `family`, never anything here.
+FAMILY_NAMES = {
+    "buy": "خرید",
+    "rent": "اجاره",
+    "temporary": "اجارهٔ کوتاه‌مدت",
+    "service": "خدمات",
+    "other": "سایر",
+    "all": "همه",
+}
+
+
+def family_name(family: Optional[str]) -> Optional[str]:
+    """The Persian name of a family; the key itself for one not named above."""
+    if not family:
+        return None
+    return FAMILY_NAMES.get(family, family)
+
+
 def category(slug: Optional[str], schema: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """One category's entry — token, family, filters — or None."""
     cats = (schema or snapshot()).get("categories") or {}
