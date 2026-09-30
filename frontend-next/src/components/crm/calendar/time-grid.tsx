@@ -10,6 +10,8 @@ import { WEEKDAYS_SHORT, jParts, weekdaySat0 } from "@/lib/jalali";
 import { EventChip } from "./chip";
 import { sameDay, type CalendarRow } from "./types";
 
+// The hours shown when nothing falls outside them. The grid widens itself
+// for a day that holds an earlier or later appointment — see hourWindow.
 const HOUR_START = 7;
 const HOUR_END = 22;         // exclusive
 const HOUR_PX = 52;
@@ -19,7 +21,30 @@ type Positioned = { row: CalendarRow; top: number; height: number; lane: number;
 
 /** Greedy interval packing: events that overlap in time share the column
  *  side by side; ones that do not reuse the same lane. */
-function packDay(rows: CalendarRow[]): Positioned[] {
+/** The hours the grid has to draw.
+ *
+ *  A block's `top` is measured from the first hour, so anything outside the
+ *  window lands at a negative offset and is painted over whatever card sits
+ *  above the calendar — visible, on top of unrelated content, and impossible
+ *  to click because that card takes the pointer. A 2 a.m. viewing or an
+ *  11 p.m. reminder is an ordinary thing to have. So the window stretches to
+ *  hold every timed row instead of the rows escaping it. */
+function hourWindow(rows: CalendarRow[]): [number, number] {
+  let from = HOUR_START;
+  let to = HOUR_END;
+  for (const r of rows) {
+    if (!r.start_at || r.all_day) continue;
+    const start = new Date(r.start_at);
+    const end = r.end_at ? new Date(r.end_at) : new Date(start.getTime() + DEFAULT_MIN * 60_000);
+    from = Math.min(from, start.getHours());
+    // an end at 23:30 needs hour 23 drawn; one exactly on the hour does not
+    const endHour = end.getHours() + (end.getMinutes() > 0 ? 1 : 0);
+    to = Math.max(to, Math.min(24, endHour));
+  }
+  return [from, to];
+}
+
+function packDay(rows: CalendarRow[], from: number): Positioned[] {
   const timed = rows
     .filter((r) => r.start_at && !r.all_day)
     .map((r) => {
@@ -46,7 +71,7 @@ function packDay(rows: CalendarRow[]): Positioned[] {
   return placed.map((p, i) => {
     const overlapping = placed.filter((q) => q.sMin < p.eMin && q.eMin > p.sMin);
     const lanes = Math.max(1, ...overlapping.map((q) => q.lane + 1));
-    const top = ((p.sMin - HOUR_START * 60) / 60) * HOUR_PX;
+    const top = ((p.sMin - from * 60) / 60) * HOUR_PX;
     const height = Math.max(20, ((p.eMin - p.sMin) / 60) * HOUR_PX - 2);
     void i;
     return { row: p.row, top, height, lane: p.lane, lanes };
@@ -62,7 +87,8 @@ export function TimeGrid({
     d.setHours(0, 0, 0, 0);
     return d;
   });
-  const hours = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i);
+  const [from, to] = hourWindow(rows);
+  const hours = Array.from({ length: to - from }, (_, i) => from + i);
   const today = new Date();
   const rowsOn = (d: Date) => rows.filter((r) => r.start_at && sameDay(new Date(r.start_at), d));
 
@@ -104,16 +130,17 @@ export function TimeGrid({
             ))}
           </div>
           {cols.map((d) => {
-            const packed = packDay(rowsOn(d));
+            const packed = packDay(rowsOn(d), from);
             return (
               <div
                 key={+d}
+                data-testid="time-grid-day"
                 className="relative cursor-pointer border-s"
                 style={{ height: HOUR_PX * hours.length }}
                 onClick={(e) => {
                   if (e.target !== e.currentTarget) return;
                   const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                  const mins = ((e.clientY - rect.top) / HOUR_PX) * 60 + HOUR_START * 60;
+                  const mins = ((e.clientY - rect.top) / HOUR_PX) * 60 + from * 60;
                   const at = new Date(d);
                   at.setMinutes(Math.round(mins / 15) * 15);
                   onCreateDay(at);

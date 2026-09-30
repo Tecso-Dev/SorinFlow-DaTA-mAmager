@@ -99,6 +99,13 @@ test.describe('تقویم', () => {
     await page.getByRole('button', { name: 'قرار جدید' }).first().click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('عنوان قرار').fill(title);
+    // 02:30 on purpose, not whatever o'clock the suite happens to run at.
+    // The grid draws 07–22 by default and a block's top is measured from its
+    // first hour, so an appointment outside that window used to land at a
+    // negative offset — painted over the card above the calendar, visible
+    // but unclickable because that card took the pointer. This test only
+    // caught it because one run happened at 2 a.m.; now it always does.
+    await dialog.getByLabel('ساعت شروع').fill('02:30');
     await dialog.getByLabel('نام مالک').fill('مالک e2e');
     await dialog.getByLabel('شمارهٔ مالک').fill('09120000001');
     await dialog.getByRole('button', { name: 'ثبت قرار' }).click();
@@ -110,6 +117,14 @@ test.describe('تقویم', () => {
     await page.getByRole('group', { name: 'نمای تقویم' }).getByRole('button', { name: 'روز' }).click();
     const chip = page.getByRole('button', { name: new RegExp(title) }).first();
     await expect(chip).toBeVisible();
+    // inside the grid, not floating above it
+    const inside = await chip.evaluate((el) => {
+      const grid = el.closest('[data-testid="time-grid-day"]') ?? el.offsetParent;
+      if (!grid) return false;
+      const a = el.getBoundingClientRect(), b = grid.getBoundingClientRect();
+      return a.top >= b.top - 1 && a.bottom <= b.bottom + 1;
+    });
+    expect(inside, 'the appointment is drawn outside its own day column').toBeTruthy();
     await chip.click();
 
     const edit = page.getByRole('dialog');
