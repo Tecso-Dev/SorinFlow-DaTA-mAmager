@@ -62,10 +62,12 @@ class TestTheShape:
         # the run's start: «running» (only over «pending»), then the account
         start = src[src.index('await self._move_status("running", only_from=("pending",))'):][:500]
         assert "self._note_account(job)" in start
-        # both places a run may rotate: the skipped-listing path and the main loop
-        assert src.count("await self.maybe_rotate_account()\n") == 2
-        for i in range(2):
-            at = src.index("await self.maybe_rotate_account()\n", 0 if i == 0 else src.index("await self.maybe_rotate_account()\n") + 1)
+        # every place a run may rotate: the skipped-listing path, the main
+        # loop, and «تلاش دوباره» on the same row (#58)
+        assert src.count("await self.maybe_rotate_account()\n") == 3
+        at = -1
+        for _ in range(3):
+            at = src.index("await self.maybe_rotate_account()\n", at + 1)
             assert "self._note_account(job)" in src[at:at + 120]
 
     def test_the_column_is_a_guarded_revision(self):
