@@ -106,8 +106,13 @@
   --card-foreground: #eef1f8;
   --popover: #10101a;
   --popover-foreground: #eef1f8;
-  --primary: #5d60ef; /* white on it: 4.8:1 (indigo-500 was 4.47) */
-  --primary-foreground: #ffffff;
+  /* Light indigo with dark ink — the other way round from the light theme.
+     #5d60ef is a fine button colour but only 3.5:1 as text on a dark surface,
+     under AA, and the panel uses the brand as text in dozens of places.
+     Inverting it fixes both ends at once: ink on the button is 11.2:1 where
+     white gave 4.8:1, and the text form is 8.4:1. */
+  --primary: #a5b4fc;
+  --primary-foreground: #0c0c14;
   --secondary: #161622;
   --secondary-foreground: #e4e7f2;
   --muted: #13131d;
@@ -138,23 +143,16 @@
   --glow-2: rgb(139 92 246 / 0.12);
 }
 
-/* Brand colours as TEXT in the dark theme.
+/* --destructive as TEXT in the dark theme.
  *
- * --primary (#5d60ef) and --destructive (#ef4444) are chosen for what they
- * look like as a filled button, and they are right for that: white on either
- * one is legible, and both are the brand. As *text* on a dark surface they
- * are 3.5:1 and 4.4:1 — under WCAG AA, and one of the places --primary lands
- * is 11px. Nobody could see that until the cards stopped being gradients,
+ * #ef4444 is right as a filled button and measures 4.4:1 as text on its own
+ * 12% tint — just under AA. Unlike --primary it is not inverted: a red button
+ * carries a meaning a pale red one does not, so only its text form is lifted.
+ * Nobody could see any of this until the cards stopped being gradients,
  * because a contrast checker cannot evaluate text over an image.
  *
- * So the text form gets a lighter tone and the filled form is left exactly as
- * it was: every button keeps its colour, and only the places where the brand
- * is ink change. A fuller answer — a lighter --primary in dark with dark ink
- * on its buttons — restyles every primary button, which is Sobhan's call.
- *
- * .text-primary-foreground is a different class token and is not matched.
+ * .text-destructive-foreground is a different class token and is not matched.
  */
-.dark .text-primary { color: #a5b4fc; }
 .dark .text-destructive { color: #fca5a5; }
 
 
