@@ -43,7 +43,7 @@ export function FileCard({
         onDragStart={(e) => e.dataTransfer.setData("text/x-filing-file", String(file.id))}
         className={cn(
           "group relative flex flex-col gap-2 rounded-2xl border bg-card p-3 text-card-foreground shadow-sm transition-colors",
-          "dark:bg-linear-to-b dark:from-white/[0.035] dark:to-white/[0.008]",
+          "dark:bg-[#121219]",
           selected && "ring-2 ring-primary",
         )}
       >

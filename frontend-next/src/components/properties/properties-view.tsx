@@ -193,7 +193,7 @@ export function PropertiesView() {
       <Reveal>
         <div className="grid items-stretch gap-3 lg:grid-cols-[auto_minmax(0,1fr)]">
           <Tilt className="w-fit">
-            <div className="flex h-full items-center gap-3 rounded-2xl border bg-card px-4 py-3 shadow-sm dark:bg-linear-to-b dark:from-white/[0.04] dark:to-transparent dark:shadow-none">
+            <div className="flex h-full items-center gap-3 rounded-2xl border bg-card px-4 py-3 shadow-sm dark:bg-[#131320] dark:shadow-none">
               <div className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary"><Building2 className="size-4.5" /></div>
               <div>
                 <div className="text-[26px] leading-none font-black tabular"><CountUp value={total} /></div>

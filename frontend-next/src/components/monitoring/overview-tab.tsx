@@ -106,7 +106,7 @@ function HealthTiles({ ov }: { ov: Overview }) {
     <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
       {items.map((it, i) => (
         <Reveal key={it.key} delay={i * 0.05}>
-          <div className="flex h-full flex-col gap-2 rounded-2xl border bg-card p-4 shadow-sm dark:bg-linear-to-b dark:from-white/[0.04] dark:to-transparent dark:shadow-none">
+          <div className="flex h-full flex-col gap-2 rounded-2xl border bg-card p-4 shadow-sm dark:bg-[#131320] dark:shadow-none">
             <div className="flex items-center gap-2">
               <div className={`grid size-9 place-items-center rounded-xl ${it.ok ? "bg-success/12 text-success" : "bg-destructive/12 text-destructive"}`}>
                 <it.icon className="size-4.5" />
@@ -118,7 +118,7 @@ function HealthTiles({ ov }: { ov: Overview }) {
         </Reveal>
       ))}
       <Reveal delay={0.1}>
-        <div className="flex h-full flex-col gap-2 rounded-2xl border bg-card p-4 shadow-sm dark:bg-linear-to-b dark:from-white/[0.04] dark:to-transparent dark:shadow-none">
+        <div className="flex h-full flex-col gap-2 rounded-2xl border bg-card p-4 shadow-sm dark:bg-[#131320] dark:shadow-none">
           <div className="flex items-center gap-2">
             <div className="grid size-9 place-items-center rounded-xl bg-info/12 text-info"><HardDrive className="size-4.5" /></div>
             <div className="text-[13px] text-muted-foreground">فضای اشغال‌شدهٔ دیسک</div>
@@ -132,7 +132,7 @@ function HealthTiles({ ov }: { ov: Overview }) {
         </div>
       </Reveal>
       <Reveal delay={0.15}>
-        <div className="flex h-full flex-col gap-2 rounded-2xl border bg-card p-4 shadow-sm dark:bg-linear-to-b dark:from-white/[0.04] dark:to-transparent dark:shadow-none">
+        <div className="flex h-full flex-col gap-2 rounded-2xl border bg-card p-4 shadow-sm dark:bg-[#131320] dark:shadow-none">
           <div className="flex items-center gap-2">
             <div className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary"><Cpu className="size-4.5" /></div>
             <div className="text-[13px] text-muted-foreground">مدت کارکرد + حافظه</div>

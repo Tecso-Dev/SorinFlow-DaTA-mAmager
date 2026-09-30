@@ -84,7 +84,7 @@ export function CallsView() {
         {tiles.map((t, i) => (
           <Reveal key={t.label} delay={i * 0.05} className="min-w-[9.5rem] shrink-0 snap-start sm:min-w-0">
             <Tilt className="h-full rounded-2xl">
-              <div className="flex h-full items-center gap-2.5 rounded-2xl border bg-card p-3 sm:gap-3 sm:p-3.5 shadow-sm dark:bg-linear-to-b dark:from-white/[0.035] dark:to-white/[0.008] dark:shadow-none">
+              <div className="flex h-full items-center gap-2.5 rounded-2xl border bg-card p-3 sm:gap-3 sm:p-3.5 shadow-sm dark:bg-[#121219] dark:shadow-none">
                 <span className={cn("grid size-9 shrink-0 place-items-center rounded-xl sm:size-10", t.tint)}>
                   <t.icon className="size-5" aria-hidden />
                 </span>

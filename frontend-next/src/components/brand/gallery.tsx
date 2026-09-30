@@ -110,7 +110,7 @@ function Concept({ concept, site }: { concept: (typeof ORDER)[number]; site: Sit
     <Reveal>
       <section
         aria-labelledby={`c-${concept.key}`}
-        className="flex flex-col gap-5 rounded-3xl border bg-card p-4 sm:p-6 dark:bg-linear-to-b dark:from-white/[0.035] dark:to-white/[0.008]"
+        className="flex flex-col gap-5 rounded-3xl border bg-card p-4 sm:p-6 dark:bg-[#121219]"
       >
         <div className="flex flex-wrap items-center gap-3">
           <span className="grid size-10 place-items-center rounded-xl bg-primary text-lg font-black text-primary-foreground">

@@ -255,7 +255,7 @@ function TaskCard({ t, onEdit }: { t: Task; onEdit: (t: Task) => void }) {
   return (
     <Tilt max={4} className={cn(
       "flex flex-col gap-2 rounded-xl border bg-card p-3 shadow-sm",
-      "dark:bg-linear-to-b dark:from-white/[0.04] dark:to-transparent",
+      "dark:bg-[#131320]",
       overdue && "border-destructive/40",
     )}>
       <div className="flex items-start justify-between gap-2">

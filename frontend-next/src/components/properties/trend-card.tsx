@@ -48,7 +48,7 @@ export function TrendCard() {
   if (!sum.total) return null;
 
   return (
-    <div className="min-w-0 rounded-2xl border bg-card p-4 shadow-sm dark:bg-linear-to-b dark:from-white/[0.04] dark:to-transparent dark:shadow-none">
+    <div className="min-w-0 rounded-2xl border bg-card p-4 shadow-sm dark:bg-[#131320] dark:shadow-none">
       <div className="mb-2 flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         <div>
           <div className="text-[13px] font-bold">آگهی‌های اسکرپ‌شده در {faNum(DAYS)} روز اخیر</div>

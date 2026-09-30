@@ -23,7 +23,7 @@ export function SideSheet({
         showCloseButton={false}
         className={cn(
           "gap-0 p-0 data-[side=left]:w-full data-[side=left]:border-e data-[side=left]:sm:max-w-2xl",
-          "dark:bg-linear-to-b dark:from-primary/[0.06] dark:to-popover",
+          "dark:bg-[#131426]",
           className,
         )}
       >

@@ -200,7 +200,7 @@ export function FilingPage() {
             ["private", "خصوصی", Lock],
           ] as const).map(([key, label, Icon]) => (
             <Tilt key={key} max={4}>
-              <div className="flex flex-col gap-1 rounded-2xl border bg-card p-3 dark:bg-linear-to-b dark:from-white/[0.035] dark:to-white/[0.008]">
+              <div className="flex flex-col gap-1 rounded-2xl border bg-card p-3 dark:bg-[#121219]">
                 <Icon className="size-4 text-muted-foreground" />
                 <span className="text-lg font-black tabular">
                   {overviewQuery.data ? <CountUp value={overviewQuery.data[key]} /> : "—"}

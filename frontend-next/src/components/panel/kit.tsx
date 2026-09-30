@@ -67,7 +67,7 @@ export function Section({
     <section
       className={cn(
         "flex min-w-0 flex-col rounded-2xl border bg-card text-card-foreground shadow-sm",
-        "dark:bg-linear-to-b dark:from-white/[0.035] dark:to-white/[0.008] dark:shadow-none",
+        "dark:bg-[#121219] dark:shadow-none",
         className,
       )}
     >

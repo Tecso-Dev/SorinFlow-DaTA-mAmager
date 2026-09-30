@@ -455,7 +455,7 @@ export function PortalDashboard({ site }: { site: { brandName: string; brandName
     <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 sm:px-6">
       <Reveal>
         <Tilt className="rounded-2xl" max={3}>
-          <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card p-4 dark:bg-linear-to-b dark:from-white/[0.035] dark:to-white/[0.008]">
+          <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card p-4 dark:bg-[#121219]">
             <div className="flex items-center gap-3">
               <div className="grid size-11 place-items-center rounded-xl bg-linear-to-br from-indigo-500 to-violet-600 text-sm font-black text-white shadow-[0_0_24px_-4px_rgb(99_102_241/0.7)]">
                 {site.brandNameLatin.slice(0, 1)}

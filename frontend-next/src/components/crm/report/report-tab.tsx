@@ -33,7 +33,7 @@ function StatCard({
 }: { icon: React.ComponentType<{ className?: string }>; label: string; value: number; hint?: string; tint: string; delay?: number }) {
   return (
     <Reveal delay={delay}>
-      <Tilt className="flex h-full flex-col gap-3 rounded-2xl border bg-card p-4 shadow-sm dark:bg-linear-to-b dark:from-white/[0.04] dark:to-transparent dark:shadow-none">
+      <Tilt className="flex h-full flex-col gap-3 rounded-2xl border bg-card p-4 shadow-sm dark:bg-[#131320] dark:shadow-none">
         <div className={`grid size-10 shrink-0 place-items-center rounded-xl ring-1 ring-inset ring-current/20 shadow-[0_0_20px_-6px_currentColor] ${tint}`}>
           <Icon className="size-5" />
         </div>

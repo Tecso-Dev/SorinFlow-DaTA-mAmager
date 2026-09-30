@@ -347,7 +347,7 @@ export function ProxiesView() {
 
 function StatTile({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-2xl border bg-card p-3 text-center dark:bg-linear-to-b dark:from-white/[0.035] dark:to-white/[0.008]">
+    <div className="rounded-2xl border bg-card p-3 text-center dark:bg-[#121219]">
       <div className="text-xl font-black tabular"><CountUp value={value} /></div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">{label}</div>
     </div>
@@ -400,7 +400,7 @@ function ResponseBars({ items }: { items: Proxy[] }) {
   const rows = [...items].sort((a, b) => (a.avg_response_time ?? 0) - (b.avg_response_time ?? 0)).slice(0, 8);
   const max = Math.max(0.001, ...rows.map((p) => p.avg_response_time ?? 0));
   return (
-    <div className="min-w-0 rounded-2xl border bg-card p-3 dark:bg-linear-to-b dark:from-white/[0.035] dark:to-white/[0.008]">
+    <div className="min-w-0 rounded-2xl border bg-card p-3 dark:bg-[#121219]">
       <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
         <span>زمان پاسخ میانگین، ثانیه</span>
         <span className="hidden items-center gap-3 sm:flex">

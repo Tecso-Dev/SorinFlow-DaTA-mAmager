@@ -139,7 +139,7 @@ export function PropertySheet({
       <SheetContent
         side="left"
         showCloseButton={false}
-        className="gap-0 p-0 data-[side=left]:w-full data-[side=left]:border-e data-[side=left]:sm:max-w-2xl dark:bg-linear-to-b dark:from-primary/[0.06] dark:to-popover"
+        className="gap-0 p-0 data-[side=left]:w-full data-[side=left]:border-e data-[side=left]:sm:max-w-2xl dark:bg-[#131426]"
       >
         <div className="sticky top-0 z-10 border-b bg-popover/90 px-4 py-3 backdrop-blur sm:px-5">
           <div className="flex items-start gap-3">

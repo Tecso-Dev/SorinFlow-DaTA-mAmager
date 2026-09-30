@@ -43,7 +43,7 @@ function Panel({
     <section
       className={cn(
         "flex h-full min-w-0 flex-col rounded-2xl border bg-card text-card-foreground",
-        "shadow-sm dark:bg-linear-to-b dark:from-white/[0.035] dark:to-white/[0.008] dark:shadow-none",
+        "shadow-sm dark:bg-[#121219] dark:shadow-none",
         className,
       )}
     >
@@ -262,7 +262,7 @@ function Kpis({ ov }: { ov: Overview }) {
           <Tilt
             className={cn(
               "relative flex h-full flex-col gap-3 overflow-hidden rounded-2xl border bg-card p-4",
-              "shadow-sm dark:bg-linear-to-b dark:from-white/[0.04] dark:to-transparent dark:shadow-none",
+              "shadow-sm dark:bg-[#131320] dark:shadow-none",
             )}
           >
             <div className="flex items-start justify-between gap-2">
