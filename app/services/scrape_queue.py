@@ -351,7 +351,7 @@ async def release_orphans(job_ids) -> int:
         retried = await _end_retries(db, job_ids, ("running", "paused"), job_retry.ORPHANED)
         released = (await db.execute(
             update(ScrapingJob)
-            .where(ScrapingJob.job_id.in_([j for j in job_ids if j not in retried]),
+            .where(ScrapingJob.job_id.in_(list(set(job_ids).difference(retried))),
                    ScrapingJob.status.in_(("running", "paused")))
             .values(status="failed", completed_at=datetime.now(), finish_reason=ORPHAN_REASON)
             .returning(ScrapingJob.job_id)
@@ -383,7 +383,7 @@ async def _fail_stale_pending(job_ids) -> int:
         retried = await _end_retries(db, job_ids, ("pending",), job_retry.STALE)
         failed = (await db.execute(
             update(ScrapingJob)
-            .where(ScrapingJob.job_id.in_([j for j in job_ids if j not in retried]),
+            .where(ScrapingJob.job_id.in_(list(set(job_ids).difference(retried))),
                    ScrapingJob.status == "pending")
             .values(status="failed", completed_at=datetime.now(), finish_reason=STALE_PENDING_REASON)
             .returning(ScrapingJob.job_id)
