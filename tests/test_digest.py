@@ -125,10 +125,10 @@ def client():
      cfg.telegram_bot_token, cfg.telegram_chat_id) = saved
 
 
-def _seed():
+def _seed(now):
     """What a night leaves behind: two listings (one rental), a finished scrape and
     a failed one, a match, a price cut on a listing that got cheaper, a lead due
-    for a call and one booked for later today."""
+    for a call and one booked for later today — `now` being the digest's clock."""
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     from app.models.user import User
     from app.models.property import Property
@@ -141,7 +141,6 @@ def _seed():
     async def _go():
         eng = create_async_engine(os.environ["DATABASE_URL"])
         maker = async_sessionmaker(eng, expire_on_commit=False)
-        now = datetime.now(timezone.utc)
         try:
             async with maker() as s:
                 s.add(User(username="dg_boss", full_name="مدیر خلاصه", role="super_admin", permissions=["crm"],
@@ -164,8 +163,6 @@ def _seed():
                                  delta_pct=-11, moved_at=now - timedelta(hours=2), status="new"))
                 s.add(Lead(property_id=p1.id, phone_number="09141112233", status="new", next_call_at=None))
                 later = now.astimezone(TEHRAN).replace(hour=23, minute=0, second=0, microsecond=0)
-                if later <= now.astimezone(TEHRAN):
-                    later = later + timedelta(minutes=30)  # a test run after 23:00 still books it 'today'
                 s.add(Lead(property_id=p2.id, phone_number="09141112244", status="contacted", next_call_at=later))
                 await s.commit()
         finally:
@@ -196,7 +193,19 @@ class TestThroughTheApp:
 
     def test_the_message_the_send_and_the_daily_record(self, client, monkeypatch):
         from app.crm import digest
-        _seed()
+        # The digest reads the clock itself, and here it reads 10:00 in Tehran
+        # today, so «later today», where the callback is booked, is 13 hours
+        # off. On the wall clock a run in Tehran's last half hour (from 20:00
+        # UTC) had no later today left: the callback counted as due, not later.
+        pinned = datetime.now(timezone.utc).astimezone(digest.TEHRAN).replace(
+            hour=10, minute=0, second=0, microsecond=0)
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return pinned.astimezone(tz) if tz else pinned.astimezone().replace(tzinfo=None)
+        monkeypatch.setattr(digest, "datetime", Clock)
+        _seed(pinned)
         boss = _tok(client, "dg_boss")
 
         # the preview: every line present, the numbers at least what was seeded
