@@ -110,6 +110,30 @@ select_doc() {
     END { flush() }
   '
 }
+# select_doc's complement: the documents that do NOT hold that line.
+reject_doc() {
+  awk -v needle="$1" '
+    function flush() { if (doc != "" && !found) printf "---\n%s", doc; doc=""; found=0 }
+    /^---[[:space:]]*$/ { flush(); next }
+    { line=$0; gsub(/^[ \t]+|[ \t]+$/, "", line); if (line == needle) found=1 }
+    { doc = doc $0 "\n" }
+    END { flush() }
+  '
+}
+# Every Ingress in stdin, the catch-all first: the one with router.priority
+# "1", which takes whatever no other rule claims (sorinflow-ingress-web, `/`
+# to the new site). kustomize writes Ingresses in name order, so on the
+# deploy that moved `/` out of sorinflow-ingress-https into it, https lost
+# `/` before web existed, and the panel and the landing page answered 404 for
+# two seconds (k3d rehearsal of 7a9c6f8). Applied first, both hold `/` for a
+# moment, and both send it to web.
+CATCH_ALL='traefik.ingress.kubernetes.io/router.priority: "1"'
+ingresses_catch_all_first() {
+  local all
+  all="$(select_doc "kind: Ingress")"
+  printf '%s\n' "$all" | select_doc "$CATCH_ALL"
+  printf '%s\n' "$all" | reject_doc "$CATCH_ALL"
+}
 # The complement: drops any document whose "kind:" is one of the
 # space-separated names in $1.
 exclude_kinds() {
@@ -254,7 +278,7 @@ run_ownership_job
 # ── 4. the rollout itself ───────────────────────────────────────────────────
 say "applying api, worker, scheduler and the ingress"
 APP="${TMP_PREFIX}.app.yaml"
-{ select_doc "kind: Deployment" < "$RENDERED"; select_doc "kind: Ingress" < "$RENDERED"; } > "$APP"
+{ select_doc "kind: Deployment" < "$RENDERED"; ingresses_catch_all_first < "$RENDERED"; } > "$APP"
 retry_kubectl kubectl apply -f "$APP"
 # Past this point backend's own spec.replicas governs its count again, and a
 # failure is the ordinary wait_rollout/rollback_and_diagnose pair's job below

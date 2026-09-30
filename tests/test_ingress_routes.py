@@ -198,3 +198,46 @@ def test_the_staging_overlay_can_still_find_the_host_it_patches(name):
             assert rules[0]["host"] == "sorinflow.com"
             return
     raise AssertionError(f"{name} is missing from k8s/base/ingress.yaml")
+
+
+def _script_function(script: str, name: str) -> str:
+    import re
+    m = re.search(r"^%s\(\) \{\n.*?\n\}\n" % re.escape(name), script, re.M | re.S)
+    assert m, f"{name}() not found in scripts/deploy_k8s.sh"
+    return m.group(0)
+
+
+@pytest.mark.parametrize("overlay", ["production", "staging"])
+def test_the_deploy_applies_the_catch_all_ingress_before_the_others(overlay):
+    """scripts/deploy_k8s.sh's own helpers (extracted verbatim) over a real
+    render: the Ingress holding `/` at router.priority "1" comes first, every
+    Ingress comes out exactly once and unchanged. In name order, https lost
+    `/` before web existed and the site answered 404 for two seconds on the
+    deploy that moved it (k3d rehearsal)."""
+    import re
+    import shutil
+    import subprocess
+
+    root = INGRESS.parent.parent.parent
+    script = (root / "scripts" / "deploy_k8s.sh").read_text(encoding="utf-8")
+    assert 'ingresses_catch_all_first < "$RENDERED"' in script
+    catch_all = re.search(r"^CATCH_ALL=.*$", script, re.M)
+    assert catch_all, "CATCH_ALL not found in scripts/deploy_k8s.sh"
+    helpers = "".join(_script_function(script, n) for n in ("select_doc", "reject_doc")) \
+        + catch_all.group(0) + "\n" + _script_function(script, "ingresses_catch_all_first")
+
+    kubectl = shutil.which("kubectl")
+    if not kubectl:
+        pytest.skip("kubectl not on PATH — present locally and on GitHub runners")
+    rendered = subprocess.run([kubectl, "kustomize", f"k8s/overlays/{overlay}"],
+                              cwd=root, capture_output=True, text=True, timeout=30)
+    assert rendered.returncode == 0, rendered.stderr
+    out = subprocess.run(["bash", "-c", helpers + "ingresses_catch_all_first"],
+                         input=rendered.stdout, capture_output=True, text=True, timeout=10)
+    assert out.returncode == 0, out.stderr
+
+    ordered = [d for d in yaml.safe_load_all(out.stdout) if d]
+    given = [d for d in yaml.safe_load_all(rendered.stdout) if isinstance(d, dict) and d.get("kind") == "Ingress"]
+    assert [d["metadata"]["name"] for d in ordered][0] == "sorinflow-ingress-web"
+    assert sorted(ordered, key=lambda d: d["metadata"]["name"]) == \
+        sorted(given, key=lambda d: d["metadata"]["name"])
