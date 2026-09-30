@@ -8,8 +8,14 @@ test('owner sees the whole office', async ({ page }) => {
   const problems = watchProblems(page);
   await signIn(page, 'owner');
   await page.goto('/panel');
+  // 20s, not the default 5: /api/stats/overview is the heaviest query on the
+  // page (it aggregates the whole office) and the cards are behind it, so the
+  // dashboard legitimately shows a skeleton first. Five seconds was enough
+  // until the suite grew long enough to leave Postgres cold by the time the
+  // last browser project ran, and then this failed on iPhone alone with the
+  // page perfectly healthy.
   for (const title of ['آگهی‌های تازهٔ امروز', 'لیدهای باز', 'تماس‌های امروز', 'نرخ تبدیل لید']) {
-    await expect(page.getByText(title, { exact: true })).toBeVisible();
+    await expect(page.getByText(title, { exact: true })).toBeVisible({ timeout: 20_000 });
   }
   await scrollThrough(page);
   for (const heading of ['روند آگهی و لید', 'بازار محله‌ها', 'قیف فروش', 'ساعت‌های تماس', 'عملکرد تیم',
@@ -28,7 +34,7 @@ test('an agent sees only their own calls and row', async ({ page }) => {
   await signIn(page, 'agent1');
   await page.goto('/panel');
   await scrollThrough(page);
-  await expect(page.getByRole('heading', { name: 'عملکرد شما' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'عملکرد شما' })).toBeVisible({ timeout: 20_000 });
   const rows = page.getByRole('table').getByRole('row');
   await expect(rows).toHaveCount(2);   // header + agent1
   await expect(page.getByRole('button', { name: /تعیین هدف/ })).toHaveCount(0);
@@ -38,7 +44,7 @@ test('the trend switches between 7, 30 and 90 days', async ({ page }) => {
   await signIn(page, 'manager1');
   await page.goto('/panel');
   const hint = page.getByText(/آگهی و .* قرارداد در .* روز گذشته/);
-  await expect(hint).toContainText('۳۰ روز');
+  await expect(hint).toContainText('۳۰ روز', { timeout: 20_000 });  // same overview query
   await page.getByRole('button', { name: '۷ روز' }).click();
   await expect(hint).toContainText('۷ روز');
 });

@@ -101,6 +101,23 @@ async function settleAnimations(page) {
       clean = anims.length ? 0 : clean + 1;
       await new Promise((resolve) => setTimeout(resolve, 120));
     }
+
+    // …and then the springs, which the loop above cannot see. `motion`'s
+    // useSpring drives its value from requestAnimationFrame and writes the
+    // transform directly, so it never appears in getAnimations(). Tilt uses
+    // one on every card. axe reading a card mid-spring cannot work out what
+    // colour the text is over — a transformed ancestor defeats its background
+    // walk — and it reports that as a colour-contrast violation, on text that
+    // is nowhere near failing. That is where this suite's "dark theme passes
+    // axe" flakes came from: same CSS, same colours, a pass or a fail
+    // depending on the frame axe happened to read.
+    const tilted = () => [...document.querySelectorAll('.group\\/tilt, [style*="transform"]')];
+    const snapshot = () => tilted().map((el) => getComputedStyle(el).transform).join("|");
+    for (let same = 0, round = 0; same < 3 && round < 40; round++) {
+      const before = snapshot();
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      same = snapshot() === before ? same + 1 : 0;
+    }
   });
 }
 
