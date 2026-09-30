@@ -170,10 +170,11 @@ def seed_schema() -> dict:
     }
 
 
-def write(schema: dict) -> None:
-    OUT.write_text(json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                   encoding="utf-8")
-    print(f"wrote {OUT.relative_to(ROOT)} ({len(schema['categories'])} categories)")
+def write(schema: dict, path: Path = OUT) -> None:
+    path.write_text(json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8")
+    shown = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+    print(f"wrote {shown} ({len(schema['categories'])} categories)")
 
 
 async def live(city: str, gap: float) -> dict:
