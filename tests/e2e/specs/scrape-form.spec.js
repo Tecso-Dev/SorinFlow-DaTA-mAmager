@@ -33,6 +33,10 @@ async function openTheForm(page, request) {
   await expect(page.locator('#section-scraper')).toBeVisible();
   // the pickers are filled from /scraper/cities and /scraper/categories
   await expect(page.locator('#scraper-category option[value="rent-apartment"]')).toHaveCount(1);
+  // …grouped by family: rent under «اجاره», buy under «خرید» (#56)
+  await expect(page.locator('#scraper-category optgroup[label="اجاره"] option[value="rent-apartment"]')).toHaveCount(1);
+  await expect(page.locator('#scraper-category optgroup[label="خرید"] option[value="buy-old-house"]')).toHaveCount(1);
+  await expect(page.locator('#jobs-filter-category optgroup[label="اجاره"] option')).not.toHaveCount(0);
   await page.waitForFunction(() => typeof document.getElementById('scraper-city-picker')?._setCityValue === 'function');
   return asked;
 }
