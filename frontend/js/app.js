@@ -5670,11 +5670,19 @@ function showCookieWarning() {
         message.textContent = 'شما هنوز وارد حساب دیوار نشده‌اید.';
     }
     
-    const modal = new bootstrap.Modal(document.getElementById('cookieWarningModal'));
+    const el = document.getElementById('cookieWarningModal');
+    const modal = bootstrap.Modal.getOrCreateInstance(el);
+    const goOn = document.getElementById('continue-scraping-btn');
+    // Bootstrap ignores hide() while the opening animation is still running,
+    // so a click on «ادامه» inside those ~300 ms started the run and left the
+    // dialog open over the page. The button waits for the dialog to be open.
+    if (!el.classList.contains('show')) {
+        goOn.disabled = true;
+        el.addEventListener('shown.bs.modal', () => { goOn.disabled = false; }, { once: true });
+    }
     modal.show();
-    
-    // Setup continue button handler
-    document.getElementById('continue-scraping-btn').onclick = function() {
+
+    goOn.onclick = function() {
         modal.hide();
         continueScraping();
     };

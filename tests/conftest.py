@@ -38,6 +38,15 @@ os.environ.setdefault("COOKIES_PATH", os.path.join(_SCRATCH, "cookies"))
 os.environ.setdefault("DOWNLOADS_PATH", os.path.join(_SCRATCH, "downloads"))
 os.environ.setdefault("SCRAPER_PROFILE_DIR", os.path.join(_SCRATCH, "profiles"))
 
+# The background loops that reach the outside world start with the app in
+# every test module that builds one. With the folder above writable, CI's
+# runner — which, unlike a sandbox, has the network — actually downloaded the
+# forwarder APK from GitHub in module after module (and would read Divar's
+# filter forms, #27), and a 13-minute suite took hours. The suite never needs
+# either: their own tests drive them directly.
+os.environ.setdefault("APK_MIRROR_HOURS", "0")
+os.environ.setdefault("DIVAR_FILTER_SCHEMA_HOURS", "0")
+
 
 @pytest.fixture(autouse=True)
 async def _dispose_db_pool_after_test():
