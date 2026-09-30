@@ -163,24 +163,26 @@ def test_a_portal_visitor_gets_no_panel_session(office):
     office(steps)
 
 
-def test_a_portal_visitor_is_refused_by_the_session_route_too(office):
-    """The panel and the portal share one cookie name at Path=/, so a customer
-    who signed in at the portal arrives at the panel with a valid cookie. Every
-    staff API refuses them by role, but GET /api/session answered 200 and the
-    panel shell — which redirects only on 401 — drew its whole chrome around a
-    customer's name. No data crossed; it was still a page they have no business
-    being on."""
+def test_the_session_route_answers_a_portal_customer_too(office):
+    """The portal's own dashboard asks the same question, so this route has to
+    answer for a customer — refusing here would break the page they are
+    entitled to. What must not happen is the *panel* rendering for them, and
+    that is the panel shell's job (app-shell.tsx sends role=visitor to the
+    portal). The panel's login refuses them outright, so the only way to
+    arrive with a valid cookie is to sign in at the portal and type a panel
+    URL. tests/e2e/next/portal-visitor.spec.js proves the redirect."""
     from types import SimpleNamespace
     from app.auth.jwt import access_claims, create_access_token
 
     async def steps(c):
-        # the cookie a portal login leaves behind, minted the same way
         visitor = SimpleNamespace(username="customer", role="visitor", token_version=0)
-        token = create_access_token(access_claims(visitor))
-        c.cookies.set("sf_session", token)
+        c.cookies.set("sf_session", create_access_token(access_claims(visitor)))
         r = await c.get("/api/session")
-        assert r.status_code == 403, r.text
-        assert "پورتال" in r.json()["detail"]
+        assert r.status_code == 200, r.text
+        assert r.json()["user"]["role"] == "visitor"
+        # and the panel's own login still refuses them
+        out = await c.post("/api/session/login", json={"username": "customer", "password": PW})
+        assert out.status_code == 403
     office(steps)
 
 

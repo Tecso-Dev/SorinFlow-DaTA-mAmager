@@ -325,12 +325,21 @@ export function AppShell({ site, children }: { site: ShellSite; children: React.
   // stay there — a page that never finishes loading and never says why.
   if (session.isPending) return <ShellSkeleton />;
   if (session.isError) {
+    // Not just the skeleton: a plain admin gets 503 here while the site is
+    // closed for maintenance, and used to sit on a page that never finished
+    // loading and never said why.
     const status = session.error instanceof ApiError ? session.error.status : 0;
-    if (status === 403) return <SessionDeadEnd href="/portal" cta="رفتن به پورتال مشتریان" message={session.error instanceof ApiError ? session.error.message : ""} />;
     if (status === 503) return <SessionDeadEnd href="/panel/login" cta="تلاش دوباره" message="سامانه در حال به‌روزرسانی است؛ چند دقیقهٔ دیگر دوباره امتحان کنید." />;
     return <SessionDeadEnd href="/panel/login" cta="ورود دوباره" message="نشست شما در دسترس نیست." />;
   }
   const user = session.data.user;
+  // A customer who signed in at the portal holds a cookie the panel's own
+  // gate accepts — one name, one Path=/ — and every staff API refuses them
+  // by role, so nothing of the office is ever shown. But the shell still
+  // drew its chrome around their name until they were sent away. The panel's
+  // login refuses them outright; this is the door left, and it is here rather
+  // than in proxy.ts because that runs before anything is verified.
+  if (user.role === "visitor") return <SessionDeadEnd href="/portal" cta="رفتن به پورتال مشتریان" message="این حساب برای پورتال مشتریان است." />;
 
   return (
     <div className="flex min-h-dvh">

@@ -142,3 +142,38 @@ test('signed out on logout, and a stale session bounces back to the landing page
   await page.goto('/portal/me');
   await page.waitForURL('**/portal');
 });
+
+test('a signed-in customer is turned away from the panel, not shown its chrome', async ({ page }) => {
+  // The portal and the panel share one cookie name at Path=/, so a customer
+  // who signs in here holds a cookie the panel's own gate accepts — it checks
+  // presence, and cannot check more, because it runs before anything is
+  // verified. Every staff API refuses them by role, so no office data was ever
+  // at risk; the panel shell still drew its whole chrome around a customer's
+  // name until they were sent away.
+  const phone = freshPhone();
+  await page.goto('/portal');
+  await page.getByRole('tab', { name: 'ثبت‌نام' }).click();
+  await page.locator('#rg-name').fill(`e2e-visitor-panel-${Date.now()}`);
+  await page.locator('#rg-phone').fill(phone);
+  await page.locator('#rg-email').fill(`${phone}@example.com`);
+  await page.locator('#rg-pass').fill('Str0ngPassw0rd!');
+  await page.getByRole('button', { name: 'ثبت‌نام و دریافت کد' }).click();
+  const code = (await page.getByText(/کد تست: \d+/).textContent()).replace(/\D/g, '');
+  await page.getByLabel('کد تأیید').fill(code);
+  await page.getByRole('button', { name: 'تأیید و ورود' }).click();
+  await page.waitForURL('**/portal/me');
+
+  for (const url of ['/panel', '/panel/users', '/panel/settings']) {
+    await page.goto(url);
+    await expect(page.getByRole('link', { name: 'رفتن به پورتال مشتریان' })).toBeVisible();
+    // none of the panel's own furniture is on the page
+    await expect(page.getByRole('navigation')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'باز کردن منو' })).toHaveCount(0);
+  }
+
+  // and the panel's own login still refuses the same account outright
+  const refused = await page.request.post('/api/session/login', {
+    data: { username: phone, password: 'Str0ngPassw0rd!' },
+  });
+  expect(refused.status()).toBe(403);
+});

@@ -96,15 +96,12 @@ async def session_verify_email(data: SessionEmail, request: Request, response: R
 async def session_read(request: Request, current_user: CurrentUser):
     """Who the panel is talking to.
 
-    The panel and the portal share one cookie name at Path=/, so a customer
-    who signed in at the portal arrives here with a perfectly valid cookie.
-    Every staff API refuses them by role, but this route answered 200 and the
-    panel shell — which only redirects on 401 — drew its whole chrome around
-    a customer's name. No data crossed; it was still a page they have no
-    business being on. The login path already refuses them (_finish above);
-    this closes the one door that did not."""
-    if current_user.role == "visitor":
-        raise HTTPException(status_code=403, detail="این حساب برای پورتال مشتریان است؛ از صفحهٔ پورتال وارد شوید.")
+    Answers for a customer too: the portal's own dashboard asks the same
+    question, and refusing them here breaks the page they are entitled to.
+    The role comes back in the body, and the panel shell is what turns a
+    customer away — see app-shell.tsx. The panel's *login* refuses them
+    outright (_finish above), so the only way to arrive with a valid cookie
+    is to have signed in at the portal and then typed a panel URL."""
     token: Optional[str] = session_token(request)
     # The CSRF token in the body assumes only our own origin can read it. That
     # holds because CORS is closed (app/main.py: cors_origins is empty and
