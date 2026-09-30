@@ -8352,7 +8352,7 @@ function noPhoneCell(p) {
              + '<i class="bi bi-chat-dots"></i> فقط چت</span>';
     }
     if (ch === 'unavailable') {
-        return '<span class="text-warning small" title="شماره در این اسکرپ گرفته نشد — در اجرای بعدی دوباره تلاش می‌شود">'
+        return '<span class="text-warning small" title="شماره در این اسکرپ گرفته نشد — با «تلاش دوباره» در آگهی‌های اسکرپ‌نشدهٔ همان اسکرپ دوباره تلاش کنید">'
              + 'گرفته نشد</span>';
     }
     return '<span class="text-muted">---</span>';
@@ -14392,6 +14392,11 @@ async function showJobLog(jobId) {
 
 let _skippedRows = [];      // what the open modal is showing
 let _skippedFilter = null;  // the bucket being shown, or null for all
+let _skippedJobId = null;   // whose list it is
+let _skippedTimer = null;   // the refresh while it is open
+// «هر ۱ دقیقه خودش به‌روز شود» (#58): a retry or a run still going changes
+// the list, and the window used to show what it read when it opened.
+const SKIPPED_REFRESH_MS = 60000;
 
 async function showSkipped(jobId) {
     const body = document.getElementById('skipped-body');
@@ -14399,13 +14404,37 @@ async function showSkipped(jobId) {
     const el = document.getElementById('skippedModal');
     if (!body || !el) return;
 
+    // One timer, whichever run the window was last opened for, and one
+    // close handler for the element's whole life.
+    _stopSkippedRefresh();
+    if (!el._skippedCloseWired) {
+        el.addEventListener('hidden.bs.modal', _stopSkippedRefresh);
+        el._skippedCloseWired = true;
+    }
+    _skippedJobId = jobId;
     _skippedFilter = null;
     summary.innerHTML = '';
     body.innerHTML = '<div class="text-muted small">در حال بارگذاری…</div>';
     new bootstrap.Modal(el).show();
+    _skippedTimer = setInterval(() => loadSkipped(false), SKIPPED_REFRESH_MS);
+    await loadSkipped(true);
+}
 
+function _stopSkippedRefresh() {
+    if (_skippedTimer) { clearInterval(_skippedTimer); _skippedTimer = null; }
+}
+
+/* The run's list, read and drawn. `first` is the opening read: its failure
+ * is shown; a refresh that fails leaves the screen as it was. An answer for
+ * a run the window no longer shows is dropped. */
+async function loadSkipped(first) {
+    const jobId = _skippedJobId;
+    const body = document.getElementById('skipped-body');
+    const summary = document.getElementById('skipped-summary');
+    if (!jobId || !body) return;
     try {
         const d = await apiCall(`/scraper/jobs/${encodeURIComponent(jobId)}/skipped`);
+        if (jobId !== _skippedJobId) return;
         _skippedRows = d.items || [];
         if (!_skippedRows.length) {
             summary.innerHTML = '';
@@ -14414,10 +14443,13 @@ async function showSkipped(jobId) {
                 رانی که پیش از افزوده‌شدن این بخش اجرا شده باشد هم سابقه‌ای ندارد.</div>`;
             return;
         }
+        if (_skippedFilter && !_skippedRows.some(r => r.reason === _skippedFilter)) _skippedFilter = null;
         renderSkippedSummary(d.by_reason || {});
         renderSkippedRows();
     } catch (err) {
-        body.innerHTML = `<div class="text-danger small">${esc(err.message || 'خطا')}</div>`;
+        if (first && jobId === _skippedJobId) {
+            body.innerHTML = `<div class="text-danger small">${esc(err.message || 'خطا')}</div>`;
+        }
     }
 }
 
@@ -14426,8 +14458,8 @@ function renderSkippedSummary(byReason) {
     const total = _skippedRows.length;
     const chip = (key, label, count) => `
         <button class="btn btn-sm ${_skippedFilter === key ? 'btn-primary' : 'btn-outline-secondary'}"
-                onclick="filterSkipped(${key === null ? 'null' : `'${key}'`})">
-            ${esc(label)} <bdi class="badge bg-secondary">${count}</bdi>
+                onclick="filterSkipped(${key === null ? 'null' : jsArg(key)})">
+            ${esc(label)} <bdi class="badge bg-secondary">${esc(count)}</bdi>
         </button>`;
     summary.innerHTML = `<div class="d-flex flex-wrap gap-2 align-items-center">
         ${chip(null, 'همه', total)}
@@ -14435,10 +14467,10 @@ function renderSkippedSummary(byReason) {
         <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="copySkippedLinks()">
             <i class="bi bi-clipboard"></i> کپی همهٔ لینک‌ها
         </button>
-        <button class="btn btn-sm btn-primary" onclick="rescrapeAllSkipped()"
-                title="همهٔ آنچه الان نمایش داده می‌شود، در یک تسک دوباره باز می‌شود"
+        <button class="btn btn-sm btn-primary" onclick="retryAllSkipped()"
+                title="همهٔ آنچه الان نمایش داده می‌شود، در همین اسکرپ دوباره امتحان می‌شود — تسک تازه‌ای باز نمی‌شود"
                 ${rescrapeCandidates().length ? '' : 'disabled'}>
-            <i class="bi bi-arrow-repeat"></i> بازاسکرپ همه (${rescrapeCandidates().length})
+            <i class="bi bi-arrow-repeat"></i> تلاش دوباره (${rescrapeCandidates().length})
         </button>
     </div>`;
 }
@@ -14461,7 +14493,7 @@ function visibleSkipped() {
         : _skippedRows;
 }
 
-/* What «بازاسکرپ همه» would open right now: exactly the rows on screen.
+/* What «تلاش دوباره» would try right now: exactly the rows on screen.
  * The button's number and the action both read this, so they cannot
  * disagree — «(8)» over a list of four was the two being computed
  * separately. Chat-only rows are included too: that verdict has been
@@ -14491,48 +14523,44 @@ function renderSkippedRows() {
             <i class="bi bi-box-arrow-up-left"></i>
           </a>
           <button class="btn btn-sm btn-outline-primary"
-                  onclick="rescrapeSkipped(${jsArg(r.url)})" title="اسکرپ تکی این آگهی">
+                  onclick="retrySkippedListing(${jsArg(r.divar_id)})"
+                  title="تلاش دوباره برای همین آگهی، در همین اسکرپ">
             <i class="bi bi-arrow-repeat"></i>
           </button>
         </div>`).join('');
 }
 
-function rescrapeSkipped(url) {
-    const input = document.getElementById('single-url');
-    if (input) input.value = url;
-    const el = document.getElementById('skippedModal');
-    const modal = el && bootstrap.Modal.getInstance(el);
-    if (modal) modal.hide();
-    // The single-scrape box is where this ends up either way; filling it and
-    // running it is the same two steps done by hand.
-    scrapeSingle();
+/* One listing, tried again inside the run that left it (#58). */
+// eslint-disable-next-line no-unused-vars -- called from the row's own onclick
+async function retrySkippedListing(divarId) {
+    await _retryInPlace({ divar_ids: [divarId] });
 }
 
-/* «یه علامت رفرش کلی دقیقاً همین فیلد بذار وقتی اونو بزنم همه رو اسکرپ کنه.»
- * Whatever the modal is showing — all of it, or one bucket — as one run.
- * The bucket filter is respected: «بازاسکرپ همه» on «بدون شماره» re-opens
- * the phoneless ones and leaves the chat-only ones, which no run will ever
- * fill, alone. */
-async function rescrapeAllSkipped() {
-    const urls = rescrapeCandidates().map(r => r.url).filter(Boolean);
-    if (!urls.length) { showToast('خبری نیست', 'چیزی برای بازاسکرپ نمایش داده نمی‌شود', 'warning'); return; }
+/* «تلاش دوباره»: whatever the window is showing — all of it, or one bucket —
+ * tried again INSIDE this run. The bucket filter is respected: on «بدون
+ * شماره» it retries the numberless ones and leaves the rest alone. */
+// eslint-disable-next-line no-unused-vars -- called from the summary's own onclick
+async function retryAllSkipped() {
+    const n = rescrapeCandidates().length;
+    if (!n) { showToast('خبری نیست', 'چیزی برای تلاش دوباره نمایش داده نمی‌شود', 'warning'); return; }
     const ok = await askConfirm({
-        icon: 'bi-arrow-repeat', title: 'بازاسکرپ همه',
-        body: `${urls.length} آگهی در یک تسک دوباره باز می‌شود. برای هر کدام یک افشا خرج می‌شود.`,
-        okLabel: `شروع (${urls.length})`,
+        icon: 'bi-arrow-repeat', title: 'تلاش دوباره',
+        body: `${n} آگهی در همین اسکرپ دوباره امتحان می‌شود و شمارنده‌ها و فهرست همین اسکرپ به‌روز می‌شوند؛ ` +
+              'تسک تازه‌ای باز نمی‌شود. برای هر آگهی ممکن است یک افشای شماره خرج شود.',
+        okLabel: `شروع (${n})`,
     });
     if (!ok) return;
+    await _retryInPlace(_skippedFilter ? { reason: _skippedFilter } : {});
+}
+
+async function _retryInPlace(body) {
+    const jobId = _skippedJobId;
+    if (!jobId) return;
     try {
-        const label = _skippedFilter
-            ? `بازاسکرپ — ${(_skippedRows.find(r => r.reason === _skippedFilter) || {}).reason_label || _skippedFilter}`
-            : 'بازاسکرپ';
-        const r = await apiCall('/scraper/rescrape', {
-            method: 'POST', body: JSON.stringify({ urls, label }),
+        const r = await apiCall(`/scraper/jobs/${encodeURIComponent(jobId)}/retry`, {
+            method: 'POST', body: JSON.stringify(body),
         });
-        const el = document.getElementById('skippedModal');
-        const modal = el && bootstrap.Modal.getInstance(el);
-        if (modal) modal.hide();
-        showToast('شروع شد', `بازاسکرپ ${urls.length} آگهی به‌عنوان تسک ${String(r.job_id).slice(0, 8)} شروع شد`, 'success');
+        showToast('در صف', `تلاش دوباره برای ${r.count} آگهی در همین اسکرپ در صف قرار گرفت`, 'success');
         loadJobs();
     } catch (e) {
         showToast('خطا', e.message, 'danger');
