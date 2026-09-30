@@ -65,7 +65,9 @@ class TestEachRoleStartsWhatItShould:
         ("scheduler", PERIODIC, False),
         ("all", PERIODIC, True),
     ])
-    async def test_the_role_decides(self, started, role, loops, worker):
+    async def test_the_role_decides(self, started, role, loops, worker, monkeypatch):
+        # the setting's own default; the suite switches it off (conftest)
+        monkeypatch.setattr(main.settings, "scrape_worker_enabled", True)
         await _start(role)
         assert set(started.loops) == loops and len(started.loops) == len(loops)
         assert started.heartbeat == [role], "every role beats"
