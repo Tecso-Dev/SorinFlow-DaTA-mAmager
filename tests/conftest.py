@@ -47,6 +47,14 @@ os.environ.setdefault("SCRAPER_PROFILE_DIR", os.path.join(_SCRATCH, "profiles"))
 os.environ.setdefault("APK_MIRROR_HOURS", "0")
 os.environ.setdefault("DIVAR_FILTER_SCHEMA_HOURS", "0")
 
+# The scrape worker starts with the app too, and picks up any run a test
+# leaves queued — in a later module, with the real Chromium. Here that run
+# fails at once; on CI's runner, which reaches divar.ir, it really scrapes,
+# for as long as Divar keeps answering. The only scraper launch in a full
+# local run was that one. The worker's own tests drive it directly, and the
+# role test sets the flag itself.
+os.environ.setdefault("SCRAPE_WORKER_ENABLED", "false")
+
 
 @pytest.fixture(autouse=True)
 async def _dispose_db_pool_after_test():
