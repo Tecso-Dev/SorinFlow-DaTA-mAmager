@@ -83,6 +83,14 @@ _LISTING_TYPE = {"buy-residential": "buy", "buy-commercial-property": "buy",
                  "rent-residential": "rent", "rent-commercial-property": "rent",
                  "rent-temporary": "rent"}
 
+# Divar's other top-level categories. A breadcrumb that starts at one of them
+# and never reaches «املاک» is Divar saying the ad is not real estate — even
+# when a leaf shares a word with a property name («اداری و مدیریتی» is a job,
+# «ماشین‌آلات صنعتی» a machine, «ابزار باغبانی و کشاورزی» a tool).
+OTHER_ROOTS = ("استخدام و کاریابی", "وسایل نقلیه", "کالای دیجیتال", "لوازم الکترونیکی",
+               "خانه و آشپزخانه", "خدمات", "وسایل شخصی", "سرگرمی و فراغت", "اجتماعی",
+               "تجهیزات و صنعتی", "برای کسب و کار")
+
 # Words a real-estate category name carries. Only asked of a breadcrumb that
 # places the ad nowhere in the tree above — no «املاک», no name only one
 # category has: Divar's own «سواری», «استخدام و کاریابی» or «خانه و آشپزخانه ›
@@ -194,6 +202,9 @@ def judge(crumbs: Iterable[str], target: Optional[str]) -> Tuple[bool, Optional[
         if not known(target) or related(node, target):
             return True, node, f"Divar files it under {node}"
         return False, node, f"Divar files it under {node}, not {target}"
+    keys = {normalize(c) for c in crumbs}
+    if keys & {normalize(r) for r in OTHER_ROOTS} and normalize("املاک") not in keys:
+        return False, None, "Divar files it under another of its top-level categories"
     # A name several categories share, with nothing above it to say which
     # («آپارتمان» alone), is still one of Divar's real-estate names.
     if any(normalize(c) in _ANYWHERE for c in crumbs):
