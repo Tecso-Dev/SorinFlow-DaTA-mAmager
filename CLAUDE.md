@@ -6,17 +6,17 @@
 - با سبحان فقط فارسی. هر سؤال یا تصمیم با ابزار سؤال (AskUserQuestion)، نه در متن.
 
 ## git و دیپلوی
-- برانچ کاری `sorinflow-v2` است و همهٔ کارها روی آن انجام می‌شود.
+- تنها برانچ بلندمدت `main` است. هر کار روی برانچ خودش از `origin/main` انجام می‌شود (`fix/<موضوع>`، `feat/<موضوع>`) و با PR به `main` می‌رود؛ بعد از ادغام آن برانچ پاک می‌شود. برانچ `sorinflow-v2` در ۱۴۰۵/۰۷/۱۱ حذف شد و نباید دوباره ساخته شود.
 - هر کس با هویت git خودش کامیت می‌زند. پیش از اولین کامیت هر نشست، حساب را با `gh api user --jq .login` ببین:
   - `sobhanaz` (سبحان): `git config user.name "sobhan azimzadeh"` و `git config user.email "sobhan.gjhav.azimzadeh@gmail.com"`.
   - `sahandmusanezhad` (سهند): همان name و email که سهند در git خودش تنظیم کرده؛ اگر تنظیم نشده، از خودش بپرس.
   هیچ خط `Co-Authored-By` یا `Claude-Session` و هیچ اشاره‌ای به Claude در پیام کامیت، PR یا فایل‌ها نباشد.
-- کار دو نفره: بازبینی اسکرپر در issue پیگیری #48 بین سبحان و سهند تقسیم شده است. هر issue روی برانچ `fix/<شماره>-<موضوع>` از `origin/sorinflow-v2` انجام می‌شود و با PR به `sorinflow-v2` می‌رود.
+- کار دو نفره: بازبینی اسکرپر در issue پیگیری #48 بین سبحان و سهند تقسیم شده است. هر issue روی برانچ `fix/<شماره>-<موضوع>` از `origin/main` انجام می‌شود و با PR به `main` می‌رود.
 - کامیت‌ها کوچک و زیاد باشند. پیام با `fix:`، `feat:`، `perf:`، `docs:`، `ci:` یا `test:` شروع شود و بگوید چه خراب بود، چه عوض شد و چه چیزی بررسی شد.
 - **هرگز به `main` پوش نکن و هرگز دیپلوی نکن.** پوش به `main` یعنی دیپلوی خودکار روی sorinflow.com (`.github/workflows/deploy.yml`)، و سایت کاربر واقعی دارد. پوش و دیپلوی فقط با دستور صریح سبحان انجام می‌شود.
 - `gh workflow run` یا «Run workflow» را برای `deploy.yml` اجرا نکن. هر برانچی را که با آن اجرا شود دیپلوی می‌کند، نه فقط main.
-- پوش به `sorinflow-v2` مجاز است و آخر هر فاز انجام شود.
-- فاز ۰ و ۱ در ۱۴۰۵/۰۷/۰۲ روی سایت دیپلوی شدند (PR ۱۴ و ۱۵، `7dcc96f`). در مخزن فقط `main` و `sorinflow-v2` مانده است. بعد از هر دیپلوی `sorinflow-v2` با `main` هم‌سطح می‌شود. `0009` قدیمی `main` محلی (`cookies.enabled`) هیچ‌وقت دیپلوی نشد و `_migrate_cookie_is_enabled` در `init_db` هر برخوردی را بی‌اثر می‌کند.
+- پوش برانچ کاری خودت به origin مجاز است و لازم هم هست (CI فقط آن‌جا اجرا می‌شود). ادغام در `main` فقط با دستور صریح سبحان، چون همان لحظه دیپلوی می‌شود.
+- فاز ۰ تا ۴ روی سایت دیپلوی شده‌اند. در مخزن `main` مانده و سه برانچ باز سهند (`fix/27-divar-filter-schema`، `fix/28-36-scraper-review`، `fix/deploy-traefik-priority`) که کار ادغام‌نشده دارند — این سه را پاک نکن. `0009` قدیمی `main` محلی (`cookies.enabled`) هیچ‌وقت دیپلوی نشد و `_migrate_cookie_is_enabled` در `init_db` هر برخوردی را بی‌اثر می‌کند.
 
 ## سرور و secretها
 - به سرور production وصل نشو. رمز SSH سرور را هرگز عوض یا غیرفعال نکن.
@@ -47,7 +47,7 @@ PG_TEST_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test SECRET_KE
 - تست end-to-end پنل با Playwright و axe در `tests/e2e/` است (`scripts/e2e_up.sh`) و روی همین مک هم اجرا می‌شود. `@playwright/test` از ۱۴۰۵/۰۷/۰۳ روی 1.63 است. اجرا:
   `PYTHON=~/.venvs/sorinflow-v2/bin/python npx --prefix tests/e2e playwright test --config tests/e2e/playwright.config.js` (پیش از اجرا پایگاه دادهٔ `sorinflow_e2e_local` را از نو بساز).
 - ۶ تست fingerprint فقط در CI (Ubuntu) اجرا می‌شوند، چون از Chromium پایتون (Playwright 1.41، همان نسخه‌ای که اسکرپر روی آن تنظیم شده) استفاده می‌کنند و آن نسخه روی macOS این مک بالا نمی‌آید.
-- venv این برانچ `~/.venvs/sorinflow-v2` است و بیرون از مخزن قرار دارد. با فایل lock ساخته می‌شود:
+- venv کار `~/.venvs/sorinflow-v2` است (اسم قدیمی، بیرون از مخزن) و با آن تست بزن. با فایل lock ساخته می‌شود:
   `uv venv --python 3.11 ~/.venvs/sorinflow-v2 && uv pip install --python ~/.venvs/sorinflow-v2/bin/python --require-hashes -r requirements-dev.lock`
   venv پوشهٔ اصلی (`venv/`) نسخه‌های production (FastAPI 0.109) را دارد و مال `main` است. به آن دست نزن.
 - وابستگی‌ها: `requirements.txt` ورودی دستی است. `requirements.lock` و `requirements-dev.lock` با `uv pip compile --universal --generate-hashes --python-version 3.10` ساخته می‌شوند (image پایه Python 3.10 دارد). Docker و CI فقط با `--require-hashes` نصب می‌کنند.
@@ -74,7 +74,7 @@ PG_TEST_URL=postgresql+asyncpg://macbook@localhost:5432/sorinflow_test SECRET_KE
 
 ## روش کار
 - نشست اصلی هماهنگ‌کننده است. هر فاز به چند جریان مستقل تقسیم می‌شود و هر زیرایجنت در git worktree جدا و با فهرست فایل مشخص کار می‌کند. بعد نتیجه‌ها یکپارچه می‌شوند.
-- worktree زیرایجنت از `origin/main` (کد production) ساخته می‌شود، **نه** از `sorinflow-v2`. در پرامپت هر ایجنت بنویس که اول `git checkout -B <اسم> sorinflow-v2` بزند، وگرنه روی کد دیگری کار و تست می‌کند.
+- worktree زیرایجنت از `origin/main` ساخته می‌شود. در پرامپت هر ایجنت بنویس که اول `git fetch origin && git checkout -B <اسم> origin/main` بزند، وگرنه روی کد دیگری کار و تست می‌کند.
 - مدل به‌صرفه: جستجو، خواندن کد، اجرای تست، مستندسازی و تغییرات مکانیکی با haiku یا sonnet. طراحی معماری، امنیت و بازبینی نهایی با مدل قوی. حساب روی پلن Max (5x) است و مصرف با سقف پنج‌ساعته و هفتگی آن سنجیده می‌شود. مصرف هر فاز در `docs/PROGRESS.md` ثبت می‌شود.
 - پیش از گزارش پایان هر فاز، یک ایجنت بازبین جدا کل diff آن فاز را با نگاه مهاجم بررسی می‌کند (باگ، امنیت، رگرسیون) و یافته‌های تأییدشده رفع می‌شوند.
-- آخر هر فاز: `docs/PROGRESS.md` به‌روز شود، `sorinflow-v2` پوش شود، و گزارش فارسی داده شود (چه شد، چه تست شد، کجا را زنده ببینم، اعتبار مصرف‌شده، برنامهٔ فاز بعد). بعد منتظر تأیید بمان.
+- آخر هر فاز: `docs/PROGRESS.md` به‌روز شود، برانچ فاز پوش و PR آن به `main` باز شود، و گزارش فارسی داده شود (چه شد، چه تست شد، کجا را زنده ببینم، اعتبار مصرف‌شده، برنامهٔ فاز بعد). بعد منتظر تأیید بمان.
