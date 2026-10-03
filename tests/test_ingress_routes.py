@@ -31,30 +31,53 @@ INGRESS = Path(__file__).resolve().parent.parent / "k8s" / "base" / "ingress.yam
 HANDED_OVER = {"/", "/portal", "/robots.txt", "/sitemap.xml", "/og.png", "/favicon.ico"}
 
 
-def _https_rules():
+def _ingress_paths():
+    """Every rule of every https Ingress, with the router priority Traefik
+    would give it.
+
+    Traefik does not rank by specificity. Each path becomes a router whose
+    priority is the LENGTH of its rule string unless the Ingress carries
+    `router.priority`, and `PathPrefix(`/`)` is 15 characters — so an Exact
+    rule shorter than that loses to the catch-all. That is not a hypothetical:
+    /health (15, tied) and /ready (14) answered from Next with a 404 on the
+    live site, and because scripts/deploy_k8s.sh verifies itself by probing
+    /health, the deploy failed at its last step and deleted every
+    NetworkPolicy. The first version of this test modelled longest-prefix,
+    which is the intuitive rule and not the one in force, so it passed.
+    """
+    out = []
     for doc in yaml.safe_load_all(INGRESS.read_text(encoding="utf-8")):
-        if isinstance(doc, dict) and doc.get("metadata", {}).get("name") == "sorinflow-ingress-https":
-            return doc["spec"]["rules"][0]["http"]["paths"]
-    raise AssertionError("no sorinflow-ingress-https in k8s/base/ingress.yaml")
+        if not (isinstance(doc, dict) and doc.get("kind") == "Ingress"):
+            continue
+        ann = doc["metadata"].get("annotations", {})
+        if ann.get("traefik.ingress.kubernetes.io/router.entrypoints") != "websecure":
+            continue
+        explicit = ann.get("traefik.ingress.kubernetes.io/router.priority")
+        for r in doc["spec"]["rules"][0]["http"]["paths"]:
+            rule = (f"Path(`{r['path']}`)" if r["pathType"] == "Exact"
+                    else f"PathPrefix(`{r['path']}`)")
+            out.append({
+                "path": r["path"],
+                "type": r["pathType"],
+                "service": r["backend"]["service"]["name"],
+                "priority": int(explicit) if explicit else len(rule),
+            })
+    assert out, "no websecure Ingress in k8s/base/ingress.yaml"
+    return out
 
 
 def _service_for(path: str) -> str | None:
-    """Which service a request for `path` reaches, by the Ingress rules:
-    Exact wins outright, otherwise the longest matching Prefix does."""
-    rules = _https_rules()
-    for r in rules:
-        if r["pathType"] == "Exact" and r["path"] == path:
-            return r["backend"]["service"]["name"]
+    """Which service a request for `path` reaches, by Traefik's own ranking:
+    every matching router competes, and the highest priority wins."""
     best, name = -1, None
-    for r in rules:
-        if r["pathType"] != "Prefix":
-            continue
-        p = r["path"].rstrip("/")
-        # Prefix matches whole segments: /dashboard matches /dashboard/x but
-        # never /dashboardx
-        if path == r["path"] or path == p or path.startswith(p + "/") or p == "":
-            if len(p) > best:
-                best, name = len(p), r["backend"]["service"]["name"]
+    for r in _ingress_paths():
+        p = r["path"].rstrip("/") or "/"
+        if r["type"] == "Exact":
+            hit = path == r["path"]
+        else:
+            hit = p == "/" or path == r["path"] or path == p or path.startswith(p + "/")
+        if hit and r["priority"] > best:
+            best, name = r["priority"], r["service"]
     return name
 
 
@@ -121,7 +144,8 @@ def test_a_prefix_rule_does_not_capture_a_longer_word():
     assert _service_for("/apiary") == "web"
 
 
-@pytest.mark.parametrize("name", ["sorinflow-ingress-http", "sorinflow-ingress-https"])
+@pytest.mark.parametrize("name", ["sorinflow-ingress-http", "sorinflow-ingress-https",
+                                  "sorinflow-ingress-catchall"])
 def test_the_staging_overlay_can_still_find_the_host_it_patches(name):
     """k8s/overlays/staging/kustomization.yaml replaces /spec/rules/0/host by
     index; a second rule added above would send staging's traffic to the
@@ -133,3 +157,23 @@ def test_the_staging_overlay_can_still_find_the_host_it_patches(name):
             assert rules[0]["host"] == "sorinflow.com"
             return
     raise AssertionError(f"{name} is missing from k8s/base/ingress.yaml")
+
+
+def test_the_catchall_is_outranked_by_every_named_path():
+    """The bug that cost the cluster its NetworkPolicies, stated directly: no
+    path the API serves may lose to `/` because its rule string is short."""
+    rules = _ingress_paths()
+    catchall = next(r for r in rules if r["path"] == "/")
+    assert catchall["priority"] == 1, \
+        "the catch-all must carry an explicit low router.priority, not a length"
+    for r in rules:
+        if r["path"] != "/":
+            assert r["priority"] > catchall["priority"], f"{r['path']} does not outrank /"
+
+
+def test_the_shortest_backend_paths_still_reach_the_api():
+    """/ready is 14 characters as a Traefik rule and /health is 15 — both at
+    or under `PathPrefix(`/`)`. They are the two this went wrong on, and they
+    are what the deploy verifies itself with."""
+    for p in ("/health", "/ready"):
+        assert _service_for(p) == "backend", p

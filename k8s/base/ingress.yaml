@@ -181,13 +181,51 @@ spec:
                 name: backend
                 port:
                   number: 8000
-          # ── everything else is the new site (web.yaml) ──
-          #
+          # Everything else is the new site — see sorinflow-ingress-catchall
+          # at the end of this file, and the comment there for why it is separate.
+---
+# The catch-all, on a router of its own with an explicit low priority.
+#
+# Traefik does not rank Ingress paths by how specific they are. Each path
+# becomes a router whose default priority is the LENGTH of its rule string,
+# and `PathPrefix(`/`)` is 15 characters — so every Exact rule shorter than
+# that loses to it:
+#
+#   Path(`/ready`)        14  lost
+#   Path(`/health`)       15  tied, and lost
+#   PathPrefix(`/`)       15
+#   Path(`/llms.txt`)     17  won
+#   Path(`/favicon.svg`)  20  won
+#
+# Not a theory. After the phase-4 switchover /health and /ready answered from
+# Next with a 404 on the live site; scripts/deploy_k8s.sh verifies itself by
+# probing /health, so the deploy failed at its last step and — by design —
+# deleted every NetworkPolicy rather than leave traffic broken by a change it
+# could not confirm.
+#
+# priority: 1 is below any length Traefik would compute, so the named list in
+# the Ingress above always wins and nothing depends on how long a path happens
+# to be. It has to be a separate Ingress because the annotation sets the
+# priority for every router an Ingress produces, and the rest must keep theirs.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sorinflow-ingress-catchall
+  labels:
+    app.kubernetes.io/component: ingress
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.priority: "1"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: sorinflow.com
+      http:
+        paths:
           # The landing page, the customer portal, the new panel and its
           # /_next assets, robots.txt, sitemap.xml, og.png, favicon.ico, the
-          # PWA icons, the service worker and the per-scope manifests. This is
-          # the switchover: before it, / was the old landing page on the
-          # backend and only /panel and /_next came here.
+          # PWA icons, the service worker and the per-scope manifests.
           - path: /
             pathType: Prefix
             backend:
