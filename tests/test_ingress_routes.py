@@ -177,3 +177,31 @@ def test_the_shortest_backend_paths_still_reach_the_api():
     are what the deploy verifies itself with."""
     for p in ("/health", "/ready"):
         assert _service_for(p) == "backend", p
+
+
+def test_the_catchall_is_applied_before_the_ingress_that_gives_up_the_root():
+    """The deploy hands kubectl one file and kubectl applies its documents in
+    order, so the order kustomize renders the Ingresses in is the order the
+    cluster sees them — and kustomize orders same-kind resources by name.
+
+    That matters for exactly one moment: the deploy that first introduces the
+    catch-all also rewrites sorinflow-ingress-https to drop `/`. If the https
+    Ingress goes out first, nothing holds `/` until the catch-all lands a
+    moment later, and the live site answers 404 to everybody for about two
+    seconds. `sorinflow-ingress-catchall` sorts ahead of `-http` and `-https`,
+    so `/` is held by one or the other at every instant — but that is a
+    property of the *name*, which is why it is asserted here rather than left
+    to whoever renames it next.
+    """
+    names = []
+    for doc in yaml.safe_load_all(INGRESS.read_text(encoding="utf-8")):
+        if isinstance(doc, dict) and doc.get("kind") == "Ingress":
+            names.append(doc["metadata"]["name"])
+    catchall = [n for n in names if "catchall" in n]
+    assert len(catchall) == 1, f"expected one catch-all Ingress, found {catchall}"
+    others = [n for n in names if n != catchall[0]]
+    assert catchall[0] == min(names), (
+        f"{catchall[0]} must sort before {others} so kubectl creates it first; "
+        "otherwise the switchover deploy leaves `/` unrouted for a moment and "
+        "the whole site 404s."
+    )
