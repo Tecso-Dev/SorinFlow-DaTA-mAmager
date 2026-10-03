@@ -18,7 +18,26 @@ os.environ.setdefault("SECRET_KEY", "0123456789abcdef0123456789abcdef")
 os.environ.setdefault("LOGS_PATH", "/tmp")
 os.environ.setdefault("IMAGES_PATH", "/tmp")
 
+from app.crm.digest import TEHRAN  # noqa: E402  (after the env above, as every suite here does)
+
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _fixed_now() -> datetime:
+    """Noon in Tehran on the day the suite runs.
+
+    The digest counts «تماس مجدد امروز» as the calls booked after now and
+    before midnight, so the seeded callback has to sit inside that window —
+    and the window closes as the day ends. This test used to book 23:00 and
+    push it half an hour when the clock was already past it, which on a CI
+    run at 23:39 Tehran landed in the past: the lead counted as due, nothing
+    counted as a callback, and the whole deploy stopped on it. Noon leaves
+    eleven hours of room at any hour of any run, and keeps the 24-hour
+    window over rows written a moment ago.
+    """
+    return datetime.now(timezone.utc).astimezone(TEHRAN).replace(
+        hour=12, minute=0, second=0, microsecond=0)
+
 JS = (ROOT / "frontend/js/app.js").read_text(encoding="utf-8")
 HTML = (ROOT / "frontend/index.html").read_text(encoding="utf-8")
 
@@ -136,12 +155,11 @@ def _seed():
     from app.models.scraping_job import ScrapingJob
     from app.models.crm_models import Customer, CustomerMatch, PriceAlert
     from app.auth.jwt import get_password_hash
-    from app.crm.digest import TEHRAN
 
     async def _go():
         eng = create_async_engine(os.environ["DATABASE_URL"])
         maker = async_sessionmaker(eng, expire_on_commit=False)
-        now = datetime.now(timezone.utc)
+        now = _fixed_now()
         try:
             async with maker() as s:
                 s.add(User(username="dg_boss", full_name="مدیر خلاصه", role="super_admin", permissions=["crm"],
@@ -163,9 +181,7 @@ def _seed():
                 s.add(PriceAlert(property_id=p1.id, listing_type="buy", from_amount=4_500_000_000, to_amount=4_000_000_000,
                                  delta_pct=-11, moved_at=now - timedelta(hours=2), status="new"))
                 s.add(Lead(property_id=p1.id, phone_number="09141112233", status="new", next_call_at=None))
-                later = now.astimezone(TEHRAN).replace(hour=23, minute=0, second=0, microsecond=0)
-                if later <= now.astimezone(TEHRAN):
-                    later = later + timedelta(minutes=30)  # a test run after 23:00 still books it 'today'
+                later = now + timedelta(hours=6)       # 18:00 Tehran: ahead of the pinned clock, still today
                 s.add(Lead(property_id=p2.id, phone_number="09141112244", status="contacted", next_call_at=later))
                 await s.commit()
         finally:
@@ -196,6 +212,7 @@ class TestThroughTheApp:
 
     def test_the_message_the_send_and_the_daily_record(self, client, monkeypatch):
         from app.crm import digest
+        monkeypatch.setattr(digest, "_now", _fixed_now)   # the route builds off this, not the wall clock
         _seed()
         boss = _tok(client, "dg_boss")
 

@@ -2,53 +2,64 @@
 
 Branch: `p4-r1-properties-portal`, based on `origin/claude/phase-4-nextjs-frontend-ca3150`.
 This stream split into two sub-streams, each in its own worktree/branch, merged back here.
-**This run was stopped before the properties/insights sub-stream finished its checks** — see
-part A below for exactly what that means.
+
+**Correction**: an earlier version of this report and of commit `fe599ef` on the
+properties/insights sub-branch described part A as an unverified, stopped-mid-flight
+snapshot ("may not even compile"). That was a mid-flight commit taken to satisfy an urgent
+"merge and push now" instruction while the sub-stream was still actually running; it kept
+going in the same turn and finished everything that message said was missing. The corrected,
+accurate status is below — see `docs/phase4/reports/p4-r1a-properties-insights.md` for the
+sub-stream's own full report.
 
 ---
 
 ## A) `/panel/properties` + `/panel/insights` — sub-branch `p4-r1a-properties-insights`
 
-**Status: unverified snapshot, stopped mid-stream.** The sub-stream was told to stop before
-it ran any of the required checks. What's merged here is a single as-is commit of everything
-it had built at that point — nothing below has been confirmed to actually build or run.
+**Status: complete and checked.**
 
-What exists (not yet checked):
+What exists:
 - `frontend-next/src/app/panel/(app)/properties/page.tsx` + `src/components/properties/*`:
-  a properties table (`properties-view.tsx`), city picker, a detail sheet
-  (`detail-sheet.tsx`) with an image lightbox (`lightbox.tsx`), inline
-  `building_direction`/`corner_type` selects, an AI photo-tags block
-  (`ai-blocks.tsx`), and a match-modal (`match-dialog.tsx`).
+  full table with every §1.1 filter (search, searchable city picker, category→buy/rent,
+  rent-only deposit/rent band) **plus** UI for the previously-unwired filters (min/max
+  price/area/rooms, has_phone, sort_by/order) behind a "فیلترهای بیشتر" toggle — a
+  parity-extension decision, documented in the sub-stream's report. Detail view is a wide
+  Sheet drawer (not `RingDialog` — too much content for a centred dialog, justified in the
+  report) with a from-scratch image lightbox (zoom/pan/carousel), inline
+  `building_direction`/`corner_type` PATCH-on-change selects, an AI facts block (any role)
+  and AI photo-tags block (root/super_admin only, server-enforced), delete via `useConfirm`,
+  and a «ملک‌های مشابه» match modal reusing the old page's 4s/3-try polling. Both exports:
+  Excel (full filter set) and JSON (intentionally narrower `{city, listing_type}` body,
+  matching the old panel's actual behavior rather than "fixing" it).
 - `frontend-next/src/app/panel/(app)/insights/page.tsx` + `src/components/insights/*`:
-  a visual tab and a pipeline tab (`visual-tab.tsx`, `pipeline-tab.tsx`), plus formatting
-  helpers (`format.ts`) mirroring the old page's "null renders as em-dash, never a fake
-  zero" rule.
+  visual tab (4 stat cards, coverage sentence, all 3 tables with exact empty-states,
+  root/super_admin AI photo-status card, the disclaimer preserved verbatim) and pipeline tab
+  (window selector, funnel that keeps unrecognised `Lead.status` values — verified against
+  live seed data, which has 5 of them — temperature donut, gap-filled trend line, city bar
+  chart, agent scoreboard, stalled leads). The "null renders as em-dash, never a fake zero"
+  rule (`format.ts`) is applied throughout.
 - `app/schemas/__init__.py`: `PropertyResponse`/`PropertyBase` gained the fields the old
   detail modal needs that were previously silently stripped by the response model
   (`land_area`, `built_area`, `building_direction`, `frontage`, `unit_status`,
   `document_type`, `usage_type`, `building_age`, `extra_attrs`, `address`, `latitude`,
-  `longitude`, `updated_at`) — this was the schema-gap fix the inventory doc flagged as a
-  judgment call; the sub-stream chose to fix it rather than leave those detail-card rows
-  permanently dead.
-- `tests/e2e/next/properties-list.spec.js`, `tests/e2e/next/insights-a.spec.js` — written,
-  never run.
+  `longitude`, `updated_at`) — purely additive, no migration (the columns already existed on
+  the model). Noted side effect: this also fixes the CRM-leads stream's `PropertySheet`,
+  which already read these same fields from the same endpoint.
+- `tests/e2e/next/properties-list.spec.js` (6 tests), `tests/e2e/next/insights-a.spec.js`
+  (5 tests).
 
-**Not done, and this is the important part**:
-- `npx tsc --noEmit`, `npm run lint`, `npx next build` were never run against this code.
-  It may not even compile.
-- No backend test was added for the `PropertyResponse` schema change, and
-  `scripts/lint_new_code.py` was never run against `app/schemas/__init__.py`.
-- The e2e specs above were written but never executed, on any project.
-- No screenshots were taken; nobody has looked at either page rendered.
-- The inventory checklist in `docs/phase4/inventory-properties-insights.md` was not
-  cross-checked item by item against what actually got built — the sub-stream's own
-  commit message only self-describes what it believes it built.
+**Checks — all pass**: `tsc --noEmit`/`lint`/`next build` clean; `lint_new_code.py` clean;
+backend pytest on Postgres for every file touching `PropertyResponse`/`/properties/*` —
+152 passed, 1 skipped (pre-existing/unrelated), 0 failed; e2e 33/33 across
+desktop/android/iphone, repeated 3× on desktop to rule out flakiness; screenshots reviewed
+at desktop 1440×900 dark and iPhone light for both pages — one real bug found and fixed this
+way (a horizontal bar chart only rendering one bar correctly).
 
-**Before this branch is trusted or shipped further, someone (or a fresh stream) must**:
-run the full check suite from `docs/phase4/routine-rules.md` against this code, fix whatever
-tsc/lint/build turns up, add the missing schema-change test, actually run the two e2e specs
-on desktop/android/webkit, take and review screenshots, and only then reconcile against the
-inventory doc line by line.
+No shared frontend-next file was touched (`kit.tsx`, `lib/*`, `app-shell.tsx`, `nav.ts`,
+`viz.tsx`, `globals.css` all untouched). Left undone, on purpose: the `over`-priced
+valuation table (API returns it, the old panel never showed it — matches parity per the
+inventory doc's own note); `PropertyUpdate` not extended beyond its existing two
+inline-editable fields (nothing else needed it). Full per-item inventory checklist and
+screenshot paths: `docs/phase4/reports/p4-r1a-properties-insights.md`.
 
 ---
 
@@ -107,7 +118,7 @@ Checked and passing along with the rest of B.
 - `~/SorinFlow-backups` was not opened or read by either sub-stream.
 - No secrets in any commit. Commit identity throughout: `sobhan azimzadeh` only, no
   `Co-Authored-By`/`Claude-Session` lines, no AI/Claude/assistant mention anywhere.
-- This branch was pushed without running the coordinator-level full check suite (tsc/lint/
-  build/pytest/e2e across everything merged together) — only part B's own checks, run before
-  the merge, are known-good. Part A is unverified as stated above. Whoever picks this branch
-  up next should treat A as a draft, not a finished deliverable.
+- Both sub-streams ran their own full check suites (tsc/lint/build/pytest/e2e) independently
+  and both are green; this branch has not additionally run a combined coordinator-level pass
+  with both merged together (e.g. one `next build` over the final merged tree) — the two
+  touch disjoint files with a clean merge, so this is low risk, but it is not yet confirmed.
