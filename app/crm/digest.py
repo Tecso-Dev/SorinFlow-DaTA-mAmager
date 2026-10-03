@@ -41,6 +41,17 @@ KEY_LAST = "digest_last_sent"                        # the Tehran date it went o
 _WEEKDAYS = ("دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه")
 
 
+def _now() -> datetime:
+    """The clock, under one name a test can pin.
+
+    `build` reads the Tehran calendar day out of it, and «تماس مجدد امروز»
+    counts the calls booked between it and 23:59:59 of that day. In the last
+    minute of the day that window is empty, so a test that books a callback
+    off the real clock cannot do it reliably — it has to fix the hour.
+    """
+    return datetime.now(timezone.utc)
+
+
 async def last_sent(db) -> Optional[str]:
     try:
         return (await secret_box.get_many(db, (KEY_LAST,))).get(KEY_LAST) or None
@@ -53,7 +64,7 @@ async def build(db, *, now: Optional[datetime] = None) -> Dict:
     from app.services.backup_service import last_offsite
     from app.services.dpa_service import to_jalali
 
-    now = now or datetime.now(timezone.utc)
+    now = now or _now()
     since = now - WINDOW
     local = now.astimezone(TEHRAN)
     day_end = local.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -141,7 +152,7 @@ async def send(db, *, now: Optional[datetime] = None, record: bool = True) -> Di
     """Build and deliver to every configured chat. `record` writes today's date
     so the loop does not send again; the panel's «ارسال الان» leaves it alone."""
     from app.services.backup_service import chat_ids, resolve_route, resolve_telegram, tg_request
-    now = now or datetime.now(timezone.utc)
+    now = now or _now()
     cfg = await resolve_telegram(db)
     chats = chat_ids(cfg["chat_id"])
     if not (cfg["token"] and chats):
@@ -174,7 +185,7 @@ async def send(db, *, now: Optional[datetime] = None, record: bool = True) -> Di
 
 async def tick(now: Optional[datetime] = None) -> Dict:
     """Send today's if the hour has passed and it has not gone out."""
-    now = now or datetime.now(timezone.utc)
+    now = now or _now()
     local = now.astimezone(TEHRAN)
     if local.hour < HOUR:
         return {"skipped": "early"}
